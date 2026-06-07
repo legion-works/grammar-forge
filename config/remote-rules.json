@@ -1,0 +1,18 @@
+[
+  {
+    "ruleId": "GF_BRIDGE",
+    "url": "bridge",
+    "port": 8082,
+    "type": "grpc",
+    "language": "en.*",
+    "baseTimeoutMilliseconds": 5000,
+    "minimumNumberOfCalls": 0,
+    "options": {
+      "secure": "false",
+      "analyzed": "false",
+      "fixOffsets": "true",
+      "whitespaceNormalisation": "true",
+      "filterMatches": "false"
+    }
+  }
+]
