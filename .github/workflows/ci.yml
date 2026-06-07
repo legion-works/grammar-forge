@@ -56,14 +56,16 @@ jobs:
         with:
           working-directory: bridge
           version: v2.1.0
+      # Pipe to xargs: quoting $(go list) collapses the package list into one
+      # bad arg; xargs splits it correctly and keeps actionlint happy (no $()).
       - name: build (non-cgo packages)
-        run: go build "$(go list ./... | grep -vE '/(harperffi|gector)$')"
+        run: go list ./... | grep -vE '/(harperffi|gector)$' | xargs go build
       # No -race: the Go race detector needs cgo and the GH runner has no
       # native libs; race coverage is provided by the CGo gate in `task test`.
       - name: test (non-cgo packages)
-        run: go test -count=1 "$(go list ./... | grep -vE '/(harperffi|gector)$')"
+        run: go list ./... | grep -vE '/(harperffi|gector)$' | xargs go test -count=1
       - name: govulncheck (non-cgo packages)
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest "$(go list ./... | grep -vE '/(harperffi|gector)$')"
+        run: go list ./... | grep -vE '/(harperffi|gector)$' | xargs go run golang.org/x/vuln/cmd/govulncheck@latest
 
   ci-complete:
     needs: [secrets, go]
