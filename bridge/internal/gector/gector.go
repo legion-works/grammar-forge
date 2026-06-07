@@ -213,16 +213,22 @@ func applyTag(token, tag string, vocab VerbVocab) ([]string, int) {
 	case tag == tagCaseLow:
 		return []string{strings.ToLower(token)}, 0
 	case strings.HasPrefix(tag, tagPrefixT):
-		fromTo := strings.TrimPrefix(tag, tagPrefixT) // e.g. "VERB_VB_VBZ"
-		if vocab != nil {
+		// $TRANSFORM_VERB_<FROM>_<TO> -> look up in the verb-form vocab.
+		// The vocab's suffix key is just "FROM_TO" (e.g. "VBN_VBD"), not
+		// the full "VERB_FROM_TO" — strip the "VERB_" prefix to get the
+		// lookup key. Non-verb transforms (CASE, AGREEMENT) fall through
+		// to the "no change" branch below.
+		fromTo := strings.TrimPrefix(tag, tagPrefixT) // "VERB_VB_VBZ"
+		fromTo = strings.TrimPrefix(fromTo, "VERB_")  // "VB_VBZ"
+		if vocab != nil && fromTo != tagPrefixT {
 			if forms, ok := vocab[token]; ok {
 				if target, ok := forms[fromTo]; ok {
 					return []string{target}, 0
 				}
 			}
 		}
-		// CASE / AGREEMENT transforms (non-verb) are unsupported in the
-		// spike; emit the original token and count as skipped.
+		// CASE / AGREEMENT / unmapped verb transforms: emit the original
+		// token and count as skipped.
 		return []string{token}, 1
 	}
 	return []string{token}, 1

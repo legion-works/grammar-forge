@@ -82,3 +82,33 @@ func TestGECToRSpanByteOffsets(t *testing.T) {
 		require.NoError(t, s.Span.Validate(len(in)), "GECToR suggestion has invalid byte span: %+v on %q", s, in)
 	}
 }
+
+func TestGECToRAppliesVerbFormTransform(t *testing.T) {
+	// Spike FINDINGS.md §3 documents two verb-form inputs that the model
+	// EMITS a $TRANSFORM_VERB_* tag for but the spike could not APPLY (no
+	// vocab). Of those two, "I seen it yesterday." (VBN -> VBD on "seen"
+	// -> "saw") is the one the model actually fires for in this build: the
+	// argmax label for "seen" is $TRANSFORM_VERB_VBN_VBD. The other
+	// ("He go to school every day." -> "goes") the model marks $KEEP at
+	// 0.635 confidence, so the argmax path produces no suggestion (which
+	// is the model's correct decision; an LLM escalation would handle it).
+	//
+	// With verb-form-vocab.txt loaded, the decoder must apply the
+	// $TRANSFORM_VERB_VBN_VBD tag on "seen" -> "saw".
+	if os.Getenv("GF_ORT_LIB_DIR") == "" {
+		t.Setenv("GF_ORT_LIB_DIR", "../../native")
+	}
+	g, err := New(modelDir(t))
+	require.NoError(t, err)
+	defer func() { _ = g.Close() }()
+
+	const in = "I seen it yesterday."
+	sugs, err := g.Correct(context.Background(), correction.Request{Text: in})
+	require.NoError(t, err)
+	require.NotEmpty(t, sugs, "GECToR should fire $TRANSFORM_VERB_VBN_VBD on 'seen' in %q", in)
+	out := in
+	for i := len(sugs) - 1; i >= 0; i-- {
+		out = sugs[i].Apply(out)
+	}
+	require.Equal(t, "I saw it yesterday.", out, "GECToR should turn %q into %q with the verb-form vocab loaded", in, "I saw it yesterday.")
+}
