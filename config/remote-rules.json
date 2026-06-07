@@ -6,7 +6,6 @@
     "type": "grpc",
     "language": "en.*",
     "baseTimeoutMilliseconds": 5000,
-    "minimumNumberOfCalls": 0,
     "options": {
       "secure": "false",
       "analyzed": "false",
