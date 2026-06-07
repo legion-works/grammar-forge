@@ -71,6 +71,35 @@ func TestDecodeAppendInsertsSpace(t *testing.T) {
 	require.Equal(t, "Please listen to me carefully.", applyAll(text, sugs))
 }
 
+// Bug #1 (review follow-up): $APPEND of punctuation/contractions must NOT insert
+// a space — only word appends do. The GECToR label set includes $APPEND_.,
+// $APPEND_'s, $APPEND_n't, etc.
+func TestDecodeAppendPunctuationAndContractionsNoSpace(t *testing.T) {
+	cases := []struct {
+		name, text, word, tag string
+		start, end            uint
+		wantRepl, want        string
+	}{
+		{"word_to", "listen", "listen", "$APPEND_to", 0, 6, "listen to", "listen to"},
+		{"contraction_s", "it", "it", "$APPEND_'s", 0, 2, "it's", "it's"},
+		{"contraction_nt", "ca", "ca", "$APPEND_n't", 0, 2, "can't", "can't"},
+		{"period", "word", "word", "$APPEND_.", 0, 4, "word.", "word."},
+		{"comma", "word", "word", "$APPEND_,", 0, 4, "word,", "word,"},
+		// mid-sentence: " they" [4,9) normalises to [5,9); contraction attaches.
+		{"mid_contraction", "I am they here", "they", "$APPEND_'re", 4, 9, "they're", "I am they're here"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := ent("\u0120"+c.word, c.tag, c.start, c.end, 0.95)
+			sugs, err := decodeToSuggestions(c.text, []pipelines.Entity{e}, VerbVocab{})
+			require.NoError(t, err)
+			require.Len(t, sugs, 1)
+			require.Equal(t, c.wantRepl, sugs[0].Replacement)
+			require.Equal(t, c.want, applyAll(c.text, sugs))
+		})
+	}
+}
+
 // Bug #1 symptom 3: trailing punctuation is a SEPARATE entity ("." [19,20)
 // $KEEP) without a Ġ leader. It must not be merged into the preceding
 // $REPLACE'd word, or the period is dropped ("he." -> "him").

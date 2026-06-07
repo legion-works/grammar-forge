@@ -168,7 +168,16 @@ func applyTag(token, tag string, vocab VerbVocab) ([]string, int) {
 	case strings.HasPrefix(tag, tagPrefixR):
 		return []string{strings.TrimPrefix(tag, tagPrefixR)}, 0
 	case strings.HasPrefix(tag, tagPrefixA):
-		return []string{token, " " + strings.TrimPrefix(tag, tagPrefixA)}, 0
+		// $APPEND_x inserts x after the token. A separating space is added only
+		// when x is a new word; punctuation ($APPEND_. , ? ! ; : etc.) and
+		// contractions ($APPEND_'s 'm 've 'll 'd 're, and $APPEND_n't) attach
+		// directly: "it" + 's -> "it's", "ca" + n't -> "can't", "word" + . ->
+		// "word.", while "listen" + to -> "listen to".
+		appended := strings.TrimPrefix(tag, tagPrefixA)
+		if appendNeedsLeadingSpace(appended) {
+			return []string{token, " " + appended}, 0
+		}
+		return []string{token, appended}, 0
 	case tag == tagCaseCap:
 		return []string{strings.Title(strings.ToLower(token))}, 0 //nolint:staticcheck // GECToR-side normalisation
 	case tag == tagCaseLow:
@@ -193,6 +202,20 @@ func applyTag(token, tag string, vocab VerbVocab) ([]string, int) {
 		return []string{token}, 1
 	}
 	return []string{token}, 1
+}
+
+// appendNeedsLeadingSpace reports whether an $APPEND_x token should be preceded
+// by a space. New words (letter/digit-led) get a space; punctuation and
+// apostrophe contractions attach directly. "n't" is the one letter-led
+// contraction in the GECToR label set and is special-cased to attach directly.
+func appendNeedsLeadingSpace(appended string) bool {
+	if appended == "" || appended == "n't" {
+		return false
+	}
+	for _, r := range appended {
+		return unicode.IsLetter(r) || unicode.IsNumber(r)
+	}
+	return false
 }
 
 // loadVerbVocab parses gector's verb-form-vocab.txt (one entry per line:
