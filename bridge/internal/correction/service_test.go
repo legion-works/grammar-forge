@@ -39,9 +39,15 @@ func (f *fakeStore) LogSignal(_ context.Context, id int64, s Signal) error {
 func (f *fakeStore) CountCorrections(context.Context) (int64, error) { return f.count, nil }
 func (f *fakeStore) Close() error                                    { return nil }
 
+var errAlways = errors.New("should not be called")
+
+// fastPolicy is the test-default escalation policy (matches the production
+// defaults; centralised so tests don't drift).
+func fastPolicy() EscalationPolicy { return EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000} }
+
 func TestServiceCorrectLogsAndTagsSuggestions(t *testing.T) {
 	st := &fakeStore{}
-	svc := NewService(fakePB{}, fakeLLM{out: "I have a cat"}, st, "grmr-test")
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "I have a cat"}, st, "grmr-test", fastPolicy())
 	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Source: SourceVencord})
 	require.NoError(t, err)
 	require.Len(t, got.Suggestions, 1)
@@ -54,7 +60,7 @@ func TestServiceCorrectLogsAndTagsSuggestions(t *testing.T) {
 
 func TestServiceCorrectNoChangeDoesNotLog(t *testing.T) {
 	st := &fakeStore{}
-	svc := NewService(fakePB{}, fakeLLM{out: "all good"}, st, "m")
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "all good"}, st, "m", fastPolicy())
 	got, err := svc.Correct(context.Background(), Request{Text: "all good"})
 	require.NoError(t, err)
 	require.Empty(t, got.Suggestions)
@@ -63,14 +69,14 @@ func TestServiceCorrectNoChangeDoesNotLog(t *testing.T) {
 }
 
 func TestServiceCorrectSurfacesLLMError(t *testing.T) {
-	svc := NewService(fakePB{}, fakeLLM{err: errors.New("down")}, &fakeStore{}, "m")
+	svc := NewService(fakePB{}, nil, fakeLLM{err: errAlways}, &fakeStore{}, "m", fastPolicy())
 	_, err := svc.Correct(context.Background(), Request{Text: "x"})
 	require.Error(t, err)
 }
 
 func TestServiceSignal(t *testing.T) {
 	st := &fakeStore{}
-	svc := NewService(fakePB{}, fakeLLM{}, st, "m")
+	svc := NewService(fakePB{}, nil, fakeLLM{}, st, "m", fastPolicy())
 	require.NoError(t, svc.Signal(context.Background(), 7, SignalAccepted))
 	require.Equal(t, int64(7), st.lastID)
 	require.Equal(t, SignalAccepted, st.lastSignal)
@@ -89,9 +95,98 @@ func (f *failingStore) LogCorrection(context.Context, Event) (int64, error) {
 
 func TestServiceCorrectBestEffortLog(t *testing.T) {
 	st := &failingStore{}
-	svc := NewService(fakePB{}, fakeLLM{out: "I have a cat"}, st, "m")
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "I have a cat"}, st, "m", fastPolicy())
 	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
 	require.NoError(t, err, "logging failure must not surface to the caller")
 	require.Len(t, got.Suggestions, 1)
 	require.Equal(t, int64(0), got.Suggestions[0].ID, "ID stays zero when log failed")
+}
+
+// fast-corrector fake: returns pre-baked suggestions. Proves the Service
+// calls Correctors and that escalation policy decides whether to call the LLM.
+type fakeCorrector struct {
+	name string
+	sugs []Suggestion
+	err  error
+}
+
+func (f fakeCorrector) Name() Model { return Model(f.name) }
+func (f fakeCorrector) Correct(context.Context, Request) ([]Suggestion, error) {
+	return f.sugs, f.err
+}
+
+func TestServiceFastPathNoEscalation(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.95}},
+	}
+	// llm that would error if called — proves it is NOT called when fast path is confident.
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+	require.Equal(t, ModelGECToR, got.Suggestions[0].Model)
+	require.Equal(t, "I have a cat", st.lastEvent.Suggestion, "fast path must produce the corrected text")
+}
+
+func TestServiceFastPathEscalatesOnLowGECToRConfidence(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{0, 4}, Replacement: "X", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	// LLM is called on escalation; it returns a confident replacement.
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: "I have a cat"}, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.NotEmpty(t, got.Suggestions)
+	require.Equal(t, int64(1), st.count, "escalation must log the combined result")
+}
+
+func TestServiceFastPathContinuesOnCorrectorError(t *testing.T) {
+	st := &fakeStore{}
+	bad := fakeCorrector{name: string(ModelHarper), err: errors.New("native lib missing")}
+	good := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.95}},
+	}
+	// bad corrector errors; good corrector wins. LLM is NOT called (high conf).
+	svc := NewService(fakePB{}, []Corrector{bad, good}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err, "fast-path corrector errors must be best-effort")
+	require.NotEmpty(t, got.Suggestions)
+	require.Equal(t, ModelGECToR, got.Suggestions[0].Model)
+}
+
+func TestServiceLLMFailureFallsBackToFastPath(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	// Force escalation by low GECToR conf; LLM fails. We must still return the
+	// fast-path suggestions rather than an error to the caller.
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err, "LLM escalation failure must not surface")
+	require.NotEmpty(t, got.Suggestions)
+	require.Equal(t, ModelGECToR, got.Suggestions[0].Model)
+}
+
+func TestApplyAllAndDominantModel(t *testing.T) {
+	// applyAll applies last-to-first. Same-length replacements so earlier
+	// byte offsets stay valid through the apply.
+	sugs := []Suggestion{
+		{Span: Span{6, 11}, Replacement: "earth", Model: ModelGECToR, Confidence: 0.9},
+		{Span: Span{0, 5}, Replacement: "howdy", Model: ModelLLM, Confidence: 0.8},
+	}
+	out := applyAll("hello world", sugs)
+	require.Equal(t, "howdy earth", out, "applyAll applies last-to-first")
+	// dominant: LLM appears once, GECToR once; LLM wins on tie-break.
+	require.Equal(t, ModelLLM, dominantModel(sugs))
+	// LLM-heavy wins outright
+	require.Equal(t, ModelLLM, dominantModel([]Suggestion{
+		{Model: ModelLLM}, {Model: ModelLLM}, {Model: ModelGECToR},
+	}))
 }

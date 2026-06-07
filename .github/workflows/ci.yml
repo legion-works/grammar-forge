@@ -31,6 +31,10 @@ jobs:
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
+  # The GH runner has no native libs (libharper_c.so, libonnxruntime.so,
+  # libtokenizers.a) and no GECToR model on disk, so we cannot exercise the
+  # CGo/ONNX packages here. The harperffi + gector packages are gated by
+  # `docker build` + local `task test`; this job only builds/tests the rest.
   go:
     needs: changes
     if: needs.changes.outputs.go == 'true'
@@ -38,20 +42,28 @@ jobs:
     defaults:
       run:
         working-directory: bridge
+    env:
+      CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.26"
           cache-dependency-path: bridge/go.sum
       - uses: golangci/golangci-lint-action@v6
         with:
           working-directory: bridge
           version: v2.1.0
-      - run: go test -race -coverprofile=cover.out ./...
-      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: build (non-cgo packages)
+        run: go build "$(go list ./... | grep -vE '/(harperffi|gector)$')"
+      # No -race: the Go race detector needs cgo and the GH runner has no
+      # native libs; race coverage is provided by the CGo gate in `task test`.
+      - name: test (non-cgo packages)
+        run: go test -count=1 "$(go list ./... | grep -vE '/(harperffi|gector)$')"
+      - name: govulncheck (non-cgo packages)
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest "$(go list ./... | grep -vE '/(harperffi|gector)$')"
 
   ci-complete:
     needs: [secrets, go]

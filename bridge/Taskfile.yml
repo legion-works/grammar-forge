@@ -1,21 +1,68 @@
 version: "3"
+vars:
+  NATIVE_DIR: "{{.TASKFILE_DIR}}/native"
+
 tasks:
+  default:
+    desc: Default target — run all gates
+    cmds:
+      - task: lint
+      - task: test
+      - task: build
+
   lint:
-    desc: Lint the bridge
+    desc: Lint the bridge (skips cgo/ORT-only lints when CGO_ENABLED=0)
     cmds:
       - golangci-lint run ./...
+
   fmt:
     desc: Format the bridge
     cmds:
       - golangci-lint fmt ./...
+
   test:
-    desc: Test the bridge with race + coverage
+    desc: Test (race + cover, CGo + ONNX) — needs bridge/native + bridge/models
+    env:
+      CGO_ENABLED: "1"
+      CGO_CFLAGS: "-I{{.NATIVE_DIR}}"
+      CGO_LDFLAGS: "-L{{.NATIVE_DIR}}"
+      GF_ORT_LIB_DIR: "{{.NATIVE_DIR}}"
+      LD_LIBRARY_PATH: "{{.NATIVE_DIR}}"
     cmds:
-      - go test -race -coverprofile=cover.out ./...
+      - go test -tags ORT -race -coverprofile=cover.out ./...
+
+  test-ci:
+    desc: CI mode — CGO_ENABLED=0 on the non-cgo packages (no native libs/model)
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - cmd: go test -count=1 $(go list ./... | grep -vE '/(harperffi|gector)$')
+        ignore_error: false
+
   build:
-    desc: Build the bridge binary
+    desc: Build the bridge binary (CGo + ONNX)
+    env:
+      CGO_ENABLED: "1"
+      CGO_CFLAGS: "-I{{.NATIVE_DIR}}"
+      CGO_LDFLAGS: "-L{{.NATIVE_DIR}}"
+      GF_ORT_LIB_DIR: "{{.NATIVE_DIR}}"
+      LD_LIBRARY_PATH: "{{.NATIVE_DIR}}"
     cmds:
-      - go build -o bin/grammarforge ./cmd/grammarforge
+      - go build -tags ORT -ldflags "-s -w" -o bin/grammarforge ./cmd/grammarforge
+
+  build-ci:
+    desc: CI build — CGO_ENABLED=0, non-cgo packages only
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - cmd: go build $(go list ./... | grep -vE '/(harperffi|gector)$')
+        ignore_error: false
+
+  docker:
+    desc: Build the bridge image (needs native libs + model in the build context)
+    cmds:
+      - docker build -t grammarforge-bridge:dev .
+
   vuln:
     desc: Vulnerability scan
     cmds:

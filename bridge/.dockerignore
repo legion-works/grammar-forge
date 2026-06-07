@@ -1,4 +1,10 @@
+# Ignore test files + the host's native libs (harper rebuilds inside docker;
+# the ORT/tokenizers libs are re-fetched in CI). Without this, the host's
+# glibc-2.43-built libharper_c.so would be copied into the build context
+# and break the bookworm linker.
 *_test.go
 /bin/
+/cover.out
 Dockerfile
 .dockerignore
+native/
