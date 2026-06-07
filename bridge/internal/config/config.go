@@ -24,6 +24,7 @@ type Config struct {
 	HarperEnabled          bool
 	EscalateMinConfidence  float64 // escalate to LLM if best GECToR confidence < this
 	EscalateMaxSentenceLen int     // escalate if input longer than this (chars)
+	EscalateMinWords       int     // escalate empty-fast-path input with >= this many words
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -73,6 +74,7 @@ func Load(getenv Getenv) Config {
 		HarperEnabled:          getBool("GF_HARPER_ENABLED", true),
 		EscalateMinConfidence:  getFloat("GF_ESCALATE_MIN_CONFIDENCE", 0.7),
 		EscalateMaxSentenceLen: getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
+		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),
 	}
 }
 

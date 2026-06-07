@@ -59,12 +59,21 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 	all := fast
 
 	if s.llm != nil && s.policy.ShouldEscalate(req.Text, fast) {
-		llmText, err := s.llm.Complete(ctx, s.pb.Build(req))
+		// Sequential refinement: feed the fast-path-CORRECTED text to the LLM so
+		// it builds on (and is not blind to) what Harper+GECToR already found,
+		// then diff the LLM's final output against the ORIGINAL. This gives the
+		// LLM the fast path's results — required for the GRMR-native completion
+		// format, which has no instruction slot for passing them explicitly —
+		// and yields one clean, non-overlapping suggestion set (avoiding the
+		// double-edit corruption from merging parallel fast+LLM edits).
+		fastCorrected := applyAll(req.Text, fast)
+		llmReq := Request{Text: fastCorrected, Source: req.Source}
+		llmText, err := s.llm.Complete(ctx, s.pb.Build(llmReq))
 		if err != nil {
 			s.log.Warn("llm escalation failed; using fast path", "err", err)
 		} else {
 			corrected := strings.TrimSpace(llmText)
-			all = mergeSuggestions(append(fast, diffToSuggestions(req.Text, corrected)...))
+			all = diffToSuggestions(req.Text, corrected)
 		}
 	}
 
