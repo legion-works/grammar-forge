@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/gertd/go-pluralize"
 	"github.com/grammarforge/bridge/internal/correction"
 	"github.com/knights-analytics/hugot/pipelines"
 )
@@ -157,15 +158,21 @@ func decodeToSuggestions(text string, entities []pipelines.Entity, vocab VerbVoc
 
 // GECToR tag prefixes (per gotutiyan/gector-deberta-large-5k labels.json).
 const (
-	tagKeep    = "$KEEP"
-	tagDelete  = "$DELETE"
-	tagOOV     = "<OOV>"
-	tagPrefixR = "$REPLACE_"
-	tagPrefixA = "$APPEND_"
-	tagPrefixT = "$TRANSFORM_"
-	tagCaseCap = "$TRANSFORM_CASE_CAPITAL"
-	tagCaseLow = "$TRANSFORM_CASE_LOWER"
+	tagKeep              = "$KEEP"
+	tagDelete            = "$DELETE"
+	tagOOV               = "<OOV>"
+	tagPrefixR           = "$REPLACE_"
+	tagPrefixA           = "$APPEND_"
+	tagPrefixT           = "$TRANSFORM_"
+	tagCaseCap           = "$TRANSFORM_CASE_CAPITAL"
+	tagCaseLow           = "$TRANSFORM_CASE_LOWER"
+	tagAgreementSingular = "$TRANSFORM_AGREEMENT_SINGULAR"
+	tagAgreementPlural   = "$TRANSFORM_AGREEMENT_PLURAL"
 )
+
+// pluralizeClient applies English noun number changes for the
+// $TRANSFORM_AGREEMENT_* tags. Constructed once; its methods are read-only.
+var pluralizeClient = pluralize.NewClient()
 
 // applyTag returns the word-pieces resulting from applying a single GECToR
 // tag to a token, plus a count of tags the decoder chose to skip (verb-form
@@ -198,6 +205,10 @@ func applyTag(token, tag string, vocab VerbVocab) ([]string, int) {
 		return []string{strings.Title(strings.ToLower(token))}, 0 //nolint:staticcheck // GECToR-side normalisation
 	case tag == tagCaseLow:
 		return []string{strings.ToLower(token)}, 0
+	case tag == tagAgreementSingular:
+		return []string{pluralizeClient.Singular(token)}, 0
+	case tag == tagAgreementPlural:
+		return []string{pluralizeClient.Plural(token)}, 0
 	case strings.HasPrefix(tag, tagPrefixT):
 		// $TRANSFORM_VERB_<FROM>_<TO> -> look up in the verb-form vocab.
 		// The vocab's suffix key is just "FROM_TO" (e.g. "VBN_VBD"), not

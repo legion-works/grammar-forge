@@ -244,3 +244,56 @@ func TestDecodeSuppressesCaseLowerAfterSentenceEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, sugs, "CASE_LOWER after a sentence end must be suppressed")
 }
+
+// Lever #2: $TRANSFORM_AGREEMENT_SINGULAR/_PLURAL noun-number transforms were
+// previously dropped by the decoder. Implemented via go-pluralize.
+func TestDecodeAgreementSingular(t *testing.T) {
+	// "every weeks" -> "every week"  ("Ġweeks" [11,17) covers " weeks")
+	const text = "He runs every weeks"
+	ents := []pipelines.Entity{
+		ent("\u0120He", "$KEEP", 0, 2, 0.9),
+		ent("\u0120runs", "$KEEP", 2, 7, 0.9),
+		ent("\u0120every", "$KEEP", 7, 13, 0.9),
+		ent("\u0120weeks", "$TRANSFORM_AGREEMENT_SINGULAR", 13, 19, 0.97),
+	}
+	sugs, err := decodeToSuggestions(text, ents, VerbVocab{})
+	require.NoError(t, err)
+	require.Len(t, sugs, 1)
+	require.Equal(t, "week", sugs[0].Replacement)
+	require.Equal(t, "He runs every week", applyAll(text, sugs))
+}
+
+func TestDecodeAgreementPlural(t *testing.T) {
+	// "three cat" -> "three cats"
+	const text = "I have three cat"
+	ents := []pipelines.Entity{
+		ent("\u0120I", "$KEEP", 0, 1, 0.9),
+		ent("\u0120have", "$KEEP", 1, 6, 0.9),
+		ent("\u0120three", "$KEEP", 6, 12, 0.9),
+		ent("\u0120cat", "$TRANSFORM_AGREEMENT_PLURAL", 12, 16, 0.9),
+	}
+	sugs, err := decodeToSuggestions(text, ents, VerbVocab{})
+	require.NoError(t, err)
+	require.Len(t, sugs, 1)
+	require.Equal(t, "cats", sugs[0].Replacement)
+	require.Equal(t, "I have three cats", applyAll(text, sugs))
+}
+
+func TestDecodeAgreementIrregularAndUncountable(t *testing.T) {
+	// irregular plural: "child" -> "children"
+	sugs, err := decodeToSuggestions("one child", []pipelines.Entity{
+		ent("\u0120one", "$KEEP", 0, 3, 0.9),
+		ent("\u0120child", "$TRANSFORM_AGREEMENT_PLURAL", 3, 9, 0.9),
+	}, VerbVocab{})
+	require.NoError(t, err)
+	require.Len(t, sugs, 1)
+	require.Equal(t, "children", sugs[0].Replacement)
+
+	// uncountable: "information" pluralised is unchanged -> no suggestion
+	sugs2, err := decodeToSuggestions("the information", []pipelines.Entity{
+		ent("\u0120the", "$KEEP", 0, 3, 0.9),
+		ent("\u0120information", "$TRANSFORM_AGREEMENT_PLURAL", 3, 15, 0.9),
+	}, VerbVocab{})
+	require.NoError(t, err)
+	require.Empty(t, sugs2, "uncountable noun pluralised is unchanged -> no suggestion")
+}
