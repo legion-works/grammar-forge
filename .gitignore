@@ -41,6 +41,7 @@ vendor/
 # --- bridge native libs + models (large/derived — fetched in CI/Docker) ---
 bridge/native/*.so
 bridge/native/*.a
+bridge/native/*.h
 bridge/models/
 
 # --- Python (gector/, learning loop) ---
