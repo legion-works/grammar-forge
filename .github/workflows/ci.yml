@@ -94,15 +94,14 @@ jobs:
       # was not present in the merge-base) so we still get a green CI.
       - name: buf breaking (skip if first proto introduction)
         run: |
-          git fetch --depth=1 origin master || true
-          BASE=$(git rev-parse origin/master 2>/dev/null || echo "")
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE:bridge/proto/ml_server.proto" 2>/dev/null; then
-            echo "no prior proto in master baseline; skipping buf breaking (first introduction)"
-            exit 0
+          git fetch --depth=1 origin master
+          if git cat-file -e master:bridge/proto/ml_server.proto 2>/dev/null; then
+            buf breaking --against '.git#branch=master,subdir=bridge'
+          else
+            echo "proto first introduction: skipping breaking check (no prior proto on master)"
           fi
-          buf breaking --against ".git#branch=master,subdir=bridge"
-      - name: task proto-check
-        run: task -d bridge proto-check
+      - name: codegen-drift gate
+        run: buf generate && git diff --exit-code -- internal/ltgrpc/pb
 
   ci-complete:
     needs: [secrets, go, proto]
