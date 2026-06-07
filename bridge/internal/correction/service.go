@@ -11,8 +11,10 @@ import (
 //  1. Run all fast correctors in order (Harper → GECToR). Best-effort: any
 //     corrector that errors is logged and skipped.
 //  2. Merge/dedup the fast suggestions (greedy by confidence DESC).
-//  3. If the policy says escalate, call the LLM and merge its diff into
-//     the result. LLM errors fall back to the fast-path result (logged).
+//  3. If the policy says escalate, feed the fast-path-CORRECTED text to the
+//     LLM (sequential refinement) and replace the result with the diff of the
+//     LLM's final output against the ORIGINAL. LLM errors fall back to the
+//     fast-path result (logged).
 //  4. Log the combined correction (best-effort; log failures are swallowed).
 //  5. Tag every returned suggestion with the logged id.
 //
