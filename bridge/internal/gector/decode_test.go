@@ -29,27 +29,22 @@ func applyAll(text string, sugs []correction.Suggestion) string {
 }
 
 // Bug #1 symptom 1: a sentence-initial edit must NOT get a spurious leading
-// space (the tokenizer emits "ĠMe" [0,2) — Ġ present, but Start=0 with no real
-// preceding space). The old decoder keyed on the Ġ leader and prepended a space,
-// producing " me and ..." with a corrupt leading space.
+// space (tokenizer emits "ĠTeh" [0,3) — Ġ present, Start=0, no real preceding
+// space). Uses a REPLACE because sentence-initial CASE_LOWER is now suppressed.
 func TestDecodeSentenceInitialNoSpuriousLeadingSpace(t *testing.T) {
-	const text = "Me and him went to the game."
+	const text = "Teh cat sat."
 	ents := []pipelines.Entity{
-		ent("\u0120Me", "$TRANSFORM_CASE_LOWER", 0, 2, 0.882),
-		ent("\u0120and", "$KEEP", 2, 6, 0.874),
-		ent("\u0120him", "$KEEP", 6, 10, 0.589),
-		ent("\u0120went", "$KEEP", 10, 15, 0.956),
-		ent("\u0120to", "$KEEP", 15, 18, 0.985),
-		ent("\u0120the", "$KEEP", 18, 22, 0.994),
-		ent("\u0120game", "$KEEP", 22, 27, 0.992),
-		ent(".", "$KEEP", 27, 28, 0.997),
+		ent("\u0120Teh", "$REPLACE_The", 0, 3, 0.95),
+		ent("\u0120cat", "$KEEP", 3, 7, 0.9),
+		ent("\u0120sat", "$KEEP", 7, 11, 0.9),
+		ent(".", "$KEEP", 11, 12, 0.9),
 	}
 	sugs, err := decodeToSuggestions(text, ents, VerbVocab{})
 	require.NoError(t, err)
-	require.Len(t, sugs, 1, "only the CASE_LOWER on 'Me' should produce a suggestion")
-	require.Equal(t, correction.Span{Start: 0, End: 2}, sugs[0].Span)
-	require.Equal(t, "me", sugs[0].Replacement, "no spurious leading space; faithful lowercasing")
-	require.Equal(t, "me and him went to the game.", applyAll(text, sugs))
+	require.Len(t, sugs, 1)
+	require.Equal(t, correction.Span{Start: 0, End: 3}, sugs[0].Span)
+	require.Equal(t, "The", sugs[0].Replacement, "no spurious leading space at position 0")
+	require.Equal(t, "The cat sat.", applyAll(text, sugs))
 }
 
 // Bug #1 symptom 2: $APPEND must insert a separating space — "listen" +
@@ -200,4 +195,50 @@ func TestDecodeMergesAlphanumericSubwords(t *testing.T) {
 	require.Equal(t, correction.Span{Start: 5, End: 16}, sugs[0].Span, "span covers the whole merged word 'intelligant'")
 	require.Equal(t, "intelligent", sugs[0].Replacement)
 	require.Equal(t, "very intelligent.", applyAll(text, sugs))
+}
+
+// Lever #1a: sentence-initial $TRANSFORM_CASE_LOWER must be suppressed.
+func TestDecodeSuppressesSentenceInitialCaseLower(t *testing.T) {
+	const text = "Me and him went."
+	ents := []pipelines.Entity{
+		ent("\u0120Me", "$TRANSFORM_CASE_LOWER", 0, 2, 0.882),
+		ent("\u0120and", "$KEEP", 2, 6, 0.9),
+		ent("\u0120him", "$KEEP", 6, 10, 0.9),
+		ent("\u0120went", "$KEEP", 10, 15, 0.9),
+		ent(".", "$KEEP", 15, 16, 0.9),
+	}
+	sugs, err := decodeToSuggestions(text, ents, VerbVocab{})
+	require.NoError(t, err)
+	require.Empty(t, sugs, "sentence-initial CASE_LOWER must be suppressed")
+}
+
+// Lever #1a: a wrongly-capitalised MID-sentence word must still be lowercased.
+func TestDecodeKeepsMidSentenceCaseLower(t *testing.T) {
+	const text = "the Cat sat"
+	ents := []pipelines.Entity{
+		ent("\u0120the", "$KEEP", 0, 3, 0.9),
+		ent("\u0120Cat", "$TRANSFORM_CASE_LOWER", 3, 7, 0.9),
+		ent("\u0120sat", "$KEEP", 7, 11, 0.9),
+	}
+	sugs, err := decodeToSuggestions(text, ents, VerbVocab{})
+	require.NoError(t, err)
+	require.Len(t, sugs, 1)
+	require.Equal(t, "cat", sugs[0].Replacement)
+	require.Equal(t, "the cat sat", applyAll(text, sugs))
+}
+
+// Lever #1a: CASE_LOWER on the first word AFTER a sentence end is also suppressed.
+func TestDecodeSuppressesCaseLowerAfterSentenceEnd(t *testing.T) {
+	const text = "Go now. then rest."
+	ents := []pipelines.Entity{
+		ent("\u0120Go", "$KEEP", 0, 2, 0.9),
+		ent("\u0120now", "$KEEP", 2, 6, 0.9),
+		ent(".", "$KEEP", 6, 7, 0.9),
+		ent("\u0120then", "$TRANSFORM_CASE_LOWER", 7, 12, 0.9),
+		ent("\u0120rest", "$KEEP", 12, 17, 0.9),
+		ent(".", "$KEEP", 17, 18, 0.9),
+	}
+	sugs, err := decodeToSuggestions(text, ents, VerbVocab{})
+	require.NoError(t, err)
+	require.Empty(t, sugs, "CASE_LOWER after a sentence end must be suppressed")
 }

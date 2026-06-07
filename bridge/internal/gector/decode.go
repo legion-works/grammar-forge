@@ -104,9 +104,25 @@ func decodeToSuggestions(text string, entities []pipelines.Entity, vocab VerbVoc
 	var out []correction.Suggestion
 	skippedTransforms := 0
 	textLen := len(text)
-	for _, w := range words {
+	for i, w := range words {
 		wordText := strings.Join(w.subwords, "")
-		pieces, skipped := applyTag(wordText, w.tagEntity.Entity, vocab)
+		tag := w.tagEntity.Entity
+		// Precision guard: GECToR sometimes emits $TRANSFORM_CASE_LOWER on the
+		// FIRST word of a sentence (e.g. "Me"->"me", "Always"->"always"), which
+		// is essentially never correct and, being a confident fast-path edit,
+		// also blocks LLM escalation. Drop it for a sentence-initial word (the
+		// first token, or one immediately following ./!/?).
+		if tag == tagCaseLow {
+			sentenceInitial := i == 0
+			if i > 0 {
+				prev := strings.Join(words[i-1].subwords, "")
+				sentenceInitial = prev == "." || prev == "!" || prev == "?"
+			}
+			if sentenceInitial {
+				continue
+			}
+		}
+		pieces, skipped := applyTag(wordText, tag, vocab)
 		skippedTransforms += skipped
 		// KEEP / OOV / empty tag: no suggestion.
 		if len(pieces) == 1 && pieces[0] == wordText {
