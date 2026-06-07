@@ -228,13 +228,15 @@ func TestDecodeKeepsMidSentenceCaseLower(t *testing.T) {
 }
 
 // Lever #1a: CASE_LOWER on the first word AFTER a sentence end is also suppressed.
+// Uses "Then" (capitalised) so the test is EFFECTIVE — without the guard the
+// decoder would emit "Then"->"then"; the guard must suppress it.
 func TestDecodeSuppressesCaseLowerAfterSentenceEnd(t *testing.T) {
-	const text = "Go now. then rest."
+	const text = "Go now. Then rest."
 	ents := []pipelines.Entity{
 		ent("\u0120Go", "$KEEP", 0, 2, 0.9),
 		ent("\u0120now", "$KEEP", 2, 6, 0.9),
 		ent(".", "$KEEP", 6, 7, 0.9),
-		ent("\u0120then", "$TRANSFORM_CASE_LOWER", 7, 12, 0.9),
+		ent("\u0120Then", "$TRANSFORM_CASE_LOWER", 7, 12, 0.9),
 		ent("\u0120rest", "$KEEP", 12, 17, 0.9),
 		ent(".", "$KEEP", 17, 18, 0.9),
 	}
