@@ -40,6 +40,7 @@ type Prompt struct {
 // PromptTemplate selects the wire format the LLMClient must use.
 type PromptTemplate string
 
+// PromptTemplate values for the LLM wire format.
 const (
 	TemplateGRMRNative   PromptTemplate = "grmr_native"   // /v1/completions
 	TemplateChatInstruct PromptTemplate = "chat_instruct" // /v1/chat/completions
@@ -47,7 +48,7 @@ const (
 
 // Store persists correction events and user signals (SQLite in Plan 1B).
 type Store interface {
-	LogCorrection(ctx context.Context, ev CorrectionEvent) (id int64, err error)
+	LogCorrection(ctx context.Context, ev Event) (id int64, err error)
 	LogSignal(ctx context.Context, correctionID int64, signal Signal) error
 	Close() error
 }
@@ -55,14 +56,15 @@ type Store interface {
 // Signal is a user reaction to a suggestion.
 type Signal string
 
+// Signal values for user reactions to a suggestion.
 const (
 	SignalAccepted Signal = "accepted"
 	SignalRejected Signal = "rejected"
 	SignalIgnored  Signal = "ignored"
 )
 
-// CorrectionEvent is a row in the correction log.
-type CorrectionEvent struct {
+// Event is a row in the correction log.
+type Event struct {
 	Source     Source
 	Original   string
 	Suggestion string
