@@ -17,10 +17,10 @@ type Corrector interface {
 	Correct(ctx context.Context, req Request) ([]Suggestion, error)
 }
 
-// LLMClient is the slow-path escalation engine (any OpenAI-compatible backend).
+// LLMClient is the slow-path engine (any OpenAI-compatible backend). It is pure
+// transport: it renders a prebuilt Prompt to the wire and returns corrected text.
 type LLMClient interface {
-	// Correct returns the corrected full text for req.Text.
-	Correct(ctx context.Context, req Request) (string, error)
+	Complete(ctx context.Context, p Prompt) (string, error)
 }
 
 // PromptBuilder turns a request into the model-family-specific prompt. The
@@ -50,6 +50,8 @@ const (
 type Store interface {
 	LogCorrection(ctx context.Context, ev Event) (id int64, err error)
 	LogSignal(ctx context.Context, correctionID int64, signal Signal) error
+	// CountCorrections returns the total number of logged corrections.
+	CountCorrections(ctx context.Context) (int64, error)
 	Close() error
 }
 

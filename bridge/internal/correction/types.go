@@ -45,6 +45,9 @@ func (s Span) Validate(textLen int) error {
 
 // Suggestion is a single proposed edit. The bridge SUGGESTS; clients apply.
 type Suggestion struct {
+	// ID is the correction-log row id, set after the suggestion is persisted,
+	// so clients can reference it in POST /signal. Zero until logged.
+	ID          int64   `json:"id,omitempty"`
 	Span        Span    `json:"span"`
 	Replacement string  `json:"replacement"`
 	Message     string  `json:"message,omitempty"`
