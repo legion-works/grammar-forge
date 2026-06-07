@@ -109,12 +109,22 @@ GECToR + Harper have **no port** — they run inside the bridge process.
 
 ## Models (exact IDs — agents tend to guess these wrong)
 
-- LLM slow path (default): `qingy2024/GRMR-V3-Q4B` (Qwen3-4B base) via **vLLM**; CPU
-  fallback `qingy2024/GRMR-V3-Q1.7B`; generic BYO fallback `Qwen3-4B`/`Qwen3-1.7B` + grammar
-  prompt. Personalised via LoRA adapter (vLLM hot-swap). The model is **config, not code**.
-- GECToR fast path: `gotutiyan/gector-deberta-large-5k` (ONNX via `hugot`); INT8 fallback
-  `Meyssa/gector-large-2024`.
-- Harper pre-filter: `harper-core` (Rust) via `hippietrail/harper-c` CGo FFI.
+- LLM slow path (default): `qingy2024/GRMR-V3-Q4B` — **Qwen3-4B BF16** ("Q4" = the 4B size
+  class, NOT 4-bit). Served via **vLLM at FP8** (`--quantization fp8 --kv-cache-dtype fp8`):
+  spike-measured 4.19 GiB weights, quality == BF16, ~230 ms p50, LoRA hot-swap works on
+  Blackwell. **INT4 = memory-constrained-only fallback** (spike found semantic flips +
+  hallucinations — don't default to it). CPU fallback `GRMR-V3-Q1.7B`; generic BYO `Qwen3-4B/1.7B`.
+- **GRMR-V3 takes NO system prompt** — use its native completion format
+  (`<|text_start|>…<|corrected_start|>`, `/v1/completions`). The bridge prompt builder must
+  **branch on model family** (GRMR-native vs generic-instruct chat+system). See SPEC §5.4.
+- GECToR fast path: `gotutiyan/gector-deberta-large-5k` — **ship INT8** (~28 ms CPU, 397 MB;
+  FP32 ~95 ms misses budget) via `hugot`. Needs a **custom ONNX export** (not `optimum-cli`;
+  DeBERTa-v1, custom heads) + bundled `verb-form-vocab.txt` + 2–3 decode passes. Build `-tags ORT`.
+- Harper pre-filter: `harper-core` via `hippietrail/harper-c` CGo (`libharper_c.so` ~16 MB,
+  ~4 ms warm; cache one `LintGroup` per process).
+- **vLLM idle offload:** sleep mode works but has no auto-timer — **the bridge owns the idle
+  `/sleep`+`/wake_up` timer**. `--gpu-memory-utilization` is a fraction of TOTAL VRAM (KV fills
+  it) → keep low (0.20) on a shared GPU.
 
 ## Toolchain (greenfield — use these when scaffolding)
 
