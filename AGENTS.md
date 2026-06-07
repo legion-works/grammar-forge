@@ -3,19 +3,25 @@
 Self-hosted, privacy-first grammar/writing assistant. A drop-in replacement for
 LanguageTool Premium that adds custom Vencord + OpenCode integrations and learns
 the user's style over time. The LLM slow path is **bring-your-own** (any
-OpenAI-compatible endpoint). Full design lives in **`SPEC.md`** — authoritative, but
-**still v0.1 draft**; confirm details before treating them as fixed.
+OpenAI-compatible endpoint). Full design lives in **`.opencode/specs/SPEC.md`** —
+authoritative, but **still v0.1 draft**; confirm details before treating them as fixed.
 
 > **This repo is destined to be PUBLIC / open-source.** Treat every commit as world-readable.
 > See "Public repo hygiene" below — it is non-negotiable.
 
 ## Current state
 
-- **Greenfield. No application code, no commits yet.** The only thing present is
-  `.opencode/` (OpenCode's own tooling/plugin SDK, with its own `.gitignore` — *not*
-  project code; ignore it when working on GrammarForge).
-- There is **no build/test/lint system yet**. First work is scaffolding per `SPEC.md`
-  Phase 1. This is a polyglot repo — each service brings its own toolchain in its own dir.
+- **Greenfield. No application code yet** — only docs + tooling config committed. First work
+  is scaffolding per the spec (Phase 1). Polyglot repo — each service brings its own toolchain.
+- There is **no build/test/lint system yet**; wire up the toolchain below when scaffolding.
+
+## Where things live
+
+- **Design docs live under `.opencode/`** — spec in `.opencode/specs/`, plans in
+  `.opencode/plans/`. Put new specs/plans/design notes there, not at the repo root.
+- `.opencode/node_modules` + `package*.json` are OpenCode's own plugin SDK (gitignored) —
+  **not** project code; ignore them when working on GrammarForge.
+- `AGENTS.md` (this file) and per-service code/config stay at the repo root / service dirs.
 
 ## Architecture in one breath
 
