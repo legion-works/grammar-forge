@@ -1,0 +1,68 @@
+{"id": 1, "cat": "sva", "input": "She go to school every day.", "golden": "She goes to school every day."}
+{"id": 2, "cat": "sva", "input": "The dogs runs across the yard.", "golden": "The dogs run across the yard."}
+{"id": 3, "cat": "sva", "input": "He don't know the answer.", "golden": "He doesn't know the answer."}
+{"id": 4, "cat": "sva", "input": "My friends is coming over tonight.", "golden": "My friends are coming over tonight."}
+{"id": 5, "cat": "sva", "input": "There is many reasons to be happy.", "golden": "There are many reasons to be happy."}
+{"id": 6, "cat": "tense", "input": "I seen it yesterday.", "golden": "I saw it yesterday."}
+{"id": 7, "cat": "tense", "input": "She buyed some apples at the market.", "golden": "She bought some apples at the market."}
+{"id": 8, "cat": "tense", "input": "They have went home already.", "golden": "They have gone home already."}
+{"id": 9, "cat": "tense", "input": "He has ate his lunch.", "golden": "He has eaten his lunch."}
+{"id": 10, "cat": "tense", "input": "We was watching a movie.", "golden": "We were watching a movie."}
+{"id": 11, "cat": "tense", "input": "Yesterday I go to the gym.", "golden": "Yesterday I went to the gym."}
+{"id": 12, "cat": "article", "input": "I have a apple in my bag.", "golden": "I have an apple in my bag."}
+{"id": 13, "cat": "article", "input": "She is a honest woman.", "golden": "She is an honest woman."}
+{"id": 14, "cat": "article", "input": "He opened a umbrella.", "golden": "He opened an umbrella."}
+{"id": 15, "cat": "article", "input": "We saw a elephant at the zoo.", "golden": "We saw an elephant at the zoo."}
+{"id": 16, "cat": "plural", "input": "I have three cat.", "golden": "I have three cats."}
+{"id": 17, "cat": "plural", "input": "There are many childs in the park.", "golden": "There are many children in the park."}
+{"id": 18, "cat": "plural", "input": "Two mouses ran across the floor.", "golden": "Two mice ran across the floor."}
+{"id": 19, "cat": "plural", "input": "She has five tooths missing.", "golden": "She has five teeth missing."}
+{"id": 20, "cat": "homophone", "input": "Their going to the park later.", "golden": "They're going to the park later."}
+{"id": 21, "cat": "homophone", "input": "Your welcome to join us.", "golden": "You're welcome to join us."}
+{"id": 22, "cat": "homophone", "input": "Its a beautiful day outside.", "golden": "It's a beautiful day outside."}
+{"id": 23, "cat": "homophone", "input": "I can't find there house.", "golden": "I can't find their house."}
+{"id": 24, "cat": "homophone", "input": "The dog wagged it's tail.", "golden": "The dog wagged its tail."}
+{"id": 25, "cat": "homophone", "input": "I think your right about that.", "golden": "I think you're right about that."}
+{"id": 26, "cat": "homophone", "input": "We went to the store to by milk.", "golden": "We went to the store to buy milk."}
+{"id": 27, "cat": "spelling", "input": "I recieved your letter.", "golden": "I received your letter."}
+{"id": 28, "cat": "spelling", "input": "This is definately the best option.", "golden": "This is definitely the best option."}
+{"id": 29, "cat": "spelling", "input": "She is very intelligant.", "golden": "She is very intelligent."}
+{"id": 30, "cat": "spelling", "input": "The resturant was crowded.", "golden": "The restaurant was crowded."}
+{"id": 31, "cat": "spelling", "input": "It was a seperate issue entirely.", "golden": "It was a separate issue entirely."}
+{"id": 32, "cat": "spelling", "input": "He has good knowlege of the subject.", "golden": "He has good knowledge of the subject."}
+{"id": 33, "cat": "caps", "input": "i went to london last summer.", "golden": "I went to London last summer."}
+{"id": 34, "cat": "caps", "input": "my friend sarah lives in paris.", "golden": "My friend Sarah lives in Paris."}
+{"id": 35, "cat": "caps", "input": "we visited the eiffel tower.", "golden": "We visited the Eiffel Tower."}
+{"id": 36, "cat": "punct", "input": "Lets go to the beach.", "golden": "Let's go to the beach."}
+{"id": 37, "cat": "punct", "input": "Im really excited about this.", "golden": "I'm really excited about this."}
+{"id": 38, "cat": "punct", "input": "Whats the plan for tomorrow?", "golden": "What's the plan for tomorrow?"}
+{"id": 39, "cat": "punct", "input": "I cant believe it worked.", "golden": "I can't believe it worked."}
+{"id": 40, "cat": "prep", "input": "I am very good in mathematics.", "golden": "I am very good at mathematics."}
+{"id": 41, "cat": "prep", "input": "She got married with her partner.", "golden": "She got married to her partner."}
+{"id": 42, "cat": "prep", "input": "Please listen me carefully.", "golden": "Please listen to me carefully."}
+{"id": 43, "cat": "prep", "input": "We arrived to the airport on time.", "golden": "We arrived at the airport on time."}
+{"id": 44, "cat": "pronoun", "input": "Me and him went to the game.", "golden": "He and I went to the game."}
+{"id": 45, "cat": "pronoun", "input": "Her and I are good friends.", "golden": "She and I are good friends."}
+{"id": 46, "cat": "pronoun", "input": "Give the book to he.", "golden": "Give the book to him."}
+{"id": 47, "cat": "negation", "input": "I don't need no help.", "golden": "I don't need any help."}
+{"id": 48, "cat": "negation", "input": "She didn't see nothing unusual.", "golden": "She didn't see anything unusual."}
+{"id": 49, "cat": "confusable", "input": "I have less books than you.", "golden": "I have fewer books than you."}
+{"id": 50, "cat": "confusable", "input": "I would of helped if I could.", "golden": "I would have helped if I could."}
+{"id": 51, "cat": "confusable", "input": "Their are several problems here.", "golden": "There are several problems here."}
+{"id": 52, "cat": "confusable", "input": "The medicine had a strong affect.", "golden": "The medicine had a strong effect."}
+{"id": 53, "cat": "confusable", "input": "This is more better than before.", "golden": "This is better than before."}
+{"id": 54, "cat": "wordorder", "input": "Always she is late for work.", "golden": "She is always late for work."}
+{"id": 55, "cat": "multi", "input": "she dont no the anser.", "golden": "She doesn't know the answer."}
+{"id": 56, "cat": "multi", "input": "their is alot of reasons why i beleive this.", "golden": "There are a lot of reasons why I believe this."}
+{"id": 57, "cat": "multi", "input": "He go to the libary every weeks.", "golden": "He goes to the library every week."}
+{"id": 58, "cat": "multi", "input": "we was hoping youd come to the party.", "golden": "We were hoping you'd come to the party."}
+{"id": 59, "cat": "unicode", "input": "I has a café near my house.", "golden": "I have a café near my house."}
+{"id": 60, "cat": "unicode", "input": "The naïve plan dont work.", "golden": "The naïve plan doesn't work."}
+{"id": 61, "cat": "clean", "input": "The quick brown fox jumps over the lazy dog.", "golden": "The quick brown fox jumps over the lazy dog."}
+{"id": 62, "cat": "clean", "input": "She sells seashells by the seashore.", "golden": "She sells seashells by the seashore."}
+{"id": 63, "cat": "clean", "input": "He went to the store and bought some milk.", "golden": "He went to the store and bought some milk."}
+{"id": 64, "cat": "clean", "input": "Artificial intelligence is transforming the world.", "golden": "Artificial intelligence is transforming the world."}
+{"id": 65, "cat": "clean", "input": "I have three cats, and they are all black.", "golden": "I have three cats, and they are all black."}
+{"id": 66, "cat": "clean", "input": "The function returns null when the list is empty.", "golden": "The function returns null when the list is empty."}
+{"id": 67, "cat": "clean", "input": "We paid 5 euros for the café au lait.", "golden": "We paid 5 euros for the café au lait."}
+{"id": 68, "cat": "clean", "input": "Please review the document before the meeting.", "golden": "Please review the document before the meeting."}

@@ -68,6 +68,10 @@ yarn-error.log*
 # --- Docker ---
 docker-compose.override.yml
 
+# --- Eval harness: golden cases are test data (override *.jsonl); results are output ---
+!eval/golden.jsonl
+eval/results.json
+
 # --- Editor / OS ---
 .DS_Store
 .idea/
