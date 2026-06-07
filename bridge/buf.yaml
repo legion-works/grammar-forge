@@ -1,0 +1,23 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use: [STANDARD]
+  # The proto is vendored from LanguageTool upstream; we cannot rename
+  # services, RPCs, fields, enums, or zero values without breaking the
+  # wire contract with LT. Suppress style categories that conflict with
+  # upstream naming. We keep PACKAGE_VERSION_SUFFIX / DIRECTORY_MATCH off
+  # by default as well.
+  except:
+    - PACKAGE_VERSION_SUFFIX
+    - PACKAGE_DIRECTORY_MATCH
+    - FIELD_LOWER_SNAKE_CASE
+    - ENUM_VALUE_PREFIX
+    - ENUM_VALUE_UPPER_SNAKE_CASE
+    - ENUM_ZERO_VALUE_SUFFIX
+    - SERVICE_SUFFIX
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+breaking:
+  use: [WIRE_JSON]
