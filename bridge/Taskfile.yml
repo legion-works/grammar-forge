@@ -1,0 +1,22 @@
+version: "3"
+tasks:
+  lint:
+    desc: Lint the bridge
+    cmds:
+      - golangci-lint run ./...
+  fmt:
+    desc: Format the bridge
+    cmds:
+      - golangci-lint fmt ./...
+  test:
+    desc: Test the bridge with race + coverage
+    cmds:
+      - go test -race -coverprofile=cover.out ./...
+  build:
+    desc: Build the bridge binary
+    cmds:
+      - go build -o bin/grammarforge ./cmd/grammarforge
+  vuln:
+    desc: Vulnerability scan
+    cmds:
+      - go run golang.org/x/vuln/cmd/govulncheck@latest ./...

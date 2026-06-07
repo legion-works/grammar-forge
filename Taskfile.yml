@@ -1,0 +1,20 @@
+version: "3"
+includes:
+  bridge:
+    taskfile: ./bridge/Taskfile.yml
+    dir: ./bridge
+tasks:
+  lint:
+    desc: Lint all services
+    cmds:
+      - task: bridge:lint
+  test:
+    desc: Test all services
+    cmds:
+      - task: bridge:test
+  ci:
+    desc: Full local CI
+    cmds:
+      - task: bridge:fmt
+      - task: bridge:lint
+      - task: bridge:test
