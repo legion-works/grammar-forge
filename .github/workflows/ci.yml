@@ -1,0 +1,65 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - 'bridge/**'
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: bridge/go.sum
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: bridge
+          version: v2.1.0
+      - run: go test -race -coverprofile=cover.out ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  ci-complete:
+    needs: [secrets, go]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required jobs succeeded
+        run: |
+          if [ "${{ needs.secrets.result }}" != "success" ]; then echo "secrets failed"; exit 1; fi
+          if [ "${{ needs.go.result }}" != "success" ] && [ "${{ needs.go.result }}" != "skipped" ]; then echo "go failed"; exit 1; fi
+          echo "ci-complete: ok"
