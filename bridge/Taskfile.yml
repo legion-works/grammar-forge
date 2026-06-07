@@ -63,6 +63,18 @@ tasks:
     cmds:
       - docker build -t grammarforge-bridge:dev .
 
+  proto:
+    desc: Lint + regenerate gRPC bindings
+    cmds:
+      - buf lint
+      - buf generate
+
+  proto-check:
+    desc: Fail if generated code is stale
+    cmds:
+      - buf generate
+      - git diff --exit-code -- internal/ltgrpc/pb
+
   vuln:
     desc: Vulnerability scan
     cmds:

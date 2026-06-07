@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       go: ${{ steps.filter.outputs.go }}
+      proto: ${{ steps.filter.outputs.proto }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -20,6 +21,10 @@ jobs:
           filters: |
             go:
               - 'bridge/**'
+            proto:
+              - 'bridge/proto/**'
+              - 'bridge/buf.yaml'
+              - 'bridge/buf.gen.yaml'
 
   secrets:
     runs-on: ubuntu-latest
@@ -67,8 +72,40 @@ jobs:
       - name: govulncheck (non-cgo packages)
         run: go list ./... | grep -vE '/(harperffi|gector)$' | xargs go run golang.org/x/vuln/cmd/govulncheck@latest
 
+  proto:
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.70.0
+      - name: buf lint
+        run: buf lint
+      # First proto introduction has no baseline; buf breaking fails when
+      # there is no prior .proto to compare against. Skip the breaking
+      # check on the very first run (when bridge/proto/ml_server.proto
+      # was not present in the merge-base) so we still get a green CI.
+      - name: buf breaking (skip if first proto introduction)
+        run: |
+          git fetch --depth=1 origin master || true
+          BASE=$(git rev-parse origin/master 2>/dev/null || echo "")
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE:bridge/proto/ml_server.proto" 2>/dev/null; then
+            echo "no prior proto in master baseline; skipping buf breaking (first introduction)"
+            exit 0
+          fi
+          buf breaking --against ".git#branch=master,subdir=bridge"
+      - name: task proto-check
+        run: task -d bridge proto-check
+
   ci-complete:
-    needs: [secrets, go]
+    needs: [secrets, go, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -76,4 +113,5 @@ jobs:
         run: |
           if [ "${{ needs.secrets.result }}" != "success" ]; then echo "secrets failed"; exit 1; fi
           if [ "${{ needs.go.result }}" != "success" ] && [ "${{ needs.go.result }}" != "skipped" ]; then echo "go failed"; exit 1; fi
+          if [ "${{ needs.proto.result }}" != "success" ] && [ "${{ needs.proto.result }}" != "skipped" ]; then echo "proto failed"; exit 1; fi
           echo "ci-complete: ok"
