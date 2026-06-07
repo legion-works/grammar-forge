@@ -1,0 +1,12 @@
+# Fast git hooks. Activate with `lefthook install`. Docs: https://lefthook.dev
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      # secret scan of staged changes — public repo, must gate.
+      # newer gitleaks (>=8.18) may prefer `gitleaks git --staged`; adjust to the installed version.
+      run: gitleaks protect --staged --redact --no-banner
+    golangci-lint:
+      root: bridge/
+      glob: "*.go"
+      run: golangci-lint run
