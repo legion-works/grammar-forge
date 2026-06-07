@@ -27,7 +27,6 @@ ngrams/
 *.gguf
 *.safetensors
 *.bin
-models/
 adapters/
 
 # --- Go (bridge/, opencode LSP shim) ---
@@ -42,7 +41,8 @@ vendor/
 bridge/native/*.so
 bridge/native/*.a
 bridge/native/*.h
-bridge/models/
+bridge/models/gector/*
+!bridge/models/gector/README.md
 
 # --- Python (gector/, learning loop) ---
 __pycache__/
