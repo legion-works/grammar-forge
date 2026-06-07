@@ -1,0 +1,119 @@
+// Package llm is the OpenAI-compatible slow-path client. It implements
+// correction.LLMClient and is pure transport — it renders a prebuilt Prompt to
+// /v1/completions (GRMR-native) or /v1/chat/completions (chat) and returns text.
+package llm
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/grammarforge/bridge/internal/correction"
+)
+
+// Config configures the client. APIKey is optional and never logged.
+type Config struct {
+	BaseURL string // e.g. http://vllm:8000/v1
+	Model   string
+	APIKey  string
+}
+
+// Client talks to an OpenAI-compatible server.
+type Client struct {
+	cfg  Config
+	http *http.Client
+}
+
+// New constructs a Client with a sane timeout.
+func New(cfg Config) *Client {
+	return &Client{cfg: cfg, http: &http.Client{Timeout: 30 * time.Second}}
+}
+
+type chatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// Complete renders p to the correct endpoint and returns the model's text.
+func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, error) {
+	maxTokens := completionBudget(p.User)
+	var endpoint string
+	var payload any
+	if p.Template == correction.TemplateChatInstruct {
+		endpoint = "/chat/completions"
+		msgs := make([]chatMessage, 0, 2)
+		if p.System != "" {
+			msgs = append(msgs, chatMessage{Role: "system", Content: p.System})
+		}
+		msgs = append(msgs, chatMessage{Role: "user", Content: p.User})
+		payload = map[string]any{
+			"model": c.cfg.Model, "messages": msgs,
+			"temperature": 0, "max_tokens": maxTokens,
+		}
+	} else {
+		endpoint = "/completions"
+		payload = map[string]any{
+			"model": c.cfg.Model, "prompt": p.User,
+			"temperature": 0, "max_tokens": maxTokens, "stop": p.Stop,
+		}
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("llm request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("llm backend status %d", resp.StatusCode)
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Text    string `json:"text"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return "", fmt.Errorf("decode llm response: %w", err)
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("llm returned no choices")
+	}
+	ch := parsed.Choices[0]
+	if ch.Text != "" {
+		return strings.TrimSpace(ch.Text), nil
+	}
+	return strings.TrimSpace(ch.Message.Content), nil
+}
+
+// completionBudget sizes max_tokens to the input: ~2.5 tokens/word, clamped.
+func completionBudget(user string) int {
+	words := len(strings.Fields(user))
+	n := int(float64(words) * 2.5)
+	if n < 64 {
+		n = 64
+	}
+	if n > 512 {
+		n = 512
+	}
+	return n
+}
