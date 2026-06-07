@@ -28,3 +28,10 @@ func TestLoadOverrides(t *testing.T) {
 		t.Errorf("LLMBaseURL = %q", c.LLMBaseURL)
 	}
 }
+
+func TestLoadLLMFormatDefault(t *testing.T) {
+	c := Load(func(string) (string, bool) { return "", false })
+	if c.LLMFormat != "grmr_native" {
+		t.Errorf("LLMFormat = %q, want grmr_native", c.LLMFormat)
+	}
+}

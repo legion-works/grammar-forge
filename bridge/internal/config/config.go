@@ -10,6 +10,7 @@ type Config struct {
 	GRPCAddr   string
 	LLMBaseURL string
 	LLMModel   string
+	LLMFormat  string // "grmr_native" (default) or "chat_instruct"
 	LLMAPIKey  string
 	DBPath     string
 	LogLevel   string
@@ -31,6 +32,7 @@ func Load(getenv Getenv) Config {
 		GRPCAddr:   get("GF_GRPC_ADDR", ":8082"),
 		LLMBaseURL: get("GF_LLM_BASE_URL", "http://vllm:8000/v1"),
 		LLMModel:   get("GF_LLM_MODEL", "qingy2024/GRMR-V3-Q4B"),
+		LLMFormat:  get("GF_LLM_FORMAT", "grmr_native"),
 		LLMAPIKey:  get("GF_LLM_API_KEY", ""),
 		DBPath:     get("GF_DB_PATH", "/data/corrections.db"),
 		LogLevel:   get("GF_LOG_LEVEL", "info"),
