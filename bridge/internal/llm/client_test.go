@@ -66,3 +66,46 @@ func TestCompleteSurfacesHTTPError(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "500"))
 }
+
+func TestCompleteSendsAuthorizationHeaderWhenAPIKeySet(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"text": "ok"}},
+		})
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m", APIKey: "secret-key"})
+	_, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.NoError(t, err)
+	require.Equal(t, "Bearer secret-key", gotAuth)
+}
+
+func TestCompleteOmitsAuthorizationHeaderWhenNoAPIKey(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"text": "ok"}},
+		})
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	_, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.NoError(t, err)
+	require.Empty(t, gotAuth)
+}
+
+func TestCompleteErrorsOnEmptyChoices(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{},
+		})
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	_, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no choices")
+}

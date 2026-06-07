@@ -76,3 +76,22 @@ func TestServiceSignal(t *testing.T) {
 	require.Equal(t, SignalAccepted, st.lastSignal)
 	require.Error(t, svc.Signal(context.Background(), 7, Signal("bogus"))) // invalid enum
 }
+
+// failingStore returns an error from LogCorrection — logging is best-effort and
+// must not break the user's request.
+type failingStore struct {
+	fakeStore
+}
+
+func (f *failingStore) LogCorrection(context.Context, Event) (int64, error) {
+	return 0, errors.New("db down")
+}
+
+func TestServiceCorrectBestEffortLog(t *testing.T) {
+	st := &failingStore{}
+	svc := NewService(fakePB{}, fakeLLM{out: "I have a cat"}, st, "m")
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err, "logging failure must not surface to the caller")
+	require.Len(t, got.Suggestions, 1)
+	require.Equal(t, int64(0), got.Suggestions[0].ID, "ID stays zero when log failed")
+}
