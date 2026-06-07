@@ -13,6 +13,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       proto: ${{ steps.filter.outputs.proto }}
+      docker: ${{ steps.filter.outputs.docker }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -25,6 +26,14 @@ jobs:
               - 'bridge/proto/**'
               - 'bridge/buf.yaml'
               - 'bridge/buf.gen.yaml'
+            docker:
+              - 'Dockerfile*'
+              - '**/Dockerfile'
+              - 'docker-compose*.yml'
+              - 'config/**'
+              - 'scripts/**'
+              - '.yamllint'
+              - '.dclintrc'
 
   secrets:
     runs-on: ubuntu-latest
@@ -103,8 +112,35 @@ jobs:
       - name: codegen-drift gate
         run: buf generate && git diff --exit-code -- internal/ltgrpc/pb
 
+  # Infra lint: Dockerfile + compose + yaml + shell. No GPU on the GH runner
+  # so the full e2e (`./scripts/e2e.sh` / `docker compose up`) is a local
+  # task documented in the README; this job only statically validates the
+  # infra so a green CI = the stack can be brought up.
+  docker:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: hadolint bridge/Dockerfile
+        # --failure-threshold error: only fail on real errors. The current
+        # Dockerfile (Plan 1C) emits DL3008/DL3003/DL3059 warnings about
+        # unpinned apt versions and consolidated RUN steps; those are
+        # pre-existing best-practice nits, not bugs.
+        run: docker run --rm -i --entrypoint=hadolint hadolint/hadolint --failure-threshold error - < bridge/Dockerfile
+      - name: yamllint
+        run: |
+          pipx install yamllint
+          yamllint docker-compose.yml config/
+      - name: docker compose config (parse check)
+        run: docker compose config -q
+      - name: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh
+      - name: dclint docker-compose.yml
+        run: npx --yes dclint docker-compose.yml
+
   ci-complete:
-    needs: [secrets, go, proto]
+    needs: [secrets, go, proto, docker]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -113,4 +149,5 @@ jobs:
           if [ "${{ needs.secrets.result }}" != "success" ]; then echo "secrets failed"; exit 1; fi
           if [ "${{ needs.go.result }}" != "success" ] && [ "${{ needs.go.result }}" != "skipped" ]; then echo "go failed"; exit 1; fi
           if [ "${{ needs.proto.result }}" != "success" ] && [ "${{ needs.proto.result }}" != "skipped" ]; then echo "proto failed"; exit 1; fi
+          if [ "${{ needs.docker.result }}" != "success" ] && [ "${{ needs.docker.result }}" != "skipped" ]; then echo "docker failed"; exit 1; fi
           echo "ci-complete: ok"

@@ -18,3 +18,22 @@ tasks:
       - task: bridge:fmt
       - task: bridge:lint
       - task: bridge:test
+  up:
+    desc: Start the full stack
+    cmds: ["docker compose up -d --build"]
+  down:
+    desc: Stop the stack
+    cmds: ["docker compose down"]
+  logs:
+    desc: Tail stack logs
+    cmds: ["docker compose logs -f --tail=100"]
+  e2e:
+    desc: Full end-to-end smoke (GPU host)
+    cmds: ["./scripts/e2e.sh"]
+  lint-infra:
+    desc: Lint Docker/compose/yaml/shell
+    cmds:
+      - docker run --rm -i --entrypoint=hadolint hadolint/hadolint --failure-threshold error - < bridge/Dockerfile
+      - npx --yes dclint docker-compose.yml
+      - yamllint docker-compose.yml config/
+      - shellcheck scripts/e2e.sh
