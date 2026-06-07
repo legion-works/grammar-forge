@@ -1,0 +1,75 @@
+# GrammarForge full stack: LanguageTool -> bridge (gRPC) -> fast path + vLLM (FP8).
+# `docker compose up`. vLLM needs an NVIDIA GPU; on CPU-only hosts swap to the
+# commented Ollama service and set GF_LLM_BASE_URL accordingly.
+name: grammarforge
+
+services:
+  bridge:
+    image: grammarforge-bridge:dev
+    build: ./bridge
+    depends_on: [vllm]
+    volumes:
+      - ./data:/data
+    environment:
+      GF_REST_ADDR: ":8000"
+      GF_GRPC_ADDR: ":8082"
+      GF_LLM_BASE_URL: "http://vllm:8000/v1"
+      GF_LLM_MODEL: "qingy2024/GRMR-V3-Q4B"
+      GF_LLM_FORMAT: "grmr_native"
+      GF_GECTOR_MODEL_DIR: "/models/gector"
+      GF_DB_PATH: "/data/corrections.db"
+      # GF_LLM_API_KEY: set via an .env file or secret if your backend needs it (never commit)
+    ports:
+      - "127.0.0.1:8000:8000"  # REST (/correct, /rephrase, /signal, /health, /stats)
+      - "127.0.0.1:8082:8082"  # gRPC (LanguageTool RemoteRule)
+    restart: unless-stopped
+
+  languagetool:
+    image: erikvl87/languagetool:6.7
+    depends_on: [bridge]
+    volumes:
+      - ./config/server.properties:/server.properties:ro
+      - ./config/remote-rules.json:/remote-rules.json:ro
+      - ./ngrams:/ngrams:ro  # optional n-gram data (large); empty dir is fine
+    environment:
+      langtool_remoteRulesFile: /remote-rules.json
+      Java_Xmx: 2g
+    ports:
+      - "127.0.0.1:8081:8010"
+    restart: unless-stopped
+
+  # Default LLM backend (OpenAI-compatible). FP8 on Blackwell; spike-validated tag.
+  vllm:
+    image: vllm/vllm-openai:v0.22.1-cu129-ubuntu2404
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - ./adapters:/adapters  # Phase-3 LoRA adapters (gitignored)
+    environment:
+      PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+      VLLM_ALLOW_RUNTIME_LORA_UPDATING: "True"
+    command:
+      - "--model"
+      - "qingy2024/GRMR-V3-Q4B"
+      - "--quantization"
+      - "fp8"
+      - "--kv-cache-dtype"
+      - "fp8"
+      - "--max-model-len"
+      - "2048"
+      - "--max-num-seqs"
+      - "4"
+      - "--gpu-memory-utilization"
+      - "0.20"
+      - "--enforce-eager"
+      - "--enable-lora"
+      - "--enable-sleep-mode"
+    restart: unless-stopped
+    # internal only — clients hit the bridge, not vLLM
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+
+volumes:
+  hf_cache:
+  # ollama_models:

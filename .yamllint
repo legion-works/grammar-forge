@@ -1,0 +1,16 @@
+---
+# GrammarForge yamllint config. Compose files have long lines + curly-brace
+# syntax for resource specs that the default 80-col / strict-braces rules
+# flag but are idiomatic. We keep the structural rules (indentation, truthy,
+# key duplication) strict.
+extends: default
+
+rules:
+  line-length: disable
+  document-start: disable
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  comments-indentation: disable
+  truthy:
+    allowed-values: ["true", "false", "on", "off"]
