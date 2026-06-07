@@ -44,6 +44,29 @@ func TestGECToRCorrectsStructuralErrors(t *testing.T) {
 	require.Equal(t, "I have three cats", out, "GECToR should turn %q into %q", in, "I have three cats")
 }
 
+func TestGECToRSuggestionConfidenceFromInference(t *testing.T) {
+	if os.Getenv("GF_ORT_LIB_DIR") == "" {
+		t.Setenv("GF_ORT_LIB_DIR", "../../native")
+	}
+	g, err := New(modelDir(t))
+	require.NoError(t, err)
+	defer func() { _ = g.Close() }()
+
+	const in = "I has three cats"
+	sugs, err := g.Correct(context.Background(), correction.Request{Text: in})
+	require.NoError(t, err)
+	require.NotEmpty(t, sugs)
+	allHardcoded := true
+	for _, s := range sugs {
+		require.Greater(t, s.Confidence, 0.0, "GECToR confidence must be > 0 (was %v on %+v)", s.Confidence, s)
+		require.LessOrEqual(t, s.Confidence, 1.0, "GECToR confidence must be <= 1.0 (was %v on %+v)", s.Confidence, s)
+		if s.Confidence != 0.9 {
+			allHardcoded = false
+		}
+	}
+	require.False(t, allHardcoded, "GECToR confidence is hardcoded 0.9; must come from inference")
+}
+
 func TestGECToRSpanByteOffsets(t *testing.T) {
 	if os.Getenv("GF_ORT_LIB_DIR") == "" {
 		t.Setenv("GF_ORT_LIB_DIR", "../../native")
