@@ -1,0 +1,69 @@
+# --- Secrets / local env (repo is PUBLIC — never commit credentials) ---
+.env
+.env.*
+!.env.example
+*.local
+secrets.*
+*.secret
+# private keys / certs
+*.pem
+*.key
+*.crt
+*.p12
+id_rsa*
+id_ed25519*
+
+# --- Runtime data (do NOT commit user text / correction log) ---
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# --- Large model assets (pulled/downloaded, never committed) ---
+ngrams/
+*.onnx
+*.gguf
+*.safetensors
+*.bin
+models/
+adapters/
+
+# --- Go (bridge/, opencode LSP shim) ---
+*.exe
+*.test
+*.out
+bridge/bridge
+/bin/
+vendor/
+
+# --- Python (gector/, learning loop) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.jsonl
+
+# --- Node / TypeScript (vencord plugin, browser extension fork) ---
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.pnpm-store/
+npm-debug.log*
+yarn-error.log*
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- Editor / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
