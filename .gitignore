@@ -38,6 +38,11 @@ bridge/bridge
 /bin/
 vendor/
 
+# --- bridge native libs + models (large/derived — fetched in CI/Docker) ---
+bridge/native/*.so
+bridge/native/*.a
+bridge/models/
+
 # --- Python (gector/, learning loop) ---
 __pycache__/
 *.py[cod]
