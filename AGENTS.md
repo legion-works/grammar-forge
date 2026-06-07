@@ -139,14 +139,14 @@ root `Taskfile.yml` fans out via `includes:`.
 | Protobuf | `buf` v2: `lint` + `breaking --against` + `generate` | source of the Go gRPC bindings; don't hand-edit generated code |
 | Docker/YAML/CI | `hadolint` · `yamllint` · `dclint` · `actionlint` | actionlint catches GH Actions script-injection |
 | Shell | `shellcheck` | already invoked by hadolint + actionlint |
-| Git hooks | `pre-commit` framework | fast subset only |
+| Git hooks | `lefthook` (Go binary) | fast subset; invokes tools directly (no hook catalog) |
 | Secrets (public!) | `gitleaks` (pre-commit + PR gate) + TruffleHog `--only-verified` (weekly) + GitHub push protection | |
 | Deps/vuln | `osv-scanner` (PR diff + weekly) + `govulncheck` | |
 | Commits/release | Conventional Commits + `release-please` | auto changelog/version |
 | Style | `.editorconfig` (tabs for Go; 2-sp YAML/JSON; 4-sp Python/TS) | |
 
-- **pre-commit (fast, local):** hooks + gitleaks + yamllint + hadolint + buf lint +
-  golangci-lint + ruff-format→ruff-check + oxlint; commitlint on `commit-msg`.
+- **lefthook (fast, local):** gitleaks + golangci-lint + yamllint + hadolint + buf lint +
+  ruff-format→ruff-check + oxlint; commitlint on `commit-msg`.
 - **CI-only (slow):** `tsc --noEmit`, vitest, `go test`, govulncheck, `buf breaking`,
   osv-scanner, trufflehog. Shape: `dorny/paths-filter` → per-service matrix → synthetic
   `ci-complete` required check; gitleaks always runs (even docs-only PRs).
