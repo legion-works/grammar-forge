@@ -20,7 +20,7 @@ func TestSuggestionToMatch(t *testing.T) {
 	require.Equal(t, "have", m.GetSuggestedReplacements()[0].GetReplacement())
 }
 
-func TestSuggestionsToMatchListSkipsZeroWidthDeletes(t *testing.T) {
+func TestSuggestionsToMatchListKeepsDeletes(t *testing.T) {
 	// deletion (empty replacement) still maps; pure cosmetic check it doesn't panic
 	ml := suggestionsToMatchList([]correction.Suggestion{
 		{Span: correction.Span{Start: 0, End: 3}, Replacement: "", Model: correction.ModelHarper},
