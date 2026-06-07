@@ -2,7 +2,10 @@
 // (e.g. LLMAPIKey) come only from env — never hardcoded, never logged.
 package config
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 // Config holds all bridge runtime settings.
 type Config struct {
@@ -14,6 +17,13 @@ type Config struct {
 	LLMAPIKey  string
 	DBPath     string
 	LogLevel   string
+
+	// Fast path (Plan 1C): Harper + GECToR run in-process; the LLM is
+	// escalation-only (see correction.EscalationPolicy).
+	GECToRModelDir         string
+	HarperEnabled          bool
+	EscalateMinConfidence  float64 // escalate to LLM if best GECToR confidence < this
+	EscalateMaxSentenceLen int     // escalate if input longer than this (chars)
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -27,6 +37,28 @@ func Load(getenv Getenv) Config {
 		}
 		return def
 	}
+	getBool := func(k string, def bool) bool {
+		if v, ok := getenv(k); ok {
+			return v == "1" || v == "true" || v == "TRUE"
+		}
+		return def
+	}
+	getFloat := func(k string, def float64) float64 {
+		if v, ok := getenv(k); ok {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				return f
+			}
+		}
+		return def
+	}
+	getInt := func(k string, def int) int {
+		if v, ok := getenv(k); ok {
+			if n, err := strconv.Atoi(v); err == nil {
+				return n
+			}
+		}
+		return def
+	}
 	return Config{
 		RESTAddr:   get("GF_REST_ADDR", ":8000"),
 		GRPCAddr:   get("GF_GRPC_ADDR", ":8082"),
@@ -36,6 +68,11 @@ func Load(getenv Getenv) Config {
 		LLMAPIKey:  get("GF_LLM_API_KEY", ""),
 		DBPath:     get("GF_DB_PATH", "/data/corrections.db"),
 		LogLevel:   get("GF_LOG_LEVEL", "info"),
+
+		GECToRModelDir:         get("GF_GECTOR_MODEL_DIR", "/models/gector"),
+		HarperEnabled:          getBool("GF_HARPER_ENABLED", true),
+		EscalateMinConfidence:  getFloat("GF_ESCALATE_MIN_CONFIDENCE", 0.7),
+		EscalateMaxSentenceLen: getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
 	}
 }
 

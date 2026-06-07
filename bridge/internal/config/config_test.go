@@ -35,3 +35,16 @@ func TestLoadLLMFormatDefault(t *testing.T) {
 		t.Errorf("LLMFormat = %q, want grmr_native", c.LLMFormat)
 	}
 }
+
+func TestFastPathDefaults(t *testing.T) {
+	c := Load(func(string) (string, bool) { return "", false })
+	if c.GECToRModelDir != "/models/gector" {
+		t.Errorf("GECToRModelDir = %q", c.GECToRModelDir)
+	}
+	if !c.HarperEnabled {
+		t.Error("HarperEnabled should default true")
+	}
+	if c.EscalateMinConfidence <= 0 || c.EscalateMaxSentenceLen <= 0 {
+		t.Error("escalation thresholds should have positive defaults")
+	}
+}
