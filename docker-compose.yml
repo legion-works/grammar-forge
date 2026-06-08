@@ -63,6 +63,11 @@ services:
       - "-c"
       - "2048"
       - "--no-webui"
+      # Idle VRAM offload: unload model+KV after 5min idle, reload on next request
+      # (~1-3s cold reload). Frees the ~3.3 GiB when idle (llama.cpp PR #18228;
+      # default -1 = disabled). Remove if you prefer the model always resident.
+      - "--sleep-idle-seconds"
+      - "300"
     restart: unless-stopped
     # internal only — clients hit the bridge, not llama-server
     deploy:
