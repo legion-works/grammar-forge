@@ -27,7 +27,7 @@ authoritative, but **still v0.1 draft**; confirm details before treating them as
 
 Clients → **LanguageTool (Java)** → gRPC → **Bridge (Go, the core)**. The bridge runs the
 **fast path IN-PROCESS** — Harper (Rust, ~10ms, CGo) → GECToR (ONNX via `hugot`) — and
-escalates to the **slow-path LLM** (default **vLLM**, OpenAI-compatible). A separate offline
+escalates to the **slow-path LLM** (default **llama.cpp**, OpenAI-compatible). A separate offline
 **Python learning loop** fine-tunes a LoRA adapter from logged corrections.
 
 > **No model sidecar.** GECToR + Harper run inside the bridge (changed from the original
@@ -58,15 +58,17 @@ The **Bridge runs two listeners**, which is easy to miss:
 
 - **Privacy is invariant #1.** The app must never phone home: no telemetry, analytics, or
   cloud calls of *our own* on any correction path. The **only** outbound traffic is to the
-  user-configured LLM endpoint, and its default MUST be local (vLLM in-compose) so text stays
-  on-prem out of the box. Pointing the LLM at a remote endpoint is the user's explicit
+  user-configured LLM endpoint, and its default MUST be local (llama.cpp in-compose) so text
+  stays on-prem out of the box. Pointing the LLM at a remote endpoint is the user's explicit
   opt-in — never the default, never forced.
 - **Bring-your-own LLM.** The slow path speaks the OpenAI-compatible chat-completions API
   (`{base_url}/v1/chat/completions`), configured by `base_url` / `model` / optional `api_key`.
   Do **not** hardwire a backend-specific client or hardcode model/URL — any OpenAI-compatible
-  backend (vLLM default; Ollama, llama.cpp, LM Studio, remote) must work via config alone.
-  Default model `qingy2024/GRMR-V3-Q4B`. **Idle offload** when dormant (vLLM sleep /
-  Ollama `keep_alive`) is expected behaviour, not a bug.
+  backend (llama.cpp default; vLLM, Ollama, LM Studio, remote) must work via config alone.
+  Default model `gemma-4-E4B-it-qat-Q4_K_XL` served by llama.cpp. **Idle behaviour** is
+  backend-specific: llama.cpp keeps one small model resident (the `llama-server` router can
+  swap models on demand); vLLM exposes `/sleep`+`/wake_up`; Ollama uses `keep_alive`. All
+  are expected behaviour, not a bug.
 - **Scope is deliberately narrow:** English-only, single-user, self-hosted. Do not add
   i18n, auth, or multi-user / cloud-sync machinery.
 - **The bridge is NOT CGo-free.** `hugot` (ONNX) and Harper both need CGo + bundled native
@@ -93,8 +95,8 @@ The **Bridge runs two listeners**, which is easy to miss:
   the upstream LT browser add-on is closed-source/outdated and cannot be patched (fork
   `codextde/textchecker` for the custom UI instead).
 - **Phase order matters.** Phase-1 personalisation is a prompt-level accept/reject cache,
-  **not training**. We picked vLLM + log `base_model`/`adapter` now to *architect* for the
-  Phase-3 QLoRA loop, but don't build it before ~500 accepted corrections.
+  **not training**. We log `base_model`/`adapter` now to *architect* for the Phase-3 QLoRA
+  loop, but don't build it before ~500 accepted corrections.
 
 ## Ports (host→container differ — don't guess)
 
@@ -103,28 +105,44 @@ The **Bridge runs two listeners**, which is easy to miss:
 | LanguageTool | 8081 | 8010 | `/v2/check` |
 | Bridge gRPC | 8082 | 8082 | RemoteRule (consumed by LT) |
 | Bridge REST | 8000 | 8000 | `/correct`, `/rephrase`, `/signal`, ... |
-| LLM backend | — | 8000 (vLLM) / 11434 (Ollama) | internal only — clients hit the bridge, not the LLM |
+| LLM backend | — | 8000 (llama.cpp / vLLM) / 11434 (Ollama) | internal only — clients hit the bridge, not the LLM |
 
 GECToR + Harper have **no port** — they run inside the bridge process.
 
 ## Models (exact IDs — agents tend to guess these wrong)
 
-- LLM slow path (default): `qingy2024/GRMR-V3-Q4B` — **Qwen3-4B BF16** ("Q4" = the 4B size
-  class, NOT 4-bit). Served via **vLLM at FP8** (`--quantization fp8 --kv-cache-dtype fp8`):
-  spike-measured 4.19 GiB weights, quality == BF16, ~230 ms p50, LoRA hot-swap works on
-  Blackwell. **INT4 = memory-constrained-only fallback** (spike found semantic flips +
-  hallucinations — don't default to it). CPU fallback `GRMR-V3-Q1.7B`; generic BYO `Qwen3-4B/1.7B`.
+- LLM slow path (default): `gemma-4-E4B-it-qat-Q4_K_XL` — **Gemma 4 E4B QAT GGUF**, served
+  by **llama.cpp** (`llama-server`, OpenAI-compatible, image `ghcr.io/ggml-org/llama.cpp:server-cuda`).
+  Spike-measured (text-only): **ERRANT F0.5 0.906, 89.7% exact, 0 clean-FP at ~3.29 GiB
+  resident** — best quality + lowest VRAM of every backend tested; beats the old
+  GRMR-V3-vLLM-FP8 default on both axes. On-disk filename is
+  `gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` (note the `UD-` infix in the filename; the
+  `--alias` and `GF_LLM_MODEL` drop it). Source repo: `unsloth/gemma-4-E4B-it-qat-GGUF`.
+  Place at `models/llm/` (gitignored via `*.gguf`).
+- **GRMR-V3 + vLLM (documented BYO alternate):** `qingy2024/GRMR-V3-Q4B` (Qwen3-4B BF16, "Q4"
+  = the 4B size class, NOT 4-bit), served by **vLLM at FP8**
+  (`--quantization fp8 --kv-cache-dtype fp8`): spike-measured 4.19 GiB weights, quality
+  byte-identical to BF16, ~230 ms p50. **Only bring vLLM back when you need per-request
+  LoRA hot-swap** (`VLLM_ALLOW_RUNTIME_LORA_UPDATING=True` + `POST /v1/load_lora_adapter`,
+  atomic `load_inplace`) — required to architect for Phase-3 personalisation. INT4 remains
+  a memory-constrained-only fallback (spike found semantic flips + hallucinations on the
+  4B model). CPU fallback `GRMR-V3-Q1.7B`; generic BYO `Qwen3-4B/1.7B`.
 - **GRMR-V3 takes NO system prompt** — use its native completion format
   (`<|text_start|>…<|corrected_start|>`, `/v1/completions`). The bridge prompt builder must
-  **branch on model family** (GRMR-native vs generic-instruct chat+system). See SPEC §5.4.
+  **branch on model family** (GRMR-native vs generic-instruct chat+system). The new default
+  (Gemma QAT chat template) needs `chat_template_kwargs:{enable_thinking:false}` for any
+  reasoning-capable chat model (the bridge sends it) or the model emits chain-of-thought
+  and returns empty content. See SPEC §5.4.
 - GECToR fast path: `gotutiyan/gector-deberta-large-5k` — **ship INT8** (~28 ms CPU, 397 MB;
   FP32 ~95 ms misses budget) via `hugot`. Needs a **custom ONNX export** (not `optimum-cli`;
   DeBERTa-v1, custom heads) + bundled `verb-form-vocab.txt` + 2–3 decode passes. Build `-tags ORT`.
 - Harper pre-filter: `harper-core` via `hippietrail/harper-c` CGo (`libharper_c.so` ~16 MB,
   ~4 ms warm; cache one `LintGroup` per process).
-- **vLLM idle offload:** sleep mode works but has no auto-timer — **the bridge owns the idle
-  `/sleep`+`/wake_up` timer**. `--gpu-memory-utilization` is a fraction of TOTAL VRAM (KV fills
-  it) → keep low (0.20) on a shared GPU.
+- **LLM idle behaviour (backend-specific):** the default llama.cpp keeps one ~3.3 GiB model
+  resident (no idle timer needed); optional model-swap uses llama-server's router
+  (`--models-preset` / `--models-max`). If you bring vLLM back as a BYO, its `/sleep`
+  (level 2) + `/wake_up` mode frees ~88% VRAM (requires `--enable-sleep-mode`) — the
+  bridge does not own an idle timer. Ollama uses `keep_alive` auto-unload.
 
 ## Toolchain (greenfield — use these when scaffolding)
 
@@ -185,6 +203,6 @@ before the repo goes public). Currently there are **no commits** — keep the sl
 
 ## Open decisions (SPEC §12 — not settled)
 
-Hot-path latency on target hardware (measure) · GRMR-V3 quality vs GECToR (local eval) ·
+Hot-path latency on target hardware (measure) · Gemma QAT quality vs GECToR (local eval) ·
 single GECToR vs 3-model ensemble · CPU slow-path quality (GPU recommended?) · Vencord
 composer/paste hook reliability · LoRA retrain trigger (time- vs data-based).
