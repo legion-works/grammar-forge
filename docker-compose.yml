@@ -25,14 +25,11 @@ services:
       - "127.0.0.1:8082:8082"  # gRPC (LanguageTool RemoteRule)
     restart: unless-stopped
 
-  # Custom LanguageTool image = erikvl87/languagetool:6.7 + the PremiumOn classpath
-  # shim (config/premium/) that unlocks /v2/check premium signalling on the OSS build.
+  # NOTE: /v2/check premium signalling (software.premium / per-rule isPremium) is
+  # NOT achievable on the OSS LanguageTool build — see config/premium/README.md.
+  # Bridge-native clients gate premium on the bridge's REST GET /health instead.
   languagetool:
-    image: grammarforge-languagetool:dev
-    build:
-      context: ./config/premium
-      args:
-        LT_IMAGE: erikvl87/languagetool:6.7
+    image: erikvl87/languagetool:6.7
     depends_on: [bridge]
     volumes:
       - ./config/server.properties:/server.properties:ro
