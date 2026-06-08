@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react", "react-perf", "import", "unicorn"],
+  "env": {
+    "browser": true,
+    "es2024": true
+  },
+  "globals": {
+    "browser": "readonly",
+    "chrome": "readonly",
+    "defineBackground": "readonly",
+    "defineContentScript": "readonly",
+    "defineConfig": "readonly",
+    "storage": "readonly"
+  },
+  "rules": {
+    "no-console": "warn",
+    "no-debugger": "error"
+  },
+  "overrides": [
+    {
+      "files": ["src/entrypoints/content/**", "src/overlay/**", "src/input/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "react",
+                "message": "No React in the content script (MV3 startup budget). React is popup/options only."
+              },
+              {
+                "name": "react-dom",
+                "message": "No React in the content script (MV3 startup budget). React is popup/options only."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "plugins": ["vitest"],
+      "env": { "browser": true }
+    }
+  ]
+}

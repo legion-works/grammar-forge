@@ -1,0 +1,16 @@
+# pnpm 10.16+ reads project settings from here, not the package.json "pnpm" field.
+#
+# Don't fail the install when an optional dependency's build script is skipped.
+# esbuild ships a prebuilt platform binary (@esbuild/<platform>) and Vite 8
+# bundles without running esbuild's postinstall, so skipping it is safe;
+# spawn-sync's native compile is an optional fallback. This keeps `pnpm install`
+# (and WXT's internal deps-status check during `wxt build`) green without
+# weakening anything the build actually needs.
+strictDepBuilds: false
+onlyBuiltDependencies:
+  - esbuild
+ignoredBuiltDependencies:
+  - spawn-sync
+allowBuilds:
+  esbuild: set this to true or false
+  spawn-sync: set this to true or false
