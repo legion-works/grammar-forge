@@ -3,6 +3,7 @@
 package prompt
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/grammarforge/bridge/internal/correction"
@@ -120,11 +121,18 @@ func (b *Builder) Build(req correction.Request) correction.Prompt {
 func (b *Builder) BuildRephrase(req correction.RephraseRequest) correction.Prompt {
 	if b.chat {
 		sys := rephraseSystemPrompt
+		// Tone/Style are untrusted client text from the /rephrase request
+		// JSON. Render each through strconv.Quote (Go-escaped quoted
+		// string literal) so an embedded quote, newline, or control char
+		// cannot break out of the connective text and inject a new
+		// instruction into the system prompt. This is the same defence as
+		// the P4 fix in internal/personalization/cache.go for the
+		// user-signal few-shot block.
 		if t := strings.TrimSpace(req.Tone); t != "" {
-			sys += " Rewrite in a " + t + " tone."
+			sys += " Rewrite in a " + strconv.Quote(t) + " tone."
 		}
 		if s := strings.TrimSpace(req.Style); s != "" {
-			sys += " Use a " + s + " style."
+			sys += " Use a " + strconv.Quote(s) + " style."
 		}
 		return correction.Prompt{
 			System:   sys,
