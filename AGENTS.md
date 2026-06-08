@@ -92,9 +92,10 @@ The **Bridge runs two listeners**, which is easy to miss:
 - **External API contracts — don't reshape casually:** `/v2/check` must stay
   LanguageTool-compatible (drop-in for existing clients); `/correct` is GrammarLLM-compatible
   JSON. On OSS LanguageTool, `software.premium` and per-match `isPremium` are dropped unless an
-  `org.languagetool.PremiumOn` class is on the LT classpath (we ship that shim under
-  `config/premium/`); the bridge's gRPC `Rule.isPremium` is ignored by OSS `GRPCRule` and is
-  kept only for future / premium LT builds. For bridge-native clients the source of truth is
+  `org.languagetool.PremiumOn` class is on the LT classpath — a classpath shim we found
+  non-functional on the OSS build and removed (not viable without a premium LT). The
+  bridge's gRPC `Rule.isPremium` is ignored by OSS `GRPCRule` and is kept only for future /
+  premium LT builds. For bridge-native clients the source of truth is
   the bridge's own REST `GET /health`, which advertises `premium: true`. The upstream LT
   browser add-on is closed-source/outdated and cannot be patched (fork `codextde/textchecker`
   for the custom UI instead).

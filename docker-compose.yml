@@ -26,8 +26,8 @@ services:
     restart: unless-stopped
 
   # NOTE: /v2/check premium signalling (software.premium / per-rule isPremium) is
-  # NOT achievable on the OSS LanguageTool build — see config/premium/README.md.
-  # Bridge-native clients gate premium on the bridge's REST GET /health instead.
+  # NOT achievable on the OSS LanguageTool build. Bridge-native clients gate
+  # premium on the bridge's REST GET /health instead.
   languagetool:
     image: erikvl87/languagetool:6.7
     depends_on: [bridge]
