@@ -50,6 +50,11 @@ func suggestionToMatch(sentence string, s correction.Suggestion) *pb.Match {
 		// the add-on/UI label sensible.
 		RuleDescription:  description,
 		MatchDescription: description,
+		// Rule.IsPremium: every bridge-emitted match is a GrammarForge premium
+		// feature, so the Rule object carries IsPremium=true. This is what LT's
+		// /v2/check JSON surfaces to clients (the upstream LT browser add-on is
+		// closed-source and gates on the premium flag).
+		Rule: &pb.Rule{IsPremium: true},
 	}
 }
 

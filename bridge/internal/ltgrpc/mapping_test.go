@@ -107,3 +107,22 @@ func TestSuggestionToMatch_InsertionRespectsUTF8Boundary(t *testing.T) {
 	repl := m.GetSuggestedReplacements()[0].GetReplacement()
 	require.Equal(t, "cafés", sentence[:off]+repl+sentence[off+length:])
 }
+
+// Every bridge-emitted LT match must carry premium=true so it surfaces
+// through LanguageTool's /v2/check JSON (the upstream LT browser add-on is
+// closed-source and gates on the premium flag). The Rule field on Match is
+// the proto3 carrier; populated on every model.
+func TestSuggestionToMatchIsPremium(t *testing.T) {
+	for _, model := range []correction.Model{
+		correction.ModelLLM, correction.ModelGECToR, correction.ModelHarper, correction.ModelLTRule,
+	} {
+		s := correction.Suggestion{
+			Span: correction.Span{Start: 0, End: 1}, Replacement: "x",
+			Model: model,
+		}
+		m := suggestionToMatch("x text", s)
+		require.NotNil(t, m.GetRule(), "Match.Rule must be set so LT can read IsPremium (model %q)", model)
+		require.True(t, m.GetRule().GetIsPremium(),
+			"Match.Rule.IsPremium must be true so the match surfaces in /v2/check (model %q)", model)
+	}
+}
