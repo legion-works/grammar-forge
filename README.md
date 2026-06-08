@@ -32,9 +32,15 @@ Requires Docker, an NVIDIA GPU host (for the default llama.cpp backend), and
 Before `docker compose up`, place the slow-path GGUF at
 `models/llm/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` (the path is gitignored via
 `*.gguf`; download from `unsloth/gemma-4-E4B-it-qat-GGUF` on Hugging Face —
-the bridge uses the alias `gemma-4-E4B-it-qat-Q4_K_XL`).
+the bridge uses the alias `gemma-4-E4B-it-qat-Q4_K_XL`). The
+`scripts/fetch-models.sh` helper automates this and the rest of the asset
+provisioning (see step 0 below).
 
 ```bash
+# 0. Provision model assets (slow-path GGUF, native libs, GECToR support files).
+#    Fetches what it can and prints the one manual step (GECToR ONNX export):
+./scripts/fetch-models.sh
+
 # 1. Local env (edit if you want a non-default LLM endpoint)
 cp .env.example .env
 
