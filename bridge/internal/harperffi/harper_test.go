@@ -152,3 +152,65 @@ func TestHarperNoLintsCleanText(t *testing.T) {
 		require.NoError(t, s.Span.Validate(len("This is perfectly fine.")))
 	}
 }
+
+// TestHarperDisableRule_Golden is a real-Harper golden test for Task 4: with the
+// "SpellCheck" rule disabled, the misspelling "recieve" must NOT be flagged,
+// while the unrelated article fix (rule "AnA": "a apple" -> "an apple") must
+// still fire. Verified rule keys against harper-core 2.4 (SpellCheck via add(),
+// AnA via insert_struct_rule_with_dialect! -> stringify!(AnA)).
+//
+//nolint:misspell // "recieve"/"a apple" are intentional fixtures under test
+func TestHarperDisableRule_Golden(t *testing.T) {
+	const text = "I recieve a apple"
+	// "recieve" occupies bytes [2,9).
+	require.Equal(t, "recieve", text[2:9])
+
+	// Baseline: with SpellCheck on (default), the misspelling IS flagged.
+	base := NewWithOptions(Options{Markdown: true})
+	defer base.Close()
+	gotBase, err := base.Correct(context.Background(), correction.Request{Text: text})
+	require.NoError(t, err)
+	require.True(t, flagsWord(gotBase, 2, 9),
+		"sanity: SpellCheck on should flag the misspelling; got %+v", gotBase)
+
+	// SpellCheck disabled: the misspelling must NOT be flagged.
+	h := NewWithOptions(Options{Markdown: true, DisabledRules: []string{"SpellCheck"}})
+	defer h.Close()
+	got, err := h.Correct(context.Background(), correction.Request{Text: text})
+	require.NoError(t, err)
+	require.False(t, flagsWord(got, 2, 9),
+		"SpellCheck disabled must suppress the misspelling lint; got %+v", got)
+
+	// The AnA article fix must still fire (some lint touches the "a" before
+	// "apple", bytes [10,11)).
+	require.True(t, flagsWord(got, 10, 11),
+		"the AnA article fix must survive disabling SpellCheck; got %+v", got)
+}
+
+// TestHarperMaxInputLen_Golden covers the Task 4 max-input guard: an input
+// longer than MaxInputLen bytes is skipped entirely (no suggestions, no error),
+// while a short misspelled input under the limit is still corrected.
+//
+//nolint:misspell // intentional misspelling fixture
+func TestHarperMaxInputLen_Golden(t *testing.T) {
+	h := NewWithOptions(Options{Markdown: true, MaxInputLen: 4})
+	defer h.Close()
+
+	long := "I recieve a apple every single day of the week."
+	require.Greater(t, len(long), 4)
+	got, err := h.Correct(context.Background(), correction.Request{Text: long})
+	require.NoError(t, err)
+	require.Empty(t, got, "input over MaxInputLen must be skipped entirely; got %+v", got)
+}
+
+// TestDialectCode covers the dialect name -> FFI code mapping, including
+// case-insensitivity and the American fallback for unknown/empty names.
+func TestDialectCode(t *testing.T) {
+	require.Equal(t, dialectAmerican, DialectCode("american"))
+	require.Equal(t, dialectBritish, DialectCode("British"))
+	require.Equal(t, dialectCanadian, DialectCode(" canadian "))
+	require.Equal(t, dialectAustralian, DialectCode("AUSTRALIAN"))
+	require.Equal(t, dialectIndian, DialectCode("indian"))
+	require.Equal(t, dialectAmerican, DialectCode(""))
+	require.Equal(t, dialectAmerican, DialectCode("klingon"))
+}

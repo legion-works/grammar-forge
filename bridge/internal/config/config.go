@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,8 +28,21 @@ type Config struct {
 	// blocks, math, and HTML are masked unlintable (default true). Set
 	// GF_HARPER_MARKDOWN=false for plain-English parsing. HarperIgnoreLinkTitle
 	// additionally masks Markdown link titles (default false).
-	HarperMarkdown         bool
-	HarperIgnoreLinkTitle  bool
+	HarperMarkdown        bool
+	HarperIgnoreLinkTitle bool
+	// HarperDialect selects the curated-rule dialect:
+	// american|british|canadian|australian|indian (default american). Unknown
+	// values fall back to american.
+	HarperDialect string
+	// HarperDisabledRules / HarperEnabledRules force individual curated rules
+	// off / on by their rule key (the linter struct name, e.g. "LongSentences",
+	// "SpellCheck"), as comma-separated lists. Empty = no override (curated
+	// defaults). Disabled is applied first, then Enabled.
+	HarperDisabledRules []string
+	HarperEnabledRules  []string
+	// HarperMaxInputLen skips Harper entirely for inputs longer than this many
+	// bytes (0 = no limit) to bound worst-case latency on pathological input.
+	HarperMaxInputLen      int
 	EscalateMinConfidence  float64 // escalate to LLM if best GECToR confidence < this
 	EscalateMaxSentenceLen int     // escalate if input longer than this (chars)
 	EscalateMinWords       int     // escalate empty-fast-path input with >= this many words
@@ -85,6 +99,19 @@ func Load(getenv Getenv) Config {
 		}
 		return def
 	}
+	getCSV := func(k string) []string {
+		v, ok := getenv(k)
+		if !ok || v == "" {
+			return nil
+		}
+		var out []string
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
 	getDuration := func(k string, def time.Duration) time.Duration {
 		if v, ok := getenv(k); ok && v != "" {
 			if d, err := time.ParseDuration(v); err == nil {
@@ -107,6 +134,10 @@ func Load(getenv Getenv) Config {
 		HarperEnabled:          getBool("GF_HARPER_ENABLED", true),
 		HarperMarkdown:         getBool("GF_HARPER_MARKDOWN", true),
 		HarperIgnoreLinkTitle:  getBool("GF_HARPER_IGNORE_LINK_TITLE", false),
+		HarperDialect:          get("GF_HARPER_DIALECT", "american"),
+		HarperDisabledRules:    getCSV("GF_HARPER_DISABLED_RULES"),
+		HarperEnabledRules:     getCSV("GF_HARPER_ENABLED_RULES"),
+		HarperMaxInputLen:      getInt("GF_HARPER_MAX_INPUT_LEN", 0),
 		EscalateMinConfidence:  getFloat("GF_ESCALATE_MIN_CONFIDENCE", 0.7),
 		EscalateMaxSentenceLen: getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
 		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),

@@ -67,6 +67,12 @@ LintGroup* harper_create_lint_group_with_dialect(int32_t dialect);
 // Returns NULL on error
 LintGroup* harper_create_lint_group(void);
 
+// Enable (enabled != 0) or disable a single curated rule by its key (the linter
+// struct name, e.g. "SpellCheck", "LongSentences", "AnA"). Returns 0 on success,
+// -1 on error (NULL group/key or invalid UTF-8). Unknown keys are accepted
+// (stored as an override in FlatConfig that never matches a registered rule).
+int32_t harper_lint_group_set_rule_enabled(LintGroup* lint_group, const char* key, int32_t enabled);
+
 // Free a lint group created by harper_create_lint_group[_with_dialect]
 void harper_free_lint_group(LintGroup* lint_group);
 

@@ -23,8 +23,17 @@ func buildFastPath(cfg config.Config) ([]correction.Corrector, func()) {
 		fast = append(fast, harperffi.NewWithOptions(harperffi.Options{
 			Markdown:        cfg.HarperMarkdown,
 			IgnoreLinkTitle: cfg.HarperIgnoreLinkTitle,
+			Dialect:         harperffi.DialectCode(cfg.HarperDialect),
+			DisabledRules:   cfg.HarperDisabledRules,
+			EnabledRules:    cfg.HarperEnabledRules,
+			MaxInputLen:     cfg.HarperMaxInputLen,
 		}))
-		slog.Info("fast path: harper enabled", "markdown", cfg.HarperMarkdown)
+		slog.Info("fast path: harper enabled",
+			"markdown", cfg.HarperMarkdown,
+			"dialect", cfg.HarperDialect,
+			"disabled_rules", len(cfg.HarperDisabledRules),
+			"enabled_rules", len(cfg.HarperEnabledRules),
+			"max_input_len", cfg.HarperMaxInputLen)
 	}
 
 	if g, err := gector.New(cfg.GECToRModelDir); err != nil {

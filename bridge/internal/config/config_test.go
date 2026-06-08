@@ -118,3 +118,36 @@ func TestLoad_PersonalizationTTLInvalidFallsBackToDefault(t *testing.T) {
 	require.Equal(t, 5*time.Minute, cfg.PersonalizationTTL,
 		"invalid TTL strings must fall back to the default, not zero or panic")
 }
+
+func TestLoad_HarperRuleConfigDefaults(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, "american", cfg.HarperDialect)
+	require.Nil(t, cfg.HarperDisabledRules)
+	require.Nil(t, cfg.HarperEnabledRules)
+	require.Equal(t, 0, cfg.HarperMaxInputLen)
+}
+
+func TestLoad_HarperRuleConfigOverrides(t *testing.T) {
+	env := map[string]string{
+		"GF_HARPER_DIALECT":        "british",
+		"GF_HARPER_DISABLED_RULES": "A, B ,,C",
+		"GF_HARPER_ENABLED_RULES":  " SpellCheck ",
+		"GF_HARPER_MAX_INPUT_LEN":  "2048",
+	}
+	cfg := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	require.Equal(t, "british", cfg.HarperDialect)
+	require.Equal(t, []string{"A", "B", "C"}, cfg.HarperDisabledRules,
+		"getCSV must split on comma, trim, and drop empties")
+	require.Equal(t, []string{"SpellCheck"}, cfg.HarperEnabledRules)
+	require.Equal(t, 2048, cfg.HarperMaxInputLen)
+}
+
+func TestLoad_HarperDisabledRulesEmptyStringIsNil(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_HARPER_DISABLED_RULES" {
+			return "", true // present but empty -> nil, not []string{""}
+		}
+		return "", false
+	})
+	require.Nil(t, cfg.HarperDisabledRules)
+}

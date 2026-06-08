@@ -19,6 +19,7 @@ import "C"
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -35,6 +36,34 @@ const (
 	suggestionRemove      = 2 // delete the lint range (no payload)
 )
 
+// Harper dialect codes. These mirror the HARPER_DIALECT_* macros in harper.h
+// (a stable ABI defined by the harper-c fork, NOT harper-core's internal
+// bit-flag discriminants).
+const (
+	dialectAmerican   = 0
+	dialectBritish    = 1
+	dialectCanadian   = 2
+	dialectAustralian = 3
+	dialectIndian     = 4
+)
+
+// DialectCode maps a dialect name (case-insensitive, surrounding space trimmed)
+// to its FFI code; unknown or empty names fall back to American.
+func DialectCode(name string) int {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "british":
+		return dialectBritish
+	case "canadian":
+		return dialectCanadian
+	case "australian":
+		return dialectAustralian
+	case "indian":
+		return dialectIndian
+	default:
+		return dialectAmerican
+	}
+}
+
 // Options configures the Harper corrector.
 type Options struct {
 	// Markdown parses input as Markdown so code spans, fenced code blocks, math,
@@ -44,6 +73,17 @@ type Options struct {
 	// IgnoreLinkTitle additionally masks Markdown link titles (only meaningful
 	// when Markdown is true).
 	IgnoreLinkTitle bool
+	// Dialect is an FFI dialect code (see DialectCode / the dialect* consts);
+	// the zero value is American.
+	Dialect int
+	// DisabledRules / EnabledRules are curated-rule keys (linter struct names,
+	// e.g. "LongSentences", "SpellCheck") to force off / on at construction.
+	// Disabled is applied first, then Enabled.
+	DisabledRules []string
+	EnabledRules  []string
+	// MaxInputLen skips correction for inputs longer than this many bytes
+	// (0 = no limit), bounding worst-case latency on pathological input.
+	MaxInputLen int
 }
 
 // Harper is a process-wide Corrector. Construct once via New/NewWithOptions;
@@ -58,9 +98,29 @@ type Harper struct {
 // cached LintGroup (parses the curated dictionary, ~260ms once).
 func New() *Harper { return NewWithOptions(Options{Markdown: true}) }
 
-// NewWithOptions builds a Harper with the given options.
+// NewWithOptions builds a Harper with the given options. The cached LintGroup is
+// built for opts.Dialect, then per-rule overrides are applied (disabled first,
+// then enabled).
 func NewWithOptions(opts Options) *Harper {
-	return &Harper{grp: C.harper_create_lint_group(), opts: opts}
+	grp := C.harper_create_lint_group_with_dialect(C.int32_t(opts.Dialect))
+	applyRuleOverrides(grp, opts.DisabledRules, false)
+	applyRuleOverrides(grp, opts.EnabledRules, true)
+	return &Harper{grp: grp, opts: opts}
+}
+
+// applyRuleOverrides toggles each curated rule key on the lint group. Each key
+// CString is freed immediately after the call. Unknown keys are harmless
+// (harper-core stores the override but it never matches a registered rule).
+func applyRuleOverrides(grp *C.LintGroup, keys []string, enabled bool) {
+	en := C.int32_t(0)
+	if enabled {
+		en = 1
+	}
+	for _, k := range keys {
+		ck := C.CString(k)
+		C.harper_lint_group_set_rule_enabled(grp, ck, en)
+		C.free(unsafe.Pointer(ck))
+	}
 }
 
 // Close frees the LintGroup.
@@ -90,6 +150,10 @@ func freeCString(p *C.char) {
 func (h *Harper) Correct(_ context.Context, req correction.Request) ([]correction.Suggestion, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.opts.MaxInputLen > 0 && len(req.Text) > h.opts.MaxInputLen {
+		return nil, nil // skip pathologically long inputs (configurable)
+	}
 
 	ctext := C.CString(req.Text)
 	defer C.free(unsafe.Pointer(ctext))

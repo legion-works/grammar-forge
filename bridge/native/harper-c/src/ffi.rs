@@ -178,6 +178,29 @@ pub extern "C" fn harper_create_lint_group() -> *mut LintGroup {
     harper_create_lint_group_with_dialect(0)
 }
 
+/// Enable or disable a single curated rule by its key (the linter struct name,
+/// e.g. "SpellCheck", "LongSentences", "RepeatedWords", "AnA"). enabled != 0
+/// enables. Returns 0 on success, -1 on error (NULL group/key or invalid UTF-8).
+/// Unknown keys are accepted (harper-core stores the override in FlatConfig; it
+/// simply never matches a registered rule).
+#[no_mangle]
+pub extern "C" fn harper_lint_group_set_rule_enabled(
+    lint_group: *mut LintGroup,
+    key: *const c_char,
+    enabled: c_int,
+) -> c_int {
+    if lint_group.is_null() || key.is_null() {
+        return -1;
+    }
+    let key_str = match unsafe { CStr::from_ptr(key) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    let group = unsafe { &mut *lint_group };
+    group.config.set_rule_enabled(key_str, enabled != 0);
+    0
+}
+
 /// Frees a lint group created by harper_create_lint_group.
 #[no_mangle]
 pub extern "C" fn harper_free_lint_group(lint_group: *mut LintGroup) {
