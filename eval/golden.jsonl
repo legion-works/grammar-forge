@@ -91,7 +91,7 @@
 {"id": 91, "cat": "caps", "input": "we flew to paris in france last april.", "golden": "We flew to Paris in France last April."}
 {"id": 92, "cat": "caps", "input": "my friend john speaks english and spanish.", "golden": "My friend John speaks English and Spanish."}
 {"id": 93, "cat": "punct", "input": "However we still have time.", "golden": "However, we still have time."}
-{"id": 94, "cat": "punct", "input": "Lets eat grandma before the food gets cold.", "golden": "Let's eat, grandma, before the food gets cold."}
+{"id": 94, "cat": "punct", "input": "Lets eat grandma before the food gets cold.", "golden": "Let's eat grandma before the food gets cold."}
 {"id": 95, "cat": "punct", "input": "I bought apples oranges and pears.", "golden": "I bought apples, oranges, and pears."}
 {"id": 96, "cat": "prep", "input": "She is married with a doctor and good in cooking.", "golden": "She is married to a doctor and good at cooking."}
 {"id": 97, "cat": "prep", "input": "He arrived to the airport in time for the flight.", "golden": "He arrived at the airport in time for the flight."}
