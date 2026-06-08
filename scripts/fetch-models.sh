@@ -21,8 +21,11 @@ echo "==> [1/4] Slow-path GGUF ($GGUF_FILE, ~4.2 GB)"
 if [ -f "$LLM_DIR/$GGUF_FILE" ]; then
   echo "    present, skipping (delete to re-fetch)"
 else
-  curl -fL --retry 5 -C - -o "$LLM_DIR/$GGUF_FILE" \
+  # Download to a .partial file (resumable) and move into place only on success,
+  # so an interrupted download never leaves a corrupt file that the next run skips.
+  curl -fL --retry 5 -C - -o "$LLM_DIR/$GGUF_FILE.partial" \
     "https://huggingface.co/$GGUF_REPO/resolve/main/$GGUF_FILE"
+  mv "$LLM_DIR/$GGUF_FILE.partial" "$LLM_DIR/$GGUF_FILE"
 fi
 
 echo "==> [2/4] hugot native libs ($HUGOT_VER)"
