@@ -213,8 +213,8 @@ func applyTag(token, tag string, vocab VerbVocab) ([]string, int) {
 		// $TRANSFORM_VERB_<FROM>_<TO> -> look up in the verb-form vocab.
 		// The vocab's suffix key is just "FROM_TO" (e.g. "VBN_VBD"), not
 		// the full "VERB_FROM_TO" — strip the "VERB_" prefix to get the
-		// lookup key. Non-verb transforms (CASE, AGREEMENT) fall through
-		// to the "no change" branch below.
+		// lookup key. CASE and AGREEMENT transforms are handled by their own
+		// cases above; only verb transforms reach here.
 		fromTo := strings.TrimPrefix(tag, tagPrefixT) // "VERB_VB_VBZ"
 		fromTo = strings.TrimPrefix(fromTo, "VERB_")  // "VB_VBZ"
 		if vocab != nil && fromTo != tagPrefixT {
@@ -224,8 +224,8 @@ func applyTag(token, tag string, vocab VerbVocab) ([]string, int) {
 				}
 			}
 		}
-		// CASE / AGREEMENT / unmapped verb transforms: emit the original
-		// token and count as skipped.
+		// Unmapped verb transforms (vocab miss): emit the original token and
+		// count as skipped.
 		return []string{token}, 1
 	}
 	return []string{token}, 1
