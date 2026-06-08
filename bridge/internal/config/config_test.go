@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -77,4 +78,43 @@ func TestLoad_EscalateOnFastEditCanDisable(t *testing.T) {
 		return "", false
 	})
 	require.False(t, cfg.EscalateOnFastEdit)
+}
+
+func TestLoad_PersonalizationDefaults(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.True(t, cfg.PersonalizationEnabled,
+		"PersonalizationEnabled should default true")
+	require.Equal(t, 5*time.Minute, cfg.PersonalizationTTL,
+		"PersonalizationTTL should default 5m")
+}
+
+func TestLoad_PersonalizationDisabledByEnv(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_PERSONALIZATION_ENABLED" {
+			return "false", true
+		}
+		return "", false
+	})
+	require.False(t, cfg.PersonalizationEnabled)
+}
+
+func TestLoad_PersonalizationTTLOverride(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_PERSONALIZATION_TTL" {
+			return "30s", true
+		}
+		return "", false
+	})
+	require.Equal(t, 30*time.Second, cfg.PersonalizationTTL)
+}
+
+func TestLoad_PersonalizationTTLInvalidFallsBackToDefault(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_PERSONALIZATION_TTL" {
+			return "not-a-duration", true
+		}
+		return "", false
+	})
+	require.Equal(t, 5*time.Minute, cfg.PersonalizationTTL,
+		"invalid TTL strings must fall back to the default, not zero or panic")
 }

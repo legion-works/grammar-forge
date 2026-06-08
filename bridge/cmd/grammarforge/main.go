@@ -17,6 +17,7 @@ import (
 	"github.com/grammarforge/bridge/internal/llm"
 	"github.com/grammarforge/bridge/internal/ltgrpc"
 	ltpb "github.com/grammarforge/bridge/internal/ltgrpc/pb"
+	"github.com/grammarforge/bridge/internal/personalization"
 	"github.com/grammarforge/bridge/internal/prompt"
 	"github.com/grammarforge/bridge/internal/restserver"
 	"github.com/grammarforge/bridge/internal/store"
@@ -26,13 +27,16 @@ import (
 func main() {
 	cfg := config.FromOS()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)})))
-	slog.Info("starting grammarforge bridge",
+	slog.Info(
+		"starting grammarforge bridge",
 		"rest_addr", cfg.RESTAddr,
 		"grpc_addr", cfg.GRPCAddr,
 		"llm_model", cfg.LLMModel,
 		"llm_format", cfg.LLMFormat,
 		"harper_enabled", cfg.HarperEnabled,
 		"gector_model_dir", cfg.GECToRModelDir,
+		"personalization_enabled", cfg.PersonalizationEnabled,
+		"personalization_ttl", cfg.PersonalizationTTL,
 	)
 
 	st, err := store.Open(cfg.DBPath)
@@ -45,8 +49,22 @@ func main() {
 	fast, cleanup := buildFastPath(cfg)
 	defer cleanup()
 
+	// Phase-2 P4 prompt-cache personalisation. On by default; the cache
+	// reads the accept/reject signal log with a TTL-cached snapshot, so
+	// the prompt builder never blocks on a slow store and a personalisation
+	// error never fails a correction. When disabled, the prompt builder
+	// keeps using the base system prompt byte-identical to the pre-P4
+	// behaviour.
+	var pb *prompt.Builder
+	if cfg.PersonalizationEnabled {
+		cache := personalization.NewCache(st, cfg.PersonalizationTTL)
+		pb = prompt.NewWithPersonalizer(cfg.LLMFormat, cache)
+	} else {
+		pb = prompt.New(cfg.LLMFormat)
+	}
+
 	svc := correction.NewService(
-		prompt.New(cfg.LLMFormat),
+		pb,
 		fast,
 		llm.New(llm.Config{BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey}),
 		st,

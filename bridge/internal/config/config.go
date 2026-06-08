@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"time"
 )
 
 // Config holds all bridge runtime settings.
@@ -33,6 +34,16 @@ type Config struct {
 	// GF_ESCALATE_ON_FAST_EDIT=false to restore the historical confidence-floor
 	// behaviour.
 	EscalateOnFastEdit bool
+
+	// Phase-2 P4 prompt-cache personalisation. On by default. The cache is
+	// TTL-bounded (no background goroutine) and the snapshot is read
+	// synchronously by the prompt builder. Set GF_PERSONALIZATION_ENABLED=false
+	// to disable (the prompt builder keeps using the base system prompt
+	// byte-identical to today). The TTL bounds how often the store is
+	// queried for fresh examples; default 5m. Invalid TTL strings fall back
+	// to the default rather than zero or panicking.
+	PersonalizationEnabled bool
+	PersonalizationTTL     time.Duration
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -68,6 +79,14 @@ func Load(getenv Getenv) Config {
 		}
 		return def
 	}
+	getDuration := func(k string, def time.Duration) time.Duration {
+		if v, ok := getenv(k); ok && v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				return d
+			}
+		}
+		return def
+	}
 	return Config{
 		RESTAddr:   get("GF_REST_ADDR", ":8000"),
 		GRPCAddr:   get("GF_GRPC_ADDR", ":8082"),
@@ -84,6 +103,9 @@ func Load(getenv Getenv) Config {
 		EscalateMaxSentenceLen: getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
 		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),
 		EscalateOnFastEdit:     getBool("GF_ESCALATE_ON_FAST_EDIT", true),
+
+		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),
+		PersonalizationTTL:     getDuration("GF_PERSONALIZATION_TTL", 5*time.Minute),
 	}
 }
 
