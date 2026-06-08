@@ -480,3 +480,89 @@ func TestCorrectDefaultPickyEmitsNoCategoryAndNoExtraLLMCall(t *testing.T) {
 			"grammar suggestions on the default path must have empty category")
 	}
 }
+
+// LLM-only path with picky=true: finalize must run ONCE on the combined
+// grammar+style set, NOT first on grammar-only and then again on
+// grammar+style. The bug shape was:
+//
+//	llmOnly -> finalize(logs grammar-only applied text, tags grammar IDs)
+//	Correct -> appendStyleSuggestions (runs after finalize)
+//	         -> returns result with style suggestions, ID==0, never logged
+//
+// The contract this test locks:
+//   - The logged Event.Suggestion == text with BOTH grammar AND style edits
+//     applied (the user's acceptance of a style suggestion will replay the
+//     combined rewrite, not a grammar-only one).
+//   - Every returned suggestion (grammar and style) has the SAME non-zero
+//     logged id, so /signal can reference both kinds.
+//   - Style suggestions are present in the result with category="style".
+//   - Score is computed on the combined set (covered indirectly: Score is
+//     derived from the suggestions slice that finalize tags).
+func TestCorrectPickyLLMOnlyFinalizesCombined(t *testing.T) {
+	st := &fakeStore{}
+	// Grammar: "I has a cat" -> "I have a cat"   (one suggestion on "has"->"have")
+	// Style:   "I has a cat" -> "I has a kitty"  (one suggestion on "cat"->"kitty")
+	// Combined applied text: "I have a kitty" (apply grammar first, then style
+	// is on a non-overlapping span so the result is the AND of both).
+	llm := &scriptedLLM{
+		grammarOut: "I have a cat",
+		styleOut:   "I has a kitty",
+	}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Picky: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, llm.grammarN, "grammar LLM called once")
+	require.Equal(t, 1, llm.styleN, "style LLM called once when picky=true")
+	// 1) Logged event: combined applied text.
+	require.Equal(t, "I have a kitty", st.lastEvent.Suggestion,
+		"logged Suggestion must be the COMBINED grammar+style applied text, not grammar-only")
+	require.Equal(t, "I has a cat", st.lastEvent.Original)
+	require.Equal(t, int64(1), st.count, "finalize must run exactly once for a picky+edits result")
+	// 2) Every returned suggestion (grammar and style) carries the logged id.
+	require.NotEmpty(t, got.Suggestions)
+	nonZeroIDs := 0
+	hasStyle := false
+	for _, s := range got.Suggestions {
+		if s.ID != 0 {
+			nonZeroIDs++
+		}
+		if s.Category == CategoryStyle {
+			hasStyle = true
+		}
+	}
+	require.Equal(t, len(got.Suggestions), nonZeroIDs,
+		"every returned suggestion (grammar and style) must carry the logged id so /signal can reference style suggestions")
+	require.True(t, hasStyle, "style suggestion must be present in the result")
+}
+
+// Style-only picky case on the llmOnly path: grammar LLM returns the
+// input unchanged (no grammar diff), style LLM returns a rewrite (one
+// style suggestion). The request must still log a non-empty event and
+// tag the style suggestion with the logged id. The old (buggy) flow
+// would skip finalize entirely on the style pass, leaving the suggestion
+// with ID==0 and logging nothing.
+func TestCorrectPickyLLMOnlyStyleOnlyLogsAndTags(t *testing.T) {
+	st := &fakeStore{}
+	llm := &scriptedLLM{
+		grammarOut: "I has a cat", // unchanged from input -> 0 grammar diffs
+		styleOut:   "I has a kitty",
+	}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Picky: true})
+	require.NoError(t, err)
+	// Style suggestion must be present.
+	var styleCount int
+	for _, s := range got.Suggestions {
+		if s.Category == CategoryStyle {
+			styleCount++
+			require.NotEqual(t, int64(0), s.ID,
+				"style suggestion on the llmOnly path must be tagged with the logged id")
+		}
+	}
+	require.Equal(t, 1, styleCount, "one style suggestion expected")
+	// The store must have logged the style-only correction.
+	require.Equal(t, int64(1), st.count,
+		"style-only picky result on the llmOnly path must still be logged (finalize runs on the combined set)")
+	require.Equal(t, "I has a kitty", st.lastEvent.Suggestion,
+		"logged Suggestion must reflect the style rewrite")
+}

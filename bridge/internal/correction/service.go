@@ -52,16 +52,22 @@ func NewService(pb PromptBuilder, fast []Corrector, llm LLMClient, store Store, 
 //     per EscalationPolicy.ShouldEscalate. Low-GECToR-confidence or long
 //     input triggers escalation; high-confidence short input is served
 //     from the fast path alone.
+//
+// When req.Picky is true, an additional best-effort style pass runs AFTER
+// grammar on BOTH paths and is merged into the result with category="style".
+// Finalize (log + tag + score) runs exactly once on the COMBINED set, so
+// /signal can reference style suggestions and the logged Event.Suggestion
+// reflects the full rewrite.
 func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) {
 	if len(s.fast) == 0 {
-		result, err := s.llmOnly(ctx, req)
+		all, err := s.llmOnlySuggestions(ctx, req)
 		if err != nil {
-			return result, err
+			return Correction{}, err
 		}
 		if req.Picky {
-			result.Suggestions = s.appendStyleSuggestions(ctx, req, result.Suggestions)
+			all = s.appendStyleSuggestions(ctx, req, all)
 		}
-		return result, nil
+		return s.finalize(ctx, req, all)
 	}
 	fast := s.runFast(ctx, req)
 	all := fast
@@ -157,17 +163,21 @@ func (s *Service) appendStyleSuggestions(ctx context.Context, req Request, gramm
 	return append(grammar, surviving...)
 }
 
-// llmOnly is the Plan 1B path: always call the LLM, diff, log, return.
-// Retained for callers that wire no fast correctors (e.g. CGO_ENABLED=0
-// builds that link only the LLM/transport stack).
-func (s *Service) llmOnly(ctx context.Context, req Request) (Correction, error) {
+// llmOnlySuggestions is the no-fast-path branch: call the LLM, diff to
+// grammar suggestions, return them WITHOUT logging. The caller (Correct)
+// appends any picky style suggestions and finalizes exactly once.
+//
+// Returning raw suggestions (not a Correction) keeps the SINGLE finalize
+// invariant: every request must log and tag exactly one combined set
+// (grammar + optional style), so /signal can reference style suggestions
+// and the logged Event.Suggestion reflects the full rewrite.
+func (s *Service) llmOnlySuggestions(ctx context.Context, req Request) ([]Suggestion, error) {
 	corrected, err := s.llm.Complete(ctx, s.pb.Build(req))
 	if err != nil {
-		return Correction{}, fmt.Errorf("llm complete: %w", err)
+		return nil, fmt.Errorf("llm complete: %w", err)
 	}
 	corrected = strings.TrimSpace(corrected)
-	all := diffToSuggestions(req.Text, corrected)
-	return s.finalize(ctx, req, all)
+	return diffToSuggestions(req.Text, corrected), nil
 }
 
 // finalize logs the combined correction (best-effort) and tags every
