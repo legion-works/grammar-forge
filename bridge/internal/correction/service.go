@@ -54,7 +54,14 @@ func NewService(pb PromptBuilder, fast []Corrector, llm LLMClient, store Store, 
 //     from the fast path alone.
 func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) {
 	if len(s.fast) == 0 {
-		return s.llmOnly(ctx, req)
+		result, err := s.llmOnly(ctx, req)
+		if err != nil {
+			return result, err
+		}
+		if req.Picky {
+			result.Suggestions = s.appendStyleSuggestions(ctx, req, result.Suggestions)
+		}
+		return result, nil
 	}
 	fast := s.runFast(ctx, req)
 	all := fast
@@ -77,7 +84,76 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 		}
 	}
 
+	if req.Picky {
+		all = s.appendStyleSuggestions(ctx, req, all)
+	}
+
 	return s.finalize(ctx, req, all)
+}
+
+// appendStyleSuggestions runs the best-effort style pass on top of the
+// grammar suggestions and returns the merged slice. Behaviour:
+//   - GRMR-native (BuildStyle returns empty User): no-op, grammar returned
+//     unchanged. Picky-mode is a chat-model feature; the native format is
+//     correction-tuned.
+//   - Style LLM error: logged at Warn, grammar returned unchanged. Style
+//     is a layer ON TOP of grammar; it must never fail the request.
+//   - Any style suggestion whose span overlaps a grammar suggestion is
+//     dropped. Grammar is authoritative — when both pipelines want to edit
+//     the same byte range, the grammar edit wins.
+//   - Style-vs-style overlaps are also deduped (first-by-span-start wins).
+// The function is pure except for the LLM call and the log; safe to invoke
+// from either the LLM-only path or the fast-path-with-escalation path.
+func (s *Service) appendStyleSuggestions(ctx context.Context, req Request, grammar []Suggestion) []Suggestion {
+	if s.llm == nil {
+		return grammar
+	}
+	p := s.pb.BuildStyle(req)
+	if p.User == "" {
+		// GRMR-native no-op signal. Picky is a no-op on GRMR-native.
+		return grammar
+	}
+	out, err := s.llm.Complete(ctx, p)
+	if err != nil {
+		s.log.Warn("style pass failed; grammar only", "err", err)
+		return grammar
+	}
+	styled := diffToSuggestionsCategory(req.Text, strings.TrimSpace(out), CategoryStyle)
+
+	// Drop style edits that overlap any grammar edit. Build a span set
+	// of grammar suggestions once; O(N*M) is fine for typical N (grammar
+	// edits) and M (style edits) — both small.
+	var surviving []Suggestion
+	for _, ss := range styled {
+		overlapsGrammar := false
+		for _, gs := range grammar {
+			if overlaps(gs.Span, ss.Span) {
+				overlapsGrammar = true
+				break
+			}
+		}
+		if overlapsGrammar {
+			continue
+		}
+		// Style-vs-style dedup: drop if it overlaps a previously-kept
+		// style suggestion (the one with the earlier span start wins,
+		// since diffToSuggestions emits ascending-span-start).
+		dup := false
+		for _, kept := range surviving {
+			if overlaps(kept.Span, ss.Span) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			surviving = append(surviving, ss)
+		}
+	}
+
+	if len(surviving) == 0 {
+		return grammar
+	}
+	return append(grammar, surviving...)
 }
 
 // llmOnly is the Plan 1B path: always call the LLM, diff, log, return.

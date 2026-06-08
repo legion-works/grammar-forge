@@ -282,3 +282,201 @@ func TestServiceRephraseNilLLM(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "llm")
 }
+
+// pickyPB is a chat-style PromptBuilder for the picky-mode tests. It differs
+// from fakePB in two ways:
+//   - Build returns a chat_instruct prompt (so the grammar path is reachable
+//     through the LLM, not via the fast path which fakePB doesn't use either,
+//     but the chat template is what the picky code branches on).
+//   - BuildStyle returns a non-empty chat prompt so the style pass actually
+//     runs. fakePB's BuildStyle is the GRMR-native no-op (empty User).
+type pickyPB struct{}
+
+func (pickyPB) Build(req Request) Prompt {
+	return Prompt{User: req.Text, System: "grammar", Template: TemplateChatInstruct}
+}
+
+func (pickyPB) BuildRephrase(req RephraseRequest) Prompt {
+	return Prompt{User: req.Text, System: "rephrase", Template: TemplateChatInstruct}
+}
+
+func (pickyPB) BuildStyle(req Request) Prompt {
+	return Prompt{User: req.Text, System: "style", Template: TemplateChatInstruct}
+}
+
+// scriptedLLM returns grammarOut on grammar-shaped calls (System contains
+// "grammar") and styleOut on style-shaped calls (System contains "style").
+// err is returned for any call. The grammar-vs-style dispatch lets a single
+// fake cover both pipelines in one test while still asserting that each path
+// hit the LLM with the right prompt.
+type scriptedLLM struct {
+	grammarOut string
+	styleOut   string
+	grammarErr error
+	styleErr   error
+	grammarN   int
+	styleN     int
+}
+
+func (s *scriptedLLM) Complete(_ context.Context, p Prompt) (string, error) {
+	switch {
+	case contains(p.System, "style"):
+		s.styleN++
+		return s.styleOut, s.styleErr
+	default:
+		s.grammarN++
+		return s.grammarOut, s.grammarErr
+	}
+}
+
+func contains(haystack, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// Picky=false is the default path. The style LLM call must NOT be made at
+// all; only the grammar path runs. No category:"style" suggestion must
+// appear in the output.
+func TestCorrectPickyFalseNoStylePass(t *testing.T) {
+	st := &fakeStore{}
+	llm := &scriptedLLM{
+		grammarOut: "I have a cat", // change vs input -> diffToSuggestions will emit
+		styleOut:   "I have a kitty", // would-be style change; must NOT be reached
+	}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.Equal(t, 1, llm.grammarN, "grammar LLM must be called once (LLM-only path)")
+	require.Equal(t, 0, llm.styleN, "style LLM must NOT be called when picky=false")
+	for _, s := range got.Suggestions {
+		require.NotEqual(t, CategoryStyle, s.Category,
+			"picky=false must not emit style-category suggestions")
+	}
+}
+
+// Picky=true with a chat-style PB and a fake LLM that returns a restyled
+// string on the style call: result contains category:"style" suggestions,
+// grammar suggestions still present with empty category. Use two clearly
+// non-overlapping edits so this test stays focused on the wiring (not the
+// overlap-drop rule, which has its own test below).
+func TestCorrectPickyAddsStyleSuggestions(t *testing.T) {
+	st := &fakeStore{}
+	// Original: "I has a cat"
+	// Grammar returns: "I have a cat"  -> suggestion on "has"->"have"
+	// Style returns:   "I has a kitty" -> suggestion on "cat"->"kitty"
+	// Two non-overlapping spans, both must survive.
+	llm := &scriptedLLM{
+		grammarOut: "I have a cat",
+		styleOut:   "I has a kitty",
+	}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Picky: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, llm.grammarN, "grammar LLM called once")
+	require.Equal(t, 1, llm.styleN, "style LLM called once when picky=true")
+	hasStyle := false
+	hasGrammar := false
+	for _, s := range got.Suggestions {
+		if s.Category == CategoryStyle {
+			hasStyle = true
+		} else {
+			hasGrammar = true
+		}
+	}
+	require.True(t, hasStyle, "picky=true must emit at least one style suggestion when style LLM produces edits")
+	require.True(t, hasGrammar, "picky=true must preserve grammar suggestions")
+}
+
+// Grammar wins on overlap: a style edit that overlaps a grammar edit must be
+// dropped. Grammar suggestion survives with empty category. Use inputs where
+// the grammar diff and the style diff BOTH touch the same byte span so the
+// overlap-drop rule is the only thing that can produce a style-empty result.
+func TestCorrectPickyStyleOverlapDroppedForGrammar(t *testing.T) {
+	st := &fakeStore{}
+	// Original: "I has a cat" (byte span of "has" is [2,5))
+	// Grammar returns: "I have a cat"  -> diff emits a Suggestion on [2,5) "has"->"have"
+	// Style returns:   "I had a cat"   -> diff emits a Suggestion on [2,5) "has"->"had"
+	// Both touch [2,5) — the style one must be dropped.
+	llm := &scriptedLLM{
+		grammarOut: "I have a cat",
+		styleOut:   "I had a cat",
+	}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Picky: true})
+	require.NoError(t, err)
+	var grammarEdits []Suggestion
+	var styleEdits []Suggestion
+	for _, s := range got.Suggestions {
+		if s.Category == CategoryStyle {
+			styleEdits = append(styleEdits, s)
+		} else {
+			grammarEdits = append(grammarEdits, s)
+		}
+	}
+	require.NotEmpty(t, grammarEdits, "grammar suggestion must survive")
+	require.Empty(t, styleEdits, "style edit overlapping a grammar edit must be dropped")
+}
+
+// Style LLM error is best-effort: the request must still succeed with the
+// grammar suggestions intact. The style pass is a layer ON TOP of grammar;
+// it must never fail the request.
+func TestCorrectPickyStyleLLMErrorIsBestEffort(t *testing.T) {
+	st := &fakeStore{}
+	llm := &scriptedLLM{
+		grammarOut: "I have a cat",
+		styleErr:   errAlways,
+	}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Picky: true})
+	require.NoError(t, err, "style LLM error must not surface to the caller")
+	require.NotEmpty(t, got.Suggestions, "grammar suggestions must survive style LLM error")
+	for _, s := range got.Suggestions {
+		require.NotEqual(t, CategoryStyle, s.Category,
+			"no style-category suggestions when style LLM errored")
+	}
+}
+
+// GRMR-native (style pass returns empty User) must short-circuit: no extra
+// LLM call, no style-category suggestions. Picky=true is harmless on
+// GRMR-native; it's a chat-model feature.
+func TestCorrectPickyGRMRNativeSkips(t *testing.T) {
+	st := &fakeStore{}
+	llm := &scriptedLLM{
+		grammarOut: "I have a cat",
+		styleOut:   "I has a kitty", // would-be style change; must NOT be reached
+	}
+	// fakePB.BuildStyle returns empty User (GRMR-native no-op).
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Picky: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, llm.grammarN, "grammar LLM called once")
+	require.Equal(t, 0, llm.styleN, "style LLM must NOT be called when BuildStyle is the GRMR-native no-op")
+	for _, s := range got.Suggestions {
+		require.NotEqual(t, CategoryStyle, s.Category,
+			"GRMR-native picky must not emit style-category suggestions")
+	}
+}
+
+// Default (picky absent) is the most important contract: the request must
+// hit the LLM zero extra times (no style pass) and grammar suggestions must
+// carry no category field (omitempty drops "").
+func TestCorrectDefaultPickyEmitsNoCategoryAndNoExtraLLMCall(t *testing.T) {
+	st := &fakeStore{}
+	llm := &scriptedLLM{grammarOut: "I have a cat"}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.Equal(t, 1, llm.grammarN)
+	require.Equal(t, 0, llm.styleN, "default path must not run the style pass")
+	for _, s := range got.Suggestions {
+		require.Equal(t, CategoryGrammar, s.Category,
+			"grammar suggestions on the default path must have empty category")
+	}
+}
