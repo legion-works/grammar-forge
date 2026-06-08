@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 )
 
@@ -183,6 +184,20 @@ func (s *Service) llmOnlySuggestions(ctx context.Context, req Request) ([]Sugges
 // finalize logs the combined correction (best-effort) and tags every
 // returned suggestion with the logged id.
 func (s *Service) finalize(ctx context.Context, req Request, all []Suggestion) (Correction, error) {
+	// applyAll (used for the logged Event.Suggestion) and clients both
+	// assume suggestions are ordered by ascending Span.Start so that
+	// last-to-first application keeps earlier byte offsets valid. The
+	// grammar-only paths already produce sorted output (mergeSuggestions
+	// sorts by span start), so this sort is a no-op for them. The picky
+	// style pass appends style edits after grammar edits, which can break
+	// the order (a style span earlier than a grammar span) and corrupt
+	// the logged combined text and any client that re-applies the result.
+	// Sort once here so the precondition is GUARANTEED for every caller,
+	// not just the grammar-only path. Stable so equal-start suggestions
+	// keep their relative order.
+	sort.SliceStable(all, func(i, j int) bool {
+		return all[i].Span.Start < all[j].Span.Start
+	})
 	result := Correction{Original: req.Text, Suggestions: all, Score: score(req.Text, all)}
 	if len(all) == 0 {
 		return result, nil

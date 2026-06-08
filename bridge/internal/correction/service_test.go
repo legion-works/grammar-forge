@@ -566,3 +566,52 @@ func TestCorrectPickyLLMOnlyStyleOnlyLogsAndTags(t *testing.T) {
 	require.Equal(t, "I has a kitty", st.lastEvent.Suggestion,
 		"logged Suggestion must reflect the style rewrite")
 }
+
+// applyAll assumes suggestions are sorted by ascending Span.Start so that
+// later-to-earlier application keeps earlier byte offsets valid. The picky
+// style pass appends style edits after grammar edits; if a style edit's
+// span is EARLIER than a grammar edit's span, the combined slice is out
+// of order and applyAll corrupts the logged Event.Suggestion.
+//
+// Concrete shape (length-changing on both edits to amplify the bug):
+//
+//	original:        "the cat runned"  (14 bytes)
+//	grammar LLM:     "the cat run"     -> Suggestion [10,14) "ned"->""  (deletion at a LATER span)
+//	style LLM:       "a cat runned"    -> Suggestion [0,3)  "the"->"a" (replacement at an EARLIER span)
+//
+// Combined (BUG order, grammar first then style):
+//
+//	[{Span:[10,14) Rpl:"" Cat:"" Model:LLM},
+//	 {Span:[0,3)  Rpl:"a" Cat:"style" Model:LLM}]
+//
+// applyAll applies last-to-first. With the bug:
+//   - i=1: style [0,3) "the"->"a"  on "the cat runned"  -> "a cat runned" (12 bytes)
+//   - i=0: grammar [10,14) "ned"->"" on "a cat runned"   -> Span.Validate(12) errors -> returns "a cat runned" UNCHANGED (the in-bounds span is no longer "ned" — bytes shifted; AND the original end 14 is now out of bounds of the 12-byte string)
+//
+// Expected combined text: "a cat run" (delete the trailing "ned" AND replace "the" with "a"). The fix (sort combined by Span.Start ascending) produces the right text.
+//
+// This test asserts the logged Event.Suggestion and the returned
+// result.Suggestions are in ascending Span.Start order.
+func TestCorrectPickyStyleBeforeGrammarLogsCorrectCombinedText(t *testing.T) {
+	st := &fakeStore{}
+	llm := &scriptedLLM{
+		grammarOut: "the cat run",  // deletes trailing "ned" at [10,14)
+		styleOut:   "a cat runned", // replaces "the" with "a" at [0,3)
+	}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "the cat runned", Picky: true})
+	require.NoError(t, err)
+	// Logged combined text must reflect BOTH edits applied in the right order.
+	require.Equal(t, "a cat run", st.lastEvent.Suggestion,
+		"logged Suggestion must be the correct combined rewrite (style+grammar), not the corrupted out-of-order applyAll result")
+	// Returned suggestions must be in ascending Span.Start order (so clients
+	// and any downstream consumer that applies them last-to-first get the
+	// right result).
+	for i := 1; i < len(got.Suggestions); i++ {
+		require.Less(t, got.Suggestions[i-1].Span.Start, got.Suggestions[i].Span.Start,
+			"returned suggestions must be sorted by ascending Span.Start")
+	}
+	// And the in-hand applyAll result must match the logged text.
+	require.Equal(t, "a cat run", applyAll("the cat runned", got.Suggestions),
+		"applying the returned suggestions to the original must yield the logged text")
+}
