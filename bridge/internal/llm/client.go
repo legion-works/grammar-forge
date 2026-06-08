@@ -53,6 +53,11 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 		payload = map[string]any{
 			"model": c.cfg.Model, "messages": msgs,
 			"temperature": 0, "max_tokens": maxTokens,
+			// Reasoning-capable instruct models (Gemma-4, Qwen3-thinking) otherwise
+			// emit chain-of-thought that consumes the token budget and leaves
+			// message.content empty for a single-shot grammar correction. This
+			// field disables thinking; backends/models without it ignore it.
+			"chat_template_kwargs": map[string]any{"enable_thinking": false},
 		}
 	} else {
 		endpoint = "/completions"

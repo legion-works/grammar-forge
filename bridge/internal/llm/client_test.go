@@ -109,3 +109,36 @@ func TestCompleteErrorsOnEmptyChoices(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no choices")
 }
+
+func TestComplete_ChatSendsEnableThinkingFalse(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	_, err := c.Complete(context.Background(), correction.Prompt{
+		System: "sys", User: "txt", Template: correction.TemplateChatInstruct,
+	})
+	require.NoError(t, err)
+	kwargs, ok := gotBody["chat_template_kwargs"].(map[string]any)
+	require.True(t, ok, "chat payload must carry chat_template_kwargs")
+	require.Equal(t, false, kwargs["enable_thinking"])
+}
+
+func TestComplete_CompletionsOmitsChatTemplateKwargs(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"choices":[{"text":"ok"}]}`))
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	_, err := c.Complete(context.Background(), correction.Prompt{
+		User: "txt", Template: correction.TemplateGRMRNative,
+	})
+	require.NoError(t, err)
+	_, present := gotBody["chat_template_kwargs"]
+	require.False(t, present, "completions payload must NOT carry chat_template_kwargs")
+}
