@@ -13,11 +13,14 @@ import (
 )
 
 type fakeService struct {
-	correctOut correction.Correction
-	correctErr error
-	lastSignal correction.Signal
-	lastID     int64
-	count      int64
+	correctOut   correction.Correction
+	correctErr   error
+	lastSignal   correction.Signal
+	lastID       int64
+	count        int64
+	rephraseOut  correction.RephraseResult
+	rephraseErr  error
+	rephraseSeen correction.RephraseRequest
 }
 
 func (f *fakeService) Correct(context.Context, correction.Request) (correction.Correction, error) {
@@ -29,6 +32,10 @@ func (f *fakeService) Signal(_ context.Context, id int64, s correction.Signal) e
 	return nil
 }
 func (f *fakeService) CountCorrections(context.Context) (int64, error) { return f.count, nil }
+func (f *fakeService) Rephrase(_ context.Context, req correction.RephraseRequest) (correction.RephraseResult, error) {
+	f.rephraseSeen = req
+	return f.rephraseOut, f.rephraseErr
+}
 
 func serve(svc CorrectionService) http.Handler { return New(Config{}, svc).Handler() }
 
@@ -85,4 +92,48 @@ func TestStats(t *testing.T) {
 	serve(&fakeService{count: 5}).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
 	require.Equal(t, http.StatusOK, rr.Code)
 	require.Contains(t, rr.Body.String(), "5")
+}
+
+// Rephrase endpoint contract. 200 with {original, rephrased, alternatives}.
+// alternatives must be an array (even when empty) so clients can iterate
+// without a null check.
+func TestRephraseOK(t *testing.T) {
+	svc := &fakeService{rephraseOut: correction.RephraseResult{
+		Original:     "He go to store.",
+		Rephrased:    "He goes to the store.",
+		Alternatives: []string{},
+	}}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rephrase", strings.NewReader(`{"text":"He go to store.","source":"vencord"}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got correction.RephraseResult
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, "He go to store.", got.Original)
+	require.Equal(t, "He goes to the store.", got.Rephrased)
+	require.NotNil(t, got.Alternatives, "alternatives key must serialise as [] not null")
+	require.Len(t, got.Alternatives, 0)
+}
+
+func TestRephraseBadJSON(t *testing.T) {
+	rr := httptest.NewRecorder()
+	serve(&fakeService{}).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/rephrase", strings.NewReader("{")))
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// Empty text is a 400 (no model call). Tone/style/source remain optional.
+func TestRephraseEmptyText(t *testing.T) {
+	rr := httptest.NewRecorder()
+	serve(&fakeService{}).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/rephrase", strings.NewReader(`{"text":""}`)))
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// LLM backend failure is a 502 (bad gateway) — the user's text is unchanged
+// and the response carries an error message.
+func TestRephraseLLMError(t *testing.T) {
+	svc := &fakeService{rephraseErr: context.DeadlineExceeded}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rephrase", strings.NewReader(`{"text":"x"}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadGateway, rr.Code)
 }

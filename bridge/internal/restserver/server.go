@@ -15,6 +15,7 @@ type CorrectionService interface {
 	Correct(ctx context.Context, req correction.Request) (correction.Correction, error)
 	Signal(ctx context.Context, correctionID int64, signal correction.Signal) error
 	CountCorrections(ctx context.Context) (int64, error)
+	Rephrase(ctx context.Context, req correction.RephraseRequest) (correction.RephraseResult, error)
 }
 
 // Config is the subset of settings the REST server needs.
@@ -39,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /correct", s.handleCorrect)
+	mux.HandleFunc("POST /rephrase", s.handleRephrase)
 	mux.HandleFunc("POST /signal", s.handleSignal)
 	mux.HandleFunc("GET /stats", s.handleStats)
 	return mux

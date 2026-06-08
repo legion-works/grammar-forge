@@ -17,6 +17,24 @@ type signalRequest struct {
 	Signal string `json:"signal"`
 }
 
+// rephraseRequest is the JSON shape of POST /rephrase. Tone/Style/Source are
+// optional; only Text is required.
+type rephraseRequest struct {
+	Text   string `json:"text"`
+	Tone   string `json:"tone,omitempty"`
+	Style  string `json:"style,omitempty"`
+	Source string `json:"source,omitempty"`
+}
+
+// rephraseResult is the JSON shape of the /rephrase response. Alternatives
+// is reserved for a future variants feature; the slice is always non-nil so
+// the field serialises as `[]` rather than `null`.
+type rephraseResult struct {
+	Original     string   `json:"original"`
+	Rephrased    string   `json:"rephrased"`
+	Alternatives []string `json:"alternatives"`
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -58,6 +76,43 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"corrections": n})
+}
+
+// handleRephrase decodes a rephrase request, delegates to the service, and
+// translates errors to HTTP status. The handler does no business logic —
+// the service is the source of truth for the LLM call and the response
+// shape. Status codes: 200 success, 400 bad JSON or empty text, 502 LLM
+// backend error.
+func (s *Server) handleRephrase(w http.ResponseWriter, r *http.Request) {
+	var req rephraseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if req.Text == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text is required"})
+		return
+	}
+	result, err := s.svc.Rephrase(r.Context(), correction.RephraseRequest{
+		Text:   req.Text,
+		Tone:   req.Tone,
+		Style:  req.Style,
+		Source: correction.Source(req.Source),
+	})
+	if err != nil {
+		s.log.Error("rephrase failed", "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "rephrase backend unavailable"})
+		return
+	}
+	alts := result.Alternatives
+	if alts == nil {
+		alts = []string{}
+	}
+	writeJSON(w, http.StatusOK, rephraseResult{
+		Original:     result.Original,
+		Rephrased:    result.Rephrased,
+		Alternatives: alts,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
