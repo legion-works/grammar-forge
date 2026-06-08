@@ -27,3 +27,10 @@ func TestChatInstructFormat(t *testing.T) {
 func TestUnknownFormatFallsBackToGRMR(t *testing.T) {
 	require.Equal(t, correction.TemplateGRMRNative, New("bogus").Build(correction.Request{Text: "x"}).Template)
 }
+
+func TestChatSystemPromptForbidsAccentAndAgreementOvercorrection(t *testing.T) {
+	p := New("chat_instruct").Build(correction.Request{Text: "x"})
+	require.Contains(t, p.System, "accents")
+	require.Contains(t, p.System, "diacritics")
+	require.Contains(t, p.System, "agreement")
+}
