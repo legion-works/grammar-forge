@@ -1,21 +1,21 @@
-# GrammarForge full stack: LanguageTool -> bridge (gRPC) -> fast path + vLLM (FP8).
-# `docker compose up`. vLLM needs an NVIDIA GPU; on CPU-only hosts swap to the
-# commented Ollama service and set GF_LLM_BASE_URL accordingly.
+# GrammarForge full stack: LanguageTool -> bridge (gRPC) -> fast path + llama.cpp.
+# `docker compose up`. llama.cpp needs an NVIDIA GPU; on CPU-only hosts swap to a
+# remote OpenAI-compatible endpoint by editing GF_LLM_BASE_URL in .env.
 name: grammarforge
 
 services:
   bridge:
     image: grammarforge-bridge:dev
     build: ./bridge
-    depends_on: [vllm]
+    depends_on: [llamacpp]
     volumes:
       - ./data:/data
     environment:
       GF_REST_ADDR: ":8000"
       GF_GRPC_ADDR: ":8082"
-      GF_LLM_BASE_URL: "http://vllm:8000/v1"
-      GF_LLM_MODEL: "qingy2024/GRMR-V3-Q4B"
-      GF_LLM_FORMAT: "grmr_native"
+      GF_LLM_BASE_URL: "http://llamacpp:8000/v1"
+      GF_LLM_MODEL: "gemma-4-E4B-it-qat-Q4_K_XL"
+      GF_LLM_FORMAT: "chat_instruct"
       GF_GECTOR_MODEL_DIR: "/models/gector"
       GF_DB_PATH: "/data/corrections.db"
       # GF_LLM_API_KEY: set via an .env file or secret if your backend needs it (never commit)
@@ -38,38 +38,56 @@ services:
       - "127.0.0.1:8081:8010"
     restart: unless-stopped
 
-  # Default LLM backend (OpenAI-compatible). FP8 on Blackwell; spike-validated tag.
-  vllm:
-    image: vllm/vllm-openai:v0.22.1-cu129-ubuntu2404
+  # Default LLM backend: llama.cpp (llama-server, OpenAI-compatible). Serves the
+  # Gemma-4-E4B QAT-Q4_K_XL GGUF text-only (no vision tower) => ~3.3 GiB VRAM.
+  # Swap to any OpenAI-compatible backend by pointing bridge GF_LLM_BASE_URL elsewhere.
+  llamacpp:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
     volumes:
-      - hf_cache:/root/.cache/huggingface
-      - ./adapters:/adapters  # Phase-3 LoRA adapters (gitignored)
-    environment:
-      PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
-      VLLM_ALLOW_RUNTIME_LORA_UPDATING: "True"
+      - ./models/llm:/models:ro   # place gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf here (gitignored)
     command:
-      - "--model"
-      - "qingy2024/GRMR-V3-Q4B"
-      - "--quantization"
-      - "fp8"
-      - "--kv-cache-dtype"
-      - "fp8"
-      - "--max-model-len"
+      - "-m"
+      - "/models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
+      - "--alias"
+      - "gemma-4-E4B-it-qat-Q4_K_XL"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "-ngl"
+      - "99"
+      - "-c"
       - "2048"
-      - "--max-num-seqs"
-      - "4"
-      - "--gpu-memory-utilization"
-      - "0.20"
-      - "--enforce-eager"
-      - "--enable-lora"
-      - "--enable-sleep-mode"
+      - "--no-webui"
     restart: unless-stopped
-    # internal only — clients hit the bridge, not vLLM
+    # internal only — clients hit the bridge, not llama-server
     deploy:
       resources:
         reservations:
           devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
 
-volumes:
-  hf_cache:
-  # ollama_models:
+  # --- BYO alternate: vLLM (FP8, per-request LoRA hot-swap, sleep-mode idle offload) ---
+  # Use this instead of llamacpp if you need runtime LoRA hot-swap (Phase-3). Then set
+  # bridge GF_LLM_BASE_URL=http://vllm:8000/v1, GF_LLM_MODEL=qingy2024/GRMR-V3-Q4B,
+  # GF_LLM_FORMAT=grmr_native (GRMR), or a Gemma w4a16-ct id + chat_instruct (~10-11 GiB).
+  # vllm:
+  #   image: vllm/vllm-openai:v0.22.1-cu129-ubuntu2404
+  #   volumes: [ "hf_cache:/root/.cache/huggingface", "./adapters:/adapters" ]
+  #   environment:
+  #     PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+  #     VLLM_ALLOW_RUNTIME_LORA_UPDATING: "True"
+  #   command: ["--model","qingy2024/GRMR-V3-Q4B","--quantization","fp8",
+  #     "--kv-cache-dtype","fp8","--max-model-len","2048","--max-num-seqs","4",
+  #     "--gpu-memory-utilization","0.20","--enforce-eager","--enable-lora","--enable-sleep-mode"]
+  #   deploy: { resources: { reservations: { devices: [{driver: nvidia, count: 1, capabilities: [gpu]}] } } }
+  #
+  # --- BYO alternate: Ollama (simplest; GGUF; no per-request hot-swap) ---
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports: ["11434:11434"]
+  #   volumes: [ollama_models:/root/.ollama]
+  #   # then set bridge GF_LLM_BASE_URL=http://ollama:11434/v1
+
+volumes: {}
+  # hf_cache:      # uncomment if using the vLLM BYO block
+  # ollama_models: # uncomment if using the Ollama BYO block
