@@ -102,10 +102,15 @@ func wordIndexFor(words []wordSpan, span correction.Span) int {
 // e.g. an ordinary spelling fix and proper-noun capitalisation
 // ("london"->"London") are unaffected.
 //
-// Known limitation: a genuine English misspelling written immediately next to
-// an accented word (a typo right after "café") is also suppressed. This is a
-// deliberate, rare trade-off — a future improvement is a real foreign-word
-// dictionary or a user allowlist (SPEC §6 personal dictionary).
+// Known limitations (quantified by the Task 8 spike, 2026-06-08; deliberately
+// NOT fixed — the filter is load-bearing for the clean eval and both candidate
+// rewrites either regress it or are unverified):
+//   - False negative: a genuine misspelling immediately next to an accented word
+//     (a typo right after "café") is suppressed (foreignness chains through it).
+//   - False positive: a clean accent-FREE loanphrase (e.g. "je ne sais quoi")
+//     has no accented anchor and so leaks through and IS flagged. This class is
+//     now addressable via the user dictionary (SPEC §6, GF_HARPER_USER_DICT) —
+//     add the loan terms — rather than by complicating this heuristic.
 //
 // kinds is the Harper LintKind per suggestion, parallel to sugs; together with
 // each suggestion's message it decides gateability via isLoanwordGateable,
