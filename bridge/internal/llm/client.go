@@ -17,7 +17,7 @@ import (
 
 // Config configures the client. APIKey is optional and never logged.
 type Config struct {
-	BaseURL string // e.g. http://vllm:8000/v1
+	BaseURL string // e.g. http://llamacpp:8000/v1
 	Model   string
 	APIKey  string
 }

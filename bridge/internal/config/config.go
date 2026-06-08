@@ -13,7 +13,7 @@ type Config struct {
 	GRPCAddr   string
 	LLMBaseURL string
 	LLMModel   string
-	LLMFormat  string // "grmr_native" (default) or "chat_instruct"
+	LLMFormat  string // "chat_instruct" (default) or "grmr_native"
 	LLMAPIKey  string
 	DBPath     string
 	LogLevel   string
