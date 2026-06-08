@@ -11,6 +11,11 @@ import (
 type correctRequest struct {
 	Text   string `json:"text"`
 	Source string `json:"source"`
+	// Picky enables the best-effort style/clarity pass on top of grammar
+	// (Phase-2 P3). Omitted/false is the default — existing clients see no
+	// change. When true, the response may include suggestions with
+	// category="style" in addition to the usual grammar suggestions.
+	Picky bool `json:"picky,omitempty"`
 }
 
 type signalRequest struct {
@@ -47,7 +52,7 @@ func (s *Server) handleCorrect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.svc.Correct(r.Context(), correction.Request{
-		Text: req.Text, Source: correction.Source(req.Source),
+		Text: req.Text, Source: correction.Source(req.Source), Picky: req.Picky,
 	})
 	if err != nil {
 		s.log.Error("correct failed", "err", err)

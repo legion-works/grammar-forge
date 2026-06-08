@@ -21,9 +21,11 @@ type fakeService struct {
 	rephraseOut  correction.RephraseResult
 	rephraseErr  error
 	rephraseSeen correction.RephraseRequest
+	lastCorrect  correction.Request
 }
 
-func (f *fakeService) Correct(context.Context, correction.Request) (correction.Correction, error) {
+func (f *fakeService) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
+	f.lastCorrect = req
 	return f.correctOut, f.correctErr
 }
 
@@ -161,4 +163,49 @@ func TestSignalRejectsTrailingGarbage(t *testing.T) {
 	serve(&fakeService{}).ServeHTTP(rr,
 		httptest.NewRequest(http.MethodPost, "/signal", strings.NewReader(`{"id":1,"signal":"accepted"} trailing`)))
 	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// Picky-mode round-trip: POST /correct with {"picky":true} must (a) decode
+// the flag, (b) pass it through to the service as correction.Request.Picky,
+// and (c) serialise a category:"style" suggestion back in the JSON response
+// when the service emits one. The Category field is the wire-level hook
+// clients use to distinguish style suggestions from grammar ones.
+func TestCorrectPickyRoundTrips(t *testing.T) {
+	svc := &fakeService{correctOut: correction.Correction{
+		Original: "I has a cat",
+		Suggestions: []correction.Suggestion{
+			{Span: correction.Span{Start: 2, End: 5}, Replacement: "have", Model: correction.ModelLLM}, // grammar
+			{Span: correction.Span{Start: 7, End: 10}, Replacement: "kitty", Model: correction.ModelLLM,
+				Category: correction.CategoryStyle}, // style
+		},
+		Score: 80,
+	}}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/correct", strings.NewReader(`{"text":"I has a cat","picky":true}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.True(t, svc.lastCorrect.Picky, "service must receive Picky=true")
+	require.Contains(t, rr.Body.String(), `"category":"style"`,
+		"response JSON must contain the style suggestion's category field")
+}
+
+// Default path: picky absent from the request body must decode to false
+// and the response must NOT contain a category field on grammar
+// suggestions (omitempty drops empty Category). This locks the contract
+// that the default /correct path is unchanged for existing clients.
+func TestCorrectPickyDefaultsFalse(t *testing.T) {
+	svc := &fakeService{correctOut: correction.Correction{
+		Original: "I has a cat",
+		Suggestions: []correction.Suggestion{
+			{Span: correction.Span{Start: 2, End: 5}, Replacement: "have", Model: correction.ModelLLM}, // grammar, no category
+		},
+		Score: 90,
+	}}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/correct", strings.NewReader(`{"text":"I has a cat"}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.False(t, svc.lastCorrect.Picky, "omitted picky must default to false")
+	require.NotContains(t, rr.Body.String(), `"category"`,
+		"grammar suggestions on the default path must NOT serialise a category field (omitempty)")
 }
