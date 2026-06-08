@@ -63,9 +63,9 @@ func Load(getenv Getenv) Config {
 	return Config{
 		RESTAddr:   get("GF_REST_ADDR", ":8000"),
 		GRPCAddr:   get("GF_GRPC_ADDR", ":8082"),
-		LLMBaseURL: get("GF_LLM_BASE_URL", "http://vllm:8000/v1"),
-		LLMModel:   get("GF_LLM_MODEL", "qingy2024/GRMR-V3-Q4B"),
-		LLMFormat:  get("GF_LLM_FORMAT", "grmr_native"),
+		LLMBaseURL: get("GF_LLM_BASE_URL", "http://llamacpp:8000/v1"),
+		LLMModel:   get("GF_LLM_MODEL", "gemma-4-E4B-it-qat-Q4_K_XL"),
+		LLMFormat:  get("GF_LLM_FORMAT", "chat_instruct"),
 		LLMAPIKey:  get("GF_LLM_API_KEY", ""),
 		DBPath:     get("GF_DB_PATH", "/data/corrections.db"),
 		LogLevel:   get("GF_LOG_LEVEL", "info"),

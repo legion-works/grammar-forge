@@ -1,13 +1,17 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestLoadDefaults(t *testing.T) {
 	c := Load(func(string) (string, bool) { return "", false })
 	if c.RESTAddr != ":8000" {
 		t.Errorf("RESTAddr = %q, want :8000", c.RESTAddr)
 	}
-	if c.LLMBaseURL != "http://vllm:8000/v1" {
+	if c.LLMBaseURL != "http://llamacpp:8000/v1" {
 		t.Errorf("LLMBaseURL = %q, want default", c.LLMBaseURL)
 	}
 	if c.LogLevel != "info" {
@@ -31,8 +35,8 @@ func TestLoadOverrides(t *testing.T) {
 
 func TestLoadLLMFormatDefault(t *testing.T) {
 	c := Load(func(string) (string, bool) { return "", false })
-	if c.LLMFormat != "grmr_native" {
-		t.Errorf("LLMFormat = %q, want grmr_native", c.LLMFormat)
+	if c.LLMFormat != "chat_instruct" {
+		t.Errorf("LLMFormat = %q, want chat_instruct", c.LLMFormat)
 	}
 }
 
@@ -47,4 +51,11 @@ func TestFastPathDefaults(t *testing.T) {
 	if c.EscalateMinConfidence <= 0 || c.EscalateMaxSentenceLen <= 0 {
 		t.Error("escalation thresholds should have positive defaults")
 	}
+}
+
+func TestLoad_LLMDefaultsAreLlamaCppGemma(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, "http://llamacpp:8000/v1", cfg.LLMBaseURL)
+	require.Equal(t, "gemma-4-E4B-it-qat-Q4_K_XL", cfg.LLMModel)
+	require.Equal(t, "chat_instruct", cfg.LLMFormat)
 }
