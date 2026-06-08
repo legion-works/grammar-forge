@@ -39,14 +39,19 @@ func diffToSuggestionsCategory(original, corrected string, category string) []Su
 				repl = diffs[i+1].Text
 				i++ // consume the paired insert
 			}
+			// Every diff suggestion is an edit (a flag-only suggestion never
+			// appears here — we're diffing original vs corrected). A pure
+			// deletion has repl=="" but still a span, so Replacements must be
+			// []string{""} (len 1) to distinguish "delete this range" from
+			// "no edit" (Replacements==nil, only possible for flag-only lints).
 			out = append(out, Suggestion{
-				Span: Span{Start: start, End: start + len(d.Text)}, Replacement: repl, Model: ModelLLM,
-				Category: category,
+				Span: Span{Start: start, End: start + len(d.Text)}, Replacement: repl,
+				Replacements: []string{repl}, Model: ModelLLM, Category: category,
 			})
 		case diffmatchpatch.DiffInsert:
 			out = append(out, Suggestion{
-				Span: Span{Start: pos, End: pos}, Replacement: d.Text, Model: ModelLLM,
-				Category: category,
+				Span: Span{Start: pos, End: pos}, Replacement: d.Text,
+				Replacements: []string{d.Text}, Model: ModelLLM, Category: category,
 			})
 		}
 	}

@@ -1,6 +1,10 @@
 package correction
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestShouldEscalateLongInput(t *testing.T) {
 	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 10}
@@ -160,4 +164,36 @@ func TestMergeDedupResultIsSortedBySpanStart(t *testing.T) {
 	if got[0].Span.Start != 0 || got[1].Span.Start != 5 || got[2].Span.Start != 9 {
 		t.Errorf("result not sorted by span start: %+v", got)
 	}
+}
+
+func TestMergeCategoryTieBreakerEqualConfidence(t *testing.T) {
+	// Same span, EQUAL confidence: higher-priority category (spelling) wins.
+	in := []Suggestion{
+		{Span: Span{0, 3}, Replacement: "the", Confidence: 0.9, Category: CategoryGrammar},
+		{Span: Span{0, 3}, Replacement: "teh", Confidence: 0.9, Category: CategorySpelling}, //nolint:misspell // intentional fixture
+	}
+	got := mergeSuggestions(in)
+	require.Len(t, got, 1)
+	require.Equal(t, CategorySpelling, got[0].Category)
+}
+
+func TestMergeConfidenceBeatsCategory(t *testing.T) {
+	// Higher-confidence GRAMMAR must beat lower-confidence SPELLING on overlap
+	// (eval-safety: category never preempts confidence → no applied-output change).
+	in := []Suggestion{
+		{Span: Span{0, 3}, Replacement: "g", Confidence: 0.95, Category: CategoryGrammar},
+		{Span: Span{0, 3}, Replacement: "s", Confidence: 0.50, Category: CategorySpelling},
+	}
+	got := mergeSuggestions(in)
+	require.Len(t, got, 1)
+	require.Equal(t, 0.95, got[0].Confidence)
+	require.Equal(t, CategoryGrammar, got[0].Category)
+}
+
+func TestMergeNonOverlappingBothKept(t *testing.T) {
+	in := []Suggestion{
+		{Span: Span{0, 3}, Confidence: 0.9, Category: CategorySpelling},
+		{Span: Span{5, 8}, Confidence: 0.9, Category: CategoryGrammar},
+	}
+	require.Len(t, mergeSuggestions(in), 2)
 }

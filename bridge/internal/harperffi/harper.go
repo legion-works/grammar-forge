@@ -284,33 +284,44 @@ func (h *Harper) Correct(_ context.Context, req correction.Request) ([]correctio
 		msg := C.GoString(cmsg)
 		freeCString(cmsg)
 
-		// Read the first structured suggestion (kind + payload) rather than
-		// parsing the human-readable suggestion string. The bridge's edit model
-		// is (span, replacement) where Apply does text[:Start]+repl+text[End:],
-		// so each Harper suggestion kind maps as:
-		//   ReplaceWith -> replace the lint range with the payload
-		//   InsertAfter -> a zero-width edit at the range end inserting the payload
-		//   Remove      -> replace the lint range with "" (delete)
-		// A lint with no suggestion keeps an empty replacement (flag only).
-		sugSpan := span
-		repl := ""
-		var sugKind C.int32_t
-		var sugText *C.char
-		if C.harper_get_suggestion(lint, 0, &sugKind, &sugText) == 0 {
-			payload := ""
-			if sugText != nil {
-				payload = C.GoString(sugText)
+		// Read all structured suggestions for this lint.
+		sugCount := int(C.harper_get_suggestion_count(lint))
+		var variants []suggestionVariant
+		for si := 0; si < sugCount; si++ {
+			var sk C.int32_t
+			var st *C.char
+			if C.harper_get_suggestion(lint, C.int32_t(si), &sk, &st) != 0 {
+				continue
 			}
-			freeCString(sugText) // NULL-safe: Remove yields a NULL payload
-			sugSpan, repl = resolveSuggestionEdit(int(sugKind), payload, span)
+			payload := ""
+			if st != nil {
+				payload = C.GoString(st)
+			}
+			freeCString(st)
+			vs, vr := resolveSuggestionEdit(int(sk), payload, span)
+			variants = append(variants, suggestionVariant{kind: int(sk), payload: vr, span: vs})
 		}
 
+		// Primary edit = first suggestion (byte-identical to today's index-0 read).
+		sugSpan := span
+		repl := ""
+		if len(variants) > 0 {
+			sugSpan, repl = variants[0].span, variants[0].payload
+		}
+
+		// Replacements: always populated when there's an edit (incl. a Remove
+		// primary that resolves to repl=""). Nil only for flag-only lints (no
+		// suggestion at all). 4 alts + primary = cap 5.
+		replacements := buildReplacementsFromVariants(variants, 5)
+
 		out = append(out, correction.Suggestion{
-			Span:        sugSpan,
-			Replacement: repl,
-			Message:     msg,
-			Model:       correction.ModelHarper,
-			Confidence:  0.95,
+			Span:         sugSpan,
+			Replacement:  repl,
+			Replacements: replacements,
+			Message:      msg,
+			Model:        correction.ModelHarper,
+			Confidence:   0.95,
+			Category:     categoryForLintKind(kind),
 		})
 		kinds = append(kinds, kind)
 	}
@@ -336,6 +347,57 @@ func resolveSuggestionEdit(kind int, payload string, lintSpan correction.Span) (
 	default: // suggestionRemove (or unrecognised): delete the range
 		return lintSpan, ""
 	}
+}
+
+// suggestionVariant is one Harper structured suggestion already resolved to the
+// bridge's edit model (kind + payload + the span the edit applies to).
+type suggestionVariant struct {
+	kind    int
+	payload string
+	span    correction.Span
+}
+
+// collectReplaceWithAlternatives returns the payloads of ReplaceWith variants
+// whose resolved span equals primary, capped at maxAlt. InsertAfter/Remove variants
+// have incompatible edit shapes and are NOT included (they cannot be applied via
+// the flat text[:Start]+repl+text[End:] model that Replacements assumes).
+func collectReplaceWithAlternatives(variants []suggestionVariant, primary correction.Span, maxAlt int) []string {
+	var out []string
+	for _, v := range variants {
+		if v.kind != suggestionReplaceWith || v.span != primary {
+			continue
+		}
+		out = append(out, v.payload)
+		if len(out) >= maxAlt {
+			break
+		}
+	}
+	return out
+}
+
+// buildReplacementsFromVariants assembles the wire-level Replacements list
+// for a Harper lint that produced the given resolved variants. Contract:
+//   - No variants (flag-only lint, no suggested edit at all) -> nil. The wire
+//     format uses nil to mean "no edit to offer"; clients hide the suggestion.
+//   - Any variants (a real edit, including a Remove where payload is ""):
+//     return []string{primaryPayload} with further ReplaceWith alternatives
+//     on the SAME primary span appended, total capped at maxAlt. A pure
+//     deletion yields []string{""} (len 1) so callers can distinguish
+//     "delete this range" from "no edit".
+//
+// The primary edit (sugSpan, repl) is taken from variants[0] byte-identically
+// to the old inline read — the helper only governs the Replacements list, not
+// the applied output.
+func buildReplacementsFromVariants(variants []suggestionVariant, maxAlt int) []string {
+	if len(variants) == 0 {
+		return nil
+	}
+	out := []string{variants[0].payload}
+	if len(out) >= maxAlt {
+		return out
+	}
+	out = append(out, collectReplaceWithAlternatives(variants[1:], variants[0].span, maxAlt-1)...)
+	return out
 }
 
 // runeOffsetIndex returns a fn mapping a rune index to a byte offset in s.

@@ -214,3 +214,79 @@ func TestDialectCode(t *testing.T) {
 	require.Equal(t, dialectAmerican, DialectCode(""))
 	require.Equal(t, dialectAmerican, DialectCode("klingon"))
 }
+
+func TestCollectReplaceWithAlternatives(t *testing.T) {
+	primary := correction.Span{Start: 2, End: 5}
+	// (kind, payload, resolvedSpan) tuples as the adapter would read them
+	variants := []suggestionVariant{
+		{kind: suggestionReplaceWith, payload: "their", span: primary},
+		{kind: suggestionReplaceWith, payload: "they're", span: primary},
+		{kind: suggestionInsertAfter, payload: ",", span: correction.Span{Start: 5, End: 5}},  // dropped (not ReplaceWith)
+		{kind: suggestionReplaceWith, payload: "X", span: correction.Span{Start: 9, End: 10}}, // dropped (different span)
+	}
+	got := collectReplaceWithAlternatives(variants, primary, 5)
+	require.Equal(t, []string{"their", "they're"}, got)
+}
+
+func TestCollectReplaceWithAlternativesCap(t *testing.T) {
+	primary := correction.Span{Start: 0, End: 1}
+	var variants []suggestionVariant
+	for i := 0; i < 8; i++ {
+		variants = append(variants, suggestionVariant{kind: suggestionReplaceWith, payload: "x", span: primary})
+	}
+	require.Len(t, collectReplaceWithAlternatives(variants, primary, 5), 5)
+}
+
+// buildReplacementsFromVariants contract tests. The wire format distinguishes
+// "no edit" (nil) from "edit, possibly a delete" ([]string{repl} of len≥1).
+// Only flag-only lints (no suggestions) may leave Replacements == nil.
+
+// Flag-only lint: Harper raised a lint but produced zero suggestions. The
+// suggestion is a warning without a concrete edit to apply.
+func TestBuildReplacementsFromVariants_FlagOnlyNil(t *testing.T) {
+	require.Nil(t, buildReplacementsFromVariants(nil, 5), "no variants must yield nil Replacements")
+	require.Nil(t, buildReplacementsFromVariants([]suggestionVariant{}, 5), "empty variants must yield nil Replacements")
+}
+
+// Pure deletion primary (Remove kind, payload ""): the suggestion is still
+// an edit (it has a span) and the wire list must be []string{""} (len 1),
+// NOT nil. Callers must be able to tell "delete this range" from "no edit".
+func TestBuildReplacementsFromVariants_RemovePrimaryYieldsEmptyStringList(t *testing.T) {
+	variants := []suggestionVariant{
+		{kind: suggestionRemove, payload: "", span: correction.Span{Start: 2, End: 5}},
+	}
+	got := buildReplacementsFromVariants(variants, 5)
+	require.Equal(t, []string{""}, got,
+		"Remove primary must produce Replacements=[\"\"] (len 1), not nil")
+}
+
+// ReplaceWith primary with no further alts: exactly one element.
+func TestBuildReplacementsFromVariants_ReplaceWithSingle(t *testing.T) {
+	variants := []suggestionVariant{
+		{kind: suggestionReplaceWith, payload: "the", span: correction.Span{Start: 0, End: 3}},
+	}
+	require.Equal(t, []string{"the"}, buildReplacementsFromVariants(variants, 5))
+}
+
+// ReplaceWith primary + alts: primary first, then alternatives on the same
+// primary span. InsertAfter/Remove alts and a different-span alt are dropped.
+func TestBuildReplacementsFromVariants_ReplaceWithPlusAlts(t *testing.T) {
+	primary := correction.Span{Start: 2, End: 5}
+	variants := []suggestionVariant{
+		{kind: suggestionReplaceWith, payload: "the", span: primary},
+		{kind: suggestionReplaceWith, payload: "tea", span: primary},
+		{kind: suggestionInsertAfter, payload: ",", span: correction.Span{Start: 5, End: 5}},  // dropped
+		{kind: suggestionReplaceWith, payload: "X", span: correction.Span{Start: 9, End: 10}}, // dropped (different span)
+	}
+	require.Equal(t, []string{"the", "tea"}, buildReplacementsFromVariants(variants, 5))
+}
+
+// Cap at maxAlt: primary + (maxAlt-1) further alts.
+func TestBuildReplacementsFromVariants_RespectsCap(t *testing.T) {
+	primary := correction.Span{Start: 0, End: 1}
+	variants := []suggestionVariant{{kind: suggestionReplaceWith, payload: "p", span: primary}}
+	for i := 0; i < 8; i++ {
+		variants = append(variants, suggestionVariant{kind: suggestionReplaceWith, payload: "x", span: primary})
+	}
+	require.Len(t, buildReplacementsFromVariants(variants, 5), 5)
+}

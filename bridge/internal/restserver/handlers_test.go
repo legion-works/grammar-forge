@@ -230,3 +230,40 @@ func TestCorrectPickyDefaultsFalse(t *testing.T) {
 	require.NotContains(t, rr.Body.String(), `"category"`,
 		"grammar suggestions on the default path must NOT serialise a category field (omitempty)")
 }
+
+// TestCorrectCategoryAndReplacementsJSON locks the /correct JSON contract for
+// the WS-A additions: a suggestion with Category=CategorySpelling and
+// Replacements=["the","tea"] must serialise as `"category":"spelling"` +
+// `"replacements":["the","tea"]`; a grammar suggestion (Category="") must
+// still OMIT the category field (back-compat). This is the wire-level lock
+// clients depend on for the browser extension's colour/alt-replacement UI.
+func TestCorrectCategoryAndReplacementsJSON(t *testing.T) {
+	svc := &fakeService{correctOut: correction.Correction{
+		Original: "teh xxx", //nolint:misspell // intentional fixture
+		Suggestions: []correction.Suggestion{
+			{
+				Span: correction.Span{Start: 0, End: 3}, Replacement: "the",
+				Replacements: []string{"the", "tea"}, Model: correction.ModelHarper,
+				Category: correction.CategorySpelling,
+			},
+			{
+				Span: correction.Span{Start: 4, End: 7}, Replacement: "ran", Model: correction.ModelGECToR,
+				Category: correction.CategoryGrammar,
+			},
+		},
+	}}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/correct", strings.NewReader(`{"text":"teh xxx"}`)) //nolint:misspell // intentional fixture
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	body := rr.Body.String()
+	require.Contains(t, body, `"category":"spelling"`,
+		"spelling suggestion must serialise category=spelling")
+	require.Contains(t, body, `"replacements":["the","tea"]`,
+		"spelling suggestion must serialise full Replacements list")
+	// grammar suggestion still omits category:
+	require.NotContains(t, body, `"category":"grammar"`,
+		"omitempty must drop the empty Category for grammar suggestions")
+	require.NotContains(t, body, `"category":""`,
+		"omitempty must not serialise an empty-string category at all")
+}

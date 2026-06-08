@@ -3,6 +3,8 @@ package correction
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestDiffNoChange(t *testing.T) {
@@ -24,6 +26,47 @@ func TestDiffSingleReplacement(t *testing.T) {
 	if got := s.Apply("I has a cat"); got != "I have a cat" {
 		t.Errorf("Apply = %q", got)
 	}
+}
+
+// TestDiffPopulatesReplacements locks the WS-A contract: EVERY diff edit
+// (including pure deletions where Replacement="") must carry
+// Replacements == []string{Replacement} so the wire format consistently
+// advertises the candidate list. Only a flag-only lint (no edit at all)
+// is allowed to leave Replacements == nil — and diffToSuggestions never
+// produces a flag-only suggestion (it diffs original vs corrected, so any
+// produced suggestion is by construction an edit).
+func TestDiffPopulatesReplacements(t *testing.T) {
+	// Mixed edit: a replacement and a zero-width insertion. //nolint:misspell // intentional fixture
+	sugs := diffToSuggestions("teh cat", "the cat") //nolint:misspell // intentional misspelling fixture
+	require.NotEmpty(t, sugs)
+	for _, s := range sugs {
+		require.NotNil(t, s.Replacements,
+			"every diff suggestion is an edit; Replacements must be non-nil")
+		require.Len(t, s.Replacements, 1,
+			"diff always emits exactly one primary replacement")
+		require.Equal(t, s.Replacement, s.Replacements[0],
+			"Replacements[0] must equal Replacement")
+	}
+}
+
+// TestDiffDeletionEditCarriesEmptyReplacements locks the deletion case
+// specifically: a pure deletion ("the the cat" -> "the cat") is still an
+// edit (it has a span) so Replacements must be []string{""} (len 1), NOT
+// nil. The wire format distinguishes "no edit" (nil) from "delete this
+// range" ([]string{""}).
+func TestDiffDeletionEditCarriesEmptyReplacements(t *testing.T) {
+	sugs := diffToSuggestions("the the cat", "the cat")
+	require.NotEmpty(t, sugs)
+	var del *Suggestion
+	for i := range sugs {
+		if sugs[i].Replacement == "" && sugs[i].Span.End > sugs[i].Span.Start {
+			del = &sugs[i]
+			break
+		}
+	}
+	require.NotNil(t, del, "expected a deletion suggestion; got %+v", sugs)
+	require.Equal(t, []string{""}, del.Replacements,
+		"a deletion (Replacement=\"\") must still carry Replacements=[\"\"] (len 1), not nil")
 }
 
 func TestDiffSuggestionsAreApplicableInReverse(t *testing.T) {

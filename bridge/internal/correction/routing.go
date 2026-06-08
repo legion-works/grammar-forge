@@ -95,6 +95,9 @@ func mergeSuggestions(in []Suggestion) []Suggestion {
 		if iLen != jLen {
 			return iLen < jLen
 		}
+		if pi, pj := categoryPriority(sorted[i].Category), categoryPriority(sorted[j].Category); pi != pj {
+			return pi > pj // higher-priority category sorts first → kept on overlap
+		}
 		// still tied: earlier start
 		return sorted[i].Span.Start < sorted[j].Span.Start
 	})
@@ -119,6 +122,26 @@ func mergeSuggestions(in []Suggestion) []Suggestion {
 }
 
 func overlaps(a, b Span) bool { return a.Start < b.End && b.Start < a.End }
+
+// categoryPriority ranks categories for the overlap tie-breaker: higher wins.
+// Used ONLY as a tie-breaker after confidence and span-length, so it never
+// preempts the confidence ordering (applied output unchanged → eval-safe).
+func categoryPriority(c string) int {
+	switch c {
+	case CategorySpelling:
+		return 5
+	case CategoryGrammar: // "" — grammar
+		return 4
+	case CategoryPunctuation:
+		return 3
+	case CategoryStyle:
+		return 2
+	case CategoryTypography:
+		return 1
+	default: // CategoryUnknown / anything else
+		return 0
+	}
+}
 
 // isNonTrivialInput reports whether text has at least minWords whitespace-
 // separated words (using defaultMinWordsForEscalation when minWords <= 0). Used

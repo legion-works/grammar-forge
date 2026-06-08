@@ -51,17 +51,33 @@ const (
 	CategoryStyle   = "style" // picky-mode style suggestion
 )
 
+// Additional categories surfaced on /correct so clients can colour/label
+// suggestions. Grammar stays "" (CategoryGrammar) so its JSON is unchanged
+// (back-compat). Only the Harper adapter sets these non-empty values today;
+// GECToR + the LLM grammar diff stay CategoryGrammar.
+const (
+	CategorySpelling    = "spelling"
+	CategoryPunctuation = "punctuation"
+	CategoryTypography  = "typography"
+	CategoryUnknown     = "unknown"
+)
+
 // Suggestion is a single proposed edit. The bridge SUGGESTS; clients apply.
 type Suggestion struct {
 	// ID is the correction-log row id, set after the suggestion is persisted,
 	// so clients can reference it in POST /signal. Zero until logged.
-	ID          int64   `json:"id,omitempty"`
-	Span        Span    `json:"span"`
-	Replacement string  `json:"replacement"`
-	Message     string  `json:"message,omitempty"`
-	Model       Model   `json:"model"`
-	RuleID      string  `json:"ruleId,omitempty"`
-	Confidence  float64 `json:"confidence,omitempty"`
+	ID          int64  `json:"id,omitempty"`
+	Span        Span   `json:"span"`
+	Replacement string `json:"replacement"`
+	// Replacements is the full candidate list (primary first), always populated
+	// with at least Replacement when there is an edit. Clients show "Apply" for
+	// one and a "Show N more" expander for many. Empty only for flag-only lints
+	// (no suggested edit).
+	Replacements []string `json:"replacements,omitempty"`
+	Message      string   `json:"message,omitempty"`
+	Model        Model    `json:"model"`
+	RuleID       string   `json:"ruleId,omitempty"`
+	Confidence   float64  `json:"confidence,omitempty"`
 	// Category tags the suggestion origin. Empty (CategoryGrammar) for the
 	// default grammar pipeline so JSON output is unchanged; "style" (CategoryStyle)
 	// for the picky-mode style pass so clients can render/hide style suggestions
