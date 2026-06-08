@@ -67,6 +67,43 @@ LintGroup* harper_create_lint_group_with_dialect(int32_t dialect);
 // Returns NULL on error
 LintGroup* harper_create_lint_group(void);
 
+// Opaque handle bundling the curated dictionary with an optional user
+// dictionary stacked on top. The SAME dictionary must back both the LintGroup
+// AND every Document parsed for it (harper-core's SpellCheck only skips a word
+// whose token metadata, assigned at document-parse time, marks it known — so a
+// user word is only suppressed when the document is parsed with this dictionary
+// too; stacking it on the lint group alone is not enough).
+typedef struct MergedDict MergedDict;
+
+// Build a merged dictionary handle: the curated set with an optional user
+// dictionary (newline-delimited words; blank lines and '#' comment lines
+// ignored) stacked on top. A NULL/empty path, non-UTF-8 path, or unreadable
+// file yields curated-only (never fails). The curated dictionary is added first
+// (curated metadata wins; user words only add previously-unknown terms).
+// Free with harper_free_merged_dict.
+MergedDict* harper_create_merged_dict(const char* user_dict_path);
+
+// Free a merged dictionary handle created by harper_create_merged_dict.
+void harper_free_merged_dict(MergedDict* dict);
+
+// Create a curated lint group backed by the merged dictionary handle for the
+// given dialect code (see HARPER_DIALECT_*). Returns NULL if dict is NULL. Free
+// the group with harper_free_lint_group; free the dict separately with
+// harper_free_merged_dict (the Arc is cloned, so free order does not matter).
+LintGroup* harper_create_lint_group_from_dict(const MergedDict* dict, int32_t dialect);
+
+// Create a plain-English document parsed with the merged dictionary handle (so
+// user-dictionary words are recognised at tokenisation time). Returns NULL if
+// dict or text is NULL, or on invalid UTF-8. Free with harper_free_document.
+Document* harper_create_document_with_dict(const MergedDict* dict, const char* text);
+
+// Create a Markdown document parsed with the merged dictionary handle (code
+// spans/blocks, math, and HTML masked unlintable; user-dictionary words
+// recognised at tokenisation time). If ignore_link_title is non-zero, Markdown
+// link titles are also ignored. Returns NULL if dict or text is NULL, or on
+// invalid UTF-8. Free with harper_free_document.
+Document* harper_create_document_markdown_with_dict(const MergedDict* dict, const char* text, int32_t ignore_link_title);
+
 // Enable (enabled != 0) or disable a single curated rule by its key (the linter
 // struct name, e.g. "SpellCheck", "LongSentences", "AnA"). Returns 0 on success,
 // -1 on error (NULL group/key or invalid UTF-8). Unknown keys are accepted

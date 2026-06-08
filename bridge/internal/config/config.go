@@ -42,7 +42,12 @@ type Config struct {
 	HarperEnabledRules  []string
 	// HarperMaxInputLen skips Harper entirely for inputs longer than this many
 	// bytes (0 = no limit) to bound worst-case latency on pathological input.
-	HarperMaxInputLen      int
+	HarperMaxInputLen int
+	// HarperUserDictPath points at a newline-delimited user word list stacked on
+	// top of the curated dictionary (blank/'#' lines ignored). Empty = curated
+	// only. The file is watched for changes and hot-reloaded. Holds user text:
+	// keep it under data/ (gitignored).
+	HarperUserDictPath     string
 	EscalateMinConfidence  float64 // escalate to LLM if best GECToR confidence < this
 	EscalateMaxSentenceLen int     // escalate if input longer than this (chars)
 	EscalateMinWords       int     // escalate empty-fast-path input with >= this many words
@@ -138,6 +143,7 @@ func Load(getenv Getenv) Config {
 		HarperDisabledRules:    getCSV("GF_HARPER_DISABLED_RULES"),
 		HarperEnabledRules:     getCSV("GF_HARPER_ENABLED_RULES"),
 		HarperMaxInputLen:      getInt("GF_HARPER_MAX_INPUT_LEN", 0),
+		HarperUserDictPath:     get("GF_HARPER_USER_DICT", ""),
 		EscalateMinConfidence:  getFloat("GF_ESCALATE_MIN_CONFIDENCE", 0.7),
 		EscalateMaxSentenceLen: getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
 		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),

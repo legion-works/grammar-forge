@@ -21,6 +21,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/grammarforge/bridge/internal/correction"
@@ -84,14 +85,33 @@ type Options struct {
 	// MaxInputLen skips correction for inputs longer than this many bytes
 	// (0 = no limit), bounding worst-case latency on pathological input.
 	MaxInputLen int
+	// UserDictPath points at a newline-delimited user word list stacked on top
+	// of the curated dictionary (blank/'#' lines ignored). Empty = curated only.
+	// When set, the file is watched and the LintGroup hot-reloaded on change.
+	UserDictPath string
 }
 
 // Harper is a process-wide Corrector. Construct once via New/NewWithOptions;
-// safe for serial use.
+// safe for serial use. When opts.UserDictPath is set, a background goroutine
+// watches the file and rebuilds the cached LintGroup on change (under h.mu).
 type Harper struct {
-	mu   sync.Mutex
-	grp  *C.LintGroup
+	mu  sync.Mutex
+	grp *C.LintGroup
+	// dict is the merged-dictionary handle backing both grp AND per-request
+	// documents when a user dictionary is configured (nil for curated-only). The
+	// document MUST be parsed with the same dictionary as the group or
+	// user-dictionary words are not recognised (harper-core assigns word
+	// metadata at parse time). Swapped under mu on hot-reload alongside grp.
+	dict *C.MergedDict
 	opts Options
+	// done stops the user-dictionary watcher; closed once by Close via stopOnce.
+	// nil (and stopOnce unused) when no watcher is running (no UserDictPath).
+	done     chan struct{}
+	stopOnce sync.Once
+	// pollInterval is the user-dictionary watcher's poll period, captured at
+	// construction (defaultUserDictPollInterval; tests may shorten it) so the
+	// watcher never reads a shared mutable global.
+	pollInterval time.Duration
 }
 
 // New builds a Harper with Markdown parsing enabled (the default). It builds the
@@ -99,13 +119,49 @@ type Harper struct {
 func New() *Harper { return NewWithOptions(Options{Markdown: true}) }
 
 // NewWithOptions builds a Harper with the given options. The cached LintGroup is
-// built for opts.Dialect, then per-rule overrides are applied (disabled first,
-// then enabled).
+// built for opts.Dialect (with the user dictionary stacked on top when
+// opts.UserDictPath is set), then per-rule overrides are applied (disabled
+// first, then enabled). When a user dictionary is configured, a watcher
+// goroutine hot-reloads the group on file change.
 func NewWithOptions(opts Options) *Harper {
-	grp := C.harper_create_lint_group_with_dialect(C.int32_t(opts.Dialect))
+	return newWithPollInterval(opts, defaultUserDictPollInterval)
+}
+
+// newWithPollInterval is NewWithOptions with an explicit watcher poll interval.
+// The poll interval is set on the struct BEFORE the watcher goroutine starts so
+// the goroutine never races the field. Tests use a short interval; production
+// goes through NewWithOptions (the default interval).
+func newWithPollInterval(opts Options, pollInterval time.Duration) *Harper {
+	grp, dict := buildGroup(opts)
+	h := &Harper{grp: grp, dict: dict, opts: opts, pollInterval: pollInterval}
+	if opts.UserDictPath != "" {
+		h.done = make(chan struct{})
+		go h.watchUserDict(h.done)
+	}
+	return h
+}
+
+// buildGroup constructs a LintGroup for the options. When UserDictPath is set it
+// builds a merged-dictionary handle (curated + user words), backs the group with
+// it, and RETURNS that handle (the caller stores it so per-request documents are
+// parsed with the same dictionary — required for user words to be recognised).
+// Otherwise it builds a curated-only group for the dialect and returns a nil
+// dict handle. Per-rule overrides are applied in both cases (disabled first,
+// then enabled).
+func buildGroup(opts Options) (*C.LintGroup, *C.MergedDict) {
+	var grp *C.LintGroup
+	var dict *C.MergedDict
+	if opts.UserDictPath != "" {
+		cpath := C.CString(opts.UserDictPath)
+		dict = C.harper_create_merged_dict(cpath)
+		C.free(unsafe.Pointer(cpath))
+		grp = C.harper_create_lint_group_from_dict(dict, C.int32_t(opts.Dialect))
+	} else {
+		grp = C.harper_create_lint_group_with_dialect(C.int32_t(opts.Dialect))
+	}
 	applyRuleOverrides(grp, opts.DisabledRules, false)
 	applyRuleOverrides(grp, opts.EnabledRules, true)
-	return &Harper{grp: grp, opts: opts}
+	return grp, dict
 }
 
 // applyRuleOverrides toggles each curated rule key on the lint group. Each key
@@ -123,11 +179,22 @@ func applyRuleOverrides(grp *C.LintGroup, keys []string, enabled bool) {
 	}
 }
 
-// Close frees the LintGroup.
+// Close stops the user-dictionary watcher (if any) and frees the LintGroup. The
+// watcher is signalled (once) before the group is freed so a reload can never
+// race the free; the freed group is nilled under the lock.
 func (h *Harper) Close() {
+	if h.done != nil {
+		h.stopOnce.Do(func() { close(h.done) })
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.grp != nil {
 		C.harper_free_lint_group(h.grp)
 		h.grp = nil
+	}
+	if h.dict != nil {
+		C.harper_free_merged_dict(h.dict)
+		h.dict = nil
 	}
 }
 
@@ -157,14 +224,23 @@ func (h *Harper) Correct(_ context.Context, req correction.Request) ([]correctio
 
 	ctext := C.CString(req.Text)
 	defer C.free(unsafe.Pointer(ctext))
+	// When a user dictionary is configured the document MUST be parsed with the
+	// same merged dictionary as the lint group, or user words are still flagged
+	// (harper-core assigns word metadata at parse time). Otherwise use the
+	// curated document constructors.
 	var doc *C.Document
-	if h.opts.Markdown {
-		ignoreLinkTitle := C.int32_t(0)
-		if h.opts.IgnoreLinkTitle {
-			ignoreLinkTitle = 1
-		}
+	ignoreLinkTitle := C.int32_t(0)
+	if h.opts.IgnoreLinkTitle {
+		ignoreLinkTitle = 1
+	}
+	switch {
+	case h.dict != nil && h.opts.Markdown:
+		doc = C.harper_create_document_markdown_with_dict(h.dict, ctext, ignoreLinkTitle)
+	case h.dict != nil:
+		doc = C.harper_create_document_with_dict(h.dict, ctext)
+	case h.opts.Markdown:
 		doc = C.harper_create_document_markdown(ctext, ignoreLinkTitle)
-	} else {
+	default:
 		doc = C.harper_create_document(ctext)
 	}
 	if doc == nil {

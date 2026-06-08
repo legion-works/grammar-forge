@@ -151,3 +151,18 @@ func TestLoad_HarperDisabledRulesEmptyStringIsNil(t *testing.T) {
 	})
 	require.Nil(t, cfg.HarperDisabledRules)
 }
+
+func TestLoad_HarperUserDictDefaultEmpty(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, "", cfg.HarperUserDictPath)
+}
+
+func TestLoad_HarperUserDictOverride(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_HARPER_USER_DICT" {
+			return "data/user_dictionary.txt", true
+		}
+		return "", false
+	})
+	require.Equal(t, "data/user_dictionary.txt", cfg.HarperUserDictPath)
+}

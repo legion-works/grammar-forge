@@ -11,8 +11,8 @@ use harper_core::{
     core_version,
     linting::{Lint, LintGroup, Linter, Suggestion},
     parsers::MarkdownOptions,
-    spell::FstDictionary,
-    Document,
+    spell::{Dictionary, FstDictionary, MergedDictionary, MutableDictionary},
+    DictWordMetadata, Document,
 };
 
 /// Gets the version of the Harper Core library as a string.
@@ -176,6 +176,138 @@ pub extern "C" fn harper_create_lint_group_with_dialect(dialect: c_int) -> *mut 
 #[no_mangle]
 pub extern "C" fn harper_create_lint_group() -> *mut LintGroup {
     harper_create_lint_group_with_dialect(0)
+}
+
+/// Reads a newline-delimited user word list from a C path. Blank lines and
+/// lines starting with '#' (comments) are ignored; surrounding whitespace is
+/// trimmed. Returns an empty Vec when the path is NULL/empty, not valid UTF-8,
+/// or the file cannot be read (so a missing user dictionary never fails the
+/// caller — it just yields no extra words).
+fn read_user_words(path: *const c_char) -> Vec<String> {
+    if path.is_null() {
+        return Vec::new();
+    }
+    let p = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(s) if !s.is_empty() => s,
+        _ => return Vec::new(),
+    };
+    std::fs::read_to_string(p)
+        .map(|s| {
+            s.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// An opaque handle bundling the curated dictionary with an optional user
+/// dictionary stacked on top, as a single `Arc<MergedDictionary>`. The SAME
+/// dictionary must back both the LintGroup AND every Document parsed for it:
+/// harper-core's SpellCheck only skips a word whose TOKEN metadata (assigned at
+/// document-parse time) marks it known, so a user word is only suppressed when
+/// the document is parsed with this dictionary too — stacking it on the lint
+/// group alone is not enough. Build the group with
+/// harper_create_lint_group_from_dict and documents with
+/// harper_create_document_*_with_dict. Free with harper_free_merged_dict.
+pub struct MergedDict(Arc<MergedDictionary>);
+
+/// Builds a merged dictionary handle: the curated set with an optional user
+/// dictionary (newline-delimited words; blank lines and '#' comments ignored)
+/// stacked on top. A NULL/empty path, non-UTF-8 path, or unreadable file yields
+/// curated-only (never fails). The curated dictionary is added FIRST so curated
+/// metadata wins on conflicts; user words only ADD previously-unknown words.
+/// Returns a handle the caller must free with harper_free_merged_dict.
+#[no_mangle]
+pub extern "C" fn harper_create_merged_dict(user_dict_path: *const c_char) -> *mut MergedDict {
+    let mut merged = MergedDictionary::new();
+    merged.add_dictionary(FstDictionary::curated() as Arc<dyn Dictionary>);
+
+    let words = read_user_words(user_dict_path);
+    if !words.is_empty() {
+        let mut user = MutableDictionary::new();
+        for w in &words {
+            user.append_word_str(w, DictWordMetadata::default());
+        }
+        merged.add_dictionary(Arc::new(user) as Arc<dyn Dictionary>);
+    }
+
+    Box::into_raw(Box::new(MergedDict(Arc::new(merged))))
+}
+
+/// Frees a merged dictionary handle created by harper_create_merged_dict.
+#[no_mangle]
+pub extern "C" fn harper_free_merged_dict(dict: *mut MergedDict) {
+    if !dict.is_null() {
+        unsafe {
+            let _ = Box::from_raw(dict);
+        }
+    }
+}
+
+/// Creates a curated lint group backed by the given merged dictionary handle for
+/// the given dialect code (see dialect_from_code). Returns NULL if dict is NULL.
+/// The caller must free the group with harper_free_lint_group (and the dict
+/// separately with harper_free_merged_dict — the Arc is cloned, so order does
+/// not matter).
+#[no_mangle]
+pub extern "C" fn harper_create_lint_group_from_dict(
+    dict: *const MergedDict,
+    dialect: c_int,
+) -> *mut LintGroup {
+    if dict.is_null() {
+        return ptr::null_mut();
+    }
+    let dict = unsafe { &*dict };
+    let lint_group = LintGroup::new_curated(dict.0.clone(), dialect_from_code(dialect));
+    Box::into_raw(Box::new(lint_group))
+}
+
+/// Creates a plain-English document parsed with the given merged dictionary
+/// handle (so user-dictionary words are recognised at tokenisation time).
+/// Returns NULL if dict or text is NULL, or on invalid UTF-8. Free with
+/// harper_free_document.
+#[no_mangle]
+pub extern "C" fn harper_create_document_with_dict(
+    dict: *const MergedDict,
+    text: *const c_char,
+) -> *mut Document {
+    if dict.is_null() || text.is_null() {
+        return ptr::null_mut();
+    }
+    let text_str = match unsafe { CStr::from_ptr(text) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return ptr::null_mut(),
+    };
+    let dict = unsafe { &*dict };
+    let doc = Document::new_plain_english(text_str, dict.0.as_ref());
+    Box::into_raw(Box::new(doc))
+}
+
+/// Creates a Markdown document parsed with the given merged dictionary handle
+/// (code spans/blocks, math, and HTML are masked unlintable; user-dictionary
+/// words are recognised at tokenisation time). If ignore_link_title is non-zero,
+/// Markdown link titles are also ignored. Returns NULL if dict or text is NULL,
+/// or on invalid UTF-8. Free with harper_free_document.
+#[no_mangle]
+pub extern "C" fn harper_create_document_markdown_with_dict(
+    dict: *const MergedDict,
+    text: *const c_char,
+    ignore_link_title: c_int,
+) -> *mut Document {
+    if dict.is_null() || text.is_null() {
+        return ptr::null_mut();
+    }
+    let text_str = match unsafe { CStr::from_ptr(text) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return ptr::null_mut(),
+    };
+    let mut options = MarkdownOptions::default();
+    options.ignore_link_title = ignore_link_title != 0;
+    let dict = unsafe { &*dict };
+    let doc = Document::new_markdown(text_str, options, dict.0.as_ref());
+    Box::into_raw(Box::new(doc))
 }
 
 /// Enable or disable a single curated rule by its key (the linter struct name,
