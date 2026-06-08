@@ -81,6 +81,37 @@ func TestShouldEscalateEmptyFastPathUsesDefaultMinWords(t *testing.T) {
 	}
 }
 
+func TestShouldEscalate_OnFastEditWhenFlagged(t *testing.T) {
+	// Harper lints carry a fixed 0.95 confidence, so a confident-but-wrong
+	// fast edit would bypass the confidence-floor escalation. With
+	// EscalateOnFastEdit set, any fast edit forces escalation so the LLM
+	// (on the original) can override it. Off by default to preserve the
+	// historical confidence-floor behaviour.
+	fast := []Suggestion{{Span: Span{Start: 0, End: 1}, Replacement: "X", Model: ModelHarper, Confidence: 0.95}}
+	on := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true}
+	off := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: false}
+	if !on.ShouldEscalate("a short clean-ish line", fast) {
+		t.Error("EscalateOnFastEdit=true with any fast edit must escalate")
+	}
+	if off.ShouldEscalate("a short clean-ish line", fast) {
+		t.Error("EscalateOnFastEdit=false must preserve the high-confidence short path")
+	}
+}
+
+func TestShouldEscalate_OnFastEdit_NoEditsNoForce(t *testing.T) {
+	// EscalateOnFastEdit only forces escalation when the fast path actually
+	// produced an edit. With no fast suggestions, the policy must still defer
+	// to the long-input / non-trivial-input rules (mirrors the
+	// MinWordsForEscalation gate).
+	pol := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true, MinWordsForEscalation: 3}
+	if pol.ShouldEscalate("hi", nil) {
+		t.Error("trivial empty-fast-path input should NOT escalate")
+	}
+	if !pol.ShouldEscalate("this is a longer line", nil) {
+		t.Error("non-trivial empty-fast-path input should escalate")
+	}
+}
+
 func TestMergeDedupPrefersHigherConfidenceOnOverlap(t *testing.T) {
 	a := Suggestion{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.9}
 	b := Suggestion{Span: Span{2, 5}, Replacement: "have", Model: ModelLLM, Confidence: 0.5}

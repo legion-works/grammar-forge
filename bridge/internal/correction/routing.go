@@ -20,6 +20,16 @@ type EscalationPolicy struct {
 	// non-trivial input with no fast-path suggestion must still consult the LLM.
 	// Trivial input (fewer words) is trusted as-is to avoid needless LLM calls.
 	MinWordsForEscalation int
+	// EscalateOnFastEdit forces escalation whenever the fast path produced any
+	// edit, regardless of confidence. Harper lints carry a fixed 0.95
+	// confidence, so a confident-but-wrong fast edit (e.g. over-eager
+	// rewording) would otherwise bypass the confidence-floor escalation and be
+	// served as-is. With this on, the LLM (now fed the ORIGINAL text, see
+	// Service.Correct) can override any fast edit. Spike 2026-06-08: turning
+	// this on took the golden set from F0.5 0.951 to 1.000 with 0 clean-text
+	// false positives. Off by default in code; wired to default ON in config
+	// (see config.GF_ESCALATE_ON_FAST_EDIT) — opt-out, not opt-in.
+	EscalateOnFastEdit bool
 }
 
 // ShouldEscalate returns true if the input is long, the fast path found nothing
@@ -38,6 +48,12 @@ func (p EscalationPolicy) ShouldEscalate(text string, fast []Suggestion) bool {
 		// catch errors the fast path is blind to, without burning a slow-path
 		// call on a one- or two-word fragment.
 		return isNonTrivialInput(text, p.MinWordsForEscalation)
+	}
+	if p.EscalateOnFastEdit {
+		// Fast path emitted edits; let the LLM arbitrate from the original
+		// (see Service.Correct). Covers confident-but-wrong Harper lints
+		// that the confidence floor would otherwise serve as-is.
+		return true
 	}
 	gectorScores := make([]float64, 0, len(fast))
 	allScores := make([]float64, 0, len(fast))
