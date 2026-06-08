@@ -121,3 +121,39 @@ func TestPersonalizationExamplesIgnoresSignallessRows(t *testing.T) {
 	}, got.Accepted)
 	require.Empty(t, got.Rejected)
 }
+
+// Rejected pairs must be ordered by RECENCY (MAX(ts) DESC, MAX(id) DESC),
+// not by frequency. An old pair with a high rejection count must NOT
+// crowd out a recent pair at the threshold. Mirrors the Accepted-query
+// ordering so the few-shot block reflects the user's latest preferences
+// (the most useful signal for personalisation), not the loudest.
+func TestPersonalizationExamplesRejectedOrderByRecency(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Helper: log a rejected event.
+	reject := func(orig, sug string) {
+		id, err := s.LogCorrection(ctx, correction.Event{Original: orig, Suggestion: sug, Model: correction.ModelLLM})
+		require.NoError(t, err)
+		require.NoError(t, s.LogSignal(ctx, id, correction.SignalRejected))
+	}
+
+	// OLD pair with HIGH count (5x) — under the old ORDER BY c DESC this
+	// would have come first. Under recency ordering it must come LAST.
+	for i := 0; i < 5; i++ {
+		reject("old", "high-count")
+	}
+	// NEWER pair at the threshold (3x) — under recency ordering this
+	// comes FIRST.
+	for i := 0; i < 3; i++ {
+		reject("new", "threshold")
+	}
+
+	got, err := s.PersonalizationExamples(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []correction.EditPair{
+		{Original: "new", Suggestion: "threshold", Count: 3},
+		{Original: "old", Suggestion: "high-count", Count: 5},
+	}, got.Rejected,
+		"rejected pairs must be ordered by recency (most-recent first), not by count — the newer threshold-count pair must come BEFORE the older high-count pair")
+}

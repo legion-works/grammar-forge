@@ -89,10 +89,13 @@ func (s *SQLite) CountCorrections(ctx context.Context) (int64, error) {
 }
 
 // PersonalizationExamples aggregates the signal log into the few-shot pairs
-// the prompt builder injects into the chat system prompt. Accepted pairs
-// are ordered most-recent-first; rejected pairs are filtered to Count>=3
-// and ordered by frequency (most-rejected first). Both sets are capped at
-// 20 rows. Rows with signal IS NULL (no user reaction) are ignored.
+// the prompt builder injects into the chat system prompt. Both accepted
+// and rejected pairs are ordered most-recent-first (MAX(ts) DESC, then
+// MAX(id) DESC for deterministic ties within the same millisecond) so the
+// few-shot block reflects the user's LATEST preferences, not the loudest.
+// Rejected pairs are filtered to Count>=3 (a single reject is not a strong
+// signal; three is a pattern). Both sets are capped at 20 rows. Rows with
+// signal IS NULL (no user reaction) are ignored on both paths.
 func (s *SQLite) PersonalizationExamples(ctx context.Context) (correction.PersonalizationData, error) {
 	accepted, err := s.queryEditPairs(ctx,
 		`SELECT original, suggestion, COUNT(*) c
@@ -110,7 +113,7 @@ func (s *SQLite) PersonalizationExamples(ctx context.Context) (correction.Person
 		 WHERE signal = 'rejected'
 		 GROUP BY original, suggestion
 		 HAVING c >= 3
-		 ORDER BY c DESC
+		 ORDER BY MAX(ts) DESC, MAX(id) DESC
 		 LIMIT 20`)
 	if err != nil {
 		return correction.PersonalizationData{}, fmt.Errorf("rejected pairs: %w", err)
