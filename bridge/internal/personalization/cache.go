@@ -8,6 +8,7 @@ package personalization
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -86,13 +87,14 @@ func (c *Cache) Snapshot() Block {
 	data, err := c.src.PersonalizationExamples(ctx)
 	// Always advance builtAt: a persistent store error must NOT cause
 	// Snapshot to hammer the store on every keystroke. The rebuilt
-	// snapshot is whatever we render this round; on error we re-render
-	// empty so a subsequent success picks up real data.
+	// snapshot is whatever we serve this round — the previous good block
+	// if we have one, else the empty block. The previous-good path is
+	// important: a transient error during steady-state operation must
+	// not visibly drop the user's learned preferences.
 	c.builtAt = time.Now()
 	c.built = true
 	if err != nil {
 		slog.Warn("personalization: store query failed; serving last-good or empty")
-		// On error, prefer the previous good block (if any).
 		return c.snap
 	}
 	c.snap = renderBlock(data)
@@ -102,6 +104,16 @@ func (c *Cache) Snapshot() Block {
 // renderBlock turns the aggregated data into the few-shot text. It is
 // pure and total: no I/O, no panics on empty input. Empty data -> empty
 // Block; the prompt builder uses Block.Empty to decide whether to inject.
+//
+// SECURITY: Original and Suggestion come from the user's signal log —
+// they are user-controlled text, NOT a trusted template. We render each
+// through strconv.Quote (which escapes quotes, backslashes, and
+// non-printable bytes including \n into the literal two-character \n)
+// so a single example occupies exactly one rendered line. Raw
+// concatenation would let an embedded " break out of the example
+// literal and an embedded \n smuggle a new prompt line into the system
+// prompt — a prompt-injection vector (the "user's" text would appear as
+// a system instruction to the LLM).
 func renderBlock(data correction.PersonalizationData) Block {
 	positive := capSlice(data.Accepted, 10)
 	negative := capSlice(data.Rejected, 10)
@@ -111,16 +123,16 @@ func renderBlock(data correction.PersonalizationData) Block {
 	var b []byte
 	b = append(b, "\n\nLearned preferences:\n"...)
 	for _, p := range positive {
-		b = append(b, "Correct \""...)
-		b = append(b, p.Original...)
-		b = append(b, "\" to \""...)
-		b = append(b, p.Suggestion...)
-		b = append(b, "\".\n"...)
+		b = append(b, "Correct "...)
+		b = strconv.AppendQuote(b, p.Original)
+		b = append(b, " to "...)
+		b = strconv.AppendQuote(b, p.Suggestion)
+		b = append(b, ".\n"...)
 	}
 	for _, p := range negative {
-		b = append(b, "Do NOT change \""...)
-		b = append(b, p.Original...)
-		b = append(b, "\" \u2014 leave it unchanged.\n"...)
+		b = append(b, "Do NOT change "...)
+		b = strconv.AppendQuote(b, p.Original)
+		b = append(b, " \u2014 leave it unchanged.\n"...)
 	}
 	text := string(b)
 	if len(text) > 2000 {
