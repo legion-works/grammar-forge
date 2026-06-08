@@ -3,6 +3,7 @@
 package harperffi
 
 import (
+	"context"
 	"testing"
 
 	"github.com/grammarforge/bridge/internal/correction"
@@ -35,4 +36,23 @@ func TestFilterStyleDropsEnhancement(t *testing.T) {
 func TestFilterStyleNoopWhenNoStyle(t *testing.T) {
 	sugs := []correction.Suggestion{{Span: correction.Span{Start: 0, End: 1}, Replacement: "I", Message: msgPronounI, Model: correction.ModelHarper}}
 	require.Len(t, filterStyleSuggestions(sugs), 1)
+}
+
+func TestHarperCorrect_GatesVocabEnhancement_Golden(t *testing.T) {
+	h := New()
+	defer h.Close()
+	got, err := h.Correct(context.Background(), correction.Request{Text: "I am very good at mathematics."})
+	require.NoError(t, err)
+	for _, s := range got {
+		require.NotContains(t, s.Message, "Vocabulary enhancement",
+			"style enhancement leaked onto the default path: %q -> %q", s.Message, s.Replacement)
+	}
+}
+
+func TestHarperCorrect_KeepsRealGrammarError_Golden(t *testing.T) {
+	h := New()
+	defer h.Close()
+	got, err := h.Correct(context.Background(), correction.Request{Text: "I has three cats."})
+	require.NoError(t, err)
+	require.NotEmpty(t, got, "the SVA error must still be flagged")
 }
