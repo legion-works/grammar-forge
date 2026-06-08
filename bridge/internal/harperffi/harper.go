@@ -19,21 +19,49 @@ import "C"
 
 import (
 	"context"
-	"regexp"
 	"sync"
 	"unsafe"
 
 	"github.com/grammarforge/bridge/internal/correction"
 )
 
-// Harper is a process-wide Corrector. Construct once via New; safe for serial use.
-type Harper struct {
-	mu  sync.Mutex
-	grp *C.LintGroup
+// Suggestion-kind codes returned by harper_get_suggestion via out_kind. These
+// mirror the HARPER_SUGGESTION_* macros in harper.h and harper-core's
+// Suggestion enum; kept as Go constants so the switch does not depend on cgo
+// macro exposure.
+const (
+	suggestionReplaceWith = 0 // replace the lint range with the payload
+	suggestionInsertAfter = 1 // insert the payload after the lint range
+	suggestionRemove      = 2 // delete the lint range (no payload)
+)
+
+// Options configures the Harper corrector.
+type Options struct {
+	// Markdown parses input as Markdown so code spans, fenced code blocks, math,
+	// and HTML are masked unlintable (reinforcing the "don't flag code"
+	// invariant at the engine). When false, input is parsed as plain English.
+	Markdown bool
+	// IgnoreLinkTitle additionally masks Markdown link titles (only meaningful
+	// when Markdown is true).
+	IgnoreLinkTitle bool
 }
 
-// New builds the cached LintGroup (parses the curated dictionary, ~260ms once).
-func New() *Harper { return &Harper{grp: C.harper_create_lint_group()} }
+// Harper is a process-wide Corrector. Construct once via New/NewWithOptions;
+// safe for serial use.
+type Harper struct {
+	mu   sync.Mutex
+	grp  *C.LintGroup
+	opts Options
+}
+
+// New builds a Harper with Markdown parsing enabled (the default). It builds the
+// cached LintGroup (parses the curated dictionary, ~260ms once).
+func New() *Harper { return NewWithOptions(Options{Markdown: true}) }
+
+// NewWithOptions builds a Harper with the given options.
+func NewWithOptions(opts Options) *Harper {
+	return &Harper{grp: C.harper_create_lint_group(), opts: opts}
+}
 
 // Close frees the LintGroup.
 func (h *Harper) Close() {
@@ -46,8 +74,6 @@ func (h *Harper) Close() {
 // Name reports the model tag.
 func (h *Harper) Name() correction.Model { return correction.ModelHarper }
 
-var replRe = regexp.MustCompile(`^Replace with: "(.*)"$`)
-
 // freeCString frees a char* returned by a harper_get_* function. Per harper.h,
 // every such function "Returns a newly allocated string that must be freed by
 // the caller using free()". The GoString call already copies the bytes; we must
@@ -59,14 +85,24 @@ func freeCString(p *C.char) {
 }
 
 // Correct returns Harper lints as byte-offset Suggestions. Harper reports CHAR
-// (rune) offsets and pre-formatted suggestion strings; both are converted here.
+// (rune) offsets, converted to byte offsets here; the structured suggestion kind
+// (replace/insert-after/remove) is read via harper_get_suggestion.
 func (h *Harper) Correct(_ context.Context, req correction.Request) ([]correction.Suggestion, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	ctext := C.CString(req.Text)
 	defer C.free(unsafe.Pointer(ctext))
-	doc := C.harper_create_document(ctext)
+	var doc *C.Document
+	if h.opts.Markdown {
+		ignoreLinkTitle := C.int32_t(0)
+		if h.opts.IgnoreLinkTitle {
+			ignoreLinkTitle = 1
+		}
+		doc = C.harper_create_document_markdown(ctext, ignoreLinkTitle)
+	} else {
+		doc = C.harper_create_document(ctext)
+	}
 	if doc == nil {
 		return nil, nil
 	}
@@ -108,18 +144,29 @@ func (h *Harper) Correct(_ context.Context, req correction.Request) ([]correctio
 		msg := C.GoString(cmsg)
 		freeCString(cmsg)
 
+		// Read the first structured suggestion (kind + payload) rather than
+		// parsing the human-readable suggestion string. The bridge's edit model
+		// is (span, replacement) where Apply does text[:Start]+repl+text[End:],
+		// so each Harper suggestion kind maps as:
+		//   ReplaceWith -> replace the lint range with the payload
+		//   InsertAfter -> a zero-width edit at the range end inserting the payload
+		//   Remove      -> replace the lint range with "" (delete)
+		// A lint with no suggestion keeps an empty replacement (flag only).
+		sugSpan := span
 		repl := ""
-		if n := int(C.harper_get_suggestion_count(lint)); n > 0 {
-			csug := C.harper_get_suggestion_text(lint, 0)
-			raw := C.GoString(csug)
-			freeCString(csug)
-			if m := replRe.FindStringSubmatch(raw); m != nil {
-				repl = m[1]
+		var sugKind C.int32_t
+		var sugText *C.char
+		if C.harper_get_suggestion(lint, 0, &sugKind, &sugText) == 0 {
+			payload := ""
+			if sugText != nil {
+				payload = C.GoString(sugText)
 			}
+			freeCString(sugText) // NULL-safe: Remove yields a NULL payload
+			sugSpan, repl = resolveSuggestionEdit(int(sugKind), payload, span)
 		}
 
 		out = append(out, correction.Suggestion{
-			Span:        span,
+			Span:        sugSpan,
 			Replacement: repl,
 			Message:     msg,
 			Model:       correction.ModelHarper,
@@ -132,6 +179,23 @@ func (h *Harper) Correct(_ context.Context, req correction.Request) ([]correctio
 	// kind above.
 	out = filterLoanwordFalsePositives(req.Text, out, kinds)
 	return out, nil
+}
+
+// resolveSuggestionEdit maps a Harper structured suggestion (kind + payload) to
+// the bridge's (span, replacement) edit model relative to the lint's byte span,
+// where Apply does text[:Start]+replacement+text[End:]:
+//   - ReplaceWith: replace the lint span with the payload.
+//   - InsertAfter: a zero-width edit at the lint span's end inserting the payload.
+//   - Remove (and any unknown kind): replace the lint span with "" (delete).
+func resolveSuggestionEdit(kind int, payload string, lintSpan correction.Span) (correction.Span, string) {
+	switch kind {
+	case suggestionReplaceWith:
+		return lintSpan, payload
+	case suggestionInsertAfter:
+		return correction.Span{Start: lintSpan.End, End: lintSpan.End}, payload
+	default: // suggestionRemove (or unrecognised): delete the range
+		return lintSpan, ""
+	}
 }
 
 // runeOffsetIndex returns a fn mapping a rune index to a byte offset in s.

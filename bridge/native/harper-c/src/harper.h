@@ -23,7 +23,14 @@ char* harper_get_version(void);
 // Returns NULL on error
 Document* harper_create_document(const char* text);
 
-// Free a document created by harper_create_document
+// Create a new document by parsing the text as Markdown. Code spans, fenced code
+// blocks, math, and HTML are masked as unlintable so Harper does not flag inside
+// them. If ignore_link_title is non-zero, Markdown link titles are also ignored.
+// Free with harper_free_document, the same as harper_create_document.
+// Returns NULL on error
+Document* harper_create_document_markdown(const char* text, int32_t ignore_link_title);
+
+// Free a document created by harper_create_document[_markdown]
 void harper_free_document(Document* doc);
 
 // Get the full text content of the document
@@ -98,6 +105,22 @@ int32_t harper_get_suggestion_count(const Lint* lint);
 // Returns a newly allocated string that must be freed by the caller using free()
 // Returns NULL on error
 char* harper_get_suggestion_text(const Lint* lint, int32_t index);
+
+// Suggestion kind codes written to *out_kind by harper_get_suggestion. These
+// mirror harper-core's Suggestion enum.
+#define HARPER_SUGGESTION_REPLACE_WITH 0
+#define HARPER_SUGGESTION_INSERT_AFTER 1
+#define HARPER_SUGGESTION_REMOVE       2
+
+// Gets a structured suggestion for a lint (replaces parsing the human-readable
+// harper_get_suggestion_text output). Writes the kind code (see
+// HARPER_SUGGESTION_* above) to *out_kind, and for REPLACE_WITH / INSERT_AFTER a
+// newly allocated payload string to *out_text (the caller must free it with
+// free()); for REMOVE, *out_text is set to NULL. INSERT_AFTER's payload is to be
+// inserted after the lint's range.
+// Returns 0 on success, or -1 on error (NULL argument, index out of range, or
+// allocation failure).
+int32_t harper_get_suggestion(const Lint* lint, int32_t index, int32_t* out_kind, char** out_text);
 
 #ifdef __cplusplus
 } // End of extern "C"

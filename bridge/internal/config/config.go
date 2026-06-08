@@ -21,8 +21,14 @@ type Config struct {
 
 	// Fast path (Plan 1C): Harper + GECToR run in-process; the LLM is
 	// escalation-only (see correction.EscalationPolicy).
-	GECToRModelDir         string
-	HarperEnabled          bool
+	GECToRModelDir string
+	HarperEnabled  bool
+	// HarperMarkdown parses Harper input as Markdown so code spans, fenced code
+	// blocks, math, and HTML are masked unlintable (default true). Set
+	// GF_HARPER_MARKDOWN=false for plain-English parsing. HarperIgnoreLinkTitle
+	// additionally masks Markdown link titles (default false).
+	HarperMarkdown         bool
+	HarperIgnoreLinkTitle  bool
 	EscalateMinConfidence  float64 // escalate to LLM if best GECToR confidence < this
 	EscalateMaxSentenceLen int     // escalate if input longer than this (chars)
 	EscalateMinWords       int     // escalate empty-fast-path input with >= this many words
@@ -99,6 +105,8 @@ func Load(getenv Getenv) Config {
 
 		GECToRModelDir:         get("GF_GECTOR_MODEL_DIR", "/models/gector"),
 		HarperEnabled:          getBool("GF_HARPER_ENABLED", true),
+		HarperMarkdown:         getBool("GF_HARPER_MARKDOWN", true),
+		HarperIgnoreLinkTitle:  getBool("GF_HARPER_IGNORE_LINK_TITLE", false),
 		EscalateMinConfidence:  getFloat("GF_ESCALATE_MIN_CONFIDENCE", 0.7),
 		EscalateMaxSentenceLen: getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
 		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),

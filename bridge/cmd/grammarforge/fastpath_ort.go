@@ -20,8 +20,11 @@ func buildFastPath(cfg config.Config) ([]correction.Corrector, func()) {
 	var fast []correction.Corrector
 
 	if cfg.HarperEnabled {
-		fast = append(fast, harperffi.New())
-		slog.Info("fast path: harper enabled")
+		fast = append(fast, harperffi.NewWithOptions(harperffi.Options{
+			Markdown:        cfg.HarperMarkdown,
+			IgnoreLinkTitle: cfg.HarperIgnoreLinkTitle,
+		}))
+		slog.Info("fast path: harper enabled", "markdown", cfg.HarperMarkdown)
 	}
 
 	if g, err := gector.New(cfg.GECToRModelDir); err != nil {

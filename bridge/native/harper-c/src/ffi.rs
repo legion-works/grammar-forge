@@ -9,7 +9,8 @@ use std::sync::Arc;
 // Import some basic things from Harper
 use harper_core::{
     core_version,
-    linting::{Lint, LintGroup, Linter},
+    linting::{Lint, LintGroup, Linter, Suggestion},
+    parsers::MarkdownOptions,
     spell::FstDictionary,
     Document,
 };
@@ -44,6 +45,36 @@ pub extern "C" fn harper_create_document(text: *const c_char) -> *mut Document {
     let doc = Document::new_plain_english_curated(text_str);
 
     // Box the document and leak it to get a raw pointer
+    Box::into_raw(Box::new(doc))
+}
+
+/// Creates a new document by parsing the text as Markdown. Code spans, fenced
+/// code blocks, math, and HTML are masked as unlintable so Harper does not flag
+/// inside them (reinforcing the "don't lint code" invariant at the engine).
+/// If ignore_link_title is non-zero, Markdown link titles are also ignored.
+/// Returns a pointer to the document, or null on error. The caller frees it with
+/// harper_free_document, exactly like harper_create_document.
+#[no_mangle]
+pub extern "C" fn harper_create_document_markdown(
+    text: *const c_char,
+    ignore_link_title: c_int,
+) -> *mut Document {
+    if text.is_null() {
+        return ptr::null_mut();
+    }
+
+    let c_str = unsafe { CStr::from_ptr(text) };
+    let text_str = match c_str.to_str() {
+        Ok(s) => s,
+        Err(_) => return ptr::null_mut(),
+    };
+
+    // MarkdownOptions is #[non_exhaustive], so it cannot be struct-literal'd from
+    // outside harper-core; start from the default and set the one field.
+    let mut options = MarkdownOptions::default();
+    options.ignore_link_title = ignore_link_title != 0;
+
+    let doc = Document::new_markdown_curated(text_str, options);
     Box::into_raw(Box::new(doc))
 }
 
@@ -316,4 +347,48 @@ pub extern "C" fn harper_get_suggestion_text(lint: *const Lint, index: c_int) ->
         Ok(cstr) => cstr.into_raw(),
         Err(_) => ptr::null_mut(),
     }
+}
+
+/// Gets a structured suggestion for a lint, replacing the need to parse the
+/// human-readable harper_get_suggestion_text output. Writes the suggestion kind
+/// code to *out_kind (0 = ReplaceWith, 1 = InsertAfter, 2 = Remove) and, for
+/// ReplaceWith/InsertAfter, a newly allocated payload string (the replacement or
+/// the text to insert after the lint range) to *out_text, which the caller must
+/// free with free(); for Remove, *out_text is set to NULL. Returns 0 on success,
+/// or -1 on error (NULL argument, index out of range, or allocation failure).
+#[no_mangle]
+pub extern "C" fn harper_get_suggestion(
+    lint: *const Lint,
+    index: c_int,
+    out_kind: *mut c_int,
+    out_text: *mut *mut c_char,
+) -> c_int {
+    if lint.is_null() || out_kind.is_null() || out_text.is_null() || index < 0 {
+        return -1;
+    }
+
+    let lint = unsafe { &*lint };
+    if index as usize >= lint.suggestions.len() {
+        return -1;
+    }
+
+    let (kind, text): (c_int, Option<String>) = match &lint.suggestions[index as usize] {
+        Suggestion::ReplaceWith(chars) => (0, Some(chars.iter().collect())),
+        Suggestion::InsertAfter(chars) => (1, Some(chars.iter().collect())),
+        Suggestion::Remove => (2, None),
+    };
+
+    let text_ptr = match text {
+        Some(s) => match CString::new(s) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => return -1,
+        },
+        None => ptr::null_mut(),
+    };
+
+    unsafe {
+        *out_kind = kind;
+        *out_text = text_ptr;
+    }
+    0
 }
