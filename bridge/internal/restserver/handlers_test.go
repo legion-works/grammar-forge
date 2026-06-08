@@ -47,6 +47,25 @@ func TestHealthOK(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 }
 
+// Bridge-native clients (Vencord, OpenCode, the textchecker fork) gate
+// premium features on a bridge-side signal. GET /health advertises
+// premium:true so the OSS LT build — which drops `software.premium` and
+// ignores per-match gRPC `Rule.isPremium` — does not need to be the
+// source of truth. The field must serialise as a JSON boolean (not a
+// string) so clients can deserialise it into bool.
+func TestHealthReportsPremium(t *testing.T) {
+	rr := httptest.NewRecorder()
+	serve(&fakeService{}).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		Status  string `json:"status"`
+		Premium bool   `json:"premium"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, "ok", got.Status)
+	require.True(t, got.Premium, "premium must be a JSON boolean true")
+}
+
 func TestCorrectReturnsSuggestions(t *testing.T) {
 	svc := &fakeService{correctOut: correction.Correction{
 		Original: "I has a cat",

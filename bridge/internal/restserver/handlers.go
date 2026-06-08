@@ -41,8 +41,19 @@ type rephraseResult struct {
 	Alternatives []string `json:"alternatives"`
 }
 
+// healthResponse is the GET /health payload. premium is statically true:
+// this is a self-hosted "premium" box. Bridge-native clients
+// (Vencord, OpenCode, the textchecker fork) gate premium features on
+// this field instead of relying on OSS LanguageTool's /v2/check, which
+// drops `software.premium` and the per-match `isPremium` flag unless
+// an org.languagetool.PremiumOn class is on the LT classpath.
+type healthResponse struct {
+	Status  string `json:"status"`
+	Premium bool   `json:"premium"`
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, healthResponse{Status: "ok", Premium: true})
 }
 
 func (s *Server) handleCorrect(w http.ResponseWriter, r *http.Request) {
