@@ -50,6 +50,37 @@ func TestShouldEscalateFallsBackWhenNoGECToRSuggestions(t *testing.T) {
 	}
 }
 
+func TestShouldEscalateEmptyFastPathNonTrivial(t *testing.T) {
+	// Bug #3: Harper+GECToR flag nothing on input with real errors they cannot
+	// see (homophones/confusables). A non-trivial empty-fast-path input MUST
+	// escalate so the LLM gets a chance.
+	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000, MinWordsForEscalation: 3}
+	if !p.ShouldEscalate("I think your right about that", nil) {
+		t.Error("non-trivial empty-fast-path input should escalate")
+	}
+}
+
+func TestShouldEscalateEmptyFastPathTrivialDoesNot(t *testing.T) {
+	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000, MinWordsForEscalation: 3}
+	if p.ShouldEscalate("ok thanks", nil) {
+		t.Error("trivial (<3 words) empty-fast-path input should NOT escalate")
+	}
+	if p.ShouldEscalate("yes", nil) {
+		t.Error("single-word empty-fast-path input should NOT escalate")
+	}
+}
+
+func TestShouldEscalateEmptyFastPathUsesDefaultMinWords(t *testing.T) {
+	// MinWordsForEscalation unset (0) falls back to the package default (3).
+	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000}
+	if !p.ShouldEscalate("she go store today", nil) {
+		t.Error("4-word input should escalate under the default min-words")
+	}
+	if p.ShouldEscalate("go now", nil) {
+		t.Error("2-word input should not escalate under the default min-words")
+	}
+}
+
 func TestMergeDedupPrefersHigherConfidenceOnOverlap(t *testing.T) {
 	a := Suggestion{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.9}
 	b := Suggestion{Span: Span{2, 5}, Replacement: "have", Model: ModelLLM, Confidence: 0.5}

@@ -114,7 +114,9 @@ func (h *Harper) Correct(_ context.Context, req correction.Request) ([]correctio
 			Confidence:  0.95,
 		})
 	}
-	return out, nil
+	// Drop dictionary-driven false positives on non-English loanwords (e.g.
+	// "café au lait" -> "café Au laid"); see filterLoanwordFalsePositives.
+	return filterLoanwordFalsePositives(req.Text, out), nil
 }
 
 // runeOffsetIndex returns a fn mapping a rune index to a byte offset in s.

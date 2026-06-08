@@ -52,8 +52,9 @@ func main() {
 		st,
 		cfg.LLMModel,
 		correction.EscalationPolicy{
-			MinConfidence:  cfg.EscalateMinConfidence,
-			MaxSentenceLen: cfg.EscalateMaxSentenceLen,
+			MinConfidence:         cfg.EscalateMinConfidence,
+			MaxSentenceLen:        cfg.EscalateMaxSentenceLen,
+			MinWordsForEscalation: cfg.EscalateMinWords,
 		},
 	)
 

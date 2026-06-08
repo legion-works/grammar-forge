@@ -1,27 +1,43 @@
 package correction
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
+
+// defaultMinWordsForEscalation is the fallback word count below which an
+// empty-fast-path input is treated as trivial and NOT escalated (used when
+// EscalationPolicy.MinWordsForEscalation is unset / <= 0).
+const defaultMinWordsForEscalation = 3
 
 // EscalationPolicy decides when the fast path is insufficient and the LLM should run.
 type EscalationPolicy struct {
 	MinConfidence  float64
 	MaxSentenceLen int
+	// MinWordsForEscalation is the minimum word count for an EMPTY-fast-path
+	// input to escalate to the LLM. Harper+GECToR miss whole classes of errors
+	// (homophones, confusables, double negatives) and flag nothing, so a
+	// non-trivial input with no fast-path suggestion must still consult the LLM.
+	// Trivial input (fewer words) is trusted as-is to avoid needless LLM calls.
+	MinWordsForEscalation int
 }
 
-// ShouldEscalate returns true if the input is long, the fast path found
-// nothing and the input is long, or the best GECToR suggestion is below the
-// confidence floor. The floor is checked against GECToR suggestions only —
-// Harper lints carry a fixed high confidence (.95) for spelling/style and
-// would mask low-confidence structural-error suggestions. When the fast path
-// produced no GECToR suggestions, the floor is checked against the best of
-// all fast suggestions (historical behaviour, covers the GECToR-unavailable
-// case).
+// ShouldEscalate returns true if the input is long, the fast path found nothing
+// on non-trivial input, or the best GECToR suggestion is below the confidence
+// floor. The floor is checked against GECToR suggestions only — Harper lints
+// carry a fixed high confidence (.95) for spelling/style and would mask
+// low-confidence structural-error suggestions. When the fast path produced no
+// GECToR suggestions (but some Harper ones), the floor is checked against the
+// best of all fast suggestions (covers the GECToR-unavailable case).
 func (p EscalationPolicy) ShouldEscalate(text string, fast []Suggestion) bool {
 	if len([]rune(text)) > p.MaxSentenceLen {
 		return true
 	}
 	if len(fast) == 0 {
-		return false // nothing flagged on short input: trust the fast path
+		// Nothing flagged: escalate only for non-trivial input so the LLM can
+		// catch errors the fast path is blind to, without burning a slow-path
+		// call on a one- or two-word fragment.
+		return isNonTrivialInput(text, p.MinWordsForEscalation)
 	}
 	gectorScores := make([]float64, 0, len(fast))
 	allScores := make([]float64, 0, len(fast))
@@ -87,3 +103,13 @@ func mergeSuggestions(in []Suggestion) []Suggestion {
 }
 
 func overlaps(a, b Span) bool { return a.Start < b.End && b.Start < a.End }
+
+// isNonTrivialInput reports whether text has at least minWords whitespace-
+// separated words (using defaultMinWordsForEscalation when minWords <= 0). Used
+// to gate empty-fast-path LLM escalation so trivial fragments are not escalated.
+func isNonTrivialInput(text string, minWords int) bool {
+	if minWords <= 0 {
+		minWords = defaultMinWordsForEscalation
+	}
+	return len(strings.Fields(text)) >= minWords
+}

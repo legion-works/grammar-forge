@@ -174,6 +174,38 @@ func TestServiceLLMFailureFallsBackToFastPath(t *testing.T) {
 	require.Equal(t, ModelGECToR, got.Suggestions[0].Model)
 }
 
+// capturingLLM records the prompt it was given so tests can assert the LLM
+// receives the fast-path-corrected text under sequential refinement.
+type capturingLLM struct {
+	gotPrompt Prompt
+	out       string
+}
+
+func (c *capturingLLM) Complete(_ context.Context, p Prompt) (string, error) {
+	c.gotPrompt = p
+	return c.out, nil
+}
+
+// Bug #3 regression: on escalation the LLM must receive the fast-path-CORRECTED
+// text (sequential refinement), and the final suggestions must apply against the
+// ORIGINAL exactly once — no double edit from parallel fast+LLM corrections.
+func TestServiceSequentialRefinementFeedsFastCorrectedText(t *testing.T) {
+	st := &fakeStore{}
+	// GECToR makes a low-confidence "cat"->"cats" edit ([13,16)) -> escalates.
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{13, 16}, Replacement: "cats", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	llm := &capturingLLM{out: "I have three cats"}
+	svc := NewService(fakePB{}, []Corrector{fc}, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I have three cat"})
+	require.NoError(t, err)
+	require.Equal(t, "I have three cats", llm.gotPrompt.User,
+		"LLM must receive the fast-path-corrected text, not the raw original")
+	require.Equal(t, "I have three cats", applyAll("I have three cat", got.Suggestions),
+		"final suggestions apply once against the original (no double edit)")
+}
+
 func TestApplyAllAndDominantModel(t *testing.T) {
 	// applyAll applies last-to-first. Same-length replacements so earlier
 	// byte offsets stay valid through the apply.

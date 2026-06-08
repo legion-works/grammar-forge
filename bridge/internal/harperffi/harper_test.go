@@ -34,6 +34,19 @@ func TestHarperByteOffsetsOnMultibyte(t *testing.T) {
 	}
 }
 
+// TestHarperLoanwordPhraseNotFlagged is a real-Harper golden test (not synthetic)
+// guarding the loanword filter against upstream message-string drift: the filter
+// keys on Harper's "title case" / "Did you mean to spell" messages, so if those
+// wordings change the false positives would resurface and this test would fail.
+func TestHarperLoanwordPhraseNotFlagged(t *testing.T) {
+	h := New()
+	defer h.Close()
+	const text = "We paid 5 euros for the café au lait."
+	sugs, err := h.Correct(context.Background(), correction.Request{Text: text})
+	require.NoError(t, err)
+	require.Empty(t, sugs, "clean loanphrase must not be flagged after the loanword filter; got %+v", sugs)
+}
+
 func TestHarperNoLintsCleanText(t *testing.T) {
 	h := New()
 	defer h.Close()
