@@ -2,22 +2,26 @@
 # GrammarForge bridge — full CGo build with bundled ONNX + Harper native libs.
 #
 # Multi-stage:
-#   1. harper  — builds libharper_c.so using a Rust toolchain that is itself
+#   1. harper  — builds libharper_c.so from the VENDORED fork at
+#               bridge/native/harper-c/ using a Rust toolchain that is itself
 #               compiled against bookworm's glibc (rust:1-slim-bookworm).
 #               A rustup-installed "stable" toolchain references newer glibc
 #               symbols (e.g. log10f@GLIBC_2.43 on the host) which the
-#               bookworm linker cannot resolve.
+#               bookworm linker cannot resolve. The fork adds the structured
+#               LintKind + dialect accessors (see native/harper-c/src/ffi.rs).
 #   2. bridge  — copies the freshly-built harper .so + downloads the
 #               hugot-bundled ORT + tokenizers libs, then builds the Go
 #               binary. The .dockerignore excludes bridge/native/ from the
-#               build context so the linker sees only the in-image libs.
+#               build context EXCEPT native/harper-c/ (the Rust source), so the
+#               linker sees only the in-image libs but the source is available.
 #   3. runtime — debian:bookworm-slim + the libs + the binary.
 FROM rust:1-slim-bookworm AS harper
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        gcc libc6-dev git \
+        gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --depth 1 https://github.com/hippietrail/harper-c.git /tmp/harper-c \
-    && (cd /tmp/harper-c && cargo build --release) \
+# Build the vendored fork (Cargo.lock pins the exact harper-core 2.4 dep set).
+COPY native/harper-c/ /tmp/harper-c/
+RUN (cd /tmp/harper-c && cargo build --release --locked) \
     && mkdir -p /out/harper-native \
     && cp /tmp/harper-c/target/release/libharper_c.so /out/harper-native/ \
     && cp /tmp/harper-c/src/harper.h /out/harper-native/

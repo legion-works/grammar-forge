@@ -1,0 +1,21 @@
+# GrammarForge vendored fork of hippietrail/harper-c (MIT).
+#
+# Upstream is a deliberately minimal C-FFI example over harper-core. This fork
+# adds the structured accessors GrammarForge needs so the Go bridge no longer
+# has to classify lints by message substrings:
+#   - harper_get_lint_kind          -> LintKind::to_string_key() (stable kind)
+#   - harper_create_lint_group_with_dialect(code) -> dialect selection
+# See src/ffi.rs and src/harper.h. Cargo.lock is committed so the Docker
+# `harper` stage builds the exact same transitive dependency set.
+[package]
+name = "harper-c"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+harper-core = "2.4"
+
+[workspace]

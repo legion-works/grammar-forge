@@ -9,23 +9,37 @@ import (
 	"github.com/grammarforge/bridge/internal/correction"
 )
 
-// Harper lint message markers used to classify the two dictionary-driven lint
-// categories that misfire on non-English loanwords. These are stable
-// harper-core message strings (verified against the curated rule set); they are
-// matched as substrings so minor wording changes upstream still classify.
-const (
-	harperMsgTitleCase = "title case"            // "...spelling is title case: `Au`."
-	harperMsgSpelling  = "Did you mean to spell" // "Did you mean to spell `lait` this way?"
-)
+// harperMsgTitleCase marks Harper's title-case dictionary-spelling lint
+// ("The canonical dictionary spelling is title case: `Au`."). It is the ONE
+// residual message check the bridge keeps: harper-core emits the same
+// Capitalization LintKind for the title-case dictionary rule, the first-person
+// "I" rule, AND sentence-initial capitalisation, and exposes no finer kind or
+// per-lint rule key over the FFI. Only the title-case dictionary rule produces
+// foreign-loanword false positives; the pronoun-"I" and sentence-start fixes
+// are real and must survive even next to an accented word. So Capitalization is
+// disambiguated on this marker; Spelling needs no such split.
+const harperMsgTitleCase = "title case"
 
-// isLoanwordGateable reports whether a Harper lint message is one of the
-// dictionary-driven categories (title-case or spelling) that produce false
-// positives on foreign loanwords. Structural lints (subject-verb agreement,
-// sentence-start capitalisation, the first-person "I" rule, repeated words,
-// indefinite article) are NOT gateable — they are correct on foreign words too.
-func isLoanwordGateable(message string) bool {
-	return strings.Contains(message, harperMsgTitleCase) ||
-		strings.Contains(message, harperMsgSpelling)
+// isLoanwordGateable reports whether a lint (by its kind, with the message used
+// only to disambiguate the overloaded Capitalization kind) is one of the
+// dictionary-driven categories that can misfire on foreign loanwords:
+//   - Spelling: always gateable ("Did you mean to spell ...").
+//   - Capitalization: gateable ONLY for the title-case dictionary rule (see
+//     harperMsgTitleCase); pronoun-"I" / sentence-start caps are never gated.
+//
+// Structural lints (Agreement, Repetition, Punctuation, ...) are correct on
+// foreign words too and are never gated. Gateability is necessary but not
+// sufficient: the accent-window heuristic in filterLoanwordFalsePositives still
+// restricts actual dropping to a foreign-word context.
+func isLoanwordGateable(kind, message string) bool {
+	switch kind {
+	case lintKindSpelling:
+		return true
+	case lintKindCapitalization:
+		return strings.Contains(message, harperMsgTitleCase)
+	default:
+		return false
+	}
 }
 
 // wordSpan is a byte range of a word token in the source text plus whether the
@@ -92,7 +106,11 @@ func wordIndexFor(words []wordSpan, span correction.Span) int {
 // an accented word (a typo right after "café") is also suppressed. This is a
 // deliberate, rare trade-off — a future improvement is a real foreign-word
 // dictionary or a user allowlist (SPEC §6 personal dictionary).
-func filterLoanwordFalsePositives(text string, sugs []correction.Suggestion) []correction.Suggestion {
+//
+// kinds is the Harper LintKind per suggestion, parallel to sugs; together with
+// each suggestion's message it decides gateability via isLoanwordGateable,
+// replacing the previous message-substring classification.
+func filterLoanwordFalsePositives(text string, sugs []correction.Suggestion, kinds []string) []correction.Suggestion {
 	if len(sugs) == 0 {
 		return sugs
 	}
@@ -107,7 +125,7 @@ func filterLoanwordFalsePositives(text string, sugs []correction.Suggestion) []c
 	flagged := make([]bool, len(words))
 	for i, s := range sugs {
 		gateableWord[i] = -1
-		if !isLoanwordGateable(s.Message) {
+		if i >= len(kinds) || !isLoanwordGateable(kinds[i], s.Message) {
 			continue
 		}
 		wi := wordIndexFor(words, s.Span)

@@ -35,9 +35,10 @@ func TestHarperByteOffsetsOnMultibyte(t *testing.T) {
 }
 
 // TestHarperLoanwordPhraseNotFlagged is a real-Harper golden test (not synthetic)
-// guarding the loanword filter against upstream message-string drift: the filter
-// keys on Harper's "title case" / "Did you mean to spell" messages, so if those
-// wordings change the false positives would resurface and this test would fail.
+// guarding the loanword filter: the spelling/capitalisation lints Harper raises
+// on "café au lait" must be dropped because they chain off the accented "café".
+// The filter now keys on Harper's structured LintKind (Spelling/Capitalization)
+// rather than message substrings, so this also guards harper_get_lint_kind.
 func TestHarperLoanwordPhraseNotFlagged(t *testing.T) {
 	h := New()
 	defer h.Close()
@@ -45,6 +46,32 @@ func TestHarperLoanwordPhraseNotFlagged(t *testing.T) {
 	sugs, err := h.Correct(context.Background(), correction.Request{Text: text})
 	require.NoError(t, err)
 	require.Empty(t, sugs, "clean loanphrase must not be flagged after the loanword filter; got %+v", sugs)
+}
+
+// TestHarperCorrect_GatesStyleEnhancement_Golden is a real-Harper golden test:
+// Harper raises an Enhancement ("Vocabulary enhancement") lint on "very good",
+// which a grammar corrector must not surface on the default path. The kind-based
+// style gate (isStyleKind) must drop it at the source.
+func TestHarperCorrect_GatesStyleEnhancement_Golden(t *testing.T) {
+	h := New()
+	defer h.Close()
+	got, err := h.Correct(context.Background(), correction.Request{Text: "I am very good at mathematics."})
+	require.NoError(t, err)
+	for _, s := range got {
+		require.NotContains(t, s.Message, "Vocabulary enhancement",
+			"style enhancement leaked onto the default path: %q -> %q", s.Message, s.Replacement)
+	}
+}
+
+// TestHarperCorrect_KeepsRealGrammarError_Golden ensures the style gate does not
+// over-filter: a genuine subject-verb agreement error (Agreement kind) must
+// still surface.
+func TestHarperCorrect_KeepsRealGrammarError_Golden(t *testing.T) {
+	h := New()
+	defer h.Close()
+	got, err := h.Correct(context.Background(), correction.Request{Text: "I has three cats."})
+	require.NoError(t, err)
+	require.NotEmpty(t, got, "the SVA error must still be flagged")
 }
 
 func TestHarperNoLintsCleanText(t *testing.T) {

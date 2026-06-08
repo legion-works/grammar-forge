@@ -82,8 +82,20 @@ func (h *Harper) Correct(_ context.Context, req correction.Request) ([]correctio
 	runeToByte := runeOffsetIndex(req.Text)
 	textLen := len(req.Text)
 	var out []correction.Suggestion
+	var kinds []string // LintKind per accepted suggestion, parallel to out
 	for i := 0; i < int(count); i++ {
 		lint := C.gf_lint_at(lints, C.int32_t(i))
+
+		ckind := C.harper_get_lint_kind(lint)
+		kind := C.GoString(ckind)
+		freeCString(ckind)
+		// Gate style/word-choice/readability enhancements at the source: a
+		// grammar corrector must not rewrite already-correct text for style on
+		// the default path (SPEC §6 picky-mode may resurface these). This
+		// replaces the old "Vocabulary enhancement" message-substring filter.
+		if isStyleKind(kind) {
+			continue
+		}
 
 		var cs, ce C.int32_t
 		C.harper_get_lint_range(lint, &cs, &ce)
@@ -113,12 +125,12 @@ func (h *Harper) Correct(_ context.Context, req correction.Request) ([]correctio
 			Model:       correction.ModelHarper,
 			Confidence:  0.95,
 		})
+		kinds = append(kinds, kind)
 	}
-	// Drop dictionary-driven loanword false positives, then style/word-choice
-	// ("Vocabulary enhancement") suggestions — neither belongs on the default
-	// grammar path.
-	out = filterLoanwordFalsePositives(req.Text, out)
-	out = filterStyleSuggestions(out)
+	// Drop dictionary-driven loanword false positives (spelling/capitalisation
+	// lints inside a foreign-word context). Style lints were already gated by
+	// kind above.
+	out = filterLoanwordFalsePositives(req.Text, out, kinds)
 	return out, nil
 }
 

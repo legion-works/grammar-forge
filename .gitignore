@@ -38,9 +38,13 @@ bridge/bridge
 vendor/
 
 # --- bridge native libs + models (large/derived — fetched in CI/Docker) ---
+# Only the direct children of bridge/native/ (the prebuilt .so/.a/.h fetched for
+# local -tags ORT builds) are ignored. The vendored Rust SOURCE under
+# bridge/native/harper-c/ IS committed; only its cargo build output is ignored.
 bridge/native/*.so
 bridge/native/*.a
 bridge/native/*.h
+bridge/native/harper-c/target/
 bridge/models/gector/*
 !bridge/models/gector/README.md
 

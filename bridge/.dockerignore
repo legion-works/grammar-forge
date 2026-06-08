@@ -2,9 +2,15 @@
 # the ORT/tokenizers libs are re-fetched in CI). Without this, the host's
 # glibc-2.43-built libharper_c.so would be copied into the build context
 # and break the bookworm linker.
+#
+# Exception: the vendored harper-c Rust SOURCE (native/harper-c/) MUST be in the
+# build context so the Docker `harper` stage can COPY + cargo build it. Its build
+# output (target/) and any prebuilt .so/.a/.h directly under native/ stay out.
 *_test.go
 /bin/
 /cover.out
 Dockerfile
 .dockerignore
-native/
+native/*
+!native/harper-c
+native/harper-c/target
