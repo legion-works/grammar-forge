@@ -41,8 +41,12 @@ func (f *fakeStore) Close() error                                    { return ni
 
 var errAlways = errors.New("should not be called")
 
-// fastPolicy is the test-default escalation policy (matches the production
-// defaults; centralised so tests don't drift).
+// fastPolicy is the test-default escalation policy. It intentionally leaves
+// EscalateOnFastEdit false (the zero value) so existing tests exercise the
+// confidence-floor path: high-confidence fast edits are served as-is, low-
+// confidence fast edits escalate. Tests that need the on-fast-edit policy
+// construct an EscalationPolicy inline. Centralised so the confidence floor
+// and max-sentence defaults don't drift between tests.
 func fastPolicy() EscalationPolicy { return EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000} }
 
 func TestServiceCorrectLogsAndTagsSuggestions(t *testing.T) {
@@ -193,18 +197,25 @@ func (c *capturingLLM) Complete(_ context.Context, p Prompt) (string, error) {
 // ORIGINAL exactly once — no double edit from parallel fast+LLM corrections.
 func TestServiceEscalationFeedsOriginalText(t *testing.T) {
 	st := &fakeStore{}
-	// GECToR makes a low-confidence "cat"->"cats" edit ([13,16)) -> escalates.
+	// GECToR makes a deliberately-wrong low-confidence "cat"->"dogs" edit
+	// ([13,16)) -> escalates. Under the old sequential refinement the LLM
+	// would have been fed "I have three dogs" (the corrupted intermediate)
+	// and could not have reverted the wrong edit. The LLM must see the
+	// ORIGINAL "I have three cat" so it can reject the bad fast edit.
 	fc := fakeCorrector{
 		name: string(ModelGECToR),
-		sugs: []Suggestion{{Span: Span{13, 16}, Replacement: "cats", Model: ModelGECToR, Confidence: 0.3}},
+		sugs: []Suggestion{{Span: Span{13, 16}, Replacement: "dogs", Model: ModelGECToR, Confidence: 0.3}},
 	}
-	llm := &capturingLLM{out: "I have three cats"}
+	// LLM, seeing the ORIGINAL, rejects the wrong fast edit and returns the
+	// text unchanged. diffToSuggestions yields an empty suggestion set, which
+	// is exactly what we want: the LLM correctly undid the corruption.
+	llm := &capturingLLM{out: "I have three cat"}
 	svc := NewService(fakePB{}, []Corrector{fc}, llm, st, "m", fastPolicy())
 	got, err := svc.Correct(context.Background(), Request{Text: "I have three cat"})
 	require.NoError(t, err)
 	require.Equal(t, "I have three cat", llm.gotPrompt.User,
 		"LLM must receive the ORIGINAL text, not the fast-path-corrected text")
-	require.Equal(t, "I have three cats", applyAll("I have three cat", got.Suggestions),
+	require.Equal(t, "I have three cat", applyAll("I have three cat", got.Suggestions),
 		"final suggestions apply once against the original (no double edit)")
 }
 
