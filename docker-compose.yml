@@ -1,6 +1,7 @@
 # GrammarForge full stack: LanguageTool -> bridge (gRPC) -> fast path + llama.cpp.
-# `docker compose up`. llama.cpp needs an NVIDIA GPU; on CPU-only hosts swap to a
-# remote OpenAI-compatible endpoint by editing GF_LLM_BASE_URL in .env.
+# `docker compose up`. llama.cpp needs an NVIDIA GPU. To use a different backend
+# (CPU host, remote, vLLM, Ollama), point the bridge service's GF_LLM_BASE_URL /
+# GF_LLM_MODEL / GF_LLM_FORMAT below at it (see the commented BYO blocks).
 name: grammarforge
 
 services:
