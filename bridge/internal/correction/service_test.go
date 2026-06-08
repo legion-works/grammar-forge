@@ -174,8 +174,8 @@ func TestServiceLLMFailureFallsBackToFastPath(t *testing.T) {
 	require.Equal(t, ModelGECToR, got.Suggestions[0].Model)
 }
 
-// capturingLLM records the prompt it was given so tests can assert the LLM
-// receives the fast-path-corrected text under sequential refinement.
+// capturingLLM records the prompt it was given so tests can assert what the
+// LLM was fed on escalation.
 type capturingLLM struct {
 	gotPrompt Prompt
 	out       string
@@ -186,10 +186,12 @@ func (c *capturingLLM) Complete(_ context.Context, p Prompt) (string, error) {
 	return c.out, nil
 }
 
-// Bug #3 regression: on escalation the LLM must receive the fast-path-CORRECTED
-// text (sequential refinement), and the final suggestions must apply against the
+// On escalation the LLM must receive the ORIGINAL text, not the fast-path-
+// corrected text. Sequential refinement locked in confident-wrong fast edits
+// the LLM could not revert (spike 2026-06-08: golden residuals fixed 7/7 vs
+// 5/7, 0 clean regressions). Final suggestions must still apply against the
 // ORIGINAL exactly once — no double edit from parallel fast+LLM corrections.
-func TestServiceSequentialRefinementFeedsFastCorrectedText(t *testing.T) {
+func TestServiceEscalationFeedsOriginalText(t *testing.T) {
 	st := &fakeStore{}
 	// GECToR makes a low-confidence "cat"->"cats" edit ([13,16)) -> escalates.
 	fc := fakeCorrector{
@@ -200,8 +202,8 @@ func TestServiceSequentialRefinementFeedsFastCorrectedText(t *testing.T) {
 	svc := NewService(fakePB{}, []Corrector{fc}, llm, st, "m", fastPolicy())
 	got, err := svc.Correct(context.Background(), Request{Text: "I have three cat"})
 	require.NoError(t, err)
-	require.Equal(t, "I have three cats", llm.gotPrompt.User,
-		"LLM must receive the fast-path-corrected text, not the raw original")
+	require.Equal(t, "I have three cat", llm.gotPrompt.User,
+		"LLM must receive the ORIGINAL text, not the fast-path-corrected text")
 	require.Equal(t, "I have three cats", applyAll("I have three cat", got.Suggestions),
 		"final suggestions apply once against the original (no double edit)")
 }

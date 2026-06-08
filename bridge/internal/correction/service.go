@@ -11,10 +11,9 @@ import (
 //  1. Run all fast correctors in order (Harper → GECToR). Best-effort: any
 //     corrector that errors is logged and skipped.
 //  2. Merge/dedup the fast suggestions (greedy by confidence DESC).
-//  3. If the policy says escalate, feed the fast-path-CORRECTED text to the
-//     LLM (sequential refinement) and replace the result with the diff of the
-//     LLM's final output against the ORIGINAL. LLM errors fall back to the
-//     fast-path result (logged).
+//  3. If the policy says escalate, feed the ORIGINAL text to the LLM and
+//     replace the result with the diff of the LLM's final output against the
+//     ORIGINAL. LLM errors fall back to the fast-path result (logged).
 //  4. Log the combined correction (best-effort; log failures are swallowed).
 //  5. Tag every returned suggestion with the logged id.
 //
@@ -61,21 +60,20 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 	all := fast
 
 	if s.llm != nil && s.policy.ShouldEscalate(req.Text, fast) {
-		// Sequential refinement: feed the fast-path-CORRECTED text to the LLM so
-		// it builds on (and is not blind to) what Harper+GECToR already found,
-		// then diff the LLM's final output against the ORIGINAL. This gives the
-		// LLM the fast path's results — required for the GRMR-native completion
-		// format, which has no instruction slot for passing them explicitly —
-		// and yields one clean, non-overlapping suggestion set (avoiding the
-		// double-edit corruption from merging parallel fast+LLM edits).
-		fastCorrected := applyAll(req.Text, fast)
-		llmReq := Request{Text: fastCorrected, Source: req.Source}
-		llmText, err := s.llm.Complete(ctx, s.pb.Build(llmReq))
+		// Feed the LLM the ORIGINAL text, not the fast-path-corrected text.
+		// Sequential refinement locked in confident-wrong fast edits the LLM
+		// could not revert (GECToR "dogs runs"->"ran", "two mouses"->"mice
+		// running"). A capable instruct model corrects the original better
+		// than it repairs a corrupted intermediate (spike 2026-06-08: golden
+		// residuals fixed 7/7 vs 5/7, 0 clean regressions). We diff the LLM
+		// output against the ORIGINAL, so fast-path suggestions are advisory
+		// only on escalation. Safe for both model families (chat + GRMR-native
+		// both correct raw text).
+		llmText, err := s.llm.Complete(ctx, s.pb.Build(req))
 		if err != nil {
 			s.log.Warn("llm escalation failed; using fast path", "err", err)
 		} else {
-			corrected := strings.TrimSpace(llmText)
-			all = diffToSuggestions(req.Text, corrected)
+			all = diffToSuggestions(req.Text, strings.TrimSpace(llmText))
 		}
 	}
 
