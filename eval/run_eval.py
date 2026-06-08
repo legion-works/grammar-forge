@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""GrammarForge GEC eval: feed golden.jsonl to the bridge /correct endpoint,
+"""GrammarForge GEC eval: feed a cases file to the bridge /correct endpoint,
 apply the returned byte-offset suggestions, and score against gold.
 
-Usage: python3 eval/run_eval.py [bridge_url]   (default http://127.0.0.1:8000)
+Usage: python3 eval/run_eval.py [bridge_url] [cases_file]
+  bridge_url  default http://127.0.0.1:8000
+  cases_file  default eval/golden.jsonl (JSONL of {id,cat,input,golden})
+
+results are written next to the cases file as <cases_stem>.results.json
+(golden.jsonl -> golden.results.json; keeps multiple eval sets side by side).
 """
 import json
 import sys
@@ -13,7 +18,11 @@ from pathlib import Path
 
 BRIDGE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000").rstrip("/")
 HERE = Path(__file__).parent
-CASES = [json.loads(l) for l in (HERE / "golden.jsonl").read_text().splitlines() if l.strip()]
+CASES_FILE = Path(sys.argv[2]) if len(sys.argv) > 2 else (HERE / "golden.jsonl")
+CASES = [json.loads(l) for l in CASES_FILE.read_text().splitlines() if l.strip()]
+# Default golden run writes results.json (errant_score.py reads that); a custom
+# cases file writes <stem>.results.json so multiple sets coexist.
+RESULTS_FILE = (HERE / "results.json") if len(sys.argv) <= 2 else CASES_FILE.with_suffix(".results.json")
 
 
 def correct(text, source="eval"):
@@ -90,7 +99,7 @@ def main():
             "n_suggestions": len(sugs),
         })
 
-    (HERE / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False))
+    RESULTS_FILE.write_text(json.dumps(results, indent=2, ensure_ascii=False))
 
     # ---- report ----
     n = len(CASES)

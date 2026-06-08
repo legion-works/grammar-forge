@@ -77,3 +77,7 @@ eval/results.json
 .idea/
 .vscode/
 *.swp
+
+# JFLEG held-out eval data (CC BY-NC-SA corpus text — local only, not committed)
+eval/jfleg_dev.jsonl
+eval/jfleg*.results.json

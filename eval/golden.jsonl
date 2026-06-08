@@ -66,3 +66,60 @@
 {"id": 66, "cat": "clean", "input": "The function returns null when the list is empty.", "golden": "The function returns null when the list is empty."}
 {"id": 67, "cat": "clean", "input": "We paid 5 euros for the café au lait.", "golden": "We paid 5 euros for the café au lait."}
 {"id": 68, "cat": "clean", "input": "Please review the document before the meeting.", "golden": "Please review the document before the meeting."}
+{"id": 69, "cat": "sva", "input": "The list of items are on the desk.", "golden": "The list of items is on the desk."}
+{"id": 70, "cat": "sva", "input": "Neither of the answers were correct.", "golden": "Neither of the answers was correct."}
+{"id": 71, "cat": "sva", "input": "Everybody have their own opinion.", "golden": "Everybody has their own opinion."}
+{"id": 72, "cat": "sva", "input": "There is many reasons to be careful.", "golden": "There are many reasons to be careful."}
+{"id": 73, "cat": "tense", "input": "Yesterday she walk to the market and buy bread.", "golden": "Yesterday she walked to the market and bought bread."}
+{"id": 74, "cat": "tense", "input": "I have saw that movie last week.", "golden": "I saw that movie last week."}
+{"id": 75, "cat": "tense", "input": "He has went home already.", "golden": "He has gone home already."}
+{"id": 76, "cat": "tense", "input": "By the time we arrived, the show already started.", "golden": "By the time we arrived, the show had already started."}
+{"id": 77, "cat": "article", "input": "She is best student in the class.", "golden": "She is the best student in the class."}
+{"id": 78, "cat": "article", "input": "He bought a umbrella and an European map.", "golden": "He bought an umbrella and a European map."}
+{"id": 79, "cat": "article", "input": "I need an hour to finish a honest review.", "golden": "I need an hour to finish an honest review."}
+{"id": 80, "cat": "plural", "input": "She has two childs and three sheeps.", "golden": "She has two children and three sheep."}
+{"id": 81, "cat": "plural", "input": "The criterias for the analysis were unclear.", "golden": "The criteria for the analysis were unclear."}
+{"id": 82, "cat": "plural", "input": "Both womans carried their own luggages.", "golden": "Both women carried their own luggage."}
+{"id": 83, "cat": "homophone", "input": "Their going to bring they're books over there.", "golden": "They're going to bring their books over there."}
+{"id": 84, "cat": "homophone", "input": "Its been raining, so the dog wagged it's tail inside.", "golden": "It's been raining, so the dog wagged its tail inside."}
+{"id": 85, "cat": "homophone", "input": "You're car is parked where your supposed to be.", "golden": "Your car is parked where you're supposed to be."}
+{"id": 86, "cat": "homophone", "input": "The affect of the new policy will effect everyone.", "golden": "The effect of the new policy will affect everyone."}
+{"id": 87, "cat": "homophone", "input": "We should of left then, but we waited to long.", "golden": "We should have left then, but we waited too long."}
+{"id": 88, "cat": "spelling", "input": "The goverment anounced a new enviroment policy.", "golden": "The government announced a new environment policy."}
+{"id": 89, "cat": "spelling", "input": "I definately recieved the seperate package yesterday.", "golden": "I definitely received the separate package yesterday."}
+{"id": 90, "cat": "spelling", "input": "Occured twice, this embarassing mispelling.", "golden": "Occurred twice, this embarrassing misspelling."}
+{"id": 91, "cat": "caps", "input": "we flew to paris in france last april.", "golden": "We flew to Paris in France last April."}
+{"id": 92, "cat": "caps", "input": "my friend john speaks english and spanish.", "golden": "My friend John speaks English and Spanish."}
+{"id": 93, "cat": "punct", "input": "However we still have time.", "golden": "However, we still have time."}
+{"id": 94, "cat": "punct", "input": "Lets eat grandma before the food gets cold.", "golden": "Let's eat, grandma, before the food gets cold."}
+{"id": 95, "cat": "punct", "input": "I bought apples oranges and pears.", "golden": "I bought apples, oranges, and pears."}
+{"id": 96, "cat": "prep", "input": "She is married with a doctor and good in cooking.", "golden": "She is married to a doctor and good at cooking."}
+{"id": 97, "cat": "prep", "input": "He arrived to the airport in time for the flight.", "golden": "He arrived at the airport in time for the flight."}
+{"id": 98, "cat": "prep", "input": "I am interested on learning more about it.", "golden": "I am interested in learning more about it."}
+{"id": 99, "cat": "pronoun", "input": "Me and him went to the store together.", "golden": "He and I went to the store together."}
+{"id": 100, "cat": "pronoun", "input": "The gift was for she and I.", "golden": "The gift was for her and me."}
+{"id": 101, "cat": "pronoun", "input": "Each student must bring their own pencil, but he should label it.", "golden": "Each student must bring their own pencil, but they should label it."}
+{"id": 102, "cat": "negation", "input": "I don't need no help from nobody.", "golden": "I don't need any help from anybody."}
+{"id": 103, "cat": "negation", "input": "She can't hardly wait for the results.", "golden": "She can hardly wait for the results."}
+{"id": 104, "cat": "confusable", "input": "There were less people then expected at the event.", "golden": "There were fewer people than expected at the event."}
+{"id": 105, "cat": "confusable", "input": "The principle reason was to ensure good morals.", "golden": "The principal reason was to ensure good morals."}
+{"id": 106, "cat": "confusable", "input": "He could of done it if he was more discrete about it.", "golden": "He could have done it if he was more discreet about it."}
+{"id": 107, "cat": "confusable", "input": "Whose coming to accept the complement on they're behalf?", "golden": "Who's coming to accept the compliment on their behalf?"}
+{"id": 108, "cat": "wordorder", "input": "Always he is late to the morning meeting.", "golden": "He is always late to the morning meeting."}
+{"id": 109, "cat": "wordorder", "input": "She asked me where was the station.", "golden": "She asked me where the station was."}
+{"id": 110, "cat": "multi", "input": "she dont has no idea were the keys is.", "golden": "She doesn't have any idea where the keys are."}
+{"id": 111, "cat": "multi", "input": "Him and me was very exciting to seen the results yesterday.", "golden": "He and I were very excited to see the results yesterday."}
+{"id": 112, "cat": "multi", "input": "the childrens books was laying on they're desks.", "golden": "The children's books were lying on their desks."}
+{"id": 113, "cat": "multi", "input": "Their is alot of reasons why this dont work good.", "golden": "There are a lot of reasons why this doesn't work well."}
+{"id": 114, "cat": "clean", "input": "The café's piñata was a naïve résumé of clichés.", "golden": "The café's piñata was a naïve résumé of clichés."}
+{"id": 115, "cat": "clean", "input": "She ordered a jalapeño on her crème brûlée by mistake.", "golden": "She ordered a jalapeño on her crème brûlée by mistake."}
+{"id": 116, "cat": "clean", "input": "The committee reviewed the proposal and approved it unanimously.", "golden": "The committee reviewed the proposal and approved it unanimously."}
+{"id": 117, "cat": "clean", "input": "Although it was raining, they decided to go for a walk.", "golden": "Although it was raining, they decided to go for a walk."}
+{"id": 118, "cat": "clean", "input": "Neither the manager nor the employees were aware of the change.", "golden": "Neither the manager nor the employees were aware of the change."}
+{"id": 119, "cat": "clean", "input": "He runs faster than anyone else on the team.", "golden": "He runs faster than anyone else on the team."}
+{"id": 120, "cat": "clean", "input": "Whom did you speak with about the budget?", "golden": "Whom did you speak with about the budget?"}
+{"id": 121, "cat": "clean", "input": "The data suggest that the hypothesis is correct.", "golden": "The data suggest that the hypothesis is correct."}
+{"id": 122, "cat": "clean", "input": "She is taller than he is, but he is stronger.", "golden": "She is taller than he is, but he is stronger."}
+{"id": 123, "cat": "clean", "input": "i++; return arr.length > 0 ? arr[0] : null;", "golden": "i++; return arr.length > 0 ? arr[0] : null;"}
+{"id": 124, "cat": "clean", "input": "The API returns a 404 when the resource doesn't exist.", "golden": "The API returns a 404 when the resource doesn't exist."}
+{"id": 125, "cat": "clean", "input": "Less water was used this year than last year.", "golden": "Less water was used this year than last year."}
