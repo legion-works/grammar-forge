@@ -27,3 +27,33 @@ func TestSuggestionsToMatchListKeepsDeletes(t *testing.T) {
 	})
 	require.Len(t, ml.GetMatches(), 1)
 }
+
+// Regression: LT's GRPCRule throws "Missing message for match with ID <id>" and
+// trips the RemoteRule circuit breaker (dropping ALL bridge matches) when a
+// Match has an empty description. Only the Harper path sets Suggestion.Message,
+// so LLM- and GECToR-sourced matches MUST still get a non-empty description.
+func TestSuggestionToMatchAlwaysHasDescription(t *testing.T) {
+	for _, model := range []correction.Model{
+		correction.ModelLLM, correction.ModelGECToR, correction.ModelHarper, correction.ModelLTRule,
+	} {
+		s := correction.Suggestion{
+			Span: correction.Span{Start: 0, End: 1}, Replacement: "x",
+			Model: model, // Message intentionally empty (the LLM/GECToR case)
+		}
+		m := suggestionToMatch(s)
+		require.NotEmpty(t, m.GetMatchDescription(),
+			"matchDescription must be non-empty for model %q (LT rejects empty)", model)
+		require.NotEmpty(t, m.GetRuleDescription(),
+			"ruleDescription must be non-empty for model %q", model)
+	}
+}
+
+// An explicit Message (Harper path) is still used verbatim as the description.
+func TestSuggestionToMatchPreservesMessage(t *testing.T) {
+	s := correction.Suggestion{
+		Span: correction.Span{Start: 0, End: 1}, Replacement: "x",
+		Message: "subject-verb agreement", Model: correction.ModelHarper,
+	}
+	m := suggestionToMatch(s)
+	require.Equal(t, "subject-verb agreement", m.GetMatchDescription())
+}
