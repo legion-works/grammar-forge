@@ -2,6 +2,7 @@ package restserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/grammarforge/bridge/internal/correction"
@@ -41,7 +42,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleCorrect(w http.ResponseWriter, r *http.Request) {
 	var req correctRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeStrict(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -58,7 +59,7 @@ func (s *Server) handleCorrect(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSignal(w http.ResponseWriter, r *http.Request) {
 	var req signalRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeStrict(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -85,7 +86,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 // backend error.
 func (s *Server) handleRephrase(w http.ResponseWriter, r *http.Request) {
 	var req rephraseRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeStrict(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -119,4 +120,22 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// decodeStrict decodes exactly one JSON value from r into v and rejects any
+// trailing data after it (so `{...} garbage` is a 400, not silently accepted).
+// json.NewDecoder.Decode stops at the first complete value, so a body like
+// `{"text":"x"} trailing` would otherwise return nil and the trailing data
+// would be ignored — which is a footgun for clients that send extra payload
+// by mistake. All POST handlers in this package go through this helper so
+// the contract is uniform.
+func decodeStrict(r *http.Request, v any) error {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if dec.More() {
+		return fmt.Errorf("unexpected trailing data after JSON body")
+	}
+	return nil
 }

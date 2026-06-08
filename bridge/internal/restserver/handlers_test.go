@@ -137,3 +137,28 @@ func TestRephraseLLMError(t *testing.T) {
 	serve(svc).ServeHTTP(rr, req)
 	require.Equal(t, http.StatusBadGateway, rr.Code)
 }
+
+// `json.NewDecoder.Decode` accepts a valid JSON value followed by trailing
+// garbage and returns nil — so a body like `{"text":"hello"} trailing` would
+// be silently accepted as a valid request. Locked to 400 across all POST
+// handlers via the shared strict-decode helper.
+func TestRephraseRejectsTrailingGarbage(t *testing.T) {
+	rr := httptest.NewRecorder()
+	serve(&fakeService{}).ServeHTTP(rr,
+		httptest.NewRequest(http.MethodPost, "/rephrase", strings.NewReader(`{"text":"hello"} trailing`)))
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestCorrectRejectsTrailingGarbage(t *testing.T) {
+	rr := httptest.NewRecorder()
+	serve(&fakeService{}).ServeHTTP(rr,
+		httptest.NewRequest(http.MethodPost, "/correct", strings.NewReader(`{"text":"hello"} trailing`)))
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestSignalRejectsTrailingGarbage(t *testing.T) {
+	rr := httptest.NewRecorder()
+	serve(&fakeService{}).ServeHTTP(rr,
+		httptest.NewRequest(http.MethodPost, "/signal", strings.NewReader(`{"id":1,"signal":"accepted"} trailing`)))
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
