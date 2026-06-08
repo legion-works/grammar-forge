@@ -49,7 +49,10 @@ func (f *fakeStore) LogSignal(_ context.Context, id int64, s Signal) error {
 	return nil
 }
 func (f *fakeStore) CountCorrections(context.Context) (int64, error) { return f.count, nil }
-func (f *fakeStore) Close() error                                    { return nil }
+func (f *fakeStore) PersonalizationExamples(context.Context) (PersonalizationData, error) {
+	return PersonalizationData{}, nil
+}
+func (f *fakeStore) Close() error { return nil }
 
 var errAlways = errors.New("should not be called")
 

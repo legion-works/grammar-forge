@@ -61,12 +61,32 @@ const (
 	TemplateChatInstruct PromptTemplate = "chat_instruct" // /v1/chat/completions
 )
 
+// EditPair is one original->suggestion edit with how many times it carried a
+// given signal. Used to build the personalisation few-shot cache.
+type EditPair struct {
+	Original   string
+	Suggestion string
+	Count      int
+}
+
+// PersonalizationData is the aggregated accept/reject history used to build the
+// prompt-cache few-shot examples (SPEC §5.5 — zero-compute personalisation).
+type PersonalizationData struct {
+	Accepted []EditPair // signal='accepted', most-recent-first, capped
+	Rejected []EditPair // signal='rejected', grouped, Count>=3, capped
+}
+
 // Store persists correction events and user signals (SQLite in Plan 1B).
 type Store interface {
 	LogCorrection(ctx context.Context, ev Event) (id int64, err error)
 	LogSignal(ctx context.Context, correctionID int64, signal Signal) error
 	// CountCorrections returns the total number of logged corrections.
 	CountCorrections(ctx context.Context) (int64, error)
+	// PersonalizationExamples aggregates the signal log into the few-shot
+	// pairs used to personalise the chat system prompt. Implementations must
+	// cap the result (e.g. 20 accepted / 20 rejected) and drop rejected
+	// pairs with Count < 3.
+	PersonalizationExamples(ctx context.Context) (PersonalizationData, error)
 	Close() error
 }
 
