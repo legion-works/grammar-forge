@@ -25,6 +25,14 @@ type Config struct {
 	EscalateMinConfidence  float64 // escalate to LLM if best GECToR confidence < this
 	EscalateMaxSentenceLen int     // escalate if input longer than this (chars)
 	EscalateMinWords       int     // escalate empty-fast-path input with >= this many words
+	// EscalateOnFastEdit forces escalation whenever the fast path produced any
+	// edit (see correction.EscalationPolicy.EscalateOnFastEdit). Defaults true;
+	// the spike showed Harper's fixed 0.95 confidence was letting
+	// confident-but-wrong edits bypass the confidence-floor escalation. The
+	// LLM, fed the ORIGINAL text, can override any fast edit. Opt out with
+	// GF_ESCALATE_ON_FAST_EDIT=false to restore the historical confidence-floor
+	// behaviour.
+	EscalateOnFastEdit bool
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -75,6 +83,7 @@ func Load(getenv Getenv) Config {
 		EscalateMinConfidence:  getFloat("GF_ESCALATE_MIN_CONFIDENCE", 0.7),
 		EscalateMaxSentenceLen: getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
 		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),
+		EscalateOnFastEdit:     getBool("GF_ESCALATE_ON_FAST_EDIT", true),
 	}
 }
 

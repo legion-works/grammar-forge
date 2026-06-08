@@ -59,3 +59,22 @@ func TestLoad_LLMDefaultsAreLlamaCppGemma(t *testing.T) {
 	require.Equal(t, "gemma-4-E4B-it-qat-Q4_K_XL", cfg.LLMModel)
 	require.Equal(t, "chat_instruct", cfg.LLMFormat)
 }
+
+func TestLoad_EscalateOnFastEditDefaultsTrue(t *testing.T) {
+	// Default ON: the spike showed Harper's fixed 0.95 confidence was letting
+	// confident-but-wrong edits bypass the confidence-floor escalation. With
+	// EscalateOnFastEdit defaulting true the LLM (on the original) arbitrates.
+	// Set GF_ESCALATE_ON_FAST_EDIT=false to opt out.
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.True(t, cfg.EscalateOnFastEdit)
+}
+
+func TestLoad_EscalateOnFastEditCanDisable(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_ESCALATE_ON_FAST_EDIT" {
+			return "false", true
+		}
+		return "", false
+	})
+	require.False(t, cfg.EscalateOnFastEdit)
+}

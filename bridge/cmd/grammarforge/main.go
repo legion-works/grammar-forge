@@ -55,6 +55,7 @@ func main() {
 			MinConfidence:         cfg.EscalateMinConfidence,
 			MaxSentenceLen:        cfg.EscalateMaxSentenceLen,
 			MinWordsForEscalation: cfg.EscalateMinWords,
+			EscalateOnFastEdit:    cfg.EscalateOnFastEdit,
 		},
 	)
 
