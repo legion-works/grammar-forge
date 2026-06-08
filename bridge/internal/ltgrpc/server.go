@@ -31,7 +31,7 @@ func (s *Server) Match(ctx context.Context, req *pb.MatchRequest) (*pb.MatchResp
 			resp.SentenceMatches = append(resp.SentenceMatches, &pb.MatchList{}) // empty, keep alignment
 			continue
 		}
-		resp.SentenceMatches = append(resp.SentenceMatches, suggestionsToMatchList(c.Suggestions))
+		resp.SentenceMatches = append(resp.SentenceMatches, suggestionsToMatchList(sentence, c.Suggestions))
 	}
 	return resp, nil
 }
