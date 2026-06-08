@@ -102,6 +102,7 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 //     dropped. Grammar is authoritative — when both pipelines want to edit
 //     the same byte range, the grammar edit wins.
 //   - Style-vs-style overlaps are also deduped (first-by-span-start wins).
+//
 // The function is pure except for the LLM call and the log; safe to invoke
 // from either the LLM-only path or the fast-path-with-escalation path.
 func (s *Service) appendStyleSuggestions(ctx context.Context, req Request, grammar []Suggestion) []Suggestion {

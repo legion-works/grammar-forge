@@ -27,7 +27,7 @@ func (fakePB) BuildRephrase(req RephraseRequest) Prompt {
 // picky-mode is a chat-model feature, and the existing tests run on a fake
 // that uses the GRMR-native format. Tests that need a chat-style style pass
 // override the method on their own fakePB instance.
-func (fakePB) BuildStyle(req Request) Prompt {
+func (fakePB) BuildStyle(_ Request) Prompt {
 	return Prompt{User: "", Template: TemplateGRMRNative}
 }
 
@@ -347,7 +347,7 @@ func contains(haystack, needle string) bool {
 func TestCorrectPickyFalseNoStylePass(t *testing.T) {
 	st := &fakeStore{}
 	llm := &scriptedLLM{
-		grammarOut: "I have a cat", // change vs input -> diffToSuggestions will emit
+		grammarOut: "I have a cat",   // change vs input -> diffToSuggestions will emit
 		styleOut:   "I have a kitty", // would-be style change; must NOT be reached
 	}
 	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())

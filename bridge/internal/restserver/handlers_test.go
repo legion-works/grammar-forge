@@ -175,8 +175,10 @@ func TestCorrectPickyRoundTrips(t *testing.T) {
 		Original: "I has a cat",
 		Suggestions: []correction.Suggestion{
 			{Span: correction.Span{Start: 2, End: 5}, Replacement: "have", Model: correction.ModelLLM}, // grammar
-			{Span: correction.Span{Start: 7, End: 10}, Replacement: "kitty", Model: correction.ModelLLM,
-				Category: correction.CategoryStyle}, // style
+			{
+				Span: correction.Span{Start: 7, End: 10}, Replacement: "kitty", Model: correction.ModelLLM,
+				Category: correction.CategoryStyle,
+			}, // style
 		},
 		Score: 80,
 	}}
