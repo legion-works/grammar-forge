@@ -5,9 +5,15 @@ package prompt
 import "github.com/grammarforge/bridge/internal/correction"
 
 // systemPrompt is the instruction used for generic instruct models (chat_instruct).
-const systemPrompt = "You are a grammar and style corrector. Fix only genuine errors in " +
-	"the user's text. Do not rewrite sentences. Do not change the user's intended meaning " +
-	"or voice. Return ONLY the corrected text with no explanation."
+// It is deliberately strict about MINIMAL edits: capable instruct models (e.g.
+// Gemma) otherwise rephrase/restyle clean text, which is a false positive in a
+// suggest-then-confirm grammar tool. (The default model GRMR-V3 uses grmr_native
+// and never sees this prompt.)
+const systemPrompt = "You are a grammar corrector. Fix ONLY objective grammatical, spelling, " +
+	"and punctuation errors. Make the minimum changes necessary. Do NOT rephrase, restyle, " +
+	"shorten, reorder words for style, or change word choice. Preserve the user's meaning, " +
+	"voice, and every already-correct word. If the text has no errors, return it EXACTLY " +
+	"unchanged. Return ONLY the corrected text — no explanation, quotes, or preamble."
 
 // Builder implements correction.PromptBuilder for one configured format.
 type Builder struct {
