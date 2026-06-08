@@ -6,7 +6,17 @@ import (
 	"strings"
 
 	"github.com/grammarforge/bridge/internal/correction"
+	"github.com/grammarforge/bridge/internal/personalization"
 )
+
+// Personalizer supplies the learned-preference few-shot block to inject
+// into the chat system prompt. nil => no personalisation. Defined here as
+// a tiny interface so the prompt package does not hard-depend on the
+// concrete *personalization.Cache (the prompt builder only needs
+// Snapshot()).
+type Personalizer interface {
+	Snapshot() personalization.Block
+}
 
 // systemPrompt is the instruction used for generic instruct models (chat_instruct).
 // It is deliberately strict about MINIMAL edits: capable instruct models (e.g.
@@ -51,21 +61,45 @@ const styleSystemPrompt = "You are a writing style assistant. Suggest STYLE and 
 
 // Builder implements correction.PromptBuilder for one configured format.
 type Builder struct {
-	chat bool // true => chat_instruct, false => grmr_native
+	chat         bool // true => chat_instruct, false => grmr_native
+	personalizer Personalizer
 }
 
 // New returns a Builder for the given format ("chat_instruct" or "grmr_native").
 // Any unknown value falls back to grmr_native (the default model is GRMR-V3).
+// The returned builder has no personaliser — use NewWithPersonalizer to wire
+// the prompt-cache few-shot block.
 func New(format string) *Builder {
 	return &Builder{chat: format == "chat_instruct"}
 }
 
+// NewWithPersonalizer returns a Builder that injects the personalisation
+// block (when non-empty) into the chat system prompt. The personaliser is
+// only consulted on the chat path and only on Build; BuildRephrase and
+// BuildStyle ignore it — the accept/reject signal log feeds the GRAMMAR
+// pass, not rephrasing or picky style suggestions. GRMR-native never
+// receives a system prompt, so the personaliser is also a no-op on that
+// path.
+func NewWithPersonalizer(format string, p Personalizer) *Builder {
+	b := New(format)
+	b.personalizer = p
+	return b
+}
+
 // Build renders the request into a Prompt. GRMR-V3 takes NO system prompt and
 // uses its native completion format; generic instruct models use chat+system.
+// On the chat path, a non-empty personaliser Block is appended to the base
+// system prompt so the LLM sees the few-shot examples.
 func (b *Builder) Build(req correction.Request) correction.Prompt {
 	if b.chat {
+		sys := systemPrompt
+		if b.personalizer != nil {
+			if block := b.personalizer.Snapshot(); !block.Empty() {
+				sys += block.String()
+			}
+		}
 		return correction.Prompt{
-			System:   systemPrompt,
+			System:   sys,
 			User:     req.Text,
 			Template: correction.TemplateChatInstruct,
 		}
