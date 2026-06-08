@@ -23,6 +23,14 @@ func (fakePB) BuildRephrase(req RephraseRequest) Prompt {
 	return Prompt{User: req.Text, Template: TemplateGRMRNative}
 }
 
+// BuildStyle is the no-op default (matches the real GRMR-native behaviour):
+// picky-mode is a chat-model feature, and the existing tests run on a fake
+// that uses the GRMR-native format. Tests that need a chat-style style pass
+// override the method on their own fakePB instance.
+func (fakePB) BuildStyle(req Request) Prompt {
+	return Prompt{User: "", Template: TemplateGRMRNative}
+}
+
 type fakeStore struct {
 	lastEvent  Event
 	lastSignal Signal

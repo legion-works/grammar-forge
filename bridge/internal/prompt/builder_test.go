@@ -82,3 +82,34 @@ func TestBuildRephraseGRMRNative(t *testing.T) {
 	require.Equal(t, "<|text_start|>\nI has a cat<|text_end|>\n<|corrected_start|>\n", p.User)
 	require.Equal(t, []string{"<|corrected_end|>", "<|text_start|>"}, p.Stop)
 }
+
+// Picky-mode style pass uses chat_instruct. The style system prompt must be
+// DISTINCT from both the minimal-edit grammar prompt and the rephrase prompt:
+// picky is a layer ON TOP of grammar, asking for clarity/word-choice edits
+// without changing meaning. Reusing systemPrompt would forbid all edits;
+// reusing rephraseSystemPrompt would over-restyle (picky is opt-in, not a
+// full rewrite).
+func TestBuildStyleChat(t *testing.T) {
+	b := New("chat_instruct")
+	p := b.BuildStyle(correction.Request{Text: "He is a good person who does good things."})
+	require.Equal(t, correction.TemplateChatInstruct, p.Template)
+	require.NotEmpty(t, p.System, "style chat prompt must have a system prompt")
+	require.Contains(t, strings.ToLower(p.System), "style",
+		"style system prompt must mention style/clarity as the goal")
+	require.NotContains(t, p.System, "Make the minimum changes",
+		"style must NOT reuse the strict minimal-edit grammar prompt")
+	require.NotEqual(t, rephraseSystemPrompt, p.System,
+		"style system prompt must be distinct from the rephrase prompt")
+	require.Equal(t, "He is a good person who does good things.", p.User)
+}
+
+// GRMR-V3's native format has no instruction slot and is correction-tuned,
+// not style-tuned. Picky-mode is a chat-model feature. BuildStyle returns
+// the empty-User skip signal (the Service checks p.User == "") so the
+// service can short-circuit and avoid a useless LLM call.
+func TestBuildStyleGRMRNativeIsNoop(t *testing.T) {
+	b := New("grmr_native")
+	p := b.BuildStyle(correction.Request{Text: "He is a good person."})
+	require.Equal(t, correction.TemplateGRMRNative, p.Template)
+	require.Empty(t, p.User, "GRMR-native style pass must return empty User as the skip signal")
+}

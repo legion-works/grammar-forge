@@ -36,6 +36,12 @@ type LLMClient interface {
 type PromptBuilder interface {
 	Build(req Request) Prompt
 	BuildRephrase(req RephraseRequest) Prompt
+	// BuildStyle returns the picky-mode style-pass prompt. On GRMR-native
+	// (which is correction-tuned, not style-tuned) this returns the empty-
+	// User skip signal so the service can short-circuit the LLM call. On
+	// chat_instruct this returns a style/clarity-focused system prompt
+	// distinct from the minimal-edit grammar prompt and the rephrase prompt.
+	BuildStyle(req Request) Prompt
 }
 
 // Prompt is a backend-agnostic prompt; the LLMClient renders it to the wire.

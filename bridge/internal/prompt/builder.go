@@ -33,6 +33,22 @@ const rephraseSystemPrompt = "You are a writing assistant. Rewrite the user's te
 	"Fix grammar, spelling, and punctuation as part of the rewrite. " +
 	"Return ONLY the rewritten text — no explanation, quotes, or preamble."
 
+// styleSystemPrompt is the instruction used for the chat_instruct picky-mode
+// STYLE pass. It is INTENTIONALLY separate from both systemPrompt and
+// rephraseSystemPrompt: picky is a layer ON TOP of grammar (a peer of the
+// grammar pass, not a replacement) and asks for word-choice, conciseness,
+// flow, and readability improvements WITHOUT changing the meaning. It is
+// NOT a rephrase: the user is choosing to see style suggestions in addition
+// to grammar ones, so the rewrite must stay close to the original. Grammar
+// errors are still flagged on the grammar pass; style is ONLY style/clarity.
+const styleSystemPrompt = "You are a writing style assistant. Suggest STYLE and CLARITY " +
+	"improvements (word choice, conciseness, flow, readability) WITHOUT changing " +
+	"the meaning, voice, or grammar of the original. Make the changes minimal — " +
+	"this is a suggest-then-confirm pass, not a rewrite. Preserve the user's " +
+	"meaning exactly. NEVER remove or alter accents or diacritics (e.g. keep " +
+	"café, naïve, résumé exactly). Return ONLY the improved text — no explanation, " +
+	"quotes, or preamble."
+
 // Builder implements correction.PromptBuilder for one configured format.
 type Builder struct {
 	chat bool // true => chat_instruct, false => grmr_native
@@ -87,6 +103,29 @@ func (b *Builder) BuildRephrase(req correction.RephraseRequest) correction.Promp
 	return correction.Prompt{
 		User:     "<|text_start|>\n" + req.Text + "<|text_end|>\n<|corrected_start|>\n",
 		Stop:     []string{"<|corrected_end|>", "<|text_start|>"},
+		Template: correction.TemplateGRMRNative,
+	}
+}
+
+// BuildStyle renders a picky-mode style-pass request into a Prompt. Chat
+// models receive the style system prompt (focused on word choice, conciseness,
+// flow, readability — NOT a rewrite). GRMR-native is a no-op: picky-mode is a
+// chat-model feature; the native format is correction-tuned and would just
+// re-do the grammar pass. The empty-User signal is the skip sentinel the
+// service checks to short-circuit the LLM call entirely.
+func (b *Builder) BuildStyle(req correction.Request) correction.Prompt {
+	if b.chat {
+		return correction.Prompt{
+			System:   styleSystemPrompt,
+			User:     req.Text,
+			Template: correction.TemplateChatInstruct,
+		}
+	}
+	// GRMR-native: no-op. Picky-mode is a chat-model feature; the native
+	// format is correction-tuned. Return the empty-User skip signal so the
+	// service can short-circuit the LLM call.
+	return correction.Prompt{
+		User:     "",
 		Template: correction.TemplateGRMRNative,
 	}
 }
