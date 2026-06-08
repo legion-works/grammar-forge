@@ -91,9 +91,13 @@ The **Bridge runs two listeners**, which is easy to miss:
   hotkeys/autocorrect/overlay in the client; the bridge stays UI-agnostic.
 - **External API contracts — don't reshape casually:** `/v2/check` must stay
   LanguageTool-compatible (drop-in for existing clients); `/correct` is GrammarLLM-compatible
-  JSON. The bridge **injects `premium: true`** into `/v2/check` for clients that gate on it —
-  the upstream LT browser add-on is closed-source/outdated and cannot be patched (fork
-  `codextde/textchecker` for the custom UI instead).
+  JSON. On OSS LanguageTool, `software.premium` and per-match `isPremium` are dropped unless an
+  `org.languagetool.PremiumOn` class is on the LT classpath (we ship that shim under
+  `config/premium/`); the bridge's gRPC `Rule.isPremium` is ignored by OSS `GRPCRule` and is
+  kept only for future / premium LT builds. For bridge-native clients the source of truth is
+  the bridge's own REST `GET /health`, which advertises `premium: true`. The upstream LT
+  browser add-on is closed-source/outdated and cannot be patched (fork `codextde/textchecker`
+  for the custom UI instead).
 - **Phase order matters.** Phase-1 personalisation is a prompt-level accept/reject cache,
   **not training**. We log `base_model`/`adapter` now to *architect* for the Phase-3 QLoRA
   loop, but don't build it before ~500 accepted corrections.
