@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end smoke for the GrammarForge stack. Requires an NVIDIA GPU host and
 # the bridge build context (bridge/native/*, bridge/models/) present.
-# First vLLM start downloads the model — be patient.
+# The llama.cpp backend loads a local GGUF (place it under models/llm/ first) —
+# load takes a few seconds, no download.
 set -euo pipefail
 
 cleanup() { docker compose down -v >/dev/null 2>&1 || true; }
@@ -18,11 +19,11 @@ for i in $(seq 1 60); do
 done
 curl -fsS http://127.0.0.1:8000/health; echo
 
-echo "==> waiting for vLLM (model load can take minutes on first run)"
+echo "==> waiting for llama.cpp backend (local GGUF load, ~seconds)"
 # shellcheck disable=SC2034
 for i in $(seq 1 180); do
   if curl -fsS http://127.0.0.1:8000/stats >/dev/null 2>&1 \
-     && docker compose logs vllm 2>/dev/null | grep -q "Application startup complete"; then break; fi
+     && docker compose logs llamacpp 2>/dev/null | grep -q "server is listening"; then break; fi
   sleep 5
 done
 
