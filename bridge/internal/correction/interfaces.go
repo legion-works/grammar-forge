@@ -6,6 +6,14 @@ import "context"
 type Request struct {
 	Text   string
 	Source Source
+	// Picky enables a best-effort style/clarity pass on top of the grammar
+	// pipeline (REST /correct only — the gRPC MatchRequest has no options
+	// field, see SPEC §4.2). When true and the LLM is configured, the service
+	// runs an additional style pass on the original text and merges any
+	// style suggestions into the result with category="style". Grammar
+	// suggestions are authoritative: any style edit that overlaps a grammar
+	// edit is dropped. Picky defaults to false; clients opt in.
+	Picky bool
 }
 
 // Corrector is a fast-path engine (Harper, GECToR). Implementations live in

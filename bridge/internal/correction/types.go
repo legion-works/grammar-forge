@@ -43,6 +43,14 @@ func (s Span) Validate(textLen int) error {
 	return nil
 }
 
+// Suggestion categories. Grammar (the default, empty string) covers grammatical,
+// spelling, and punctuation fixes; Style marks picky-mode style/clarity/word-choice
+// suggestions (returned only when the REST /correct request sets picky=true).
+const (
+	CategoryGrammar = ""      // default — no JSON change for existing grammar suggestions
+	CategoryStyle   = "style" // picky-mode style suggestion
+)
+
 // Suggestion is a single proposed edit. The bridge SUGGESTS; clients apply.
 type Suggestion struct {
 	// ID is the correction-log row id, set after the suggestion is persisted,
@@ -54,6 +62,12 @@ type Suggestion struct {
 	Model       Model   `json:"model"`
 	RuleID      string  `json:"ruleId,omitempty"`
 	Confidence  float64 `json:"confidence,omitempty"`
+	// Category tags the suggestion origin. Empty (CategoryGrammar) for the
+	// default grammar pipeline so JSON output is unchanged; "style" (CategoryStyle)
+	// for the picky-mode style pass so clients can render/hide style suggestions
+	// separately. Serialised with omitempty so the field is absent on JSON for
+	// grammar suggestions.
+	Category string `json:"category,omitempty"`
 }
 
 // Apply returns original with this suggestion's byte span replaced. Caller

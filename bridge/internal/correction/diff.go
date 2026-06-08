@@ -7,7 +7,19 @@ import "github.com/sergi/go-diff/diffmatchpatch"
 // delete-then-insert pair becomes one replacement; a lone insert is a zero-width
 // span; a lone delete is a deletion (empty replacement). Suggestions are ordered
 // by ascending span start (apply them last-to-first to keep offsets valid).
+// The grammar path: every suggestion gets Category == "" (CategoryGrammar) so
+// JSON output is unchanged.
 func diffToSuggestions(original, corrected string) []Suggestion {
+	return diffToSuggestionsCategory(original, corrected, CategoryGrammar)
+}
+
+// diffToSuggestionsCategory is the workhorse used by both the grammar path and
+// the picky-mode style pass. category tags every produced Suggestion (see
+// CategoryGrammar, CategoryStyle). Model is always ModelLLM because the diff
+// is always computed against the LLM's corrected output — whether that output
+// is a grammar correction or a style restyle is a property of the LLM call, not
+// of the diff itself.
+func diffToSuggestionsCategory(original, corrected string, category string) []Suggestion {
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(original, corrected, false)
 	dmp.DiffCleanupSemantic(diffs)
@@ -29,10 +41,12 @@ func diffToSuggestions(original, corrected string) []Suggestion {
 			}
 			out = append(out, Suggestion{
 				Span: Span{Start: start, End: start + len(d.Text)}, Replacement: repl, Model: ModelLLM,
+				Category: category,
 			})
 		case diffmatchpatch.DiffInsert:
 			out = append(out, Suggestion{
 				Span: Span{Start: pos, End: pos}, Replacement: d.Text, Model: ModelLLM,
+				Category: category,
 			})
 		}
 	}

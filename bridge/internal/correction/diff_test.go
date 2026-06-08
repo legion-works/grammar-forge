@@ -85,6 +85,35 @@ func TestDiffLoneDeletionHasEmptyReplacement(t *testing.T) {
 	}
 }
 
+// diffToSuggestionsCategory tags every produced Suggestion with the given
+// category. The grammar path uses CategoryGrammar ("") so JSON output is
+// unchanged; picky-mode style pass uses CategoryStyle so clients can
+// distinguish style suggestions from grammar ones.
+func TestDiffToSuggestionsCategory(t *testing.T) {
+	sugs := diffToSuggestionsCategory("I has a cat", "I have a cat", CategoryStyle)
+	if len(sugs) != 1 {
+		t.Fatalf("want 1 suggestion, got %d: %+v", len(sugs), sugs)
+	}
+	if sugs[0].Category != CategoryStyle {
+		t.Errorf("category = %q, want %q", sugs[0].Category, CategoryStyle)
+	}
+	if sugs[0].Model != ModelLLM {
+		t.Errorf("model = %q, want %q", sugs[0].Model, ModelLLM)
+	}
+}
+
+// diffToSuggestions is the grammar-path wrapper; it must keep Category empty
+// so existing JSON serialisation is unchanged (omitempty drops the field).
+func TestDiffToSuggestionsGrammarCategoryEmpty(t *testing.T) {
+	sugs := diffToSuggestions("I has a cat", "I have a cat")
+	if len(sugs) != 1 {
+		t.Fatalf("want 1 suggestion, got %d", len(sugs))
+	}
+	if sugs[0].Category != "" {
+		t.Errorf("grammar category = %q, want empty (omitempty in JSON)", sugs[0].Category)
+	}
+}
+
 func TestDiffMultibyteByteSpanApplies(t *testing.T) {
 	original := "café €5"
 	corrected := "café $5"
