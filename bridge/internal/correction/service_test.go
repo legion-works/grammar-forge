@@ -17,7 +17,8 @@ func (f fakeLLM) Complete(context.Context, Prompt) (string, error) { return f.ou
 
 type fakePB struct{}
 
-func (fakePB) Build(req Request) Prompt                 { return Prompt{User: req.Text, Template: TemplateGRMRNative} }
+func (fakePB) Build(req Request) Prompt { return Prompt{User: req.Text, Template: TemplateGRMRNative} }
+
 func (fakePB) BuildRephrase(req RephraseRequest) Prompt {
 	return Prompt{User: req.Text, Template: TemplateGRMRNative}
 }
