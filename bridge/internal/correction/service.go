@@ -151,6 +151,27 @@ func (s *Service) CountCorrections(ctx context.Context) (int64, error) {
 	return s.store.CountCorrections(ctx)
 }
 
+// Rephrase asks the LLM to rewrite req.Text for clarity/fluency. It is
+// LLM-only (no fast path; rephrase is a chat-model feature and GRMR-V3's
+// native format is correction-tuned). Unlike Correct, this method:
+//   - surfaces LLM errors to the caller (no best-effort fallback);
+//   - does NOT log to the store (rephrase has no signal lifecycle / is not a
+//     grammar suggestion to accept-or-reject).
+func (s *Service) Rephrase(ctx context.Context, req RephraseRequest) (RephraseResult, error) {
+	if s.llm == nil {
+		return RephraseResult{}, fmt.Errorf("rephrase requires an llm backend")
+	}
+	out, err := s.llm.Complete(ctx, s.pb.BuildRephrase(req))
+	if err != nil {
+		return RephraseResult{}, fmt.Errorf("rephrase: llm complete: %w", err)
+	}
+	return RephraseResult{
+		Original:     req.Text,
+		Rephrased:    strings.TrimSpace(out),
+		Alternatives: []string{},
+	}, nil
+}
+
 // applyAll applies suggestions last-to-first so earlier byte offsets stay
 // valid as later (higher) spans are replaced.
 func applyAll(text string, sugs []Suggestion) string {

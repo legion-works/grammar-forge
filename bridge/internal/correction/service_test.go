@@ -17,7 +17,10 @@ func (f fakeLLM) Complete(context.Context, Prompt) (string, error) { return f.ou
 
 type fakePB struct{}
 
-func (fakePB) Build(req Request) Prompt { return Prompt{User: req.Text, Template: TemplateGRMRNative} }
+func (fakePB) Build(req Request) Prompt                 { return Prompt{User: req.Text, Template: TemplateGRMRNative} }
+func (fakePB) BuildRephrase(req RephraseRequest) Prompt {
+	return Prompt{User: req.Text, Template: TemplateGRMRNative}
+}
 
 type fakeStore struct {
 	lastEvent  Event
@@ -234,4 +237,39 @@ func TestApplyAllAndDominantModel(t *testing.T) {
 	require.Equal(t, ModelLLM, dominantModel([]Suggestion{
 		{Model: ModelLLM}, {Model: ModelLLM}, {Model: ModelGECToR},
 	}))
+}
+
+// Rephrase is LLM-only. The fast path / grammar pipeline must NOT run, the
+// store must NOT be logged to, and the result's Original must be the
+// unmodified input text.
+func TestServiceRephraseHappyPath(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "a rewrite"}, st, "m", fastPolicy())
+	got, err := svc.Rephrase(context.Background(), RephraseRequest{Text: "He go to store.", Source: SourceVencord})
+	require.NoError(t, err)
+	require.Equal(t, "He go to store.", got.Original)
+	require.Equal(t, "a rewrite", got.Rephrased)
+	require.Empty(t, got.Alternatives, "Alternatives is reserved; must be empty")
+	require.Equal(t, int64(0), st.count, "rephrase must NOT log to the store")
+}
+
+// LLM backend failure must surface to the caller (unlike Correct's best-effort
+// fast-path fallback): rephrase is LLM-only, so a backend error is a 502.
+func TestServiceRephraseLLMError(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	_, err := svc.Rephrase(context.Background(), RephraseRequest{Text: "x"})
+	require.Error(t, err)
+	require.Equal(t, int64(0), st.count, "rephrase must NOT log on backend error")
+}
+
+// A Service with no LLM backend is a misconfiguration for rephrase. Surface a
+// clear error rather than silently producing a Suggestion for the original
+// text or panicking on nil deref.
+func TestServiceRephraseNilLLM(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, nil, st, "m", fastPolicy())
+	_, err := svc.Rephrase(context.Background(), RephraseRequest{Text: "x"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm")
 }

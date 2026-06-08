@@ -27,6 +27,7 @@ type LLMClient interface {
 // implementation branches on model family (GRMR-native vs generic chat+system).
 type PromptBuilder interface {
 	Build(req Request) Prompt
+	BuildRephrase(req RephraseRequest) Prompt
 }
 
 // Prompt is a backend-agnostic prompt; the LLMClient renders it to the wire.
