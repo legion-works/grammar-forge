@@ -115,7 +115,20 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
         event.stopPropagation()
     })
 
+    // Escape closes the popover (keyboard parity with the click-outside path).
+    function onKeydown(event: KeyboardEvent): void {
+        if (event.key === 'Escape') {
+            event.preventDefault()
+            handle.hide()
+        }
+    }
+    panel.addEventListener('keydown', onKeydown)
+
     root.appendChild(panel)
+
+    // Move focus to the primary action so keyboard users can apply with Enter
+    // / Space without tabbing in from the field.
+    panel.querySelector<HTMLButtonElement>('.gf-panel__btn--primary')?.focus()
 
     let outsideListenerInstalled = false
     function onOutsideMouseDown(event: MouseEvent): void {
@@ -145,6 +158,7 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
                 doc.removeEventListener('mousedown', onOutsideMouseDown, true)
                 outsideListenerInstalled = false
             }
+            panel.removeEventListener('keydown', onKeydown)
             if (panel.isConnected) panel.remove()
             unregisterPopover(root, handle)
         },

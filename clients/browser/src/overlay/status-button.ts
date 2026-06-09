@@ -271,8 +271,10 @@ function buildBodyHTML(options: StatusButtonOptions): string {
     const summary = buildCategorySummary(options.byCategory)
     return (
         `<span aria-hidden="true" style="color:#ef4444">!</span> ` +
+        `<span aria-live="polite" aria-atomic="true">` +
         `<span>${options.count} issue${options.count === 1 ? '' : 's'}</span>` +
         (summary ? ` <span style="opacity:.7">·</span> <span>${escapeText(summary)}</span>` : '') +
+        `</span>` +
         buildBreakdownBar(options.byCategory)
     )
 }

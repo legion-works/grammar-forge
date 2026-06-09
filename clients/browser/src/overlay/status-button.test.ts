@@ -194,4 +194,13 @@ describe('renderStatusButton', () => {
         renderStatusButton(root, mkOptions({ count: 0, corrections: [], byCategory: {} }))
         expect(root.querySelector('.gf-pill-bar')).toBeNull()
     })
+
+    it('wraps the issue count in an aria-live polite region', () => {
+        const root = mkRoot()
+        renderStatusButton(root, mkOptions({ count: 3 }))
+        const live = root.querySelector('[aria-live="polite"]') as HTMLElement
+        expect(live).not.toBeNull()
+        expect(live.getAttribute('aria-atomic')).toBe('true')
+        expect(live.textContent).toContain('3')
+    })
 })

@@ -44,6 +44,7 @@ export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipH
 
     const tip = doc.createElement('div')
     tip.className = 'gf-tooltip'
+    tip.id = 'gf-chip'
     tip.setAttribute('role', 'tooltip')
 
     const meta = CATEGORY_META[options.category]

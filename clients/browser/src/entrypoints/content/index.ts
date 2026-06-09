@@ -111,6 +111,9 @@ interface Runtime {
     hoverTimer: ReturnType<typeof setTimeout> | null
     /** The item the tooltip currently previews (avoids redundant re-renders). */
     hoverItem: RenderableItem | null
+    /** The field the current chip belongs to; needed to clear our
+     *  aria-describedby on the right element when the chip hides. */
+    hoverField: HTMLElement | null
     stopObserver: (() => void) | null
     /**
      * Every remover that bound a listener to this runtime. teardownRuntime
@@ -169,6 +172,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         r.tooltip?.hide()
         r.tooltip = null
         r.hoverItem = null
+        r.hoverField = null
         // 3. Tear down the DOM.
         r.overlay.destroy()
         // 4. Flush any pending feedback (best-effort).
@@ -194,6 +198,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             tooltip: null,
             hoverTimer: null,
             hoverItem: null,
+            hoverField: null,
             stopObserver: null,
             cleanups: [],
         }
@@ -319,19 +324,32 @@ function wireRuntime(
             runtime.hoverTimer = null
         }
     }
+    const clearChipAria = (el: HTMLElement): void => {
+        // Don't clobber a page-owned aria-describedby — only clear it if WE
+        // set it (and we only ever set the single id 'gf-chip').
+        if (el.getAttribute('aria-describedby') === 'gf-chip') {
+            el.removeAttribute('aria-describedby')
+        }
+    }
     const hideTooltipNow = (): void => {
         clearTooltipHide()
+        const field = runtime.hoverField
         runtime.tooltip?.hide()
         runtime.tooltip = null
         runtime.hoverItem = null
+        runtime.hoverField = null
+        if (field) clearChipAria(field)
     }
     const scheduleTooltipHide = (): void => {
         clearTooltipHide()
+        const field = runtime.hoverField
         runtime.hoverTimer = setTimeout(() => {
             runtime.hoverTimer = null
             runtime.tooltip?.hide()
             runtime.tooltip = null
             runtime.hoverItem = null
+            runtime.hoverField = null
+            if (field) clearChipAria(field)
         }, TOOLTIP_HIDE_GRACE_MS)
     }
 
@@ -575,6 +593,7 @@ function wireRuntime(
             }
             clearTooltipHide()
             runtime.hoverItem = hit.item
+            runtime.hoverField = el
             runtime.tooltip?.hide()
             runtime.tooltip = showTooltip(overlay.root, {
                 anchorRect: hit.rect,
@@ -583,6 +602,10 @@ function wireRuntime(
                 diffCorrected: hit.item.diffCorrected,
                 diffIsDeletion: hit.item.diffIsDeletion,
             })
+            // Associate the chip with the field for screen readers. The hide
+            // paths only clear this if the value is still exactly 'gf-chip'
+            // (don't clobber a page-owned aria-describedby).
+            el.setAttribute('aria-describedby', 'gf-chip')
         }
         const onFieldMouseLeave = (): void => {
             scheduleTooltipHide()
@@ -742,6 +765,15 @@ function wireRuntime(
             source: 'browser',
         })
         closePopoverFor(a.el)
+        if (a.el instanceof HTMLInputElement || a.el instanceof HTMLTextAreaElement) {
+            a.el.focus()
+            const end = a.item.cuStart + replacement.length
+            try {
+                a.el.setSelectionRange(a.item.cuStart, end)
+            } catch {
+                // some input types (number, email) throw on setSelectionRange
+            }
+        }
         void rerunFor(a.el)(getText(a.el))
     }
     ctx.addEventListener(document, 'keydown', onKeydown)
@@ -801,6 +833,15 @@ function wireRuntime(
                     source: 'browser',
                 })
                 closePopoverFor(el)
+                if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+                    el.focus()
+                    const end = item.cuStart + replacement.length
+                    try {
+                        el.setSelectionRange(item.cuStart, end)
+                    } catch {
+                        // some input types (number, email) throw on setSelectionRange
+                    }
+                }
                 void rerunFor(el)(getText(el))
             },
             onIgnore: () => {
