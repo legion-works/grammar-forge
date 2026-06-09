@@ -15,9 +15,16 @@ export interface RenderableItem {
      *  correction). Sent back with the accept/reject/ignore signal so the bridge
      *  can attribute it. Undefined when the bridge did not log this suggestion. */
     id?: number
-    /** UTF-16 code-unit offsets into the original `text`. */
+    /** UTF-16 code-unit offsets of the minimal edit into the original `text`.
+     *  Used to APPLY the fix (applyFix) and to validate staleness — NOT for the
+     *  highlight rect (an insertion is zero-width here). */
     cuStart: number
     cuEnd: number
+    /** Code-unit range to HIGHLIGHT (the surrounding whole word(s)). Differs
+     *  from [cuStart,cuEnd) so a zero-width insertion (e.g. "sw"->"saw") still
+     *  highlights its word. Used for the highlight rect + hover/click hit-test. */
+    hlStart: number
+    hlEnd: number
     /** Display category (resolves colour / texture / popover label). */
     category: Category
     /** Bridge-supplied message (e.g. explanation). May be empty. */
@@ -95,6 +102,8 @@ export async function runCheck(text: string, deps: RunCheckDeps): Promise<RunChe
             id: s.id,
             cuStart: cu.start,
             cuEnd: cu.end,
+            hlStart: diff.wordStart,
+            hlEnd: diff.wordEnd,
             category: derive(s),
             message: s.message ?? '',
             replacements,

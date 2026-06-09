@@ -59,4 +59,26 @@ describe('wordLevelDiff', () => {
         expect(d.original).toBe('teh')
         expect(d.corrected).toBe('the')
     })
+
+    it('returns the whole-word range for a ZERO-WIDTH insertion (the highlight bug)', () => {
+        // "she sw the" — the bridge fix "sw"->"saw" is an INSERT of "a" between
+        // s(4) and w(5), so the raw edit span is zero-width [5,5). The highlight
+        // range must still cover the word "sw" [4,6) or it has no rect and never
+        // highlights.
+        const text = 'she sw the'
+        const d = wordLevelDiff(text, 5, 5, 'a')
+        expect(d.original).toBe('sw')
+        expect(d.corrected).toBe('saw')
+        expect(d.wordStart).toBe(4)
+        expect(d.wordEnd).toBe(6)
+        // crucially, a non-zero range (unlike the raw [6,6) edit span)
+        expect(d.wordEnd).toBeGreaterThan(d.wordStart)
+    })
+
+    it('exposes wordStart/wordEnd for a substitution (highlights the whole word)', () => {
+        const text = 'we was watching'
+        const d = wordLevelDiff(text, 4, 6, 'ere') // "as"->"ere" inside "was" [3,6)
+        expect(d.wordStart).toBe(3)
+        expect(d.wordEnd).toBe(6)
+    })
 })

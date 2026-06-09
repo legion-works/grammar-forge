@@ -13,6 +13,15 @@ export interface WordDiff {
     corrected: string
     /** True when the correction removes the text (empty/whitespace corrected). */
     isDeletion: boolean
+    /** Code-unit range of the surrounding whole word(s) — what to HIGHLIGHT.
+     *  The raw edit span [cuStart,cuEnd) can be ZERO-WIDTH (e.g. inserting a
+     *  letter: "sw" -> "saw" is an insert at one offset), which has no rect and
+     *  so can't be highlighted. This expanded range covers the affected word so
+     *  the highlight (and hover/click hit-test) lands on it. Apply still uses
+     *  the raw edit span. Equals [editStart,editEnd] when the edit is not inside
+     *  a word (e.g. an insertion at a whitespace boundary). */
+    wordStart: number
+    wordEnd: number
 }
 
 function isBoundary(ch: string | undefined): boolean {
@@ -63,5 +72,7 @@ export function wordLevelDiff(
         original,
         corrected,
         isDeletion: corrected.trim().length === 0,
+        wordStart,
+        wordEnd,
     }
 }

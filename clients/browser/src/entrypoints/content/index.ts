@@ -580,7 +580,9 @@ function wireRuntime(
         const st = runtime.fields.get(el)
         if (!st) return
         if (st.items.length > 0) {
-            const spans = st.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
+            // Highlight/hit-test the WORD range (hlStart/hlEnd), not the raw edit
+            // span — a zero-width insertion (e.g. "sw"->"saw") has no rect.
+            const spans = st.items.map((it) => ({ start: it.hlStart, end: it.hlEnd }))
             let allRects: DOMRect[][]
             try {
                 allRects = getSpanRectsBatch(el, spans)
@@ -1263,7 +1265,11 @@ function wireRuntime(
         // these to draw (the browser tracks layout natively), but the
         // orchestrator's hit-test still needs them to map a pointer
         // position to a `RenderableItem`.
-        const spans = state.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
+        // Highlight/hit-test the WORD range (hlStart/hlEnd), not the raw edit
+        // span — a zero-width insertion (e.g. "sw"->"saw" inserts one letter)
+        // has no rect, so the spelling fixes never highlighted. Apply still uses
+        // the minimal [cuStart,cuEnd) span.
+        const spans = state.items.map((it) => ({ start: it.hlStart, end: it.hlEnd }))
         // Defensive: a rect-measurement throw must NOT abort the highlight
         // dispatch below. On a contenteditable, skipping setFieldHighlights
         // leaves the stale CSS.highlights ranges un-rebuilt — the bug where the
@@ -1291,9 +1297,11 @@ function wireRuntime(
             }
             getNativeHighlighter().setFieldHighlights(
                 el,
+                // Highlight the WORD range (hlStart/hlEnd) so zero-width
+                // insertions still get a visible ::highlight() Range.
                 state.items.map((it) => ({
-                    cuStart: it.cuStart,
-                    cuEnd: it.cuEnd,
+                    cuStart: it.hlStart,
+                    cuEnd: it.hlEnd,
                     category: it.category,
                 })),
             )
