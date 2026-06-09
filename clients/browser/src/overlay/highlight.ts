@@ -81,8 +81,22 @@ export function createHighlightLayer(root: ShadowRoot): HighlightLayer {
             }
         },
         setState(state) {
+            const prev = lastState
             lastState = state
-            for (const n of pool) applyState(n, state)
+            // focused changed → must re-apply to all nodes (every highlight for
+            // this field gains/loses focus intensity).
+            if (state.focused !== prev.focused) {
+                for (const n of pool) applyState(n, state)
+                return
+            }
+            // only hover changed → toggle just the old + new hovered nodes.
+            if (state.hoverItemIndex !== prev.hoverItemIndex) {
+                for (const n of pool) {
+                    const idx = Number(n.dataset.item)
+                    if (idx === prev.hoverItemIndex || idx === state.hoverItemIndex)
+                        applyState(n, state)
+                }
+            }
         },
         destroy() {
             for (const n of pool) n.remove()

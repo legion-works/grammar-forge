@@ -146,6 +146,23 @@ describe('createHighlightLayer', () => {
         expect(nodes[2]!.classList.contains('gf-highlight--hover')).toBe(false)
     })
 
+    it('setState hover change only re-toggles the changed nodes', () => {
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 1 },
+        ])
+        layer.setState({ focused: false, hoverItemIndex: 0 })
+        const n0 = root.querySelectorAll('.gf-highlight')[0] as HTMLElement
+        const n1 = root.querySelectorAll('.gf-highlight')[1] as HTMLElement
+        expect(n0.classList.contains('gf-highlight--hover')).toBe(true)
+        expect(n1.classList.contains('gf-highlight--hover')).toBe(false)
+        layer.setState({ focused: false, hoverItemIndex: 1 })
+        expect(n0.classList.contains('gf-highlight--hover')).toBe(false)
+        expect(n1.classList.contains('gf-highlight--hover')).toBe(true)
+    })
+
     it('destroy() removes every pooled node', () => {
         const root = mkRoot()
         const layer = createHighlightLayer(root)

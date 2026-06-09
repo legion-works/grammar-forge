@@ -741,8 +741,7 @@ function wireRuntime(
             // highlight intensity flips instantly when the pointer crosses
             // a word boundary.
             const hit = hitTest(state.itemRects, e.clientX, e.clientY)
-            const newHoverIdx = hit ? state.itemRects.findIndex((er) => er.item === hit.item) : -1
-            const nextIdx: number | null = newHoverIdx >= 0 ? newHoverIdx : null
+            const nextIdx: number | null = hit ? hit.index : null
             if (nextIdx !== state.hoverItemIndex) {
                 state.hoverItemIndex = nextIdx
                 if (state.useNativeHighlight) {
@@ -1305,11 +1304,12 @@ function hitTest(
     itemRects: ReadonlyArray<{ item: RenderableItem; rects: DOMRect[] }>,
     x: number,
     y: number,
-): { item: RenderableItem; rect: DOMRect } | null {
-    for (const entry of itemRects) {
+): { item: RenderableItem; rect: DOMRect; index: number } | null {
+    for (let i = 0; i < itemRects.length; i++) {
+        const entry = itemRects[i]!
         for (const r of entry.rects) {
             if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
-                return { item: entry.item, rect: r }
+                return { item: entry.item, rect: r, index: i }
             }
         }
     }
