@@ -172,6 +172,13 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         r.tooltip?.hide()
         r.tooltip = null
         r.hoverItem = null
+        // Clear the chip's aria-describedby off the PAGE field before dropping
+        // the reference — the field survives a settings-driven teardown, so a
+        // dangling aria-describedby="gf-chip" would point a screen reader at a
+        // removed node. Guarded so we never clobber a page-owned value.
+        if (r.hoverField && r.hoverField.getAttribute('aria-describedby') === 'gf-chip') {
+            r.hoverField.removeAttribute('aria-describedby')
+        }
         r.hoverField = null
         // 3. Tear down the DOM.
         r.overlay.destroy()
