@@ -21,7 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 # Build the vendored fork (Cargo.lock pins the exact harper-core 2.4 dep set).
 COPY native/harper-c/ /tmp/harper-c/
-RUN (cd /tmp/harper-c && cargo build --release --locked) \
+# Cache mounts persist the cargo registry + target dir across builds so an
+# unchanged harper-c (the common case) relinks from cache instead of a cold
+# Rust build. The cp pulls the artifact OUT of the ephemeral target cache into a
+# real image path within the same RUN (cache mounts are not committed to layers).
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/tmp/harper-c/target \
+    (cd /tmp/harper-c && cargo build --release --locked) \
     && mkdir -p /out/harper-native \
     && cp /tmp/harper-c/target/release/libharper_c.so /out/harper-native/ \
     && cp /tmp/harper-c/src/harper.h /out/harper-native/
@@ -41,12 +47,17 @@ RUN cd /src/native \
     && curl -fsSL -o libtokenizers.a https://github.com/knights-analytics/hugot/releases/download/v0.7.5/libtokenizers.a \
     && mv libonnxruntime-linux-x64.so libonnxruntime.so
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 ENV CGO_ENABLED=1 \
     CGO_CFLAGS="-I/src/native" \
     CGO_LDFLAGS="-L/src/native -Wl,-rpath,/usr/local/lib"
-RUN go build -tags ORT -ldflags="-s -w" -o /out/grammarforge ./cmd/grammarforge
+# Cache mounts persist the Go module + build caches so a source-only change (the
+# COPY . . above busts this layer every time) recompiles ONLY the changed
+# packages instead of a cold CGo+ONNX build of the whole module.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -tags ORT -ldflags="-s -w" -o /out/grammarforge ./cmd/grammarforge
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
