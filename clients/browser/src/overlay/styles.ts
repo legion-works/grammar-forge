@@ -248,8 +248,11 @@ export const OVERLAY_CSS = `
     color: light-dark(#b91c1c, #fecaca);
   }
   .gf-pill__badge--ok {
-    background: color-mix(in srgb, #22c55e 22%, transparent);
-    color: #16a34a;
+    /* Clean state reads CALM, not a loud success banner: a fainter green wash
+       and a muted green glyph. The pill itself is near-transparent at idle and
+       lifts on hover, so the badge only needs to whisper "all clear". */
+    background: color-mix(in srgb, #22c55e 14%, transparent);
+    color: #4b9e6a;
   }
   .gf-pill-bar {
     display: inline-flex;

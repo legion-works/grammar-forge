@@ -235,7 +235,7 @@ export function App() {
                             </p>
                         )}
                         {tabStatus && tabStatus.fieldCount > 0 && totalCount === 0 && (
-                            <p className="gf-popup__ok">✓ No issues</p>
+                            <p className="gf-popup__ok gf-popup__ok--clean">✓ Looks clean</p>
                         )}
                         {tabStatus && totalCount > 0 && (
                             <ul className="gf-popup__summary-list">

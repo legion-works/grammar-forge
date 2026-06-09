@@ -168,6 +168,11 @@ textarea {
   color: #16a34a;
   font-size: 13px;
 }
+/* The "no issues" empty state reads calm, not a loud success banner: a softer,
+   muted green than the bridge-health "ok" indicator that shares .gf-popup__ok. */
+.gf-popup__ok--clean {
+  color: #4b9e6a;
+}
 .gf-popup__bad {
   display: inline-flex;
   flex-wrap: wrap;
