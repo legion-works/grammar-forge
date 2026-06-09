@@ -1,16 +1,21 @@
-// Popup UI (React). The small status window the user clicks from the
-// toolbar. Shows the bridge connection state, an Enabled toggle, a
-// "Check now" button (sends TRIGGER_CHECK to the active tab), the
-// focused field's per-category counts (sourced from TAB_STATUS), and a
-// per-category legend so the colours on the page are interpretable.
-// React is allowed in popup/options (NOT in content — see the oxlint
+// Popup UI (React). Tabbed interface: Status tab shows bridge health, per-site
+// power toggle, enabled toggle, "Check now", and the focused-field summary.
+// Settings tab embeds the shared SettingsForm and an "Open full settings page"
+// link. React is allowed in popup/options (NOT in content — see the oxlint
 // `no-restricted-imports` override).
 import { useCallback, useEffect, useState } from 'react'
 import { BridgeClient } from '@/api/client'
 import { CATEGORY_META } from '@/api/category'
 import type { Category } from '@/api/types'
 import { isMessage, messageSender, sendActiveTabMessage } from '@/messaging/schema'
-import { getSettings, setSettings, settingsItem, type Settings } from '@/storage/settings'
+import {
+    getSettings,
+    isSiteBlocked,
+    setSettings,
+    settingsItem,
+    type Settings,
+} from '@/storage/settings'
+import { SettingsForm } from '@/entrypoints/settings/SettingsForm'
 
 type HealthState =
     | { status: 'unknown' }
@@ -20,6 +25,7 @@ type HealthState =
 interface TabStatus {
     enabled: boolean
     fieldCount: number
+    hostname: string
     counts: Partial<Record<Category, number>>
 }
 
@@ -34,10 +40,13 @@ const CATEGORY_LABELS: Record<Category, string> = {
     unknown: 'Issue',
 }
 
+type TabKey = 'status' | 'settings'
+
 export function App() {
     const [settings, setSettingsState] = useState<Settings | null>(null)
     const [health, setHealth] = useState<HealthState>({ status: 'unknown' })
     const [tabStatus, setTabStatus] = useState<TabStatus | null>(null)
+    const [tab, setTab] = useState<TabKey>('status')
 
     const refreshHealth = useCallback(async (s: Settings): Promise<void> => {
         try {
@@ -56,6 +65,7 @@ export function App() {
                 setTabStatus({
                     enabled: reply.enabled,
                     fieldCount: reply.fieldCount,
+                    hostname: reply.hostname,
                     counts: reply.counts,
                 })
             }
@@ -66,10 +76,6 @@ export function App() {
 
     useEffect(() => {
         void getSettings().then(setSettingsState)
-        // The watch lives until the popup unmounts (closing the toolbar
-        // window); the popup has no long-lived cleanup, so we discard the
-        // unsubscribe. (Popups are ephemeral; WXT closes the page when the
-        // user dismisses the toolbar.)
         settingsItem.watch((next) => {
             setSettingsState(next)
             void refreshHealth(next)
@@ -79,9 +85,13 @@ export function App() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
+    useEffect(() => {
+        if (settings) void refreshHealth(settings)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [settings?.bridgeBaseUrl, settings?.allowRemoteBridge])
+
     const onCheckNow = useCallback(async (): Promise<void> => {
         await sendActiveTabMessage(messageSender('TRIGGER_CHECK')())
-        // Give the content script a moment to re-check, then refresh.
         setTimeout(() => {
             void refreshTabStatus()
         }, 200)
@@ -90,6 +100,19 @@ export function App() {
     const onToggleEnabled = useCallback(async (next: boolean): Promise<void> => {
         await setSettings({ enabled: next })
     }, [])
+
+    const sitePaused = settings && tabStatus ? isSiteBlocked(settings, tabStatus.hostname) : false
+
+    const onTogglePower = useCallback(async (): Promise<void> => {
+        if (!settings || !tabStatus?.hostname) return
+        const host = tabStatus.hostname
+        const blocked = isSiteBlocked(settings, host)
+        await setSettings({
+            blockedSites: blocked
+                ? settings.blockedSites.filter((h) => h !== host)
+                : [...settings.blockedSites, host],
+        })
+    }, [settings, tabStatus])
 
     if (!settings) {
         return (
@@ -115,96 +138,158 @@ export function App() {
                 </p>
             </header>
 
-            <section className="gf-popup__status" aria-live="polite">
-                {health.status === 'unknown' && <span>Checking bridge…</span>}
-                {health.status === 'ok' && (
-                    <span className="gf-popup__ok">
-                        <span
-                            className="gf-popup__dot"
-                            style={{ background: '#22c55e' }}
-                            aria-hidden
-                        />
-                        Bridge reachable{health.premium ? ' · premium' : ''}
-                    </span>
-                )}
-                {health.status === 'unreachable' && (
-                    <span className="gf-popup__bad">
-                        <span
-                            className="gf-popup__dot"
-                            style={{ background: '#ef4444' }}
-                            aria-hidden
-                        />
-                        Bridge unreachable
-                        <span className="gf-popup__err">{health.error}</span>
-                    </span>
-                )}
-            </section>
+            <div className="gf-popup__tabs" role="tablist" aria-label="GrammarForge">
+                <button
+                    role="tab"
+                    type="button"
+                    id="gf-tab-status"
+                    aria-selected={tab === 'status'}
+                    aria-controls="gf-panel-status"
+                    className={`gf-popup__tab${tab === 'status' ? ' gf-popup__tab--active' : ''}`}
+                    onClick={() => setTab('status')}
+                >
+                    Status
+                </button>
+                <button
+                    role="tab"
+                    type="button"
+                    id="gf-tab-settings"
+                    aria-selected={tab === 'settings'}
+                    aria-controls="gf-panel-settings"
+                    className={`gf-popup__tab${tab === 'settings' ? ' gf-popup__tab--active' : ''}`}
+                    onClick={() => setTab('settings')}
+                >
+                    Settings
+                </button>
+            </div>
 
-            <label className="gf-popup__row">
-                <input
-                    type="checkbox"
-                    checked={settings.enabled}
-                    onChange={(e) => void onToggleEnabled(e.currentTarget.checked)}
-                />
-                <span>Enabled on this browser</span>
-            </label>
-
-            <button
-                className="gf-popup__btn gf-popup__btn--primary"
-                type="button"
-                onClick={() => void onCheckNow()}
-                disabled={!settings.enabled}
-            >
-                Check now
-            </button>
-
-            <section className="gf-popup__summary" aria-label="Focused field summary">
-                <h2>Focused field</h2>
-                {!tabStatus && <p className="gf-popup__hint">No content script on this tab.</p>}
-                {tabStatus && tabStatus.fieldCount === 0 && (
-                    <p className="gf-popup__hint">No editable fields detected.</p>
-                )}
-                {tabStatus && tabStatus.fieldCount > 0 && totalCount === 0 && (
-                    <p className="gf-popup__ok">✓ No issues</p>
-                )}
-                {tabStatus && totalCount > 0 && (
-                    <ul className="gf-popup__summary-list">
-                        {summaryEntries.map((c) => (
-                            <li key={c}>
+            {tab === 'status' && (
+                <div role="tabpanel" id="gf-panel-status" aria-labelledby="gf-tab-status">
+                    <section className="gf-popup__status" aria-live="polite">
+                        {health.status === 'unknown' && <span>Checking bridge…</span>}
+                        {health.status === 'ok' && (
+                            <span className="gf-popup__ok">
                                 <span
-                                    className="gf-popup__swatch"
-                                    style={{ background: CATEGORY_META[c].tint }}
+                                    className="gf-popup__dot"
+                                    style={{ background: '#22c55e' }}
                                     aria-hidden
                                 />
-                                <strong>{tabStatus.counts[c]}</strong>{' '}
-                                <span>{CATEGORY_LABELS[c]}</span>
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </section>
+                                Bridge reachable{health.premium ? ' · premium' : ''}
+                            </span>
+                        )}
+                        {health.status === 'unreachable' && (
+                            <span className="gf-popup__bad">
+                                <span
+                                    className="gf-popup__dot"
+                                    style={{ background: '#ef4444' }}
+                                    aria-hidden
+                                />
+                                Bridge unreachable — is it running at {settings.bridgeBaseUrl}?
+                                <span className="gf-popup__err">{health.error}</span>
+                            </span>
+                        )}
+                    </section>
 
-            <section className="gf-popup__legend" aria-label="Category legend">
-                <h2>Category legend</h2>
-                <ul>
-                    {CATEGORY_ORDER.map((c) => {
-                        const meta = CATEGORY_META[c]
-                        return (
-                            <li
-                                key={c}
-                                className={`gf-popup__legend-row gf-popup__legend-row--${c}`}
+                    {tabStatus?.hostname && (
+                        <div className="gf-popup__row">
+                            <button
+                                className={`gf-popup__btn${sitePaused ? '' : ' gf-popup__btn--primary'}`}
+                                type="button"
+                                onClick={() => void onTogglePower()}
                             >
-                                <span
-                                    className="gf-popup__swatch"
-                                    style={{ background: meta.tint }}
-                                    aria-hidden
-                                />
-                                <span>{meta.label}</span>
-                            </li>
-                        )
-                    })}
-                </ul>
-            </section>
+                                {sitePaused
+                                    ? `Resume on ${tabStatus.hostname}`
+                                    : `Pause on ${tabStatus.hostname}`}
+                            </button>
+                        </div>
+                    )}
+
+                    <label className="gf-popup__row">
+                        <input
+                            type="checkbox"
+                            checked={settings.enabled}
+                            onChange={(e) => void onToggleEnabled(e.currentTarget.checked)}
+                        />
+                        <span>Enabled on this browser</span>
+                    </label>
+
+                    <button
+                        className="gf-popup__btn gf-popup__btn--primary"
+                        type="button"
+                        onClick={() => void onCheckNow()}
+                        disabled={!settings.enabled}
+                    >
+                        Check now
+                    </button>
+
+                    <section className="gf-popup__summary" aria-label="Focused field summary">
+                        <h2>Focused field</h2>
+                        {!tabStatus && (
+                            <p className="gf-popup__hint">
+                                No GrammarForge on this tab — try reloading the page.
+                            </p>
+                        )}
+                        {tabStatus && tabStatus.fieldCount === 0 && (
+                            <p className="gf-popup__hint">
+                                No editable field detected. Click into a text box to start checking.
+                            </p>
+                        )}
+                        {tabStatus && tabStatus.fieldCount > 0 && totalCount === 0 && (
+                            <p className="gf-popup__ok">✓ No issues</p>
+                        )}
+                        {tabStatus && totalCount > 0 && (
+                            <ul className="gf-popup__summary-list">
+                                {summaryEntries.map((c) => (
+                                    <li key={c}>
+                                        <span
+                                            className="gf-popup__swatch"
+                                            style={{ background: CATEGORY_META[c].tint }}
+                                            aria-hidden
+                                        />
+                                        <strong>{tabStatus.counts[c]}</strong>{' '}
+                                        <span>{CATEGORY_LABELS[c]}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </section>
+
+                    <section className="gf-popup__legend" aria-label="Category legend">
+                        <h2>Category legend</h2>
+                        <ul>
+                            {CATEGORY_ORDER.map((c) => {
+                                const meta = CATEGORY_META[c]
+                                return (
+                                    <li
+                                        key={c}
+                                        className={`gf-popup__legend-row gf-popup__legend-row--${c}`}
+                                    >
+                                        <span
+                                            className="gf-popup__swatch"
+                                            style={{ background: meta.tint }}
+                                            aria-hidden
+                                        />
+                                        <span>{meta.label}</span>
+                                    </li>
+                                )
+                            })}
+                        </ul>
+                    </section>
+                </div>
+            )}
+
+            {tab === 'settings' && (
+                <div role="tabpanel" id="gf-panel-settings" aria-labelledby="gf-tab-settings">
+                    <SettingsForm />
+                    <button
+                        className="gf-popup__btn"
+                        type="button"
+                        onClick={() => void browser.runtime.openOptionsPage()}
+                    >
+                        Open full settings page
+                    </button>
+                </div>
+            )}
         </main>
     )
 }
