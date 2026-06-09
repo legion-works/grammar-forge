@@ -12,6 +12,7 @@ import type { Category } from '@/api/types'
 export type GfMessage =
     | { type: 'TRIGGER_CHECK' }
     | { type: 'GET_TAB_STATUS' }
+    | { type: 'REPHRASE_SELECTION' }
     | {
           type: 'TAB_STATUS'
           enabled: boolean
@@ -25,6 +26,7 @@ export type GfMessage =
 export interface GfMessageMap {
     TRIGGER_CHECK: { type: 'TRIGGER_CHECK' }
     GET_TAB_STATUS: { type: 'GET_TAB_STATUS' }
+    REPHRASE_SELECTION: { type: 'REPHRASE_SELECTION' }
     TAB_STATUS: {
         type: 'TAB_STATUS'
         enabled: boolean

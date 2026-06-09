@@ -97,6 +97,10 @@ export function App() {
         }, 200)
     }, [refreshTabStatus])
 
+    const onRephraseSelection = useCallback(async (): Promise<void> => {
+        await sendActiveTabMessage(messageSender('REPHRASE_SELECTION')())
+    }, [])
+
     const onToggleEnabled = useCallback(async (next: boolean): Promise<void> => {
         await setSettings({ enabled: next })
     }, [])
@@ -220,6 +224,15 @@ export function App() {
                         disabled={!settings.enabled}
                     >
                         Check now
+                    </button>
+
+                    <button
+                        className="gf-popup__btn"
+                        type="button"
+                        onClick={() => void onRephraseSelection()}
+                        disabled={!settings.enabled}
+                    >
+                        Rephrase selection
                     </button>
 
                     <section className="gf-popup__summary" aria-label="Focused field summary">

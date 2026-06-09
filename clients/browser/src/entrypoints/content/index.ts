@@ -24,6 +24,12 @@ import { dismissPopoversIn, showPopover, type PopoverHandle } from '@/overlay/po
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { showToast } from '@/overlay/toast'
 import {
+    showRephraseButton,
+    dismissRephraseButtonsIn,
+    type RephraseButtonHandle,
+} from '@/overlay/rephrase-button'
+import { showRephraseCard, dismissRephraseCardsIn } from '@/overlay/rephrase-card'
+import {
     renderStatusButton,
     type StatusButtonHandle,
     type StatusButtonOptions,
@@ -49,6 +55,18 @@ export default defineContentScript({
         void start(ctx)
     },
 })
+
+/** Map a DOM Selection range to a [start,end) code-unit span on el's flattened
+ *  text (the same model applyFix/getText use). Robust to text- or element-node
+ *  endpoints via Range.toString() length. */
+function selectionToCodeUnitSpan(el: HTMLElement, range: Range): { start: number; end: number } {
+    const pre = el.ownerDocument.createRange()
+    pre.selectNodeContents(el)
+    pre.setEnd(range.startContainer, range.startOffset)
+    const start = pre.toString().length
+    const end = start + range.toString().length
+    return { start, end }
+}
 
 interface FieldState {
     /**
@@ -979,6 +997,11 @@ function wireRuntime(
             void checkFocusedField()
             return undefined
         }
+        if (isMessage(raw, 'REPHRASE_SELECTION')) {
+            const found = resolveSelection()
+            if (found) void openRephraseFor(found.el, found.text, found.span)
+            return undefined
+        }
         if (isMessage(raw, 'GET_TAB_STATUS')) {
             const reply = buildTabStatus(runtime)
             return Promise.resolve(reply) as unknown as true
@@ -1007,6 +1030,9 @@ function wireRuntime(
         // a hard reload, because nothing re-mounts them.) Just drop transient
         // anchored UI whose rects are now stale, and flush pending feedback.
         dismissPopoversIn(overlay.root)
+        dismissRephraseButtonsIn(overlay.root)
+        dismissRephraseCardsIn(overlay.root)
+        rephraseButtonHandle = null
         runtime.active = null
         // dismissPopoversIn removes the popover DOM directly (not via
         // closePopoverFor), so clear the active-field back-reference too.
@@ -1036,6 +1062,132 @@ function wireRuntime(
         }
         return null
     }
+
+    // ---- Rephrase selection (slow LLM path) ----
+    // The Rephrase button is one-per-root (showRephraseButton dismisses any
+    // prior), so we only need to track the latest handle to hide on dismiss.
+    let rephraseButtonHandle: RephraseButtonHandle | null = null
+    const hideRephraseButton = (): void => {
+        rephraseButtonHandle?.hide()
+        rephraseButtonHandle = null
+    }
+
+    // Resolve the focused tracked field's CURRENT non-empty selection into the
+    // text, its code-unit span, and a viewport rect to anchor UI. Returns null
+    // when there is no usable selection (collapsed, empty, or not in a field).
+    const resolveSelection = (): {
+        el: HTMLElement
+        text: string
+        span: { start: number; end: number }
+        rect: DOMRect
+    } | null => {
+        const el = focusedTrackedField()
+        if (!el) return null
+        if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+            const start = el.selectionStart ?? 0
+            const end = el.selectionEnd ?? 0
+            if (end <= start) return null
+            const text = el.value.slice(start, end)
+            if (!text.trim()) return null
+            const rects = getSpanRectsBatch(el, [{ start, end }])
+            const rect = rects[0]?.[0] ?? el.getBoundingClientRect()
+            return { el, text, span: { start, end }, rect }
+        }
+        // contenteditable
+        const sel = el.ownerDocument.getSelection()
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
+        const range = sel.getRangeAt(0)
+        if (!el.contains(range.commonAncestorContainer)) return null
+        const text = range.toString()
+        if (!text.trim()) return null
+        const span = selectionToCodeUnitSpan(el, range)
+        const r = range.getBoundingClientRect()
+        const rect = r.width || r.height ? r : el.getBoundingClientRect()
+        return { el, text, span, rect }
+    }
+
+    // Rephrase the given selection: call the bridge (slow LLM path), show a
+    // pending state, then a result card. Apply replaces the SELECTION span.
+    async function openRephraseFor(
+        el: HTMLElement,
+        text: string,
+        span: { start: number; end: number },
+    ): Promise<void> {
+        const s = getSettings()
+        hideRephraseButton()
+        // Lightweight pending toast (rephrase is a slow LLM round-trip).
+        // showToast requires actionLabel/onAction — auto-dismisses after the
+        // default 1200ms, so a no-op action is fine for a transient status.
+        showToast(overlay.root, { message: 'Rephrasing…', actionLabel: '', onAction: () => {} })
+        try {
+            const res = await runtime.client.rephrase({
+                text,
+                tone: s.rephraseTone || undefined,
+                style: s.rephraseStyle || undefined,
+                alternatives: s.rephraseAlternatives,
+                source: 'browser',
+                override: s.rephraseOverride,
+            })
+            if (!ctx.isValid) return
+            showRephraseCard(overlay.root, {
+                anchorRect: el.getBoundingClientRect(),
+                original: res.original,
+                rephrased: res.rephrased,
+                alternatives: res.alternatives,
+                onApply: (chosen: string) => {
+                    // Re-validate the span against live text: if the field
+                    // changed since selection, the offsets may be stale. Only
+                    // apply when the slice still equals the original selection.
+                    const live = getText(el)
+                    if (live.slice(span.start, span.end) !== text) {
+                        debugWarn('rephrase', 'selection span went stale; not applying')
+                        return
+                    }
+                    applyFix(el, span, chosen)
+                    void rerunFor(el)(getText(el))
+                },
+                onClose: () => {},
+            })
+        } catch (e) {
+            debugWarn('rephrase', 'rephrase failed', e)
+            showToast(overlay.root, {
+                message: 'Rephrase failed',
+                actionLabel: '',
+                onAction: () => {},
+            })
+        }
+    }
+
+    // Debounced selection listener: shows/hides the Rephrase button as the
+    // user drags a selection. 150ms debounce so a dragging selection doesn't
+    // thrash. showRephraseButton is one-per-root (dismisses the prior), so
+    // re-showing on every settled change is fine. `found` is captured by
+    // value in the onClick closure (fresh const each tick).
+    let selectionDebounce: ReturnType<typeof setTimeout> | null = null
+    const onSelectionChange = (): void => {
+        if (selectionDebounce) clearTimeout(selectionDebounce)
+        selectionDebounce = setTimeout(() => {
+            selectionDebounce = null
+            const found = resolveSelection()
+            if (!found) {
+                hideRephraseButton()
+                return
+            }
+            rephraseButtonHandle = showRephraseButton(overlay.root, {
+                anchorRect: found.rect,
+                onClick: () => {
+                    hideRephraseButton()
+                    void openRephraseFor(found.el, found.text, found.span)
+                },
+            })
+        }, 150)
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    runtime.cleanups.push(() => {
+        document.removeEventListener('selectionchange', onSelectionChange)
+        if (selectionDebounce) clearTimeout(selectionDebounce)
+        hideRephraseButton()
+    })
 
     // Accept hotkey (in-content keydown, NOT browser.commands — the commands
     // API is unreliable for arbitrary chords cross-OS). Pressing the configured
