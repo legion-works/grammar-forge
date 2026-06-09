@@ -11,10 +11,16 @@
 
 :root {
   color-scheme: light dark;
-  --gf-bg: color-mix(in oklab, Canvas 70%, transparent);
-  --gf-border: color-mix(in oklab, CanvasText 18%, transparent);
+  /* Explicit glass values (NOT system Canvas mixes) so the panel + controls
+     read with real contrast on any backdrop. Canvas-based color-mix rendered
+     near-invisible on dark setups (the popup looked flat / tabs unstyled). */
+  --gf-bg: light-dark(rgba(245, 245, 245, 0.92), rgba(28, 28, 30, 0.92));
+  --gf-border: light-dark(rgba(0, 0, 0, 0.14), rgba(255, 255, 255, 0.14));
   --gf-text: light-dark(#0f172a, #f1f5f9);
   --gf-text-dim: light-dark(rgba(15, 23, 42, 0.7), rgba(241, 245, 249, 0.7));
+  /* Surface fills for nested controls (tab group, inputs, chips). */
+  --gf-surface: light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.06));
+  --gf-surface-strong: light-dark(rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.14));
   --gf-scrim: rgba(0, 0, 0, 0.4);
   --gf-radius: 14px;
   --gf-radius-pill: 9999px;
@@ -25,7 +31,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   :root {
-    --gf-bg: color-mix(in oklab, Canvas 92%, transparent);
+    --gf-bg: light-dark(rgba(245, 245, 245, 0.98), rgba(24, 24, 26, 0.98));
     --gf-scrim: rgba(0, 0, 0, 0.08);
     --gf-blur: none;
     --gf-blur-pill: none;
@@ -109,7 +115,7 @@ textarea {
   gap: 4px;
   padding: 3px;
   border-radius: var(--gf-radius-pill);
-  background: color-mix(in oklab, Canvas 30%, transparent);
+  background: var(--gf-surface);
   border: 1px solid var(--gf-border);
 }
 .gf-popup__tab {
@@ -121,11 +127,17 @@ textarea {
   color: var(--gf-text-dim);
   font-size: 13px;
   font-weight: 600;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.gf-popup__tab:hover:not(.gf-popup__tab--active) {
+  color: var(--gf-text);
 }
 .gf-popup__tab--active {
-  background: color-mix(in oklab, Canvas 60%, transparent);
+  background: var(--gf-surface-strong);
   color: var(--gf-text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
 }
 .gf-popup__tab:focus-visible {
   outline: 2px solid #93c5fd;
@@ -217,7 +229,7 @@ textarea {
   padding: 0 14px;
   border-radius: var(--gf-radius-pill);
   border: 1px solid var(--gf-border);
-  background: color-mix(in oklab, Canvas 30%, transparent);
+  background: var(--gf-surface);
   backdrop-filter: var(--gf-blur-pill);
   -webkit-backdrop-filter: var(--gf-blur-pill);
   transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
@@ -370,7 +382,7 @@ textarea {
   padding: 0 8px;
   border-radius: 8px;
   border: 1px solid var(--gf-border);
-  background: color-mix(in oklab, Canvas 40%, transparent);
+  background: var(--gf-surface);
 }
 
 .gf-options__btn {
@@ -378,7 +390,7 @@ textarea {
   padding: 0 12px;
   border-radius: var(--gf-radius-pill);
   border: 1px solid var(--gf-border);
-  background: color-mix(in oklab, Canvas 30%, transparent);
+  background: var(--gf-surface);
   backdrop-filter: var(--gf-blur-pill);
   -webkit-backdrop-filter: var(--gf-blur-pill);
 }
@@ -409,7 +421,7 @@ textarea {
   padding: 0 10px;
   border-radius: var(--gf-radius-pill);
   border: 1px solid var(--gf-border);
-  background: color-mix(in oklab, Canvas 30%, transparent);
+  background: var(--gf-surface);
   font-size: 12px;
 }
 
@@ -433,7 +445,7 @@ textarea {
   padding: 0 8px;
   border-radius: 8px;
   border: 1px solid var(--gf-border);
-  background: color-mix(in oklab, Canvas 40%, transparent);
+  background: var(--gf-surface);
 }
 
 .gf-options__health {
