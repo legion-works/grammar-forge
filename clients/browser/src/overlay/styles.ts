@@ -87,6 +87,12 @@ export const OVERLAY_CSS = `
     position: fixed;
     pointer-events: auto;
     z-index: ${Z_OVERLAY};
+    /* When promoted to the top layer via popover=manual + showPopover(), the UA
+       stylesheet applies inset:0 + margin:auto, which CENTERS the panel and
+       overrides our explicit left/top (the popover opened over the pill, not the
+       word). Reset both so our JS positionPanel() left/top wins. */
+    margin: 0;
+    inset: auto;
     min-width: 280px;
     max-width: 380px;
     padding: 12px 14px;
