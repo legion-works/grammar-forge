@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """CoNLL-2014-test eval via the official M2 scorer (F0.5), comparable to
-published GEC numbers. Source is PRE-TOKENIZED — fed to /correct as-is; output
-stays token-per-space (m2scorer is token-level). Data + scorer are gitignored;
-run eval/get_benchmarks.sh first.
+published GEC numbers. Source is PRE-TOKENIZED — fed to /correct as-is; the
+hyp is re-tokenized with nltk.word_tokenize to match the gold's PTB spacing
+(m2scorer is token-level). Data + scorer are gitignored; run
+eval/get_benchmarks.sh first.
+
+Run with eval/.venv/bin/python (needs nltk + errant).
 
 Usage: python3 eval/conll14_eval.py [bridge_url] [n]
 """
@@ -12,6 +15,15 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+
+try:
+    from nltk.tokenize import word_tokenize
+except LookupError:
+    import nltk
+
+    nltk.download("punkt", quiet=True)
+    nltk.download("punkt_tab", quiet=True)
+    from nltk.tokenize import word_tokenize
 
 HERE = Path(__file__).parent
 GOLD = HERE / "benchmarks" / "conll14" / "official-2014.combined.m2"
@@ -84,7 +96,8 @@ def main():
             except Exception as e:  # noqa: BLE001
                 print(f"request error: {e!r}", file=sys.stderr)
                 hyp = src
-            f.write(hyp.replace("\n", " ") + "\n")
+            hyp_tokenized = " ".join(word_tokenize(hyp))
+            f.write(hyp_tokenized.replace("\n", " ") + "\n")
     # m2scorer scores the first LIMIT sentences only if we also subset the gold;
     # for a true number run the FULL set (LIMIT=None). For a subset, build a
     # truncated gold copy.

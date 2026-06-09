@@ -1,8 +1,26 @@
 #!/usr/bin/env python3
-"""BEA-2019 W&I+LOCNESS dev eval via ERRANT (F0.5), comparable to published GEC
-numbers. ERRANT re-tokenizes internally, so the source is fed as DETOKENIZED
-natural text and the SAME source goes to errant_parallel -orig (so hyp.m2 S-lines
-align with the gold m2). Data is gitignored; run eval/get_benchmarks.sh first.
+"""BEA-2019 W&I+LOCNESS dev eval via ERRANT (F0.5).
+
+**Caveat: this number is APPROXIMATE / directional, NOT bit-comparable to the
+published shared-task numbers.** Two known shifts:
+
+  1. The official gold m2 was built with errant==2.0.0, which requires
+     Python <=3.6 and CANNOT be installed in our Python-3.13 venv. We use
+     errant 3.0.2; the research notes its tokenization differs "minorly"
+     from 2.0.0 but enough to inflate FP (errant_parallel splits some tokens
+     differently than the gold annotator, so the resulting edits don't match
+     the gold edits and land in the false-positive bucket).
+  2. The LLM slow-path tends to OVER-correct learner text relative to the
+     minimal-edit gold, so a portion of true-positive edits also drift.
+
+The detokenize path below is the less-wrong of the two we tried: feeding the
+gold m2 S-lines AS-IS makes the bridge re-correct the tokenization itself
+(exploding FP further). Treating CoNLL-2014 (m2scorer, exact-comparable) as
+the headline number; BEA-dev here is a secondary/directional signal until an
+errant-2.0.0 environment is available.
+
+Run with eval/.venv/bin/python (needs errant + nltk). Data is gitignored; run
+eval/get_benchmarks.sh first.
 
 Usage: python3 eval/bea19_eval.py [bridge_url] [n]
 """
@@ -48,25 +66,14 @@ def apply_suggestions(text, suggestions):  # verbatim from jfleg_eval.py
 
 
 def bea_sources():
-    """Natural-text source for BEA dev. Prefer the W&I+LOCNESS JSON source if
-    present; else detokenize the gold-M2 S-lines. The SAME text is used for
-    /correct AND errant_parallel -orig so the hyp.m2 aligns with the gold m2."""
+    """BEA source for /correct + errant_parallel -orig. We feed DETOKENIZED
+    natural text so the bridge corrects content, not tokenization. NOTE: the
+    BEA-dev number is APPROXIMATE, not bit-comparable to the shared task —
+    the gold m2 was built with errant 2.0.0 (Python <=3.6) and we run errant
+    3.0.2 (Python 3.13), so tokenization differs slightly and inflates FP.
+    See the module docstring."""
     from lib_m2 import detokenize, read_m2_sources
 
-    jsons = list(BEA.rglob("*.dev.json"))
-    if jsons:
-        out = []
-        for jf in sorted(jsons):
-            for line in jf.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    out.append(json.loads(line)["text"])
-        # JSON is per-DOCUMENT; sentence segmentation must match the M2. If the
-        # counts don't match the gold M2 sentence count, FALL BACK to the M2
-        # S-lines (already ERRANT-tokenized natural text). Verify in Task 5.
-        gold_n = len(read_m2_sources(str(GOLD)))
-        if sum(len(t.split("\n")) for t in out) != gold_n:
-            return [detokenize(s) for s in read_m2_sources(str(GOLD))]
-        return out
     return [detokenize(s) for s in read_m2_sources(str(GOLD))]
 
 
@@ -145,6 +152,12 @@ def main():
     print("-- published reference (F0.5, ERRANT) --")
     for name, f05, srcname in REFERENCE_TABLE:
         print(f"  {name:28s} {f05:5.2f}  [{srcname}]")
+    print(
+        "NOTE: APPROXIMATE / directional only — gold m2 was built with errant 2.0.0"
+        " (Py<=3.6); we run errant 3.0.2 which tokenizes slightly differently"
+        " and inflates FP. Treat CoNLL-2014 (m2scorer, exact-comparable) as the"
+        " headline number."
+    )
     print("=" * 60)
     return 0
 
