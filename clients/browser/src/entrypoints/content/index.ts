@@ -408,7 +408,7 @@ function wireRuntime(
     // ---- Hover-tooltip lifecycle (shared across fields; one tooltip at a
     // time). The tooltip itself holds no listeners/timers — the grace-delay
     // hide timer lives here on the runtime so teardown can cancel it.
-    const HOVER_THROTTLE_MS = 400
+    const HOVER_THROTTLE_MS = 250
     const TOOLTIP_HIDE_GRACE_MS = 150
     // Minimum delay before reading a field's text after a paste, so rich editors
     // (Lexical/Discord) that apply the paste ASYNC have reconciled. Also the
