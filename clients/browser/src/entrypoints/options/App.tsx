@@ -16,10 +16,12 @@ type HealthState =
     | { status: 'unreachable'; error: string }
 
 const HOTKEYS: { value: Settings['acceptHotkey']; label: string }[] = [
-    { value: 'Ctrl+.', label: 'Ctrl + .  (default)' },
-    { value: 'Ctrl+Shift+.', label: 'Ctrl + Shift + .' },
-    { value: 'Alt+.', label: 'Alt + .' },
+    { value: 'Alt+Enter', label: 'Alt + Enter  (default)' },
     { value: 'Ctrl+Enter', label: 'Ctrl + Enter' },
+    { value: 'Ctrl+Shift+Enter', label: 'Ctrl + Shift + Enter' },
+    { value: 'Alt+.', label: 'Alt + .' },
+    { value: 'Ctrl+Shift+.', label: 'Ctrl + Shift + .' },
+    { value: 'Ctrl+.', label: 'Ctrl + .' },
 ]
 
 export function App() {

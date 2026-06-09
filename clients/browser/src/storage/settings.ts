@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
     checkPastedText: true,
     picky: false,
     autocorrect: false,
-    acceptHotkey: 'Ctrl+.',
+    acceptHotkey: 'Alt+Enter',
     onDemandHotkey: 'Ctrl+Shift+Period',
     personalDictionary: [],
 }
