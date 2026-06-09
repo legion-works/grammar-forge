@@ -6,6 +6,41 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { showPopover, type PopoverOptions } from '@/overlay/popover'
 
+// jsdom lacks a full Popover API. Stub showPopover/hidePopover as no-ops on the
+// prototype so showPopover() takes the top-layer branch without throwing.
+// Installed/removed per test.
+let popoverStubInstalled = false
+function installPopoverStub(): void {
+    const proto = HTMLElement.prototype as unknown as {
+        showPopover?: () => void
+        hidePopover?: () => void
+    }
+    if (typeof proto.showPopover !== 'function') {
+        proto.showPopover = function () {}
+        proto.hidePopover = function () {}
+        popoverStubInstalled = true
+    }
+    // Make 'popover' visible on the prototype so isPopoverSupported() returns
+    // true and the setAttribute('popover', 'manual') branch is exercised.
+    if (!('popover' in proto)) {
+        Object.defineProperty(proto, 'popover', {
+            value: '',
+            writable: true,
+            configurable: true,
+        })
+    }
+}
+function removePopoverStub(): void {
+    if (!popoverStubInstalled) return
+    const proto = HTMLElement.prototype as unknown as {
+        showPopover?: () => void
+        hidePopover?: () => void
+    }
+    delete proto.showPopover
+    delete proto.hidePopover
+    popoverStubInstalled = false
+}
+
 const ANCHOR = new DOMRect(100, 100, 80, 16)
 
 function mkOptions(overrides: Partial<PopoverOptions> = {}): PopoverOptions {
@@ -34,6 +69,10 @@ describe('showPopover', () => {
     let root: ShadowRoot
     beforeEach(() => {
         root = mkRoot()
+        installPopoverStub()
+    })
+    afterEach(() => {
+        removePopoverStub()
     })
 
     it('renders a panel with the category label, message, and primary replacement', () => {
@@ -127,16 +166,27 @@ describe('showPopover', () => {
         expect(opts.onApply).not.toHaveBeenCalled()
         expect(opts.onIgnore).not.toHaveBeenCalled()
     })
+
+    it('uses popover="manual" when the Popover API is available', () => {
+        expect(root.querySelector('.gf-panel')).toBeNull()
+        showPopover(root, mkOptions())
+        const panel = root.querySelector('.gf-panel') as HTMLElement
+        const hasPopoverApi = typeof (panel as { showPopover?: unknown }).showPopover === 'function'
+        const popoverAttr = hasPopoverApi ? panel.getAttribute('popover') : null
+        expect(popoverAttr).toBe('manual')
+    })
 })
 
 describe('showPopover outside-click dismiss', () => {
     let root: ShadowRoot
     beforeEach(() => {
         root = mkRoot()
+        installPopoverStub()
         vi.useFakeTimers()
     })
     afterEach(() => {
         vi.useRealTimers()
+        removePopoverStub()
     })
 
     it('dismisses on a mousedown outside the popover (after the 100ms mount delay)', () => {

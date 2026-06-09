@@ -85,6 +85,16 @@ export function dismissPopoversIn(root: ShadowRoot): void {
     for (const handle of Array.from(set)) handle.hide()
 }
 
+/** Feature-detect the HTML Popover API (top-layer + manual control). jsdom has
+ *  only partial support, so we test both the method's presence and that the
+ *  `popover` attribute reflects on the prototype. */
+function isPopoverSupported(panel: HTMLElement): boolean {
+    return (
+        typeof (panel as { showPopover?: unknown }).showPopover === 'function' &&
+        'popover' in HTMLElement.prototype
+    )
+}
+
 /**
  * Mount a popover in the supplied shadow root, anchored to the given rect.
  * Only one popover per root is open at a time (opening a new one dismisses
@@ -101,6 +111,15 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
     panel.className = 'gf-panel'
     panel.setAttribute('role', 'dialog')
     panel.setAttribute('aria-label', 'Grammar correction')
+
+    const usePopoverApi = isPopoverSupported(panel)
+    if (usePopoverApi) {
+        // Manual mode: WE control dismiss. (auto would light-dismiss on ANY
+        // outside mousedown, including clicks on our own highlights that we use
+        // to RE-OPEN the card — a close-then-reopen race. Manual keeps explicit
+        // control while still putting the panel in the top layer.)
+        panel.setAttribute('popover', 'manual')
+    }
 
     positionPanel(panel, options.anchorRect, view)
 
@@ -125,6 +144,16 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
     panel.addEventListener('keydown', onKeydown)
 
     root.appendChild(panel)
+
+    if (usePopoverApi) {
+        try {
+            ;(panel as { showPopover: () => void }).showPopover()
+        } catch {
+            // Some engines throw if the element is not connected or is already
+            // showing; the panel is still in the DOM (just not top-layer) and
+            // the existing z-index keeps it visible, so this is a soft fallback.
+        }
+    }
 
     // Move focus to the primary action so keyboard users can apply with Enter
     // / Space without tabbing in from the field.
@@ -159,6 +188,13 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
                 outsideListenerInstalled = false
             }
             panel.removeEventListener('keydown', onKeydown)
+            if (usePopoverApi && panel.isConnected) {
+                try {
+                    ;(panel as { hidePopover: () => void }).hidePopover()
+                } catch {
+                    // already hidden / not in top layer — fall through to remove
+                }
+            }
             if (panel.isConnected) panel.remove()
             unregisterPopover(root, handle)
         },
