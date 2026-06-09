@@ -88,11 +88,15 @@ non-redistributable) — regenerate with `get_benchmarks.sh`.
   3.0.2`, whose tokenization differs slightly and inflates FP. The slow-path LLM also
   over-corrects learner text vs the minimal-edit gold. Treat CoNLL-2014 as the headline.
 
-**Spot result (25-sentence subset, 2026-06-09):** CoNLL-2014 **F0.5 ≈ 66.9** (P 70.8 / R 54.8)
-— squarely **GECToR-class** (published single-model 65.3, ensemble 66.5, T5-11B 68.9),
-confirming GrammarForge is at the published single-model SOTA ceiling on the most-cited GEC
-benchmark. (BEA-dev ≈ 17 with the caveat above.) Run the FULL sets (CoNLL 1312, BEA 4384) for
-the definitive numbers — slow with LLM escalation + shared GPU.
+**Definitive result (FULL sets, 2026-06-09):** CoNLL-2014-test **F0.5 = 59.78** (P 64.97 /
+R 45.32, 1312 sents, ~4 min) — a strong single-model GEC result, ~5–6 F0.5 below published
+GECToR single-model (65.3) and below the ensemble SOTA (76). The shape is **precision-leaning**
+(the cascade is conservative — it doesn't over-correct, good for a writing assistant, but
+recall 45% means it misses over half the aggressive gold edits; the top quality lever is a
+2nd GEC model for majority-vote before LLM escalation). BEA-2019-dev **F0.5 = 14.53**
+(4384 sents, ~12 min) is **directional only** — see the errant-2.0.0-vs-3.0.2 + over-correction
+caveat above; do not read it as our true BEA standing. (A 25-sentence subset gave a rosier
+66.9 — small-sample optimism; the full set is the honest number.)
 
 ## ERRANT / benchmark venv setup (`.venv`, gitignored)
 
