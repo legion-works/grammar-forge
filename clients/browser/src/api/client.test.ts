@@ -122,3 +122,59 @@ describe('BridgeClient.health', () => {
         await expect(c.health()).rejects.toThrow(/local/i)
     })
 })
+
+describe('BridgeClient.rephrase', () => {
+    it('POSTs /rephrase with snake_cased override and returns the parsed response', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+            new Response(
+                JSON.stringify({
+                    original: 'i has went',
+                    rephrased: 'I have gone',
+                    alternatives: ['I went'],
+                }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+        )
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', true)
+        const res = await c.rephrase({
+            text: 'i has went',
+            tone: 'formal',
+            alternatives: 2,
+            source: 'browser',
+            override: {
+                provider: 'anthropic',
+                baseUrl: 'https://api.anthropic.com',
+                model: 'claude-x',
+                apiKey: 'secret',
+            },
+        })
+        expect(res.rephrased).toBe('I have gone')
+        expect(res.alternatives).toEqual(['I went'])
+        expect(fetchMock).toHaveBeenCalledOnce()
+        const call = fetchMock.mock.calls[0]!
+        expect(String(call[0])).toBe('http://localhost:8000/rephrase')
+        const body = JSON.parse((call[1] as RequestInit).body as string)
+        expect(body.override.base_url).toBe('https://api.anthropic.com')
+        expect(body.override.api_key).toBe('secret')
+        expect(body.override.provider).toBe('anthropic')
+        expect(body.alternatives).toBe(2)
+        expect(body.tone).toBe('formal')
+    })
+
+    it('omits the override when none is configured', async () => {
+        const fetchMock = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(
+                new Response(JSON.stringify({ original: 'x', rephrased: 'y', alternatives: [] }), {
+                    status: 200,
+                    headers: { 'content-type': 'application/json' },
+                }),
+            )
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', true)
+        await c.rephrase({ text: 'x', source: 'browser' })
+        const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string)
+        expect(body.override).toBeUndefined()
+    })
+})

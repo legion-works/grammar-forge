@@ -32,3 +32,25 @@ export interface CorrectRequest {
     picky?: boolean
     source: string
 }
+
+export interface RephraseOverride {
+    provider: 'openai' | 'anthropic'
+    baseUrl: string
+    model: string
+    apiKey: string
+}
+
+export interface RephraseRequest {
+    text: string
+    tone?: string
+    style?: string
+    alternatives?: number
+    source: string
+    override?: RephraseOverride
+}
+
+export interface RephraseResponse {
+    original: string
+    rephrased: string
+    alternatives: string[]
+}

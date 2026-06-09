@@ -1,5 +1,10 @@
 import { isLocalBridgeUrl } from '@/api/url'
-import type { CorrectRequest, CorrectResponse } from '@/api/types'
+import type {
+    CorrectRequest,
+    CorrectResponse,
+    RephraseRequest,
+    RephraseResponse,
+} from '@/api/types'
 
 export interface SignalEvent {
     id?: number
@@ -97,5 +102,29 @@ export class BridgeClient {
 
     health(): Promise<{ status: string; premium?: boolean }> {
         return this.get<{ status: string; premium?: boolean }>('/health')
+    }
+
+    rephrase(req: RephraseRequest): Promise<RephraseResponse> {
+        try {
+            this.guard()
+        } catch (e) {
+            return Promise.reject(e)
+        }
+        const body: Record<string, unknown> = {
+            text: req.text,
+            source: req.source,
+        }
+        if (req.tone) body.tone = req.tone
+        if (req.style) body.style = req.style
+        if (req.alternatives && req.alternatives > 1) body.alternatives = req.alternatives
+        if (req.override) {
+            body.override = {
+                provider: req.override.provider,
+                base_url: req.override.baseUrl,
+                model: req.override.model,
+                api_key: req.override.apiKey,
+            }
+        }
+        return this.post<RephraseResponse>('/rephrase', body)
     }
 }
