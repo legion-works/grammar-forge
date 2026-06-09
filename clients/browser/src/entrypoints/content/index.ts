@@ -113,6 +113,12 @@ interface FieldState {
      * pill is destroyed by the attachment's setHandles swap.
      */
     statusHandle: StatusButtonHandle | null
+    /**
+     * Restore this field's ORIGINAL `spellcheck` attribute (recorded at attach).
+     * Run on detach so a field reused by a chatty SPA isn't left with our
+     * `spellcheck="false"`. Also pushed onto runtime.cleanups for teardown.
+     */
+    restoreSpellcheck: () => void
 }
 
 interface ActiveSuggestion {
@@ -342,6 +348,13 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             const newClient = new BridgeClient(next.bridgeBaseUrl, next.allowRemoteBridge)
             runtime.client = newClient
             runtime.signalQueue = createSignalQueue({ send: (events) => newClient.signal(events) })
+        }
+        // A spellcheck-suppression flip must re-attach fields so the attribute
+        // is applied/restored. The cheapest correct path is a full runtime
+        // rebuild (teardown restores every field's original attribute, re-init
+        // re-applies under the new setting).
+        if (runtime && prev.suppressNativeSpellcheck !== next.suppressNativeSpellcheck) {
+            teardownRuntime()
         }
         reconcile(next)
     })
@@ -663,6 +676,7 @@ function wireRuntime(
                 !(el instanceof HTMLTextAreaElement) &&
                 !(el instanceof HTMLInputElement),
             statusHandle: null,
+            restoreSpellcheck: () => {},
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -671,6 +685,20 @@ function wireRuntime(
             native: state.useNativeHighlight,
             total: runtime.fieldCount,
         })
+
+        // Native-spellcheck suppression (opt-in). Record the field's ORIGINAL
+        // `spellcheck` attribute so detach can restore it exactly (null when it
+        // was absent), then set it to "false" when the setting is on. We never
+        // clobber a page-set value permanently — the restore runs on detach AND
+        // on settings-driven teardown.
+        const originalSpellcheck = el.getAttribute('spellcheck')
+        const restoreSpellcheck = (): void => {
+            if (originalSpellcheck === null) el.removeAttribute('spellcheck')
+            else el.setAttribute('spellcheck', originalSpellcheck)
+        }
+        state.restoreSpellcheck = restoreSpellcheck
+        if (s.suppressNativeSpellcheck) el.setAttribute('spellcheck', 'false')
+        runtime.cleanups.push(restoreSpellcheck)
 
         // Release this field's paste-grace timer on a settings-driven teardown.
         // teardownRuntime() iterates runtime.cleanups but does NOT walk the
@@ -882,6 +910,7 @@ function wireRuntime(
         // Cancel any pending paste-grace timer first so it can't fire a check
         // against a field that's leaving the DOM.
         clearPasteGrace(state)
+        state.restoreSpellcheck()
         // Destroy the per-field renderer. For overlay fields that's the
         // pooled DOM nodes inside the shared shadow root. For native fields
         // it's the document-global registry entries owned by this field.
