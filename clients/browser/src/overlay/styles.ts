@@ -155,12 +155,11 @@ export const OVERLAY_CSS = `
       0 4px 12px rgba(0, 0, 0, 0.10);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     cursor: pointer;
-    transform-origin: 50% 100%;
-    /* Enter animation is TRANSFORM-ONLY (a scale pop). It must NOT animate
-       opacity: a filled opacity keyframe persists its end value and overrides
-       both the faint idle opacity below AND the :hover lift (animations beat
-       regular declarations). That is what kept the pill fully opaque. */
-    animation: gf-pill-pop ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    /* Position is applied via transform: translate() (P3 — composited, no
+       reflow on the scroll/resize loop). There is therefore NO enter-pop scale
+       animation: a transform keyframe would clobber the position translate, and
+       a filled opacity keyframe would persist its end value and override the
+       faint idle opacity + the :hover lift. The pill simply appears. */
     /* Nearly transparent by default — the user opts in by hovering or dragging.
        Lifts fully on :hover / .gf-pill--dragging. */
     opacity: 0.1;
@@ -175,10 +174,6 @@ export const OVERLAY_CSS = `
      is unfocused. display:none so it neither paints nor intercepts pointer
      events; the orchestrator toggles this on field focus/blur. */
   .gf-pill--hidden { display: none; }
-  @keyframes gf-pill-pop {
-    from { transform: scale(${SCALE_TOOLTIP}); }
-    to   { transform: scale(1); }
-  }
 
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .gf-pill {

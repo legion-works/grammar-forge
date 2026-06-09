@@ -2,6 +2,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { renderStatusButton, type StatusButtonOptions } from '@/overlay/status-button'
 
+function translateOf(pill: HTMLElement): { x: number; y: number } {
+    const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(pill.style.transform)
+    return m ? { x: parseFloat(m[1]!), y: parseFloat(m[2]!) } : { x: NaN, y: NaN }
+}
+
 function mkRoot(): ShadowRoot {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -186,8 +191,8 @@ describe('renderStatusButton', () => {
         // style.top = 300-28-8 = 264.
         renderStatusButton(root, mkOptions())
         const pill = root.querySelector('.gf-pill') as HTMLElement
-        expect(parseFloat(pill.style.left)).toBe(382)
-        expect(parseFloat(pill.style.top)).toBe(264)
+        expect(translateOf(pill).x).toBe(382)
+        expect(translateOf(pill).y).toBe(264)
         pill.dispatchEvent(
             new PointerEvent('pointerdown', { clientX: 200, clientY: 200, bubbles: true }),
         )
@@ -195,8 +200,8 @@ describe('renderStatusButton', () => {
             new PointerEvent('pointermove', { clientX: 230, clientY: 250, bubbles: true }),
         )
         // Moved +30,+50 from the style start (382,264) → 412, 314.
-        expect(parseFloat(pill.style.left)).toBe(412)
-        expect(parseFloat(pill.style.top)).toBe(314)
+        expect(translateOf(pill).x).toBe(412)
+        expect(translateOf(pill).y).toBe(314)
         pill.dispatchEvent(
             new PointerEvent('pointerup', { clientX: 230, clientY: 250, bubbles: true }),
         )
@@ -254,8 +259,8 @@ describe('renderStatusButton', () => {
         // (-50,-40) offset moves it up/left, still within the field.
         renderStatusButton(root, mkOptions({ dragOffset: { dx: -50, dy: -40 } }))
         const pill = root.querySelector('.gf-pill') as HTMLElement
-        expect(parseFloat(pill.style.left)).toBe(332)
-        expect(parseFloat(pill.style.top)).toBe(224)
+        expect(translateOf(pill).x).toBe(332)
+        expect(translateOf(pill).y).toBe(224)
     })
 
     it('a drag offset cannot push the pill outside the field box (clamped to field)', () => {
@@ -265,8 +270,8 @@ describe('renderStatusButton', () => {
         // maxLeft = 500-110-8 = 382 ; maxTop = 300-28-8 = 264.
         renderStatusButton(root, mkOptions({ dragOffset: { dx: 500, dy: 500 } }))
         const pill = root.querySelector('.gf-pill') as HTMLElement
-        expect(parseFloat(pill.style.left)).toBe(382)
-        expect(parseFloat(pill.style.top)).toBe(264)
+        expect(translateOf(pill).x).toBe(382)
+        expect(translateOf(pill).y).toBe(264)
     })
 
     it('reposition() re-anchors the pill to a fresh field rect with the live offset', () => {
@@ -279,8 +284,8 @@ describe('renderStatusButton', () => {
         // (both within the new field box: maxLeft=382? no — left 392 > maxLeft
         // 382 → clamped to 382; top 184 < maxTop=164? maxTop=200-28-8=164, so
         // 184 > 164 → clamped to 164).
-        expect(parseFloat(pill.style.left)).toBe(382)
-        expect(parseFloat(pill.style.top)).toBe(164)
+        expect(translateOf(pill).x).toBe(382)
+        expect(translateOf(pill).y).toBe(164)
     })
 
     it('dragging the pill past the threshold reports a new accumulated offset', () => {
@@ -364,5 +369,41 @@ describe('renderStatusButton', () => {
         power.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
         expect(onDragMove).not.toHaveBeenCalled()
         expect(onTogglePower).toHaveBeenCalledTimes(1)
+    })
+
+    it('update() refreshes the badge + stripe in place, reusing the same pill node', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(
+            root,
+            mkOptions({ count: 2, byCategory: { spelling: 2 } }),
+        )
+        const pillBefore = root.querySelector('.gf-pill')
+        handle.update(mkOptions({ count: 5, byCategory: { spelling: 3, grammar: 2 } }))
+        const pillAfter = root.querySelector('.gf-pill')
+        expect(pillAfter).toBe(pillBefore)
+        expect(root.querySelector('.gf-pill__badge')?.textContent).toBe('5')
+        expect(root.querySelectorAll('.gf-pill-bar__stripe')).toHaveLength(2)
+    })
+
+    it('update() switches to the clean state when count drops to 0', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions({ count: 3 }))
+        handle.update(mkOptions({ count: 0, corrections: [], byCategory: {} }))
+        expect(root.querySelector('.gf-pill__badge--ok')).not.toBeNull()
+    })
+
+    it('update() preserves visibility state set via initiallyVisible', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions({ count: 1, initiallyVisible: false }))
+        expect(root.querySelector('.gf-pill')?.classList.contains('gf-pill--hidden')).toBe(true)
+        handle.update(mkOptions({ count: 2 }))
+        expect(root.querySelector('.gf-pill')?.classList.contains('gf-pill--hidden')).toBe(true)
+    })
+
+    it('positions the pill via transform translate, not left/top', () => {
+        const root = mkRoot()
+        renderStatusButton(root, mkOptions({ count: 1 }))
+        const pill = root.querySelector('.gf-pill') as HTMLElement
+        expect(pill.style.transform).toMatch(/translate/)
     })
 })

@@ -75,6 +75,12 @@ export interface StatusButtonHandle {
      *  is `display:none` so it neither paints nor intercepts pointer events,
      *  but its hover panel / drag state survive). */
     setVisible: (visible: boolean) => void
+    /** Refresh the pill's count badge, category stripe bar, and hover-panel
+     *  corrections IN PLACE (no teardown) when a new check resolves. Preserves
+     *  the pill element, its drag offset + live drag, the hover-panel lifecycle,
+     *  and the visibility (setVisible) state. A panel open at update time is
+     *  closed (it reopens with fresh data on the next hover). */
+    update: (options: StatusButtonOptions) => void
 }
 
 const POWER_SVG =
@@ -100,9 +106,14 @@ export function renderStatusButton(
     const doc = root.ownerDocument
     const view = doc.defaultView ?? window
 
+    // Mutable current options: update() swaps this in place so the badge/
+    // stripe/corrections + the panel/click closures all read fresh data without
+    // recreating the pill (and its drag state / listeners / visibility).
+    let current = options
+
     const pill = doc.createElement('div')
     pill.className = 'gf-pill'
-    if (options.disabled) pill.classList.add('gf-pill--disabled')
+    if (current.disabled) pill.classList.add('gf-pill--disabled')
 
     // Power button (always present).
     const power = doc.createElement('button')
@@ -110,24 +121,22 @@ export function renderStatusButton(
     power.className = 'gf-pill__power'
     power.setAttribute(
         'aria-label',
-        options.disabled ? 'Enable grammar checking on this site' : 'Disable on this site',
+        current.disabled ? 'Enable grammar checking on this site' : 'Disable on this site',
     )
     power.title = power.getAttribute('aria-label') ?? ''
     power.innerHTML = POWER_SVG
-    bindButton(power, options.onTogglePower)
+    bindButton(power, () => current.onTogglePower())
     pill.appendChild(power)
 
+    // Body (count) — only present in the enabled state. Held so update() can
+    // refresh its innerHTML + aria-label in place.
+    let body: HTMLButtonElement | null = null
     // Body (count) — hidden in the collapsed/disabled state.
-    if (!options.disabled) {
-        const body = doc.createElement('button')
+    if (!current.disabled) {
+        body = doc.createElement('button')
         body.type = 'button'
         body.className = 'gf-pill__body'
-        body.setAttribute(
-            'aria-label',
-            options.count === 0 ? 'No grammar issues' : `${options.count} grammar issues`,
-        )
-        body.innerHTML = buildBodyHTML(options)
-        bindButton(body, options.onFocusField)
+        bindButton(body, () => current.onFocusField())
         pill.appendChild(body)
 
         // Recheck button — force a fresh check of the field now.
@@ -137,19 +146,32 @@ export function renderStatusButton(
         recheck.setAttribute('aria-label', 'Recheck now')
         recheck.title = 'Recheck now'
         recheck.innerHTML = REFRESH_SVG
-        bindButton(recheck, options.onRecheck)
+        bindButton(recheck, () => current.onRecheck())
         pill.appendChild(recheck)
     }
+
+    // Fill (or refill) the body's count badge + breakdown bar + aria-label from
+    // `current`. Called on mount and on every update(). No-op when disabled
+    // (no body element exists).
+    const renderBody = (): void => {
+        if (!body) return
+        body.setAttribute(
+            'aria-label',
+            current.count === 0 ? 'No grammar issues' : `${current.count} grammar issues`,
+        )
+        body.innerHTML = buildBodyHTML(current)
+    }
+    renderBody()
 
     root.appendChild(pill)
     // Focus-only visibility: a hidden pill is display:none (no paint, no
     // pointer events) but keeps its drag/hover state. Default visible.
-    if (options.initiallyVisible === false) pill.classList.add('gf-pill--hidden')
+    if (current.initiallyVisible === false) pill.classList.add('gf-pill--hidden')
     // Live drag offset from the field's default bottom-right anchor. Seeded
     // from the persisted session offset; drag-end accumulates into it; the
     // shared scroll/resize loop re-anchors via `reposition` using this value.
-    let currentOffset = options.dragOffset ?? { dx: 0, dy: 0 }
-    positionPill(pill, options.anchorRect, view, currentOffset)
+    let currentOffset = current.dragOffset ?? { dx: 0, dy: 0 }
+    positionPill(pill, current.anchorRect, view, currentOffset)
 
     // Pointer-drag (session). A move past DRAG_THRESHOLD_PX starts a drag; a
     // plain click (no move) still reaches the inner buttons. On drop, report the
@@ -158,16 +180,12 @@ export function renderStatusButton(
     let dragged = false
     const onPointerDown = (e: PointerEvent): void => {
         if (e.button !== 0) return
-        // Start from the AUTHORITATIVE style position (what positionPill set),
-        // NOT pill.offsetLeft/Top: the pill is position:fixed, so offsetLeft is
-        // layout-derived relative to the offsetParent and can differ from our
-        // style.left — reading it caused a visual jump at drag start.
-        dragStart = {
-            x: e.clientX,
-            y: e.clientY,
-            left: parseFloat(pill.style.left) || 0,
-            top: parseFloat(pill.style.top) || 0,
-        }
+        // Start from the AUTHORITATIVE transform translate (what positionPill
+        // set), NOT pill.offsetLeft/Top: the pill is position:fixed at 0,0 with
+        // a transform offset, so offsetLeft is layout-derived and can differ
+        // from our translate — reading it caused a visual jump at drag start.
+        const t = readTranslate(pill)
+        dragStart = { x: e.clientX, y: e.clientY, left: t.x, top: t.y }
         dragged = false
     }
     const onPointerMove = (e: PointerEvent): void => {
@@ -184,8 +202,8 @@ export function renderStatusButton(
         }
         dragged = true
         pill.classList.add('gf-pill--dragging')
-        pill.style.left = `${dragStart.left + ddx}px`
-        pill.style.top = `${dragStart.top + ddy}px`
+        // Position via transform (composited, no reflow); left/top stay 0.
+        pill.style.transform = `translate(${dragStart.left + ddx}px, ${dragStart.top + ddy}px)`
     }
     const onPointerUp = (e: PointerEvent): void => {
         if (!dragStart) return
@@ -204,7 +222,7 @@ export function renderStatusButton(
             // reposition with this offset) and the spot persists across
             // re-renders and the enabled↔disabled pill swap.
             currentOffset = { dx: currentOffset.dx + ddx, dy: currentOffset.dy + ddy }
-            options.onDragMove?.(currentOffset)
+            current.onDragMove?.(currentOffset)
         }
         dragStart = null
     }
@@ -251,8 +269,8 @@ export function renderStatusButton(
         hideTimer = view.setTimeout(hidePanel, PANEL_HIDE_GRACE_MS)
     }
     const showPanel = (): void => {
-        if (panel || options.disabled || options.corrections.length === 0) return
-        panel = buildPanel(doc, options)
+        if (panel || current.disabled || current.corrections.length === 0) return
+        panel = buildPanel(doc, current)
         root.appendChild(panel)
         positionPanel(panel, pill.getBoundingClientRect(), view)
         panel.addEventListener('mouseenter', clearHide)
@@ -266,14 +284,14 @@ export function renderStatusButton(
             event.stopPropagation()
             if (btn.dataset.action === 'apply-all') {
                 hidePanel()
-                options.onApplyAll()
+                current.onApplyAll()
                 return
             }
             if (btn.dataset.action === 'apply-one') {
                 const i = Number.parseInt(btn.dataset.index ?? '', 10)
                 if (Number.isInteger(i)) {
                     hidePanel()
-                    options.onApplyOne(i)
+                    current.onApplyOne(i)
                 }
             }
         })
@@ -295,7 +313,23 @@ export function renderStatusButton(
         setVisible: (visible: boolean) => {
             pill.classList.toggle('gf-pill--hidden', !visible)
         },
+        update: (next: StatusButtonOptions) => {
+            current = next
+            pill.classList.toggle('gf-pill--disabled', current.disabled)
+            renderBody()
+            // A panel open at update time is closed; it reopens on the next
+            // hover with fresh corrections (update happens per-check, not
+            // per-hover, so this is invisible in practice).
+            hidePanel()
+        },
     }
+}
+
+/** Read the pill's current transform translate offset (x,y in px). Returns
+ *  {0,0} when no translate is set (jsdom / pre-position). */
+function readTranslate(el: HTMLElement): { x: number; y: number } {
+    const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(el.style.transform)
+    return m ? { x: parseFloat(m[1]!), y: parseFloat(m[2]!) } : { x: 0, y: 0 }
 }
 
 function bindButton(el: HTMLElement, onClick: () => void): void {
@@ -377,8 +411,12 @@ function positionAbsolute(
     if (top > vh - height - VIEWPORT_GUTTER) top = vh - height - VIEWPORT_GUTTER
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     if (top < VIEWPORT_GUTTER) top = VIEWPORT_GUTTER
-    pill.style.left = `${left}px`
-    pill.style.top = `${top}px`
+    // Position via transform (composited, no reflow). The pill stays
+    // position:fixed at 0,0 and the translate carries the offset; the scroll/
+    // resize loop rewriting the transform never forces a synchronous layout.
+    pill.style.left = '0'
+    pill.style.top = '0'
+    pill.style.transform = `translate(${left}px, ${top}px)`
 }
 
 function positionPanel(panel: HTMLElement, pillRect: DOMRect, view: Window): void {

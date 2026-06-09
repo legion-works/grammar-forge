@@ -23,7 +23,7 @@ import { getNativeHighlighter, isNativeHighlightSupported } from '@/overlay/nati
 import { dismissPopoversIn, showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { showToast } from '@/overlay/toast'
-import { renderStatusButton, type StatusButtonHandle } from '@/overlay/status-button'
+import { renderStatusButton, type StatusButtonHandle, type StatusButtonOptions } from '@/overlay/status-button'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
 import {
@@ -1224,7 +1224,8 @@ function wireRuntime(
             count,
             focused: document.activeElement === el,
         })
-        const statusHandle = renderStatusButton(root, {
+        // Build options once; reused for both initial render and update path.
+        const statusOptions: StatusButtonOptions = {
             count,
             byCategory: tallyByCategory(state.items),
             anchorRect: anchor,
@@ -1254,7 +1255,16 @@ function wireRuntime(
             // state.statusHandle.setVisible (below). `contains` (not `===`)
             // because rich editors can put focus on a child node of `el`.
             initiallyVisible: el.contains(document.activeElement),
-        })
+        }
+
+        // Reuse existing handle if already mounted (update in place); otherwise create.
+        let statusHandle: StatusButtonHandle
+        if (state.statusHandle && state.statusHandle.isMounted()) {
+            state.statusHandle.update(statusOptions)
+            statusHandle = state.statusHandle
+        } else {
+            statusHandle = renderStatusButton(root, statusOptions)
+        }
         // Stash the handle so the shared scroll/resize loop can reposition the
         // pill as the field moves, and focus/blur can toggle its visibility.
         state.statusHandle = statusHandle
