@@ -166,3 +166,14 @@ func TestLoad_HarperUserDictOverride(t *testing.T) {
 	})
 	require.Equal(t, "data/user_dictionary.txt", cfg.HarperUserDictPath)
 }
+
+func TestLoad_LLMSeedDefaultZero(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, 0, cfg.LLMSeed, "LLMSeed must default to 0 when GF_LLM_SEED is unset")
+}
+
+func TestLoad_LLMSeedOverride(t *testing.T) {
+	env := map[string]string{"GF_LLM_SEED": "123"}
+	cfg := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	require.Equal(t, 123, cfg.LLMSeed)
+}

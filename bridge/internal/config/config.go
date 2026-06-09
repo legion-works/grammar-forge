@@ -16,9 +16,15 @@ type Config struct {
 	LLMBaseURL string
 	LLMModel   string
 	LLMFormat  string // "chat_instruct" (default) or "grmr_native"
-	LLMAPIKey  string
-	DBPath     string
-	LogLevel   string
+	// LLMSeed is the sampling seed sent to the LLM backend on every request so
+	// greedy output is reproducible across runs (deterministic eval gating and
+	// stable client output). Configurable via GF_LLM_SEED (default 0). Backends
+	// that ignore seed (or run greedy) are unaffected; for BYO temp>0 configs it
+	// pins sampling.
+	LLMSeed   int
+	LLMAPIKey string
+	DBPath    string
+	LogLevel  string
 
 	// Fast path (Plan 1C): Harper + GECToR run in-process; the LLM is
 	// escalation-only (see correction.EscalationPolicy).
@@ -131,6 +137,7 @@ func Load(getenv Getenv) Config {
 		LLMBaseURL: get("GF_LLM_BASE_URL", "http://llamacpp:8000/v1"),
 		LLMModel:   get("GF_LLM_MODEL", "gemma-4-E4B-it-qat-Q4_K_XL"),
 		LLMFormat:  get("GF_LLM_FORMAT", "chat_instruct"),
+		LLMSeed:    getInt("GF_LLM_SEED", 0),
 		LLMAPIKey:  get("GF_LLM_API_KEY", ""),
 		DBPath:     get("GF_DB_PATH", "/data/corrections.db"),
 		LogLevel:   get("GF_LOG_LEVEL", "info"),

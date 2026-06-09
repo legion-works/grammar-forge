@@ -66,7 +66,7 @@ func main() {
 	svc := correction.NewService(
 		pb,
 		fast,
-		llm.New(llm.Config{BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey}),
+		llm.New(llm.Config{BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey, Seed: cfg.LLMSeed}),
 		st,
 		cfg.LLMModel,
 		correction.EscalationPolicy{

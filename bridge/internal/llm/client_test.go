@@ -142,3 +142,31 @@ func TestComplete_CompletionsOmitsChatTemplateKwargs(t *testing.T) {
 	_, present := gotBody["chat_template_kwargs"]
 	require.False(t, present, "completions payload must NOT carry chat_template_kwargs")
 }
+
+func TestCompleteSendsSeedOnBothPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tmpl correction.PromptTemplate
+		resp string
+	}{
+		{"chat", correction.TemplateChatInstruct, `{"choices":[{"message":{"content":"ok"}}]}`},
+		{"completions", correction.TemplateGRMRNative, `{"choices":[{"text":"ok"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				_, _ = w.Write([]byte(tc.resp))
+			}))
+			defer srv.Close()
+			c := New(Config{BaseURL: srv.URL + "/v1", Model: "m", Seed: 42})
+			_, err := c.Complete(context.Background(), correction.Prompt{
+				System: "sys", User: "txt", Template: tc.tmpl,
+			})
+			require.NoError(t, err)
+			seed, ok := gotBody["seed"]
+			require.True(t, ok, "payload must carry seed")
+			require.EqualValues(t, 42, seed)
+		})
+	}
+}

@@ -20,6 +20,7 @@ type Config struct {
 	BaseURL string // e.g. http://llamacpp:8000/v1
 	Model   string
 	APIKey  string
+	Seed    int // sampling seed for reproducible output (sent on every request)
 }
 
 // Client talks to an OpenAI-compatible server.
@@ -52,7 +53,7 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 		msgs = append(msgs, chatMessage{Role: "user", Content: p.User})
 		payload = map[string]any{
 			"model": c.cfg.Model, "messages": msgs,
-			"temperature": 0, "max_tokens": maxTokens,
+			"temperature": 0, "seed": c.cfg.Seed, "max_tokens": maxTokens,
 			// Reasoning-capable instruct models (Gemma-4, Qwen3-thinking) otherwise
 			// emit chain-of-thought that consumes the token budget and leaves
 			// message.content empty for a single-shot grammar correction. This
@@ -63,7 +64,7 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 		endpoint = "/completions"
 		payload = map[string]any{
 			"model": c.cfg.Model, "prompt": p.User,
-			"temperature": 0, "max_tokens": maxTokens, "stop": p.Stop,
+			"temperature": 0, "seed": c.cfg.Seed, "max_tokens": maxTokens, "stop": p.Stop,
 		}
 	}
 
