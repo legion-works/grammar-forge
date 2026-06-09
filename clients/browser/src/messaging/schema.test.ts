@@ -12,7 +12,12 @@ describe('messageSender', () => {
 
     it('passes through additional fields for TAB_STATUS', () => {
         const send = messageSender('TAB_STATUS')
-        const m = send({ enabled: true, fieldCount: 3, hostname: 'example.com', counts: { spelling: 2, grammar: 1 } })
+        const m = send({
+            enabled: true,
+            fieldCount: 3,
+            hostname: 'example.com',
+            counts: { spelling: 2, grammar: 1 },
+        })
         expect(m).toEqual({
             type: 'TAB_STATUS',
             enabled: true,
