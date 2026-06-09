@@ -85,3 +85,8 @@ eval/results.json
 # JFLEG held-out eval data (CC BY-NC-SA corpus text — local only, not committed)
 eval/jfleg_dev.jsonl
 eval/jfleg*.results.json
+
+# WS-C benchmark corpora — non-redistributable (NUS NUCLE / Cambridge W&I+LOCNESS)
+eval/benchmarks/**
+!eval/benchmarks/.gitkeep
+
