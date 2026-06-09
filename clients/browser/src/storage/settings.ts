@@ -26,6 +26,15 @@ export interface Settings {
     acceptHotkey: string
     onDemandHotkey: string
     personalDictionary: string[]
+    /**
+     * When true, set `spellcheck="false"` on every monitored field so the
+     * browser's native red squiggles don't double up with GrammarForge
+     * highlights. The field's ORIGINAL `spellcheck` attribute is recorded on
+     * attach and restored on detach/teardown (we never clobber a page that set
+     * it deliberately). Off by default; opt-in (privacy invariant unaffected —
+     * this only touches the page DOM, no network).
+     */
+    suppressNativeSpellcheck: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -42,6 +51,7 @@ export const DEFAULT_SETTINGS: Settings = {
     acceptHotkey: 'Alt+Enter',
     onDemandHotkey: 'Ctrl+Shift+Period',
     personalDictionary: [],
+    suppressNativeSpellcheck: false,
 }
 
 /**

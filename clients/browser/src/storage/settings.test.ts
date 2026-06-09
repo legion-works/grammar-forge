@@ -36,6 +36,7 @@ describe('DEFAULT_SETTINGS', () => {
             acceptHotkey: 'Alt+Enter',
             onDemandHotkey: 'Ctrl+Shift+Period',
             personalDictionary: [],
+            suppressNativeSpellcheck: false,
         })
     })
 })
