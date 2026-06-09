@@ -6,6 +6,7 @@
 
 import { deriveCategory, type CATEGORY_META } from '@/api/category'
 import { verifyByteSpan } from '@/api/offset'
+import { wordLevelDiff } from '@/lib/word-diff'
 import type { BridgeSuggestion, Category, CorrectResponse } from '@/api/types'
 
 /** A renderable correction item — one underline + one popover. */
@@ -23,8 +24,15 @@ export interface RenderableItem {
     message: string
     /** Replacement strings; index 0 is the primary. Always at least one. */
     replacements: string[]
-    /** Original text the suggestion is replacing. */
+    /** Original text the suggestion is replacing (the exact edit span). */
     original: string
+    /** Word-level preview of the primary replacement: the surrounding whole
+     *  word(s) before vs after the edit (e.g. "was" -> "were" even though the
+     *  raw span is "as" -> "ere"). Display only — apply uses the exact span. */
+    diffOriginal: string
+    diffCorrected: string
+    /** True when the primary correction removes the text (deletion). */
+    diffIsDeletion: boolean
     /** The original UTF-8 byte span from the bridge (kept for re-check + signal). */
     byteSpan: { start: number; end: number }
     /** Bridge model tag (kept for signal context). */
@@ -79,6 +87,7 @@ export async function runCheck(text: string, deps: RunCheckDeps): Promise<RunChe
         const replacements =
             s.replacements && s.replacements.length > 0 ? s.replacements : [s.replacement]
         const original = text.slice(cu.start, cu.end)
+        const diff = wordLevelDiff(text, cu.start, cu.end, replacements[0] ?? '')
         items.push({
             id: s.id,
             cuStart: cu.start,
@@ -87,6 +96,9 @@ export async function runCheck(text: string, deps: RunCheckDeps): Promise<RunChe
             message: s.message ?? '',
             replacements,
             original,
+            diffOriginal: diff.original,
+            diffCorrected: diff.corrected,
+            diffIsDeletion: diff.isDeletion,
             byteSpan: { start: s.span.start, end: s.span.end },
             model: s.model,
             ruleId: s.ruleId,

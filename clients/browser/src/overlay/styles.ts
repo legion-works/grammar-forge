@@ -235,6 +235,36 @@ export const OVERLAY_CSS = `
   }
 
   /* ============================================================
+   * Diff preview (shared by tooltip, popover, pill panel):
+   * original word(s) red + struck-through  ->  corrected word(s) green
+   * ============================================================ */
+  .gf-diff {
+    display: inline;
+    font-size: 13px;
+    word-break: break-word;
+  }
+  .gf-diff__old {
+    color: #fca5a5;
+    text-decoration: line-through;
+    text-decoration-color: #ef4444;
+  }
+  .gf-diff__arrow {
+    opacity: 0.7;
+    margin: 0 2px;
+  }
+  .gf-diff__new {
+    color: #86efac;
+    font-weight: 600;
+  }
+  .gf-diff__removed {
+    color: #9ca3af;
+    font-style: italic;
+  }
+  .gf-panel__diff {
+    margin: 4px 0 8px;
+  }
+
+  /* ============================================================
    * Popover internals
    * ============================================================ */
   .gf-panel__header {

@@ -6,6 +6,7 @@
 // so it never intercepts the page's mouse events (the field stays fully
 // editable and selectable under it).
 import { CATEGORY_META } from '@/api/category'
+import { diffInnerHTML, escapeText } from '@/overlay/diff-view'
 import type { Category } from '@/api/types'
 
 const TOOLTIP_WIDTH_MAX = 320
@@ -19,10 +20,12 @@ export interface TooltipOptions {
     category: Category
     /** Bridge-supplied explanation. May be empty. */
     message: string
-    /** Primary replacement (index 0). Empty string for a pure deletion. */
-    replacement: string
-    /** Original text being replaced (shown for a deletion). */
-    original: string
+    /** Word-level diff: original word(s) (shown red, struck) -> corrected
+     *  word(s) (shown green). e.g. "was" -> "were". */
+    diffOriginal: string
+    diffCorrected: string
+    /** True when the correction removes the text (no green side). */
+    diffIsDeletion: boolean
 }
 
 export interface TooltipHandle {
@@ -85,28 +88,6 @@ function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void 
     }
 }
 
-function escapeText(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;')
-}
-
-/** Render the fix line: "-> replacement" for an edit, or "Remove <original>"
- *  for a deletion (empty replacement). */
-function renderFix(opts: TooltipOptions): string {
-    if (opts.replacement.length > 0) {
-        return `<div class="gf-tooltip__fix"><span class="gf-tooltip__arrow" aria-hidden="true">&rarr;</span> <span class="gf-tooltip__replacement">${escapeText(opts.replacement)}</span></div>`
-    }
-    const orig = opts.original.trim()
-    if (orig.length > 0) {
-        return `<div class="gf-tooltip__fix">Remove <span class="gf-tooltip__replacement">${escapeText(orig)}</span></div>`
-    }
-    return ''
-}
-
 function renderInnerHTML(label: string, badge: string, opts: TooltipOptions): string {
     const hasMessage = opts.message.trim().length > 0
     return `
@@ -115,7 +96,7 @@ function renderInnerHTML(label: string, badge: string, opts: TooltipOptions): st
             <span class="gf-tooltip__label">${escapeText(label)}</span>
         </div>
         ${hasMessage ? `<div class="gf-tooltip__message">${escapeText(opts.message)}</div>` : ''}
-        ${renderFix(opts)}
+        <div class="gf-tooltip__fix">${diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion)}</div>
         <div class="gf-tooltip__hint">Click to fix</div>
     `
 }

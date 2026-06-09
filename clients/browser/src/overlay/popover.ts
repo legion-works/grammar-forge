@@ -9,6 +9,7 @@
 // on document and inspects composedPath() (shadow-DOM aware). The previous
 // popover is always torn down before a new one mounts.
 import { CATEGORY_META } from '@/api/category'
+import { diffInnerHTML } from '@/overlay/diff-view'
 import type { Category } from '@/api/types'
 
 const OUTSIDE_CLICK_DELAY_MS = 100
@@ -22,6 +23,11 @@ export interface PopoverOptions {
     category: Category
     /** Bridge-supplied explanation. */
     message: string
+    /** Word-level diff preview of the primary fix (original red -> corrected
+     *  green); shown above the action row. */
+    diffOriginal: string
+    diffCorrected: string
+    diffIsDeletion: boolean
     /** Replacement strings, index 0 is primary. */
     replacements: string[]
     /** Original text being replaced (used by Add to dictionary). */
@@ -178,7 +184,6 @@ function escapeText(text: string): string {
 }
 
 function renderInnerHTML(label: string, badge: string, opts: PopoverOptions): string {
-    const primary = opts.replacements[0] ?? ''
     const extras = opts.replacements.slice(1)
     const hasExtras = extras.length > 0
     const showDict = opts.category === 'spelling' && typeof opts.onAddToDictionary === 'function'
@@ -188,10 +193,8 @@ function renderInnerHTML(label: string, badge: string, opts: PopoverOptions): st
             <span class="gf-panel__dot" style="background:${badge}"></span>
             <span class="gf-panel__label">${escapeText(label)}</span>
         </div>
-        <div class="gf-panel__message">${escapeText(opts.message)}</div>
-        <div class="gf-panel__message">
-            <span class="gf-panel__replacement">${escapeText(primary)}</span>
-        </div>
+        ${opts.message ? `<div class="gf-panel__message">${escapeText(opts.message)}</div>` : ''}
+        <div class="gf-panel__diff">${diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion)}</div>
         <div class="gf-panel__actions">
             <button class="gf-panel__btn gf-panel__btn--primary" data-action="apply" type="button">
                 Apply

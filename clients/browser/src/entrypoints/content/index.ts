@@ -423,8 +423,9 @@ function wireRuntime(
                 anchorRect: hit.rect,
                 category: hit.item.category,
                 message: hit.item.message,
-                replacement: hit.item.replacements[0] ?? '',
-                original: hit.item.original,
+                diffOriginal: hit.item.diffOriginal,
+                diffCorrected: hit.item.diffCorrected,
+                diffIsDeletion: hit.item.diffIsDeletion,
             })
         }
         const onFieldMouseLeave = (): void => {
@@ -578,6 +579,9 @@ function wireRuntime(
             anchorRect,
             category: item.category,
             message: item.message,
+            diffOriginal: item.diffOriginal,
+            diffCorrected: item.diffCorrected,
+            diffIsDeletion: item.diffIsDeletion,
             replacements: item.replacements,
             original: item.original,
             onApply: (replacementIndex: number) => {
