@@ -14,7 +14,13 @@ export interface HotkeyEvent {
     shiftKey: boolean
     altKey: boolean
     metaKey: boolean
+    /** The produced character/key name. SHIFT- and layout-DEPENDENT: pressing
+     *  Shift+. reports '>' here, not '.'. We therefore also match on `code`. */
     key: string
+    /** The PHYSICAL key (`event.code`): 'Period', 'KeyZ', 'Digit1', 'Enter', …
+     *  Layout- and shift-INDEPENDENT, so a chord like Ctrl+Shift+Period matches
+     *  reliably regardless of the glyph the OS produced. */
+    code: string
 }
 
 export interface ParsedHotkey {
@@ -97,17 +103,42 @@ export function parseHotkey(input: string): ParsedHotkey {
 }
 
 /**
- * Return true iff `event` matches the parsed chord. `Ctrl` on Windows/Linux
- * and `Cmd` (metaKey) on macOS both satisfy a parsed `ctrl` flag, so the same
- * `Ctrl+.` config works on both OSes. Comparison on the key is
- * case-insensitive — browsers report `key` as `"."` or `"Period"` etc.
+ * Normalise a physical `event.code` ('Period', 'KeyZ', 'Digit1', 'Enter') to a
+ * bare token comparable to a parsed key: strip the 'Key'/'Digit' prefix and
+ * lowercase. 'KeyZ' -> 'z', 'Digit1' -> '1', 'Period' -> 'period', 'Enter' ->
+ * 'enter'. Returns '' for an empty/absent code.
+ */
+function normalizeCode(code: string): string {
+    if (!code) return ''
+    const lower = code.toLowerCase()
+    if (lower.startsWith('key')) return lower.slice(3)
+    if (lower.startsWith('digit')) return lower.slice(5)
+    return lower
+}
+
+/**
+ * Return true iff `event` matches the parsed chord. `Ctrl` on Windows/Linux and
+ * `Cmd` (metaKey) on macOS both satisfy a parsed `ctrl` flag, so the same config
+ * works cross-OS.
+ *
+ * The key is matched against BOTH `event.key` (the produced glyph) AND the
+ * PHYSICAL `event.code`. This is essential because `event.key` is shift- and
+ * layout-dependent: pressing Shift+`.` reports `event.key === '>'` (US layout),
+ * never `'.'`, so a `Shift`+punctuation chord could NEVER match on `key` alone.
+ * `event.code` ('Period') is stable, so a config of `Ctrl+Shift+Period` (or the
+ * bare `.`/`Period` token) matches regardless of the glyph the OS produced.
  */
 export function matchesHotkey(event: HotkeyEvent, parsed: ParsedHotkey): boolean {
     if (parsed.ctrl && !(event.ctrlKey || event.metaKey)) return false
     if (parsed.shift && !event.shiftKey) return false
     if (parsed.alt && !event.altKey) return false
     if (parsed.meta && !event.metaKey) return false
-    return event.key.toLowerCase() === parsed.key.toLowerCase()
+    const want = parsed.key.toLowerCase()
+    return (
+        event.key.toLowerCase() === want ||
+        event.code.toLowerCase() === want ||
+        normalizeCode(event.code) === want
+    )
 }
 
 export interface ShouldAcceptOptions {

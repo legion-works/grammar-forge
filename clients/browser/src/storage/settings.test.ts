@@ -33,7 +33,7 @@ describe('DEFAULT_SETTINGS', () => {
             checkPastedText: true,
             picky: false,
             autocorrect: false,
-            acceptHotkey: 'Alt+Enter',
+            acceptHotkey: 'Alt+Period',
             onDemandHotkey: 'Ctrl+Shift+Period',
             personalDictionary: [],
             suppressNativeSpellcheck: false,

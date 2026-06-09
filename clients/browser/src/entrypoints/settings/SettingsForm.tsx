@@ -11,13 +11,18 @@ type HealthState =
     | { status: 'ok'; premium: boolean }
     | { status: 'unreachable'; error: string }
 
+// Values use PHYSICAL key names (event.code: Period, Comma, Enter, Backslash,
+// KeyJ) so the chord matches regardless of keyboard layout or the shifted glyph
+// the OS produces (a `.`-glyph chord can never match Shift+. → '>'; see
+// hotkeys/accept.ts matchesHotkey). Avoid Enter as a default (it inserts a
+// newline in textareas).
 const HOTKEYS: { value: Settings['acceptHotkey']; label: string }[] = [
-    { value: 'Alt+Enter', label: 'Alt + Enter  (default)' },
-    { value: 'Ctrl+Enter', label: 'Ctrl + Enter' },
+    { value: 'Alt+Period', label: 'Alt + .  (default)' },
+    { value: 'Ctrl+Period', label: 'Ctrl + .' },
+    { value: 'Ctrl+Shift+Period', label: 'Ctrl + Shift + .' },
+    { value: 'Alt+Comma', label: 'Alt + ,' },
+    { value: 'Ctrl+Shift+Comma', label: 'Ctrl + Shift + ,' },
     { value: 'Ctrl+Shift+Enter', label: 'Ctrl + Shift + Enter' },
-    { value: 'Alt+.', label: 'Alt + .' },
-    { value: 'Ctrl+Shift+.', label: 'Ctrl + Shift + .' },
-    { value: 'Ctrl+.', label: 'Ctrl + .' },
 ]
 
 export function SettingsForm() {

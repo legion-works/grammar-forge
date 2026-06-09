@@ -8,6 +8,7 @@ function keyEvent(overrides: Partial<HotkeyEvent>): HotkeyEvent {
         altKey: false,
         metaKey: false,
         key: '',
+        code: '',
         ...overrides,
     }
 }
@@ -92,6 +93,45 @@ describe('matchesHotkey', () => {
         const parsedZ = parseHotkey('Ctrl+Z')
         expect(matchesHotkey(keyEvent({ ctrlKey: true, key: 'z' }), parsedZ)).toBe(true)
         expect(matchesHotkey(keyEvent({ ctrlKey: true, key: 'Z' }), parsedZ)).toBe(true)
+    })
+
+    it('matches a physical-key chord via event.code (shift-glyph independent)', () => {
+        // Ctrl+Shift+Period: the browser reports event.key as the SHIFTED glyph
+        // ('>' on a US layout), NOT '.'. event.code is always 'Period'. The
+        // matcher must accept the physical code so Shift+punctuation chords work.
+        const parsed = parseHotkey('Ctrl+Shift+Period')
+        expect(
+            matchesHotkey(
+                keyEvent({ ctrlKey: true, shiftKey: true, key: '>', code: 'Period' }),
+                parsed,
+            ),
+        ).toBe(true)
+    })
+
+    it('matches Alt+Period via event.code even when key is the literal "."', () => {
+        const parsed = parseHotkey('Alt+Period')
+        expect(matchesHotkey(keyEvent({ altKey: true, key: '.', code: 'Period' }), parsed)).toBe(
+            true,
+        )
+    })
+
+    it('still matches a letter chord by event.code when key differs by layout', () => {
+        // Ctrl+KeyZ: physical Z key. Some layouts/IMEs report a different key
+        // glyph, but code stays KeyZ.
+        const parsed = parseHotkey('Ctrl+KeyZ')
+        expect(matchesHotkey(keyEvent({ ctrlKey: true, key: 'я', code: 'KeyZ' }), parsed)).toBe(
+            true,
+        )
+    })
+
+    it('rejects a code mismatch', () => {
+        const parsed = parseHotkey('Ctrl+Shift+Period')
+        expect(
+            matchesHotkey(
+                keyEvent({ ctrlKey: true, shiftKey: true, key: '<', code: 'Comma' }),
+                parsed,
+            ),
+        ).toBe(false)
     })
 })
 
