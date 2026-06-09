@@ -45,7 +45,7 @@ export const OVERLAY_CSS = `
    * Highlight (translucent, NOT glass) — one full-rect node per
    * getClientRects() rect. The category colour is set per-node via the
    * --gf-hl custom property; visible alpha is driven by intensity
-   * modifier classes (default 12% / --focus 20% / --hover 32%).
+   * modifier classes (default 20% / --focus 24% / --hover 42%).
    * ============================================================ */
   .gf-highlight {
     position: fixed;
@@ -56,11 +56,11 @@ export const OVERLAY_CSS = `
     pointer-events: none;
     z-index: ${Z_OVERLAY};
     border-radius: 3px;
-    background: color-mix(in srgb, var(--gf-hl, #888) 17%, transparent);
+    background: color-mix(in srgb, var(--gf-hl, #888) 20%, transparent);
     transition: background 140ms ease-out;
   }
-  .gf-highlight--focus { background: color-mix(in srgb, var(--gf-hl, #888) 20%, transparent); }
-  .gf-highlight--hover { background: color-mix(in srgb, var(--gf-hl, #888) 37%, transparent); }
+  .gf-highlight--focus { background: color-mix(in srgb, var(--gf-hl, #888) 24%, transparent); }
+  .gf-highlight--hover { background: color-mix(in srgb, var(--gf-hl, #888) 42%, transparent); }
 
   /* Transient applied flourish: a quick fade and lift the moment a fix is
      applied, before the highlight reconciles away. Animation-only on a

@@ -23,8 +23,8 @@ export const CATEGORY_META: Record<
     },
     punctuation: {
         label: 'Punctuation',
-        badge: '#3b82f6',
-        tint: '#2563eb',
+        badge: '#06b6d4',
+        tint: '#0891b2',
         priority: 3,
     },
     style: {

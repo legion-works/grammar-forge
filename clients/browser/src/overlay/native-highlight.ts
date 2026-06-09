@@ -58,9 +58,12 @@ export interface NativeHighlighter {
 }
 
 const STYLE_ID = 'gf-native-highlights'
-const IDLE_ALPHA = 17
-const STRONG_ALPHA = 20
-const HOVER_ALPHA = 37
+// Alpha ladder — MUST stay in lock-step with the overlay path's
+// `.gf-highlight` / `--focus` / `--hover` color-mix percentages in styles.ts,
+// or textarea (overlay) and contenteditable (native) highlights visibly differ.
+const IDLE_ALPHA = 20
+const STRONG_ALPHA = 24
+const HOVER_ALPHA = 42
 
 function registry(): Map<string, Highlight> | null {
     if (!isNativeHighlightSupported()) return null
