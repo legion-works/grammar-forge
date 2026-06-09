@@ -10,6 +10,10 @@ import type { BridgeSuggestion, Category, CorrectResponse } from '@/api/types'
 
 /** A renderable correction item — one underline + one popover. */
 export interface RenderableItem {
+    /** Correction-log row id from the bridge (set once the bridge persisted the
+     *  correction). Sent back with the accept/reject/ignore signal so the bridge
+     *  can attribute it. Undefined when the bridge did not log this suggestion. */
+    id?: number
     /** UTF-16 code-unit offsets into the original `text`. */
     cuStart: number
     cuEnd: number
@@ -76,6 +80,7 @@ export async function runCheck(text: string, deps: RunCheckDeps): Promise<RunChe
             s.replacements && s.replacements.length > 0 ? s.replacements : [s.replacement]
         const original = text.slice(cu.start, cu.end)
         items.push({
+            id: s.id,
             cuStart: cu.start,
             cuEnd: cu.end,
             category: derive(s),

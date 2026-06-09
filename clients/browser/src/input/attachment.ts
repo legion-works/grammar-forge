@@ -99,8 +99,36 @@ export function createFieldAttachment(
     el.addEventListener('input', onInput)
     el.addEventListener('blur', onBlur)
 
+    // Run a handle set's destroy hooks (idempotent; a single failure must not
+    // block the others). Used both when REPLACING the handles (each re-render)
+    // and on detach — without this, re-rendering a field orphaned its previous
+    // underline nodes in the shadow root (they accumulated / "stuck around"
+    // because only detach ever destroyed them).
+    const runDestroyers = (h: FieldHandles): void => {
+        try {
+            h.underlineDestroy?.()
+        } catch {
+            // page returning to unmonitored state; ignore
+        }
+        try {
+            h.popoverHide?.()
+        } catch {
+            // ignore
+        }
+        try {
+            h.statusDestroy?.()
+        } catch {
+            // ignore
+        }
+    }
+
     const setHandles = (next: FieldHandles): void => {
         if (detached) return
+        // Tear down the PREVIOUS render's overlay before adopting the new
+        // handles. renderField creates the fresh nodes first, then calls
+        // setHandles(new); destroying the old set here makes the swap atomic
+        // (no stale underline left behind, no flicker gap).
+        runDestroyers(handles)
         handles = next
     }
 
@@ -110,26 +138,9 @@ export function createFieldAttachment(
         el.removeEventListener('input', onInput)
         el.removeEventListener('blur', onBlur)
         debouncedRun.cancel()
-        // Destroy whatever overlay handles are currently bound. The
-        // popover may be mid-open; popoverHide() is idempotent (the popover
-        // handle's hide() returns immediately when there's nothing to
-        // close).
-        try {
-            handles.underlineDestroy?.()
-        } catch {
-            // A single failed destroy must not block the rest of the
-            // cleanup — the page is going back to its unmonitored state.
-        }
-        try {
-            handles.popoverHide?.()
-        } catch {
-            // see above
-        }
-        try {
-            handles.statusDestroy?.()
-        } catch {
-            // see above
-        }
+        // Destroy whatever overlay handles are currently bound. The popover
+        // may be mid-open; popoverHide() is idempotent.
+        runDestroyers(handles)
         // Decrement exactly once: the countReader is called BEFORE the
         // decrement so the caller can decide to no-op (e.g. if the runtime
         // was already torn down). We never decrement when the count is

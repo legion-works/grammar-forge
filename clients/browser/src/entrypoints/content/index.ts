@@ -258,16 +258,22 @@ function wireRuntime(
             const state = runtime.fields.get(el)
             if (!state) return
             if (!ctx.isValid) return
-            // Drop the prior overlay handles via the attachment (which is
-            // about to overwrite them with the fresh ones), so a stale
-            // underline / popover from the previous check doesn't ghost
-            // for one frame while the new check renders.
-            state.attachment.setHandles({})
             if (!el.isConnected) {
+                // Field left the DOM mid-check: clear its overlay + hit-test
+                // rects. setHandles({}) now tears down the prior render (the
+                // attachment destroys the old handles on replace), so the
+                // underlines don't linger after the field is gone.
                 state.items = []
+                state.itemRects = []
+                state.attachment.setHandles({})
                 updateFocusedCounts(runtime, el)
                 return
             }
+            // NOTE: we deliberately do NOT clear the overlay here. The prior
+            // render's underlines stay visible during the (async) bridge call
+            // and are swapped out atomically when renderField calls
+            // setHandles(new) — which destroys the previous set. Clearing here
+            // instead would blink the underlines off for the whole round-trip.
             try {
                 const s = getSettings()
                 const { items } = await runCheck(text, {
@@ -514,6 +520,7 @@ function wireRuntime(
         const replacement = a.item.replacements[a.replacementIndex] ?? a.item.replacements[0] ?? ''
         applyFix(a.el, { start: a.item.cuStart, end: a.item.cuEnd }, replacement)
         void signalQueue.enqueue({
+            id: a.item.id,
             action: 'accepted',
             category: a.item.category,
             source: 'browser',
@@ -569,6 +576,7 @@ function wireRuntime(
                     item.replacements[replacementIndex] ?? item.replacements[0] ?? ''
                 applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
                 void signalQueue.enqueue({
+                    id: item.id,
                     action: 'accepted',
                     category: item.category,
                     source: 'browser',
@@ -578,6 +586,7 @@ function wireRuntime(
             },
             onIgnore: () => {
                 void signalQueue.enqueue({
+                    id: item.id,
                     action: 'ignored',
                     category: item.category,
                     source: 'browser',

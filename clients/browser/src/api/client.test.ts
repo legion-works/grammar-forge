@@ -71,6 +71,34 @@ describe('BridgeClient.correct', () => {
     })
 })
 
+describe('BridgeClient.signal', () => {
+    it('POSTs one {id, signal} per attributable event (action -> signal)', async () => {
+        const bodies: unknown[] = []
+        const fetchMock = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+            bodies.push(JSON.parse(String(init?.body)))
+            return Promise.resolve(new Response(null, { status: 204 }))
+        })
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', true)
+        await c.signal([
+            { id: 7, action: 'accepted', category: 'grammar', source: 'browser' },
+            { id: 9, action: 'ignored', source: 'browser' },
+        ])
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+        expect(bodies).toContainEqual({ id: 7, signal: 'accepted' })
+        expect(bodies).toContainEqual({ id: 9, signal: 'ignored' })
+    })
+    it('drops events without a correction id (unattributable -> no POST)', async () => {
+        const fetchMock = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(new Response(null, { status: 204 }))
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', true)
+        await c.signal([{ action: 'accepted', source: 'browser' }])
+        expect(fetchMock).not.toHaveBeenCalled()
+    })
+})
+
 describe('BridgeClient.health', () => {
     it('GETs /health, times out, and throws on non-ok', async () => {
         const ok = vi.fn<typeof fetch>().mockResolvedValue(
