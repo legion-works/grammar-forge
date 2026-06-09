@@ -118,6 +118,85 @@ describe('createFieldAttachment', () => {
         expect(statusDestroy).toHaveBeenCalledTimes(1)
     })
 
+    it('a re-render setHandles swap does NOT run the prior highlightDestroy', () => {
+        // Regression guard: the highlight layer / native registry is updated
+        // IN PLACE on every render, so the prior render's highlightDestroy must
+        // NOT fire on a swap — doing so wiped the highlights the new render had
+        // just set ("highlights die on the first edit"). The transient pill +
+        // popover destroyers DO fire on the swap (they're recreated per render).
+        const ta = document.createElement('textarea')
+        document.body.appendChild(ta)
+        const att = createFieldAttachment(
+            ta,
+            mkOptions(),
+            () => 0,
+            () => {},
+        )
+        const highlightDestroy1 = vi.fn<() => void>()
+        const popoverHide1 = vi.fn<() => void>()
+        const statusDestroy1 = vi.fn<() => void>()
+        att.setHandles({
+            highlightDestroy: highlightDestroy1,
+            popoverHide: popoverHide1,
+            statusDestroy: statusDestroy1,
+        })
+        // Second render (e.g. after an edit) swaps in fresh handles.
+        att.setHandles({
+            highlightDestroy: vi.fn<() => void>(),
+            popoverHide: vi.fn<() => void>(),
+            statusDestroy: vi.fn<() => void>(),
+        })
+        // The prior highlight was NOT destroyed (persistent, updated in place)…
+        expect(highlightDestroy1).not.toHaveBeenCalled()
+        // …but the prior transient pill + popover WERE torn down on the swap.
+        expect(popoverHide1).toHaveBeenCalledTimes(1)
+        expect(statusDestroy1).toHaveBeenCalledTimes(1)
+        att.detach()
+    })
+
+    it('detach still clears the highlight even after re-render swaps dropped it', () => {
+        // The highlightDestroy is carried forward across swaps so detach can
+        // still clear the persistent highlight, even when a later render didn't
+        // re-supply one.
+        const ta = document.createElement('textarea')
+        document.body.appendChild(ta)
+        const att = createFieldAttachment(
+            ta,
+            mkOptions(),
+            () => 0,
+            () => {},
+        )
+        const highlightDestroy = vi.fn<() => void>()
+        att.setHandles({ highlightDestroy })
+        // A later render supplies only a status handle (no highlightDestroy).
+        att.setHandles({ statusDestroy: vi.fn<() => void>() })
+        att.detach()
+        // The original highlight destroyer was carried forward and fired once.
+        expect(highlightDestroy).toHaveBeenCalledTimes(1)
+    })
+
+    it('clearHandles() tears down everything (incl. highlight) without detaching', () => {
+        const ta = document.createElement('textarea')
+        document.body.appendChild(ta)
+        const att = createFieldAttachment(
+            ta,
+            mkOptions(),
+            () => 0,
+            () => {},
+        )
+        const highlightDestroy = vi.fn<() => void>()
+        const popoverHide = vi.fn<() => void>()
+        const statusDestroy = vi.fn<() => void>()
+        att.setHandles({ highlightDestroy, popoverHide, statusDestroy })
+        att.clearHandles()
+        expect(highlightDestroy).toHaveBeenCalledTimes(1)
+        expect(popoverHide).toHaveBeenCalledTimes(1)
+        expect(statusDestroy).toHaveBeenCalledTimes(1)
+        // Not detached — the attachment is still live.
+        expect(att.isDetached()).toBe(false)
+        att.detach()
+    })
+
     it('the debounced run reads text at FIRE time, not at call time (Fix 2)', async () => {
         const ta = document.createElement('textarea')
         ta.value = 'hello'

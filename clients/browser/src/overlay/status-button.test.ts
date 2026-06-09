@@ -209,16 +209,26 @@ describe('renderStatusButton', () => {
         expect(live.textContent).toContain('3')
     })
 
-    it('applies the drag offset to the default field anchor when given', () => {
+    it('a drag offset within the field shifts the pill (bound to the field)', () => {
         const root = mkRoot()
-        renderStatusButton(root, mkOptions({ dragOffset: { dx: 50, dy: 50 } }))
+        // ANCHOR is 400×200 (right=500,bottom=300). A small offset keeps the
+        // pill inside the field box. Default bottom-right = (382, 264); a
+        // (-50,-40) offset moves it up/left, still within the field.
+        renderStatusButton(root, mkOptions({ dragOffset: { dx: -50, dy: -40 } }))
         const pill = root.querySelector('.gf-pill') as HTMLElement
-        // jsdom has no layout (offsetWidth 0 → fallback 110×28). Default anchor
-        // = anchor.right - width - gutter = 500 - 110 - 8 = 382 (top: 300 - 28 -
-        // 8 = 264). The offset shifts it by (+50,+50); the viewport is large so
-        // the clamp passes it through.
-        expect(parseFloat(pill.style.left)).toBe(432)
-        expect(parseFloat(pill.style.top)).toBe(314)
+        expect(parseFloat(pill.style.left)).toBe(332)
+        expect(parseFloat(pill.style.top)).toBe(224)
+    })
+
+    it('a drag offset cannot push the pill outside the field box (clamped to field)', () => {
+        const root = mkRoot()
+        // A big positive offset would put the pill past the field's
+        // bottom-right; the field-clamp pins it to the field's far edge.
+        // maxLeft = 500-110-8 = 382 ; maxTop = 300-28-8 = 264.
+        renderStatusButton(root, mkOptions({ dragOffset: { dx: 500, dy: 500 } }))
+        const pill = root.querySelector('.gf-pill') as HTMLElement
+        expect(parseFloat(pill.style.left)).toBe(382)
+        expect(parseFloat(pill.style.top)).toBe(264)
     })
 
     it('reposition() re-anchors the pill to a fresh field rect with the live offset', () => {
@@ -228,8 +238,11 @@ describe('renderStatusButton', () => {
         // Re-anchor to a field that has scrolled up by 100px.
         handle.reposition(new DOMRect(100, 0, 400, 200))
         // right=500, bottom=200 → 500-110-8+10 = 392 ; 200-28-8+20 = 184
-        expect(parseFloat(pill.style.left)).toBe(392)
-        expect(parseFloat(pill.style.top)).toBe(184)
+        // (both within the new field box: maxLeft=382? no — left 392 > maxLeft
+        // 382 → clamped to 382; top 184 < maxTop=164? maxTop=200-28-8=164, so
+        // 184 > 164 → clamped to 164).
+        expect(parseFloat(pill.style.left)).toBe(382)
+        expect(parseFloat(pill.style.top)).toBe(164)
     })
 
     it('dragging the pill past the threshold reports a new accumulated offset', () => {
@@ -271,6 +284,31 @@ describe('renderStatusButton', () => {
         // seeded (5,7) + delta (10,20) = (15,27)
         expect(off.dx).toBe(15)
         expect(off.dy).toBe(27)
+    })
+
+    it('renders hidden when initiallyVisible is false (focus-only pill)', () => {
+        const root = mkRoot()
+        renderStatusButton(root, mkOptions({ initiallyVisible: false }))
+        const pill = root.querySelector('.gf-pill') as HTMLElement
+        expect(pill.classList.contains('gf-pill--hidden')).toBe(true)
+    })
+
+    it('renders visible by default (initiallyVisible omitted)', () => {
+        const root = mkRoot()
+        renderStatusButton(root, mkOptions())
+        const pill = root.querySelector('.gf-pill') as HTMLElement
+        expect(pill.classList.contains('gf-pill--hidden')).toBe(false)
+    })
+
+    it('setVisible toggles the hidden class', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions({ initiallyVisible: false }))
+        const pill = root.querySelector('.gf-pill') as HTMLElement
+        expect(pill.classList.contains('gf-pill--hidden')).toBe(true)
+        handle.setVisible(true)
+        expect(pill.classList.contains('gf-pill--hidden')).toBe(false)
+        handle.setVisible(false)
+        expect(pill.classList.contains('gf-pill--hidden')).toBe(true)
     })
 
     it('a click without movement does NOT start a drag (buttons still work)', () => {

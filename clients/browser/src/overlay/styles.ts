@@ -151,6 +151,10 @@ export const OVERLAY_CSS = `
     opacity: 1;
   }
   .gf-pill--dragging { cursor: grabbing; user-select: none; }
+  /* Focus-only visibility: the active per-field pill is hidden while its field
+     is unfocused. display:none so it neither paints nor intercepts pointer
+     events; the orchestrator toggles this on field focus/blur. */
+  .gf-pill--hidden { display: none; }
   @keyframes gf-pill-pop {
     from { transform: scale(${SCALE_TOOLTIP}); }
     to   { transform: scale(1); }

@@ -56,6 +56,11 @@ export interface StatusButtonOptions {
     /** Called when the user finishes dragging; reports the new accumulated
      *  offset from the field's default anchor. */
     onDragMove?: (offset: { dx: number; dy: number }) => void
+    /** Initial visibility (default true). The active per-field pill is
+     *  FOCUS-ONLY: the orchestrator passes `false` when the field isn't focused
+     *  at render time, then toggles via `handle.setVisible` on focus/blur. The
+     *  disabled (site-paused) pill omits this (always visible). */
+    initiallyVisible?: boolean
 }
 
 export interface StatusButtonHandle {
@@ -65,6 +70,11 @@ export interface StatusButtonHandle {
      *  offset. Called by the shared scroll/resize loop so the pill tracks its
      *  field instead of staying pinned while the field scrolls away. */
     reposition: (anchorRect: DOMRect) => void
+    /** Show/hide the pill without destroying it. The pill is FOCUS-ONLY: the
+     *  orchestrator hides it on field blur and shows it on focus (a hidden pill
+     *  is `display:none` so it neither paints nor intercepts pointer events,
+     *  but its hover panel / drag state survive). */
+    setVisible: (visible: boolean) => void
 }
 
 const POWER_SVG =
@@ -132,6 +142,9 @@ export function renderStatusButton(
     }
 
     root.appendChild(pill)
+    // Focus-only visibility: a hidden pill is display:none (no paint, no
+    // pointer events) but keeps its drag/hover state. Default visible.
+    if (options.initiallyVisible === false) pill.classList.add('gf-pill--hidden')
     // Live drag offset from the field's default bottom-right anchor. Seeded
     // from the persisted session offset; drag-end accumulates into it; the
     // shared scroll/resize loop re-anchors via `reposition` using this value.
@@ -258,6 +271,9 @@ export function renderStatusButton(
         },
         isMounted: () => pill.isConnected,
         reposition: (anchorRect: DOMRect) => positionPill(pill, anchorRect, view, currentOffset),
+        setVisible: (visible: boolean) => {
+            pill.classList.toggle('gf-pill--hidden', !visible)
+        },
     }
 }
 
@@ -288,14 +304,41 @@ function positionPill(
     const height = pill.offsetHeight || PILL_HEIGHT_FALLBACK
     // Default anchor: bottom-right of the field, shifted by the live drag
     // offset so a dragged pill re-anchors to the field as it moves.
-    positionAbsolute(
-        pill,
-        {
-            left: anchor.right - width - VIEWPORT_GUTTER + offset.dx,
-            top: anchor.bottom - height - VIEWPORT_GUTTER + offset.dy,
-        },
-        view,
-    )
+    const left = anchor.right - width - VIEWPORT_GUTTER + offset.dx
+    const top = anchor.bottom - height - VIEWPORT_GUTTER + offset.dy
+    // The pill is BOUND to its field: clamp so it can't escape the field's box
+    // (a drag can move it within the field, but never outside it), then clamp
+    // to the viewport as a final safety. For a field smaller than the pill the
+    // field-clamp pins the pill to the field's bottom-right corner.
+    const pos = clampToRect({ left, top }, width, height, anchor)
+    positionAbsolute(pill, pos, view)
+}
+
+/**
+ * Clamp a top-left position so a `width`×`height` box stays inside `rect`
+ * (inset by VIEWPORT_GUTTER). When the box is larger than the rect on an axis,
+ * the box is pinned to the rect's far (right/bottom) edge — so the pill stays
+ * attached to a small field's bottom-right corner rather than centering or
+ * overflowing the near edge.
+ */
+function clampToRect(
+    pos: { left: number; top: number },
+    width: number,
+    height: number,
+    rect: DOMRect,
+): { left: number; top: number } {
+    let { left, top } = pos
+    const maxLeft = rect.right - width - VIEWPORT_GUTTER
+    const maxTop = rect.bottom - height - VIEWPORT_GUTTER
+    const minLeft = rect.left + VIEWPORT_GUTTER
+    const minTop = rect.top + VIEWPORT_GUTTER
+    // Right/bottom edge first, then left/top — so if the field is too small
+    // (min > max) the far-edge pin wins (pill clings to bottom-right corner).
+    if (left > maxLeft) left = maxLeft
+    if (left < minLeft) left = minLeft
+    if (top > maxTop) top = maxTop
+    if (top < minTop) top = minTop
+    return { left, top }
 }
 
 /** Place the pill at an absolute viewport position, clamped into the viewport. */

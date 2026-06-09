@@ -34,6 +34,7 @@ import {
     type Settings,
 } from '@/storage/settings'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
+import { debugLog, debugWarn } from '@/lib/debug-log'
 import type { ContentScriptContext } from 'wxt/utils/content-script-context'
 import type { Category } from '@/api/types'
 
@@ -282,10 +283,10 @@ async function start(ctx: ContentScriptContext): Promise<void> {
 
     // Standalone collapsed "power" pill shown when the site is paused, so the
     // user can re-enable in-page. It is NOT part of the checking runtime (which
-    // is torn down while paused); it lives on its own overlay host pinned to the
-    // viewport's bottom-right corner. The collapsed pill also accepts the
-    // shared drag offset so dragging the re-enable pill works and stays
-    // consistent with active fields.
+    // is torn down while paused) — there is no field to bind it to — so it is
+    // LOCKED to the viewport's bottom-right corner (zero drag offset, no
+    // onDragMove → drags don't persist). The full-viewport anchorRect + the
+    // field-clamp resolve to the viewport corner.
     const mountDisabledPill = (): void => {
         if (disabledHost) return
         const host = (disabledHost = createOverlayHost())
@@ -299,13 +300,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             onRecheck: () => {},
             onApplyAll: () => {},
             onApplyOne: () => {},
-            // Anchored to the viewport bottom-right (the full-viewport anchorRect
-            // above) plus the persisted drag offset, so the re-enable pill
-            // "respects the drag" rather than snapping to a fixed corner.
-            dragOffset: pillPosition.dragOffset ?? undefined,
-            onDragMove: (offset) => {
-                pillPosition.dragOffset = offset
-            },
+            // Locked to the corner: no drag offset, no onDragMove handler.
         })
     }
     const unmountDisabledPill = (): void => {
@@ -454,12 +449,13 @@ function wireRuntime(
             if (!ctx.isValid) return
             if (!el.isConnected) {
                 // Field left the DOM mid-check: clear its overlay + hit-test
-                // rects. setHandles({}) now tears down the prior render (the
-                // attachment destroys the old handles on replace), so the
-                // highlights don't linger after the field is gone.
+                // rects. clearHandles() tears down EVERYTHING including the
+                // persistent highlight (unlike a re-render setHandles swap,
+                // which preserves it) so nothing lingers after the field is
+                // gone.
                 state.items = []
                 state.itemRects = []
-                state.attachment.setHandles({})
+                state.attachment.clearHandles()
                 updateFocusedCounts(runtime, el)
                 return
             }
@@ -485,10 +481,9 @@ function wireRuntime(
                 updateFocusedCounts(runtime, el)
             } catch (e) {
                 // The bridge is unreachable or rejected the URL. Surface nothing
-                // intrusive — the popover/pill stays in its prior state. A noisy
-                // console.warn is the only signal; the popup status mirrors this.
-                // oxlint-disable-next-line no-console
-                console.warn('grammarforge: correct() failed', e)
+                // intrusive — the popover/pill stays in its prior state. A
+                // warning is the only signal; the popup status mirrors this.
+                debugWarn('check', 'correct() failed', e)
             }
         }
 
@@ -669,6 +664,11 @@ function wireRuntime(
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
+        debugLog('field', 'attach', {
+            tag: el.tagName,
+            native: state.useNativeHighlight,
+            total: runtime.fieldCount,
+        })
 
         // Release this field's paste-grace timer on a settings-driven teardown.
         // teardownRuntime() iterates runtime.cleanups but does NOT walk the
@@ -729,6 +729,8 @@ function wireRuntime(
         // bubbling listeners; capture isn't needed since no other listener
         // preventDefault's these.
         const onFieldFocus = (): void => {
+            // FOCUS-ONLY pill: reveal this field's pill on focus.
+            state.statusHandle?.setVisible(true)
             if (state.useNativeHighlight) {
                 getNativeHighlighter().setFocusedField(el)
                 return
@@ -739,6 +741,9 @@ function wireRuntime(
             })
         }
         const onFieldBlur = (): void => {
+            // FOCUS-ONLY pill: hide this field's pill on blur so only the
+            // focused field shows its pill.
+            state.statusHandle?.setVisible(false)
             if (state.useNativeHighlight) {
                 // Only clear focus if WE were the focused field — the
                 // native highlighter's focused state is global to the
@@ -871,6 +876,7 @@ function wireRuntime(
     const detach = (el: HTMLElement): void => {
         const state = runtime.fields.get(el)
         if (!state) return
+        debugLog('field', 'detach', { tag: el.tagName, native: state.useNativeHighlight })
         // Cancel any pending paste-grace timer first so it can't fire a check
         // against a field that's leaving the DOM.
         clearPasteGrace(state)
@@ -1178,6 +1184,12 @@ function wireRuntime(
         state.itemRects = []
         const anchor = el.getBoundingClientRect()
         const count = state.items.length
+        debugLog('render', 'renderField', {
+            tag: el.tagName,
+            native: state.useNativeHighlight,
+            count,
+            focused: document.activeElement === el,
+        })
         const statusHandle = renderStatusButton(root, {
             count,
             byCategory: tallyByCategory(state.items),
@@ -1203,9 +1215,13 @@ function wireRuntime(
             onDragMove: (offset) => {
                 pillPosition.dragOffset = offset
             },
+            // FOCUS-ONLY: the pill shows only while its field is focused. Render
+            // hidden when the field isn't the active element; focus/blur toggle
+            // it via state.statusHandle.setVisible (below).
+            initiallyVisible: document.activeElement === el,
         })
         // Stash the handle so the shared scroll/resize loop can reposition the
-        // pill as the field moves.
+        // pill as the field moves, and focus/blur can toggle its visibility.
         state.statusHandle = statusHandle
         if (count === 0) {
             // No suggestions this round — the status pill alone is enough.
@@ -1280,6 +1296,7 @@ function wireRuntime(
                     category: it.category,
                 })),
             )
+            debugLog('highlight', 'native setFieldHighlights', { count: state.items.length })
         } else {
             // Flatten (item, rect) → specs and reconcile the persistent
             // overlay layer.
@@ -1292,6 +1309,10 @@ function wireRuntime(
             }
             if (!state.highlightLayer) state.highlightLayer = createHighlightLayer(root)
             state.highlightLayer.reconcile(specs)
+            debugLog('highlight', 'overlay reconcile', {
+                items: state.items.length,
+                rects: specs.length,
+            })
             // Push current intensity (focus + hover) onto the
             // freshly-reconciled layer; reconcile reuses nodes, so the
             // latest state must be re-applied to keep the visual

@@ -72,6 +72,15 @@ export interface FieldAttachment {
     rerun: (text: string) => void
     /** Register/refresh the overlay handles the field currently owns. */
     setHandles: (handles: FieldHandles) => void
+    /**
+     * Tear down the CURRENT handles in place (highlight + popover + status)
+     * WITHOUT detaching the field. Used when the field has left the DOM mid-
+     * check (its overlay must be cleared even though the attachment lives on
+     * until the observer's detach fires). Unlike a `setHandles` re-render swap
+     * — which preserves the persistent highlight so a fresh render isn't wiped
+     * — this clears everything, including the highlight.
+     */
+    clearHandles: () => void
     /** Release everything bound to this field. Idempotent. */
     detach: () => void
     /** Whether detach() has been called. */
@@ -126,17 +135,11 @@ export function createFieldAttachment(
     el.addEventListener('input', onInput)
     el.addEventListener('blur', onBlur)
 
-    // Run a handle set's destroy hooks (idempotent; a single failure must not
-    // block the others). Used both when REPLACING the handles (each re-render)
-    // and on detach — without this, re-rendering a field orphaned its previous
-    // highlight nodes in the shadow root (they accumulated / "stuck around"
-    // because only detach ever destroyed them).
-    const runDestroyers = (h: FieldHandles): void => {
-        try {
-            h.highlightDestroy?.()
-        } catch {
-            // page returning to unmonitored state; ignore
-        }
+    // Run the TRANSIENT destroy hooks (status pill + popover) of a handle set.
+    // These are re-created fresh on every render (renderStatusButton already
+    // removes the prior pill via destroyExisting; the popover is per-open), so
+    // tearing the old ones down on a swap is safe + idempotent.
+    const runTransientDestroyers = (h: FieldHandles): void => {
         try {
             h.popoverHide?.()
         } catch {
@@ -149,14 +152,47 @@ export function createFieldAttachment(
         }
     }
 
+    // Run the PERSISTENT highlight destroyer. The highlight layer (overlay
+    // reconciling pool) and the native CSS-Custom-Highlight registry entries
+    // are UPDATED IN PLACE on each render (reconcile / setFieldHighlights), not
+    // destroyed+recreated — so this must run ONLY on detach / field-gone, never
+    // on a per-render swap. Running it on a swap was the "highlights die on the
+    // first edit" bug: the new render set the ranges, then the prior render's
+    // highlightDestroy=clearField wiped them.
+    const runHighlightDestroyer = (h: FieldHandles): void => {
+        try {
+            h.highlightDestroy?.()
+        } catch {
+            // page returning to unmonitored state; ignore
+        }
+    }
+
     const setHandles = (next: FieldHandles): void => {
         if (detached) return
-        // Tear down the PREVIOUS render's overlay before adopting the new
-        // handles. renderField creates the fresh nodes first, then calls
-        // setHandles(new); destroying the old set here makes the swap atomic
-        // (no stale highlight left behind, no flicker gap).
-        runDestroyers(handles)
-        handles = next
+        // Tear down only the PREVIOUS render's TRANSIENT overlay (pill +
+        // popover) before adopting the new handles — the swap stays atomic for
+        // those. The highlight is persistent (updated in place by the new
+        // render), so its destroyer is carried forward, NOT run here; running
+        // it would wipe the highlights the new render just set.
+        runTransientDestroyers(handles)
+        // Carry forward a highlightDestroy when the caller didn't supply a new
+        // one, so detach can still clear the persistent highlight. renderField
+        // always supplies one (pointing at the same persistent layer/field), so
+        // in practice this just replaces like-for-like.
+        handles = {
+            ...next,
+            highlightDestroy: next.highlightDestroy ?? handles.highlightDestroy,
+        }
+    }
+
+    const clearHandles = (): void => {
+        if (detached) return
+        // Field gone (left the DOM mid-check): clear EVERYTHING, including the
+        // persistent highlight, then drop the handles. Distinct from a re-
+        // render swap, which preserves the highlight.
+        runTransientDestroyers(handles)
+        runHighlightDestroyer(handles)
+        handles = {}
     }
 
     const detach = (): void => {
@@ -165,9 +201,11 @@ export function createFieldAttachment(
         el.removeEventListener('input', onInput)
         el.removeEventListener('blur', onBlur)
         debouncedRun.cancel()
-        // Destroy whatever overlay handles are currently bound. The popover
-        // may be mid-open; popoverHide() is idempotent.
-        runDestroyers(handles)
+        // Destroy whatever overlay handles are currently bound — transient
+        // (pill/popover) AND the persistent highlight. The popover may be
+        // mid-open; popoverHide() is idempotent.
+        runTransientDestroyers(handles)
+        runHighlightDestroyer(handles)
         // Decrement exactly once: the countReader is called BEFORE the
         // decrement so the caller can decide to no-op (e.g. if the runtime
         // was already torn down). We never decrement when the count is
@@ -180,6 +218,7 @@ export function createFieldAttachment(
         cancelPending: () => debouncedRun.cancel(),
         rerun,
         setHandles,
+        clearHandles,
         detach,
         isDetached: () => detached,
     }
