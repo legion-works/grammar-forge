@@ -20,7 +20,7 @@ import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightSpec } from '@/overlay/highlight'
 import { getNativeHighlighter, isNativeHighlightSupported } from '@/overlay/native-highlight'
-import { showPopover, type PopoverHandle } from '@/overlay/popover'
+import { dismissPopoversIn, showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { showToast } from '@/overlay/toast'
 import { renderStatusButton } from '@/overlay/status-button'
@@ -131,9 +131,6 @@ interface Runtime {
      *  aria-describedby on the right element when the chip hides. */
     hoverField: HTMLElement | null
     stopObserver: (() => void) | null
-    /** Session drag offset for the status pill (bottom-right default anchor).
-     *  Persists across re-renders in this runtime; null = no drag yet. */
-    pillDragOffset: { dx: number; dy: number } | null
     /**
      * Every remover that bound a listener to this runtime. teardownRuntime
      * iterates and runs them, so a disable→enable cycle on the same page
@@ -158,6 +155,15 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     // user can re-enable in-page (disabledHost).
     let runtime: Runtime | null = null
     let disabledHost: ReturnType<typeof createOverlayHost> | null = null
+    // Status-pill position state — kept in start() scope (NOT on the runtime) so
+    // it survives a settings-driven teardown: dragging the pill, then disabling
+    // the site, must keep the re-enable pill where the pill was (the runtime,
+    // and anything on it, is destroyed on teardown). `dragged` is the explicit
+    // dragged position (null until the user drags); `lastRendered` tracks
+    // wherever the pill last rendered (default field/viewport anchor) so the
+    // disabled pill can fall back to it. A shared object so wireRuntime (where
+    // the active pill renders) mutates the same state as the disabled pill here.
+    const pillPosition: PillPosition = { dragged: null, lastRendered: null }
 
     const teardownRuntime = (): void => {
         if (!runtime) return
@@ -232,7 +238,6 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             hoverItem: null,
             hoverField: null,
             stopObserver: null,
-            pillDragOffset: null,
             cleanups: [],
         }
     }
@@ -252,7 +257,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     const initRuntime = (s: Settings): void => {
         if (runtime) return
         const r = (runtime = makeRuntime(s))
-        wireRuntime(ctx, r, () => currentSettings, togglePower)
+        wireRuntime(ctx, r, () => currentSettings, togglePower, pillPosition)
     }
 
     // Standalone collapsed "power" pill shown when the site is paused, so the
@@ -274,9 +279,15 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             onRecheck: () => {},
             onApplyAll: () => {},
             onApplyOne: () => {},
-            dragOffset: runtime?.pillDragOffset ?? undefined,
-            onDragMove: (offset) => {
-                if (runtime) runtime.pillDragOffset = offset
+            // Appear where the active pill last was (dragged position, else the
+            // last default anchor); fall back to viewport bottom-right (anchorRect).
+            position: pillPosition.dragged ?? pillPosition.lastRendered ?? undefined,
+            onDragMove: (pos) => {
+                pillPosition.dragged = pos
+                pillPosition.lastRendered = pos
+            },
+            onPositioned: (left, top) => {
+                pillPosition.lastRendered = { left, top }
             },
         })
     }
@@ -338,11 +349,25 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     })
 }
 
+/**
+ * Session status-pill position, shared between start() (the disabled re-enable
+ * pill) and wireRuntime (the active per-field pill) so a dragged spot persists
+ * across the enabled↔disabled swap and re-renders. Lives in start() scope so it
+ * survives a settings-driven runtime teardown.
+ */
+interface PillPosition {
+    /** Explicit dragged position (null until the user drags the pill). */
+    dragged: { left: number; top: number } | null
+    /** Wherever the pill last rendered (default anchor when not dragged). */
+    lastRendered: { left: number; top: number } | null
+}
+
 function wireRuntime(
     ctx: ContentScriptContext,
     runtime: Runtime,
     getSettings: () => Settings,
     togglePower: () => void,
+    pillPosition: PillPosition,
 ): void {
     const { overlay, signalQueue } = runtime
 
@@ -856,12 +881,23 @@ function wireRuntime(
     // WxtWindowEventMap overload only registers — it can't be unregistered
     // by hand.)
     const onLocationChange = (): void => {
-        overlay.destroy()
-        // Drop the page-global native highlighter too — the page we're
-        // leaving might have styled content that's about to be torn down
-        // by the navigation, and the new page should not inherit our
-        // injected `<style>` or stale registry entries.
-        getNativeHighlighter().destroy()
+        // SPA soft-navigations (history.pushState/replaceState) fire this WITHOUT
+        // re-injecting the content script. Do NOT destroy the overlay or the
+        // native highlighter here — the field observer reconciles removed/added
+        // fields on the new DOM, so the overlay self-heals. (Destroying here left
+        // SPA pages — Discord/WhatsApp/etc. — with NO overlay or highlights until
+        // a hard reload, because nothing re-mounts them.) Just drop transient
+        // anchored UI whose rects are now stale, and flush pending feedback.
+        dismissPopoversIn(overlay.root)
+        runtime.active = null
+        if (runtime.hoverTimer) {
+            clearTimeout(runtime.hoverTimer)
+            runtime.hoverTimer = null
+        }
+        runtime.tooltip?.hide()
+        runtime.tooltip = null
+        runtime.hoverItem = null
+        runtime.hoverField = null
         void signalQueue.flush()
     }
     window.addEventListener('wxt:locationchange', onLocationChange)
@@ -1101,9 +1137,15 @@ function wireRuntime(
             onRecheck: () => void rerunFor(el)(getText(el)),
             onApplyAll: () => void applyAllFor(el),
             onApplyOne: (i) => applyOneFor(el, i),
-            dragOffset: runtime.pillDragOffset ?? undefined,
-            onDragMove: (offset) => {
-                runtime.pillDragOffset = offset
+            // Persisted (session) pill position — a dragged spot survives
+            // re-renders and the enabled↔disabled swap (state in start() scope).
+            position: pillPosition.dragged ?? undefined,
+            onDragMove: (pos) => {
+                pillPosition.dragged = pos
+                pillPosition.lastRendered = pos
+            },
+            onPositioned: (left, top) => {
+                pillPosition.lastRendered = { left, top }
             },
         })
         if (count === 0) {

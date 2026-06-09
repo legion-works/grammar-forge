@@ -34,8 +34,9 @@ function mkOptions(overrides: Partial<StatusButtonOptions> = {}): StatusButtonOp
         onRecheck: vi.fn<() => void>(),
         onApplyAll: vi.fn<() => void>(),
         onApplyOne: vi.fn<(i: number) => void>(),
-        dragOffset: undefined,
-        onDragMove: vi.fn<(o: { dx: number; dy: number }) => void>(),
+        position: undefined,
+        onDragMove: vi.fn<(p: { left: number; top: number }) => void>(),
+        onPositioned: vi.fn<(left: number, top: number) => void>(),
         ...overrides,
     }
 }
@@ -209,25 +210,19 @@ describe('renderStatusButton', () => {
         expect(live.textContent).toContain('3')
     })
 
-    it('applies a session drag offset to the pill position', () => {
+    it('places the pill at an explicit absolute position when given', () => {
         const root = mkRoot()
-        renderStatusButton(root, mkOptions({ dragOffset: { dx: -40, dy: 30 } }))
+        renderStatusButton(root, mkOptions({ position: { left: 300, top: 200 } }))
         const pill = root.querySelector('.gf-pill') as HTMLElement
-        // jsdom has no layout; offsetWidth is 0 → fallback used. We assert the
-        // offset is added to the computed left/top (exact base depends on the
-        // fallback math; assert the delta by rendering with and without offset).
-        const left0 = parseFloat(pill.style.left)
-        const top0 = parseFloat(pill.style.top)
-        renderStatusButton(root, mkOptions({ dragOffset: { dx: -40, dy: 30 } }))
-        const pill2 = root.querySelector('.gf-pill') as HTMLElement
-        // re-render is deterministic; same offset → same position
-        expect(parseFloat(pill2.style.left)).toBe(left0)
-        expect(parseFloat(pill2.style.top)).toBe(top0)
+        // jsdom has no layout (offsetWidth 0 → fallback), and the viewport is
+        // large, so the position passes through the clamp unchanged.
+        expect(parseFloat(pill.style.left)).toBe(300)
+        expect(parseFloat(pill.style.top)).toBe(200)
     })
 
-    it('dragging the pill past the threshold reports a new offset via onDragMove', () => {
+    it('dragging the pill past the threshold reports a new absolute position', () => {
         const root = mkRoot()
-        const onDragMove = vi.fn<(o: { dx: number; dy: number }) => void>()
+        const onDragMove = vi.fn<(p: { left: number; top: number }) => void>()
         renderStatusButton(root, mkOptions({ onDragMove }))
         const pill = root.querySelector('.gf-pill') as HTMLElement
         pill.dispatchEvent(
@@ -240,14 +235,15 @@ describe('renderStatusButton', () => {
             new PointerEvent('pointerup', { clientX: 140, clientY: 130, bubbles: true }),
         )
         expect(onDragMove).toHaveBeenCalledTimes(1)
-        const off = onDragMove.mock.calls[0]![0]
-        expect(off.dx).toBe(40)
-        expect(off.dy).toBe(30)
+        const pos = onDragMove.mock.calls[0]![0]
+        // jsdom offsetLeft/Top are 0, so the absolute position == the drag delta.
+        expect(pos.left).toBe(40)
+        expect(pos.top).toBe(30)
     })
 
     it('a click without movement does NOT start a drag (buttons still work)', () => {
         const root = mkRoot()
-        const onDragMove = vi.fn<(o: { dx: number; dy: number }) => void>()
+        const onDragMove = vi.fn<(p: { left: number; top: number }) => void>()
         const onTogglePower = vi.fn<() => void>()
         renderStatusButton(root, mkOptions({ onDragMove, onTogglePower }))
         const power = root.querySelector('.gf-pill__power') as HTMLElement

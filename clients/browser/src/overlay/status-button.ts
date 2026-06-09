@@ -47,10 +47,15 @@ export interface StatusButtonOptions {
     onApplyAll: () => void
     /** Click a single correction row in the hover panel. */
     onApplyOne: (index: number) => void
-    /** Session drag offset (dx,dy) applied to the default bottom-right anchor. */
-    dragOffset?: { dx: number; dy: number }
-    /** Called when the user finishes dragging the pill; reports the new offset. */
-    onDragMove?: (offset: { dx: number; dy: number }) => void
+    /** Absolute viewport position override (left,top). When set, the pill is
+     *  placed here (clamped) instead of at the default field/viewport anchor —
+     *  used to persist a dragged position across re-renders and the
+     *  enabled↔disabled pill swap. */
+    position?: { left: number; top: number }
+    /** Called when the user finishes dragging; reports the new ABSOLUTE position. */
+    onDragMove?: (position: { left: number; top: number }) => void
+    /** Called after the pill is positioned, with its final absolute left/top. */
+    onPositioned?: (left: number, top: number) => void
 }
 
 export interface StatusButtonHandle {
@@ -123,7 +128,12 @@ export function renderStatusButton(
     }
 
     root.appendChild(pill)
-    positionPill(pill, options.anchorRect, view, options.dragOffset)
+    if (options.position) {
+        positionAbsolute(pill, options.position, view)
+    } else {
+        positionPill(pill, options.anchorRect, view)
+    }
+    options.onPositioned?.(parseFloat(pill.style.left) || 0, parseFloat(pill.style.top) || 0)
 
     // Pointer-drag (session). A move past DRAG_THRESHOLD_PX starts a drag; a
     // plain click (no move) still reaches the inner buttons. On drop, report the
@@ -162,10 +172,11 @@ export function renderStatusButton(
         }
         if (dragged) {
             pill.classList.remove('gf-pill--dragging')
-            const base = options.dragOffset ?? { dx: 0, dy: 0 }
             const ddx = e.clientX - dragStart.x
             const ddy = e.clientY - dragStart.y
-            options.onDragMove?.({ dx: base.dx + ddx, dy: base.dy + ddy })
+            // Report the new ABSOLUTE viewport position so it persists verbatim
+            // across re-renders and the enabled↔disabled pill swap.
+            options.onDragMove?.({ left: dragStart.left + ddx, top: dragStart.top + ddy })
         }
         dragStart = null
     }
@@ -260,18 +271,31 @@ function destroyExisting(root: ShadowRoot): void {
     root.querySelectorAll('.gf-pill, .gf-pill-panel').forEach((el) => el.remove())
 }
 
-function positionPill(
+function positionPill(pill: HTMLElement, anchor: DOMRect, view: Window): void {
+    const width = pill.offsetWidth || PILL_WIDTH_FALLBACK
+    const height = pill.offsetHeight || PILL_HEIGHT_FALLBACK
+    // Default anchor: bottom-right of the field.
+    positionAbsolute(
+        pill,
+        {
+            left: anchor.right - width - VIEWPORT_GUTTER,
+            top: anchor.bottom - height - VIEWPORT_GUTTER,
+        },
+        view,
+    )
+}
+
+/** Place the pill at an absolute viewport position, clamped into the viewport. */
+function positionAbsolute(
     pill: HTMLElement,
-    anchor: DOMRect,
+    pos: { left: number; top: number },
     view: Window,
-    offset: { dx: number; dy: number } = { dx: 0, dy: 0 },
 ): void {
     const vw = view.innerWidth
     const vh = view.innerHeight
     const width = pill.offsetWidth || PILL_WIDTH_FALLBACK
     const height = pill.offsetHeight || PILL_HEIGHT_FALLBACK
-    let left = anchor.right - width - VIEWPORT_GUTTER + offset.dx
-    let top = anchor.bottom - height - VIEWPORT_GUTTER + offset.dy
+    let { left, top } = pos
     if (left > vw - width - VIEWPORT_GUTTER) left = vw - width - VIEWPORT_GUTTER
     if (top > vh - height - VIEWPORT_GUTTER) top = vh - height - VIEWPORT_GUTTER
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
