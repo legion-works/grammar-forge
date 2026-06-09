@@ -36,7 +36,7 @@ describe('createHighlightLayer', () => {
         const layer = createHighlightLayer(root)
         layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 7 }])
         const node = root.querySelector('.gf-highlight') as HTMLElement
-        // spelling underline colour from CATEGORY_META
+        // spelling tint colour from CATEGORY_META
         expect(node.style.getPropertyValue('--gf-hl')).toBe('#dc2626')
         expect(node.dataset.item).toBe('7')
     })

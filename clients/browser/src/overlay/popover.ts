@@ -1,6 +1,6 @@
 // Adapted from codextde/textchecker @ 7b66d78e74379f9fc909f6d4a2d984cb50a5d088 (MIT)
 // The click-to-fix popover. Renders a glass panel anchored to a viewport
-// rect (the underline). The panel shows the category, the bridge message,
+// rect (the highlight). The panel shows the category, the bridge message,
 // the primary replacement, and an action row: Apply · "Show N more" (when
 // there are alternatives) · Ignore once · Add to dictionary (spelling only).
 //
@@ -18,7 +18,7 @@ const PANEL_WIDTH = 300
 const VIEWPORT_GUTTER = 10
 
 export interface PopoverOptions {
-    /** Viewport rect of the underline the popover is anchored to. */
+    /** Viewport rect of the highlight the popover is anchored to. */
     anchorRect: DOMRect
     category: Category
     /** Bridge-supplied explanation. */

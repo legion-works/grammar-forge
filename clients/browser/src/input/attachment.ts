@@ -19,8 +19,8 @@ import { createDebouncer } from '@/input/debounce'
 import { getText } from '@/input/text'
 
 export interface FieldHandles {
-    /** Called once on detach. Omitted when the underline is not rendered. */
-    underlineDestroy?: () => void
+    /** Called once on detach. Omitted when the highlight is not rendered. */
+    highlightDestroy?: () => void
     /** Called once on detach. Omitted when no popover is open. */
     popoverHide?: () => void
     /** Called once on detach. Omitted when the status pill is not rendered. */
@@ -129,11 +129,11 @@ export function createFieldAttachment(
     // Run a handle set's destroy hooks (idempotent; a single failure must not
     // block the others). Used both when REPLACING the handles (each re-render)
     // and on detach — without this, re-rendering a field orphaned its previous
-    // underline nodes in the shadow root (they accumulated / "stuck around"
+    // highlight nodes in the shadow root (they accumulated / "stuck around"
     // because only detach ever destroyed them).
     const runDestroyers = (h: FieldHandles): void => {
         try {
-            h.underlineDestroy?.()
+            h.highlightDestroy?.()
         } catch {
             // page returning to unmonitored state; ignore
         }
@@ -154,7 +154,7 @@ export function createFieldAttachment(
         // Tear down the PREVIOUS render's overlay before adopting the new
         // handles. renderField creates the fresh nodes first, then calls
         // setHandles(new); destroying the old set here makes the swap atomic
-        // (no stale underline left behind, no flicker gap).
+        // (no stale highlight left behind, no flicker gap).
         runDestroyers(handles)
         handles = next
     }

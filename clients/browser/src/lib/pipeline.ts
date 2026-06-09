@@ -9,7 +9,7 @@ import { verifyByteSpan } from '@/api/offset'
 import { wordLevelDiff } from '@/lib/word-diff'
 import type { BridgeSuggestion, Category, CorrectResponse } from '@/api/types'
 
-/** A renderable correction item — one underline + one popover. */
+/** A renderable correction item — one highlight + one popover. */
 export interface RenderableItem {
     /** Correction-log row id from the bridge (set once the bridge persisted the
      *  correction). Sent back with the accept/reject/ignore signal so the bridge

@@ -173,7 +173,7 @@ export function App() {
                             <li key={c}>
                                 <span
                                     className="gf-popup__swatch"
-                                    style={{ background: CATEGORY_META[c].underline }}
+                                    style={{ background: CATEGORY_META[c].tint }}
                                     aria-hidden
                                 />
                                 <strong>{tabStatus.counts[c]}</strong>{' '}
@@ -196,7 +196,7 @@ export function App() {
                             >
                                 <span
                                     className="gf-popup__swatch"
-                                    style={{ background: meta.underline }}
+                                    style={{ background: meta.tint }}
                                     aria-hidden
                                 />
                                 <span>{meta.label}</span>

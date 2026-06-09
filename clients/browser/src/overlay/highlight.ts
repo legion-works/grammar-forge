@@ -33,7 +33,7 @@ function styleHighlightNode(node: HTMLDivElement, spec: HighlightSpec): void {
         return
     }
     node.style.display = ''
-    node.style.setProperty('--gf-hl', CATEGORY_META[spec.category].underline)
+    node.style.setProperty('--gf-hl', CATEGORY_META[spec.category].tint)
     node.style.left = `${spec.rect.left}px`
     node.style.top = `${spec.rect.top}px`
     node.style.width = `${Math.max(spec.rect.width, 4)}px`

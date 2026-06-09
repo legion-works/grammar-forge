@@ -104,7 +104,7 @@ export function buildMirrorProbe(
  * `el`. For <textarea> / <input> the mirror-div technique is used; for any
  * other element (contenteditable, [g_editable], etc.) a Range is built over
  * the resolved text nodes. Returns an empty array on any failure (caller
- * skips the underline).
+ * skips the highlight).
  *
  * Thin wrapper kept for back-compat with existing call sites and tests —
  * prefer `getSpanRectsBatch` when more than one span is being measured
@@ -261,7 +261,7 @@ function getInputMirrorRects(
     // buildMirrorProbe clamps internally, but if the (clamped) range
     // collapses to zero width we should bail before touching the DOM —
     // matches the contenteditable path's behaviour above and prevents
-    // rendering a 0-wide underline for spans that landed past the text.
+    // rendering a 0-wide highlight for spans that landed past the text.
     const text = el.value
     const start = Math.max(0, Math.min(cuStart, text.length))
     const end = Math.max(start, Math.min(cuEnd, text.length))

@@ -78,7 +78,7 @@ function buildStyleSheet(): string {
     const cats = Object.keys(CATEGORY_META) as Category[]
     const light: string[] = []
     for (const cat of cats) {
-        const color = CATEGORY_META[cat].underline
+        const color = CATEGORY_META[cat].tint
         light.push(
             `::highlight(gf-${cat}) { background-color: color-mix(in srgb, ${color} ${IDLE_ALPHA}%, transparent); }`,
         )
@@ -96,7 +96,7 @@ function buildStyleSheet(): string {
     const darkIdle = cats
         .map(
             (cat) =>
-                `::highlight(gf-${cat}) { background-color: color-mix(in srgb, ${CATEGORY_META[cat].underline} ${IDLE_ALPHA + 4}%, transparent); }`,
+                `::highlight(gf-${cat}) { background-color: color-mix(in srgb, ${CATEGORY_META[cat].tint} ${IDLE_ALPHA + 4}%, transparent); }`,
         )
         .join('\n')
     return [

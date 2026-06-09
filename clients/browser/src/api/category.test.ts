@@ -43,7 +43,7 @@ describe('CATEGORY_META', () => {
             'unknown',
         ] as const) {
             expect(CATEGORY_META[c].label).toBeTruthy()
-            expect(CATEGORY_META[c].underline).toMatch(/^#/)
+            expect(CATEGORY_META[c].tint).toMatch(/^#/)
         }
     })
 })

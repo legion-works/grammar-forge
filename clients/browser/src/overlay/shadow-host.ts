@@ -69,7 +69,7 @@ export function createOverlayHost(doc: Document = document): OverlayHost {
             //     listeners/timers of its own; the orchestrator also hides it
             //     on teardown, this is belt-and-braces).
             dismissTooltipsIn(root)
-            // 2. remove any underline + status-pill nodes we may have
+            // 2. remove any highlight + status-pill nodes we may have
             //    rendered. We don't have a registry of those, but the
             //    popover is the only thing that installs document-level
             //    listeners; the rest are pure shadow-root children that

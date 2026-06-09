@@ -8,7 +8,7 @@
 // Nested-editor rule: a contenteditable element nested inside ANOTHER
 // contenteditable is not a host — only the outermost editable ancestor is.
 // Without this, the observer would report the inner div as a separate field
-// and the overlay would render nested underlines. The browser default
+// and the overlay would render nested highlights. The browser default
 // <div contenteditable>…</div> uses one host; nested CE is a styling choice,
 // not a separate field.
 

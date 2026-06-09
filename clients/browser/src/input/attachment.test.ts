@@ -99,7 +99,7 @@ describe('createFieldAttachment', () => {
         expect(counter.box.count).toBe(0)
     })
 
-    it('detach() destroys any rendered overlay handles (underline/popover/status)', () => {
+    it('detach() destroys any rendered overlay handles (highlight/popover/status)', () => {
         const ta = document.createElement('textarea')
         document.body.appendChild(ta)
         const att = createFieldAttachment(
@@ -108,12 +108,12 @@ describe('createFieldAttachment', () => {
             () => 0,
             () => {},
         )
-        const underlineDestroy = vi.fn<() => void>()
+        const highlightDestroy = vi.fn<() => void>()
         const popoverHide = vi.fn<() => void>()
         const statusDestroy = vi.fn<() => void>()
-        att.setHandles({ underlineDestroy, popoverHide, statusDestroy })
+        att.setHandles({ highlightDestroy, popoverHide, statusDestroy })
         att.detach()
-        expect(underlineDestroy).toHaveBeenCalledTimes(1)
+        expect(highlightDestroy).toHaveBeenCalledTimes(1)
         expect(popoverHide).toHaveBeenCalledTimes(1)
         expect(statusDestroy).toHaveBeenCalledTimes(1)
     })

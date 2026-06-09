@@ -55,7 +55,7 @@ interface FieldState {
      * that churn editable fields don't leak listeners.
      */
     attachment: FieldAttachment
-    /** Latest runCheck result, used to render underlines + status pill. */
+    /** Latest runCheck result, used to render highlights + status pill. */
     items: RenderableItem[]
     /**
      * Per-item viewport rects from the LAST render, parallel to (a subset of)
@@ -413,7 +413,7 @@ function wireRuntime(
                 // Field left the DOM mid-check: clear its overlay + hit-test
                 // rects. setHandles({}) now tears down the prior render (the
                 // attachment destroys the old handles on replace), so the
-                // underlines don't linger after the field is gone.
+                // highlights don't linger after the field is gone.
                 state.items = []
                 state.itemRects = []
                 state.attachment.setHandles({})
@@ -421,10 +421,10 @@ function wireRuntime(
                 return
             }
             // NOTE: we deliberately do NOT clear the overlay here. The prior
-            // render's underlines stay visible during the (async) bridge call
+            // render's highlights stay visible during the (async) bridge call
             // and are swapped out atomically when renderField calls
             // setHandles(new) — which destroys the previous set. Clearing here
-            // instead would blink the underlines off for the whole round-trip.
+            // instead would blink the highlights off for the whole round-trip.
             const seq = ++state.checkSeq
             try {
                 const s = getSettings()
@@ -737,8 +737,8 @@ function wireRuntime(
             el.removeEventListener('click', onFieldClick)
         })
 
-        // Re-measure span rects + reconcile underlines when the page scrolls or
-        // the field resizes, so the underlines track the text instead of drifting
+        // Re-measure span rects + reconcile highlights when the page scrolls or
+        // the field resizes, so the highlights track the text instead of drifting
         // from their render-time viewport coords. rAF-coalesced; cheap because
         // reconcile reuses the pooled nodes.
         //
@@ -990,7 +990,7 @@ function wireRuntime(
                 // 'ignored' event is the source of truth for the training loop).
                 const idx = state.items.indexOf(item)
                 if (idx >= 0) state.items.splice(idx, 1)
-                // Reconcile the persistent underline layer (the underline for
+                // Reconcile the persistent highlight layer (the highlight for
                 // this item disappears) and re-render the pill (count updates).
                 renderField(el, overlay.root, state)
                 updateFocusedCounts(runtime, el)
@@ -1121,7 +1121,7 @@ function wireRuntime(
             }
             state.attachment.setHandles({
                 statusDestroy: () => statusHandle.destroy(),
-                underlineDestroy: () => {
+                highlightDestroy: () => {
                     state.highlightLayer?.destroy()
                     state.highlightLayer = null
                 },
@@ -1195,7 +1195,7 @@ function wireRuntime(
         // highlight layer persists. Register destroy hooks so a detach/teardown
         // clears both.
         state.attachment.setHandles({
-            underlineDestroy: () => {
+            highlightDestroy: () => {
                 if (state.useNativeHighlight) {
                     getNativeHighlighter().clearField(el)
                 } else {

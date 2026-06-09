@@ -5,58 +5,44 @@ export const CATEGORY_META: Record<
     {
         label: string
         badge: string
-        underline: string
-        underlineStyle: 'wavy' | 'dotted' | 'solid'
-        underlineWidth: number
+        tint: string
         priority: number
     }
 > = {
     spelling: {
         label: 'Spelling',
         badge: '#ef4444',
-        underline: '#dc2626',
-        underlineStyle: 'wavy',
-        underlineWidth: 2,
+        tint: '#dc2626',
         priority: 5,
     },
     grammar: {
         label: 'Grammar',
         badge: '#eab308',
-        underline: '#ca8a04',
-        underlineStyle: 'wavy',
-        underlineWidth: 2,
+        tint: '#ca8a04',
         priority: 4,
     },
     punctuation: {
         label: 'Punctuation',
         badge: '#3b82f6',
-        underline: '#2563eb',
-        underlineStyle: 'wavy',
-        underlineWidth: 2,
+        tint: '#2563eb',
         priority: 3,
     },
     style: {
         label: 'Style',
         badge: '#8b5cf6',
-        underline: '#7c3aed',
-        underlineStyle: 'dotted',
-        underlineWidth: 2,
+        tint: '#7c3aed',
         priority: 2,
     },
     typography: {
         label: 'Typography',
         badge: '#6b7280',
-        underline: '#6b7280',
-        underlineStyle: 'solid',
-        underlineWidth: 1,
+        tint: '#6b7280',
         priority: 1,
     },
     unknown: {
         label: 'Issue',
         badge: '#9ca3af',
-        underline: '#9ca3af',
-        underlineStyle: 'dotted',
-        underlineWidth: 1,
+        tint: '#9ca3af',
         priority: 0,
     },
 }
