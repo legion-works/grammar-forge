@@ -456,6 +456,184 @@ export const OVERLAY_CSS = `
   }
 
   /* ============================================================
+   * Rephrase flow — entry button (.gf-rephrase-btn) + result card
+   * (.gf-rephrase-card). Both use the same glass material as the
+   * popover + pill; the card adds the Popover-API top-layer fix
+   * (margin:0; inset:auto;) so our inline left/top wins.
+   * ============================================================ */
+  .gf-rephrase-btn {
+    position: fixed;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: ${Z_OVERLAY};
+    padding: 6px 12px;
+    border-radius: 9999px;
+    isolation: isolate;
+    contain: layout paint;
+    font: 600 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: rgba(28, 28, 30, 0.82);
+    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.82));
+    color: light-dark(#111, #f5f5f5);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.20),
+      0 1px 3px rgba(0, 0, 0, 0.14),
+      0 4px 12px rgba(0, 0, 0, 0.18);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .gf-rephrase-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .gf-rephrase-btn:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-rephrase-btn {
+      background: light-dark(
+        color-mix(in oklab, #f5f5f5 55%, transparent),
+        color-mix(in oklab, #1c1c1e 42%, transparent)
+      );
+      border-color: color-mix(in oklab, white 14%, transparent);
+      -webkit-backdrop-filter: blur(12px) saturate(170%);
+      backdrop-filter: blur(12px) saturate(170%);
+    }
+  }
+
+  .gf-rephrase-card {
+    position: fixed;
+    pointer-events: auto;
+    z-index: ${Z_OVERLAY};
+    /* When promoted to the top layer via popover=manual + showPopover(), the
+       UA stylesheet applies inset:0 + margin:auto, which CENTERS the card and
+       overrides our explicit left/top (the card opened over the selection /
+       button, not the viewport). Reset both so our JS positionCard() left/top
+       wins — same fix as .gf-panel above. */
+    margin: 0;
+    inset: auto;
+    min-width: 280px;
+    max-width: 380px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    isolation: isolate;
+    contain: layout paint;
+    background: rgba(28, 28, 30, 0.78);
+    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    color: light-dark(#111, #f5f5f5);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+      0 1px 2px rgba(0, 0, 0, 0.12),
+      0 8px 24px rgba(0, 0, 0, 0.20);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    transform-origin: 50% 100%;
+    animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-rephrase-card {
+      background: light-dark(
+        color-mix(in oklab, #f5f5f5 50%, transparent),
+        color-mix(in oklab, #1c1c1e 40%, transparent)
+      );
+      border-color: color-mix(in oklab, white 14%, transparent);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      backdrop-filter: blur(16px) saturate(180%);
+    }
+  }
+
+  .gf-rephrase-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .gf-rephrase-card__label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.85;
+  }
+  .gf-rephrase-card__close {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 9999px;
+    background: transparent;
+    color: inherit;
+    font: 600 16px/1 system-ui, sans-serif;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: background 120ms ease-out, opacity 120ms ease-out;
+  }
+  .gf-rephrase-card__close:hover {
+    background: rgba(255, 255, 255, 0.10);
+    opacity: 1;
+  }
+  .gf-rephrase-card__close:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+  }
+  .gf-rephrase-card__original {
+    font-size: 12px;
+    line-height: 1.4;
+    opacity: 0.55;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  }
+  .gf-rephrase-card__text {
+    font-size: 14px;
+    line-height: 1.45;
+    margin-bottom: 12px;
+    word-break: break-word;
+  }
+  .gf-rephrase-card__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .gf-rephrase-card__btn {
+    appearance: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 120ms ease-out, border-color 120ms ease-out;
+  }
+  .gf-rephrase-card__btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.30);
+  }
+  .gf-rephrase-card__btn:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+  }
+  .gf-rephrase-card__btn--primary {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #fff;
+  }
+  .gf-rephrase-card__btn--primary:hover {
+    background: #1d4ed8;
+    border-color: #1e40af;
+  }
+
+  /* ============================================================
    * Liquid-glass refractive RIM — an additive highlight ring (does not touch
    * the base box-shadow). Bright specular top edge + a hairline all around so
    * the panel edge reads as a glass lens. The backdrop displacement filter
@@ -464,7 +642,8 @@ export const OVERLAY_CSS = `
    * ============================================================ */
   .gf-panel::after,
   .gf-pill-panel::after,
-  .gf-tooltip::after {
+  .gf-tooltip::after,
+  .gf-rephrase-card::after {
     content: "";
     position: absolute;
     inset: 0;
@@ -660,7 +839,9 @@ export const OVERLAY_CSS = `
     .gf-pill,
     .gf-pill-panel,
     .gf-tooltip,
-    .gf-toast {
+    .gf-toast,
+    .gf-rephrase-btn,
+    .gf-rephrase-card {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
       background: color-mix(in oklab, #1c1c1e 92%, transparent);
@@ -678,7 +859,7 @@ export const OVERLAY_CSS = `
    * opaque tint).
    * ============================================================ */
   @media (prefers-contrast: more) {
-    .gf-panel, .gf-pill, .gf-tooltip, .gf-pill-panel, .gf-toast {
+    .gf-panel, .gf-pill, .gf-tooltip, .gf-pill-panel, .gf-toast, .gf-rephrase-card {
       backdrop-filter: none; -webkit-backdrop-filter: none;
     }
   }
