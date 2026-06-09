@@ -12,18 +12,19 @@ describe('messageSender', () => {
 
     it('passes through additional fields for TAB_STATUS', () => {
         const send = messageSender('TAB_STATUS')
-        const m = send({ enabled: true, fieldCount: 3, counts: { spelling: 2, grammar: 1 } })
+        const m = send({ enabled: true, fieldCount: 3, hostname: 'example.com', counts: { spelling: 2, grammar: 1 } })
         expect(m).toEqual({
             type: 'TAB_STATUS',
             enabled: true,
             fieldCount: 3,
+            hostname: 'example.com',
             counts: { spelling: 2, grammar: 1 },
         })
     })
 
     it('accepts a partial TAB_STATUS payload (omitted fields become undefined)', () => {
         const send = messageSender('TAB_STATUS')
-        const m = send({ enabled: false, fieldCount: 0, counts: {} })
+        const m = send({ enabled: false, fieldCount: 0, hostname: 'example.com', counts: {} })
         expect(m.type).toBe('TAB_STATUS')
         expect(m.enabled).toBe(false)
     })

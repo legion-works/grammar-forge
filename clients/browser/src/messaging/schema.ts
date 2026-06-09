@@ -16,6 +16,7 @@ export type GfMessage =
           type: 'TAB_STATUS'
           enabled: boolean
           fieldCount: number
+          hostname: string
           /** Per-category counts on the FOCUSED field's last check, if any. */
           counts: Partial<Record<Category, number>>
       }
@@ -28,6 +29,7 @@ export interface GfMessageMap {
         type: 'TAB_STATUS'
         enabled: boolean
         fieldCount: number
+        hostname: string
         counts: Partial<Record<Category, number>>
     }
 }

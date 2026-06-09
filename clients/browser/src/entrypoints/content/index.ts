@@ -1411,6 +1411,7 @@ function buildTabStatus(runtime: Runtime): GfMessageMap['TAB_STATUS'] {
         type: 'TAB_STATUS',
         enabled: runtime != null,
         fieldCount: runtime.fieldCount,
+        hostname: location.hostname,
         counts: { ...runtime.counts },
     }
 }
