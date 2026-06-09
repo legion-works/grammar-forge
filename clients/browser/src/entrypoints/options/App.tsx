@@ -236,6 +236,18 @@ export function App() {
                         Autocorrect (auto-apply high-confidence fixes — off by default)
                     </label>
                 </div>
+                <div className="gf-options__row">
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={settings.suppressNativeSpellcheck}
+                            onChange={(e) =>
+                                void patch({ suppressNativeSpellcheck: e.currentTarget.checked })
+                            }
+                        />{' '}
+                        Hide the browser&rsquo;s own spellcheck on checked fields
+                    </label>
+                </div>
             </section>
 
             <section className="gf-options__section">
