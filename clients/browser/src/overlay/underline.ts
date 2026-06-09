@@ -10,6 +10,22 @@
 import { CATEGORY_META } from '@/api/category'
 import type { Category } from '@/api/types'
 
+// The wavy squiggle is an SVG tiled as a background image. It CANNOT use
+// `stroke='currentColor'`: `currentColor` does not resolve inside a data-URI
+// background (the SVG is an independent document), so the wave would paint
+// black and vanish on dark pages even though the node's `color` is set. We
+// bake the category colour straight into the SVG instead. The '#' in a hex
+// colour must be percent-encoded (%23) or it is parsed as a URI fragment and
+// breaks the data URI.
+function wavyBackgroundImage(color: string): string {
+    const stroke = color.replace('#', '%23')
+    return (
+        `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' ` +
+        `width='6' height='3' viewBox='0 0 6 3'><path d='M0 2 Q 1.5 0 3 2 T 6 2' ` +
+        `fill='none' stroke='${stroke}' stroke-width='1' stroke-linecap='round'/></svg>")`
+    )
+}
+
 export interface UnderlineHandle {
     /** Remove every underline node this handle owns. */
     destroy: () => void
@@ -42,6 +58,12 @@ export function renderUnderlines(
         node.className = `gf-underline gf-underline--${meta.underlineStyle}`
         node.setAttribute('aria-hidden', 'true')
         node.style.color = meta.underline
+        // Wavy uses an SVG background that can't read `currentColor`; bake the
+        // colour in (the dotted/solid variants use CSS currentColor, which
+        // works, so they're left to the stylesheet).
+        if (meta.underlineStyle === 'wavy') {
+            node.style.backgroundImage = wavyBackgroundImage(meta.underline)
+        }
         node.style.width = `${Math.max(rect.width, 4)}px`
         node.style.height = `${meta.underlineWidth}px`
         node.style.left = `${rect.left}px`

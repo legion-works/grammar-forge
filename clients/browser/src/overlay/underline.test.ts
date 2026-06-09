@@ -36,6 +36,19 @@ describe('renderUnderlines', () => {
         expect(node.getAttribute('tabindex')).toBeNull()
     })
 
+    it('bakes the category colour into the wavy SVG (no currentColor, which is invisible in a data-URI background)', () => {
+        const root = mkRoot()
+        const handle = renderUnderlines(root, {
+            rects: [new DOMRect(10, 20, 100, 16)],
+            category: 'grammar',
+        })
+        const bg = handle.nodes[0]!.style.backgroundImage
+        expect(bg).toContain('data:image/svg+xml')
+        // grammar underline colour is #d97706 -> %23d97706 in the data URI.
+        expect(bg).toContain('%23d97706')
+        expect(bg).not.toContain('currentColor')
+    })
+
     it('skips zero-width / zero-height rects', () => {
         const root = mkRoot()
         const handle = renderUnderlines(root, {
