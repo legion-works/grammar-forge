@@ -3,7 +3,7 @@
 // contenteditable elements. jsdom cannot lay out the page, so we exercise
 // the TreeWalker math against a fake getClientRects() injected on Range.
 import { describe, expect, it, vi } from 'vitest'
-import { findTextNodeForOffset } from '@/overlay/rect'
+import { findTextNodeForOffset, __mirrorStyleForTest } from '@/overlay/rect'
 
 describe('findTextNodeForOffset (contenteditable offset→node)', () => {
     it('returns the first text node when the start offset is 0', () => {
@@ -246,5 +246,28 @@ describe('getSpanRectsBatch (mirror-div layout-thrash killer)', () => {
         expect(out[0]?.[0]?.width).toBe(10)
         expect(out[1]?.[0]?.width).toBe(10)
         createRangeSpy.mockRestore()
+    })
+})
+
+describe('mirror style cache (P1/H1)', () => {
+    it('reuses the cached mirror style string for the same element + box', () => {
+        const el = document.createElement('textarea')
+        el.value = 'the quick brown fox'
+        document.body.appendChild(el)
+        const first = __mirrorStyleForTest(el)
+        const second = __mirrorStyleForTest(el)
+        // Same element + same box signature → identical cached string reference.
+        expect(second).toBe(first)
+    })
+
+    it('rebuilds the cached style when the element box (offsetWidth) changes', () => {
+        const el = document.createElement('textarea')
+        el.value = 'hello world'
+        document.body.appendChild(el)
+        const first = __mirrorStyleForTest(el)
+        Object.defineProperty(el, 'offsetWidth', { value: 999, configurable: true })
+        const second = __mirrorStyleForTest(el)
+        // Different signature → a freshly built string (not the cached reference).
+        expect(second).not.toBe(first)
     })
 })

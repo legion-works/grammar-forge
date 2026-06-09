@@ -18,6 +18,62 @@ export interface MirrorProbe {
     remove: () => void
 }
 
+// P1/H1: cache the mirror's derived cssText string per element. Rebuilding it
+// (a getComputedStyle read + string concat) on every measure was the dominant
+// textarea cost. The cache key is a cheap box/style signature; when it changes
+// (font/size/width) we rebuild. A WeakMap keys by the element so detached
+// fields are GC'd.
+interface CachedMirrorStyle {
+    signature: string
+    style: string
+}
+const mirrorStyleCache = new WeakMap<HTMLElement, CachedMirrorStyle>()
+
+function mirrorStyleSignature(el: HTMLElement, computed: CSSStyleDeclaration): string {
+    return [
+        el.offsetWidth,
+        computed.fontFamily,
+        computed.fontSize,
+        computed.fontWeight,
+        computed.lineHeight,
+        computed.letterSpacing,
+        computed.padding,
+        computed.border,
+    ].join('|')
+}
+
+function mirrorStyleFor(el: HTMLTextAreaElement | HTMLInputElement): string {
+    const computed = el.ownerDocument.defaultView!.getComputedStyle(el)
+    const signature = mirrorStyleSignature(el, computed)
+    const cached = mirrorStyleCache.get(el)
+    if (cached && cached.signature === signature) return cached.style
+    const style = [
+        'position: absolute',
+        'top: -9999px',
+        'left: -9999px',
+        'visibility: hidden',
+        'pointer-events: none',
+        'white-space: pre-wrap',
+        'word-wrap: break-word',
+        'overflow: hidden',
+        `width: ${el.offsetWidth}px`,
+        `font-family: ${computed.fontFamily}`,
+        `font-size: ${computed.fontSize}`,
+        `font-weight: ${computed.fontWeight}`,
+        `line-height: ${computed.lineHeight}`,
+        `letter-spacing: ${computed.letterSpacing}`,
+        `padding: ${computed.padding}`,
+        `border: ${computed.border}`,
+    ].join('; ')
+    mirrorStyleCache.set(el, { signature, style })
+    return style
+}
+
+/** Test-only: force a cache resolution for `el` and return the cssText string. */
+export function __mirrorStyleForTest(el: HTMLTextAreaElement | HTMLInputElement): string {
+    return mirrorStyleFor(el)
+}
+
 /**
  * Resolve a flat code-unit offset within a contenteditable (or any element
  * containing text nodes) to the concrete Text node + the offset within it.
@@ -58,31 +114,13 @@ export function buildMirrorProbe(
     cuEnd: number,
 ): MirrorProbe {
     const doc = el.ownerDocument
-    const computed = doc.defaultView!.getComputedStyle(el)
     const text = el.value
     const start = Math.max(0, Math.min(cuStart, text.length))
     const end = Math.max(start, Math.min(cuEnd, text.length))
 
     const mirror = doc.createElement('div')
     mirror.setAttribute('aria-hidden', 'true')
-    mirror.style.cssText = [
-        'position: absolute',
-        'top: -9999px',
-        'left: -9999px',
-        'visibility: hidden',
-        'pointer-events: none',
-        'white-space: pre-wrap',
-        'word-wrap: break-word',
-        'overflow: hidden',
-        `width: ${el.offsetWidth}px`,
-        `font-family: ${computed.fontFamily}`,
-        `font-size: ${computed.fontSize}`,
-        `font-weight: ${computed.fontWeight}`,
-        `line-height: ${computed.lineHeight}`,
-        `letter-spacing: ${computed.letterSpacing}`,
-        `padding: ${computed.padding}`,
-        `border: ${computed.border}`,
-    ].join('; ')
+    mirror.style.cssText = mirrorStyleFor(el)
 
     const before = doc.createElement('span')
     before.textContent = text.substring(0, start)
@@ -178,27 +216,9 @@ function getInputMirrorRectsBatch(
     const minStart = Math.min(...usable.map((s) => s.start))
     const maxEnd = Math.max(...usable.map((s) => s.end))
 
-    const computed = owner.defaultView!.getComputedStyle(el)
     const mirror = owner.createElement('div')
     mirror.setAttribute('aria-hidden', 'true')
-    mirror.style.cssText = [
-        'position: absolute',
-        'top: -9999px',
-        'left: -9999px',
-        'visibility: hidden',
-        'pointer-events: none',
-        'white-space: pre-wrap',
-        'word-wrap: break-word',
-        'overflow: hidden',
-        `width: ${el.offsetWidth}px`,
-        `font-family: ${computed.fontFamily}`,
-        `font-size: ${computed.fontSize}`,
-        `font-weight: ${computed.fontWeight}`,
-        `line-height: ${computed.lineHeight}`,
-        `letter-spacing: ${computed.letterSpacing}`,
-        `padding: ${computed.padding}`,
-        `border: ${computed.border}`,
-    ].join('; ')
+    mirror.style.cssText = mirrorStyleFor(el)
 
     const before = owner.createElement('span')
     before.textContent = text.substring(0, minStart)
