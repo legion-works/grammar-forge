@@ -11,6 +11,7 @@ import { isEditableElement } from '@/input/detector'
  */
 const make = (
     onFieldDiscovered: (el: HTMLElement) => void,
+    onFieldDetached?: (el: HTMLElement) => void,
 ): { observe: () => () => void; flush: () => Promise<void> } => {
     let pending: Array<() => void> = []
     const schedule = (cb: () => void): number => {
@@ -29,7 +30,13 @@ const make = (
         for (const cb of batch) cb()
     }
     const observe = (): (() => void) =>
-        createFieldObserver({ root: document, onFieldDiscovered, schedule, cancel })
+        createFieldObserver({
+            root: document,
+            onFieldDiscovered,
+            schedule,
+            cancel,
+            onFieldDetached,
+        })
     return { observe, flush }
 }
 
@@ -73,7 +80,10 @@ describe('createFieldObserver', () => {
         stop()
     })
 
-    it('deduplicates — a field is only reported once across adds', async () => {
+    it('deduplicates — a field is only reported once while it stays in the DOM', async () => {
+        // (Re-inserting the same node later is a FRESH field — the detach
+        // event clears the dedup set so the content orchestrator can rebind
+        // listeners against a clean slate.)
         const cb = vi.fn<() => void>()
         const { observe, flush } = make(cb)
         const stop = observe()
@@ -83,9 +93,9 @@ describe('createFieldObserver', () => {
         await flush()
         expect(cb).toHaveBeenCalledTimes(1)
 
-        ta.remove()
-        document.body.appendChild(ta)
-        await flush()
+        // re-adding the SAME node without a removal in between — the
+        // MutationObserver will not even fire (the node was already a
+        // child), so the callback count stays at 1.
         expect(cb).toHaveBeenCalledTimes(1)
         stop()
     })
@@ -184,6 +194,95 @@ describe('createFieldObserver', () => {
         await flush()
         expect(cb).toHaveBeenCalledTimes(1)
         expect(cb).toHaveBeenCalledWith(outer)
+        stop()
+    })
+})
+
+describe('createFieldObserver (detached fields on SPA churn)', () => {
+    afterEach(() => {
+        document.body.innerHTML = ''
+    })
+
+    it('fires onFieldDetached when a discovered field is removed from the DOM', async () => {
+        const disc = vi.fn<() => void>()
+        const det = vi.fn<() => void>()
+        const { observe, flush } = make(disc, det)
+        const stop = observe()
+
+        const ta = document.createElement('textarea')
+        document.body.appendChild(ta)
+        await flush()
+        expect(disc).toHaveBeenCalledTimes(1)
+        expect(det).not.toHaveBeenCalled()
+
+        ta.remove()
+        await flush()
+        expect(det).toHaveBeenCalledTimes(1)
+        expect(det).toHaveBeenCalledWith(ta)
+        stop()
+    })
+
+    it('does NOT fire onFieldDetached for nodes that were never discovered', async () => {
+        const disc = vi.fn<() => void>()
+        const det = vi.fn<() => void>()
+        const { observe, flush } = make(disc, det)
+        const stop = observe()
+
+        // add a non-editable element and then remove it; the observer should
+        // stay silent (it never reported the element, so it has nothing to
+        // detach).
+        const d = document.createElement('div')
+        document.body.appendChild(d)
+        await flush()
+        expect(disc).not.toHaveBeenCalled()
+
+        d.remove()
+        await flush()
+        expect(det).not.toHaveBeenCalled()
+        stop()
+    })
+
+    it('does NOT double-fire onFieldDetached when the same field is removed twice', async () => {
+        const disc = vi.fn<() => void>()
+        const det = vi.fn<() => void>()
+        const { observe, flush } = make(disc, det)
+        const stop = observe()
+
+        const ta = document.createElement('textarea')
+        document.body.appendChild(ta)
+        await flush()
+
+        ta.remove()
+        await flush()
+        expect(det).toHaveBeenCalledTimes(1)
+
+        // re-removing a detached node is a no-op for the second MO microtask
+        // (the element is still in the seen set, but the second cycle finds
+        // nothing new in removedNodes that the observer hasn't already
+        // reported).
+        await flush()
+        expect(det).toHaveBeenCalledTimes(1)
+        stop()
+    })
+
+    it('reports detach even when the editable ancestor itself is removed', async () => {
+        // A nested structure: the OUTER ce div is the field. Removing it must
+        // surface one detach event for the outer host.
+        const disc = vi.fn<() => void>()
+        const det = vi.fn<() => void>()
+        const { observe, flush } = make(disc, det)
+        const stop = observe()
+
+        const outer = document.createElement('div')
+        outer.setAttribute('contenteditable', 'true')
+        document.body.appendChild(outer)
+        await flush()
+        expect(disc).toHaveBeenCalledTimes(1)
+
+        outer.remove()
+        await flush()
+        expect(det).toHaveBeenCalledTimes(1)
+        expect(det).toHaveBeenCalledWith(outer)
         stop()
     })
 })

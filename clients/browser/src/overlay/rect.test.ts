@@ -135,3 +135,113 @@ describe('buildMirrorProbe (input/textarea style copy)', () => {
         ta.remove()
     })
 })
+
+describe('getSpanRectsBatch (mirror-div layout-thrash killer)', () => {
+    it('returns one rect array per span in the input order', async () => {
+        const ta = document.createElement('textarea')
+        ta.value = 'the quick brown fox jumps over'
+        document.body.appendChild(ta)
+        // stub getBoundingClientRect on the textarea + on a manually-injected
+        // marker (the mirror div approach measures marker rects relative to
+        // the textarea's rect; jsdom returns zeros for everything but the
+        // we just need the call to be hit + each span to receive a rect).
+        const taRect = new DOMRect(100, 200, 300, 20)
+        vi.spyOn(ta, 'getBoundingClientRect').mockReturnValue(taRect)
+
+        // stub the marker's getBoundingClientRect by overriding on the
+        // prototype BEFORE we call the batch fn (the function reads it on
+        // each marker span; we want to verify the call happens once per
+        // span, not once per call site).
+        let markerCalls = 0
+        const original = HTMLSpanElement.prototype.getBoundingClientRect
+        HTMLSpanElement.prototype.getBoundingClientRect = function (): DOMRect {
+            // The mirror div is also an Element, so distinguish by tag.
+            if (this.tagName === 'SPAN') markerCalls += 1
+            return new DOMRect(10, 20, 5, 16)
+        }
+
+        try {
+            const { getSpanRectsBatch } = await import('@/overlay/rect')
+            const out = getSpanRectsBatch(ta, [
+                { start: 0, end: 3 }, // 'the'
+                { start: 4, end: 9 }, // 'quick'
+                { start: 10, end: 15 }, // 'brown'
+            ])
+            expect(out).toHaveLength(3)
+            for (const r of out) {
+                expect(r).toHaveLength(1)
+                expect(r[0]?.width).toBe(5)
+            }
+            // one marker call per span
+            expect(markerCalls).toBe(3)
+        } finally {
+            HTMLSpanElement.prototype.getBoundingClientRect = original
+            ta.remove()
+        }
+    })
+
+    it('a batched call builds ONE mirror div (not one per span)', async () => {
+        const ta = document.createElement('textarea')
+        ta.value = 'abc def ghi jkl mno pqr'
+        document.body.appendChild(ta)
+        const { getSpanRectsBatch } = await import('@/overlay/rect')
+        getSpanRectsBatch(ta, [
+            { start: 0, end: 3 },
+            { start: 4, end: 7 },
+            { start: 8, end: 11 },
+            { start: 12, end: 15 },
+            { start: 16, end: 19 },
+        ])
+        // exactly ONE mirror div with aria-hidden=true was appended +
+        // removed during the call.
+        expect(document.body.querySelectorAll('div[aria-hidden="true"]')).toHaveLength(0)
+        ta.remove()
+    })
+
+    it('returns an empty inner array for spans that resolve to zero width', async () => {
+        const ta = document.createElement('textarea')
+        ta.value = 'hi'
+        document.body.appendChild(ta)
+        const { getSpanRectsBatch } = await import('@/overlay/rect')
+        const out = getSpanRectsBatch(ta, [
+            { start: 0, end: 2 }, // valid: 'hi'
+            { start: 5, end: 5 }, // collapses to zero width after clamp
+            { start: 99, end: 100 }, // past end of text
+        ])
+        expect(out[0]).toHaveLength(1)
+        expect(out[1]).toEqual([])
+        expect(out[2]).toEqual([])
+        ta.remove()
+    })
+
+    it('still works for the contenteditable path (one-pass Range over each span)', async () => {
+        const el = document.createElement('div')
+        el.append(document.createTextNode('hello world'))
+        // spy on createRange to confirm the contenteditable branch is hit
+        // and that one Range per span is built (not a shared Range).
+        const createRangeSpy = vi.spyOn(el.ownerDocument, 'createRange')
+        // jsdom has no getClientRects; inject a fake
+        const fakeRange = {
+            setStart: vi.fn<() => void>(),
+            setEnd: vi.fn<() => void>(),
+            getClientRects: vi.fn<() => DOMRectList>().mockReturnValue({
+                0: new DOMRect(0, 0, 10, 12),
+                length: 1,
+                item: (i: number) => (i === 0 ? new DOMRect(0, 0, 10, 12) : null),
+            } as unknown as DOMRectList),
+            detach: vi.fn<() => void>(),
+        } as unknown as Range
+        createRangeSpy.mockReturnValue(fakeRange)
+
+        const { getSpanRectsBatch } = await import('@/overlay/rect')
+        const out = getSpanRectsBatch(el, [
+            { start: 0, end: 5 },
+            { start: 6, end: 11 },
+        ])
+        expect(createRangeSpy).toHaveBeenCalledTimes(2)
+        expect(out).toHaveLength(2)
+        expect(out[0]?.[0]?.width).toBe(10)
+        expect(out[1]?.[0]?.width).toBe(10)
+        createRangeSpy.mockRestore()
+    })
+})

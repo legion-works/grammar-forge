@@ -14,6 +14,15 @@ const EDITABLE_ATTRS: ReadonlyArray<string> = ['contenteditable', 'role', 'g_edi
 export interface FieldObserverOptions {
     root: ParentNode
     onFieldDiscovered: (el: HTMLElement) => void
+    /**
+     * Fires when a previously-discovered field is removed from the DOM.
+     * Chatty SPAs (Gmail/Notion/Discord) add+remove editor fields constantly;
+     * the content orchestrator needs the detach event to release per-field
+     * listeners (input/blur), destroy overlay handles, and decrement the
+     * popup field count. Optional — older callers that don't care about
+     * detach can omit it.
+     */
+    onFieldDetached?: (el: HTMLElement) => void
     /** Injectable for tests; defaults to window.requestAnimationFrame. */
     schedule?: (cb: () => void) => number
     /** Injectable for tests; defaults to window.cancelAnimationFrame. */
@@ -32,14 +41,24 @@ export function createFieldObserver(opts: FieldObserverOptions): () => void {
     const {
         root,
         onFieldDiscovered,
+        onFieldDetached,
         schedule = defaultSchedule,
         cancel = defaultCancel,
         createObserver = defaultObserver,
         isEditable = defaultIsEditable,
     } = opts
 
+    // `seen` is the single source of truth for "we know about this field".
+    // `reported` tracks elements we have already announced via
+    // onFieldDiscovered; `detached` is a one-shot guard so the same node
+    // doesn't get the onFieldDetached callback twice (e.g. when the MO
+    // coalesces the removal of an outer container and one of its children
+    // across two microtasks). Both are WeakSets — they pin no memory.
     const seen = new WeakSet<Element>()
+    const reported = new WeakSet<Element>()
+    const detached = new WeakSet<Element>()
     const pending = new Set<Element>()
+    const detachPending = new Set<Element>()
     let rafHandle: number | null = null
 
     const consider = (el: Element | null | undefined): void => {
@@ -57,7 +76,20 @@ export function createFieldObserver(opts: FieldObserverOptions): () => void {
         // current batch before processing new ones.
         const batch = Array.from(pending)
         pending.clear()
-        for (const el of batch) onFieldDiscovered(el as HTMLElement)
+        for (const el of batch) {
+            onFieldDiscovered(el as HTMLElement)
+            reported.add(el)
+        }
+        // Detach events fire in the same rAF tick so a remove+add of the
+        // same node in one frame is reported atomically (added first, then
+        // removed).
+        const detaches = Array.from(detachPending)
+        detachPending.clear()
+        for (const el of detaches) {
+            if (detached.has(el)) continue
+            detached.add(el)
+            onFieldDetached?.(el as HTMLElement)
+        }
     }
 
     const requestDrain = (): void => {
@@ -65,13 +97,18 @@ export function createFieldObserver(opts: FieldObserverOptions): () => void {
         rafHandle = schedule(drain)
     }
 
-    // Initial sweep
+    // Initial sweep. Index-based queue — no shift() — so a 10k-node root
+    // scans in O(n) instead of O(n²). (The original `.shift()` + `.push(...spread)`
+    // pattern re-indexed the whole queue on every step.)
     const initialQueue: Element[] = [root as Element]
-    while (initialQueue.length) {
-        const n = initialQueue.shift()!
+    for (let i = 0; i < initialQueue.length; i++) {
+        const n = initialQueue[i]!
         consider(n)
         if (n instanceof HTMLElement || n instanceof Document) {
-            initialQueue.push(...Array.from(n.children))
+            const kids = n.children
+            for (let k = 0; k < kids.length; k++) {
+                initialQueue.push(kids[k] as Element)
+            }
         }
     }
     requestDrain()
@@ -85,15 +122,31 @@ export function createFieldObserver(opts: FieldObserverOptions): () => void {
                         while (stack.length) {
                             const cur = stack.pop()!
                             consider(cur)
-                            stack.push(...Array.from(cur.children))
+                            const kids = cur.children
+                            for (let k = 0; k < kids.length; k++) {
+                                stack.push(kids[k] as Element)
+                            }
                         }
+                    }
+                }
+                // A removed field may still be in `seen` (and possibly
+                // `reported`); we surface it via onFieldDetached so the
+                // caller can release its listeners + state. We also drop it
+                // from `seen` so a re-insertion later is treated as a brand
+                // new field (a fresh onFieldDiscovered is the right call —
+                // the OLD onFieldDetached already cleaned up the old state).
+                for (const n of m.removedNodes) {
+                    if (n instanceof Element && reported.has(n)) {
+                        seen.delete(n)
+                        reported.delete(n)
+                        detachPending.add(n)
                     }
                 }
             } else if (m.type === 'attributes' && m.target instanceof Element) {
                 consider(m.target)
             }
         }
-        if (pending.size) requestDrain()
+        if (pending.size || detachPending.size) requestDrain()
     })
 
     observer.observe(root, {

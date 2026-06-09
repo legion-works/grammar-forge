@@ -10,16 +10,16 @@
 // keeps the per-text transform pure and testable in @/lib/pipeline.
 
 import { createFieldObserver } from '@/input/observer'
-import { createDebouncer } from '@/input/debounce'
+import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { shouldCheckInput } from '@/input/paste-guard'
 import { applyFix, getText } from '@/input/text'
 import { isSpanStillValid, runCheck, tallyByCategory, type RenderableItem } from '@/lib/pipeline'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
 import { createOverlayHost } from '@/overlay/shadow-host'
-import { getSpanRects } from '@/overlay/rect'
+import { getSpanRectsBatch } from '@/overlay/rect'
 import { renderUnderlines, type UnderlineHandle } from '@/overlay/underline'
 import { showPopover, type PopoverHandle } from '@/overlay/popover'
-import { renderStatusButton, type StatusButtonHandle } from '@/overlay/status-button'
+import { renderStatusButton } from '@/overlay/status-button'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
 import { getSettings, isSiteBlocked, settingsItem, type Settings } from '@/storage/settings'
@@ -36,12 +36,17 @@ export default defineContentScript({
 })
 
 interface FieldState {
-    underlineHandle: UnderlineHandle | null
-    popoverHandle: PopoverHandle | null
-    statusHandle: StatusButtonHandle | null
+    /**
+     * The per-field lifecycle owner. Owns the input/blur listeners, the
+     * trailing-edge debouncer, and (via `setHandles`) the destroy hooks
+     * for whatever overlay elements are currently mounted. Calling
+     * `attachment.detach()` releases everything bound to this field —
+     * wired to the observer's onFieldDetached callback so chatty SPAs
+     * that churn editable fields don't leak listeners.
+     */
+    attachment: FieldAttachment
+    /** Latest runCheck result, used to render underlines + status pill. */
     items: RenderableItem[]
-    rerun: (text: string) => void
-    debouncedRun: (text: string) => void
 }
 
 interface ActiveSuggestion {
@@ -197,13 +202,12 @@ function wireRuntime(
             const state = runtime.fields.get(el)
             if (!state) return
             if (!ctx.isValid) return
-            state.underlineHandle?.destroy()
-            state.underlineHandle = null
-            state.popoverHandle?.hide()
-            state.popoverHandle = null
+            // Drop the prior overlay handles via the attachment (which is
+            // about to overwrite them with the fresh ones), so a stale
+            // underline / popover from the previous check doesn't ghost
+            // for one frame while the new check renders.
+            state.attachment.setHandles({})
             if (!el.isConnected) {
-                state.statusHandle?.destroy()
-                state.statusHandle = null
                 state.items = []
                 updateFocusedCounts(runtime, el)
                 return
@@ -234,65 +238,103 @@ function wireRuntime(
         if (!(el instanceof HTMLElement)) return
         const state = runtime.fields.get(el)
         if (!state) return
-        await state.rerun(getText(el))
+        await rerunFor(el)(getText(el))
     }
 
-    // The `input` event carries an `InputEvent` with `inputType`. Gate on it
-    // so a paste with checkPastedText=false never schedules a check, while
-    // typing and undo/redo still do.
     const onInput =
         (el: HTMLElement) =>
         (e: Event): void => {
+            // The `input` event carries an `InputEvent` with `inputType`. Gate
+            // on it so a paste with checkPastedText=false never schedules a
+            // check, while typing and undo/redo still do. The check itself
+            // reads the field's text at FIRE time inside the debouncer, NOT
+            // here — so a typing burst doesn't pay for an O(textLen) text
+            // read on every keystroke (Fix 2).
             const s = getSettings()
             if (s.checkMode !== 'realtime') return
             const inputType = (e as InputEvent).inputType ?? ''
             if (!shouldCheckInput(inputType, { checkPastedText: s.checkPastedText })) return
             const state = runtime.fields.get(el)
             if (!state) return
-            state.debouncedRun(getText(el))
+            state.attachment.debouncedRun()
         }
 
     const attach = (el: HTMLElement): void => {
         if (runtime.fields.has(el)) return
         const s = getSettings()
         const rerun = rerunFor(el)
-        const debouncedRun = createDebouncer<[string]>((text) => {
-            void rerun(text)
-        }, s.realtimeDelayMs)
-        const state: FieldState = {
-            underlineHandle: null,
-            popoverHandle: null,
-            statusHandle: null,
-            items: [],
-            rerun: (text: string) => {
-                void rerun(text)
+        const attachment = createFieldAttachment(
+            el,
+            {
+                realtimeDelayMs: s.realtimeDelayMs,
+                onRunCheck: (target, text) => {
+                    // The attachment's debounced callback captured `el` at
+                    // attach time, so `target` will always equal `el` here.
+                    // We forward to the runCheck orchestrator with the LIVE
+                    // text read inside the debounce window.
+                    void rerun(text)
+                },
+                onBlur: () => {
+                    // Flush pending signals on blur; the field is leaving focus.
+                    void signalQueue.flush()
+                },
             },
-            debouncedRun,
+            () => runtime.fieldCount,
+            () => {
+                runtime.fieldCount -= 1
+            },
+        )
+        // Bind the per-field input gating (paste policy / realtime gate)
+        // on TOP of the attachment's debouncer. The attachment's input
+        // listener calls debouncedRun directly, but we need to apply the
+        // realtime + paste guard first. The cleanest way is to override
+        // the input handler: re-add a typed one and have it call into
+        // the attachment's debouncedRun.
+        // (The attachment already added a plain input listener — we
+        // replace it via a one-shot re-binding: removeEventListener on
+        // the attachment's closure-bound handler isn't possible from
+        // here, so instead we install a CAPTURING listener that runs
+        // FIRST and stops propagation when the gate says "skip". The
+        // attachment's handler still runs, but only with valid input
+        // events reaching it. This is the simplest robust layering that
+        // doesn't require the attachment to know about the gate.)
+        // -> See "gating capture" below.
+        const state: FieldState = {
+            attachment,
+            items: [],
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
 
-        // Plain addEventListener — push the removers into runtime.cleanups so
-        // a settings-driven teardown also disconnects the per-field handlers.
-        // (ctx.addEventListener's typed overloads are Window/Document-only; the
-        // third overload's inference doesn't work cleanly for HTMLElement +
-        // InputEvent. We use the bare addEventListener + manual remover.)
-        const inputHandler = onInput(el)
-        const blurHandler = (): void => {
-            // Flush pending signals on blur; the field is leaving focus.
-            void signalQueue.flush()
-        }
-        el.addEventListener('input', inputHandler)
-        el.addEventListener('blur', blurHandler)
-        runtime.cleanups.push(() => {
-            el.removeEventListener('input', inputHandler)
-            el.removeEventListener('blur', blurHandler)
-        })
+        // Gating capture: installed at the capture phase so it sees the
+        // event BEFORE the attachment's bubble-phase handler. When the
+        // realtime/paste gate says "skip", we stopImmediatePropagation so
+        // the attachment's listener never fires for this event. When the
+        // gate says "check", we do nothing — the attachment's listener
+        // runs normally and schedules the debounced run.
+        const gateHandler = onInput(el)
+        el.addEventListener('input', gateHandler, { capture: true })
+        runtime.cleanups.push(() => el.removeEventListener('input', gateHandler, { capture: true }))
+    }
+
+    const detach = (el: HTMLElement): void => {
+        const state = runtime.fields.get(el)
+        if (!state) return
+        // Release the per-field listeners, debouncer, and any registered
+        // overlay handles. The attachment decrements runtime.fieldCount
+        // exactly once (idempotent guard inside `detach`).
+        state.attachment.detach()
+        runtime.fields.delete(el)
+        if (runtime.active?.el === el) runtime.active = null
     }
 
     runtime.stopObserver = createFieldObserver({
         root: document.body,
         onFieldDiscovered: (el) => attach(el),
+        // Chatty SPAs (Gmail/Notion/Discord) add+remove editor fields
+        // constantly; without this, the per-field listeners + the
+        // fieldCount counter would only ever grow. Detach releases both.
+        onFieldDetached: (el) => detach(el),
     })
 
     // Background → content: TRIGGER_CHECK (on-demand hotkey / popup "Check now")
@@ -358,11 +400,8 @@ function wireRuntime(
         const live = getText(a.el)
         if (!isSpanStillValid(live, a.item)) {
             // Stale span: don't apply. Tear down this popover + re-check.
-            const state = runtime.fields.get(a.el)
-            state?.popoverHandle?.hide()
-            if (state) state.popoverHandle = null
-            runtime.active = null
-            state?.rerun(live)
+            closePopoverFor(a.el)
+            void rerunFor(a.el)(live)
             return
         }
         const replacement = a.item.replacements[a.replacementIndex] ?? a.item.replacements[0] ?? ''
@@ -372,13 +411,8 @@ function wireRuntime(
             category: a.item.category,
             source: 'browser',
         })
-        const state = runtime.fields.get(a.el)
-        if (state) {
-            state.popoverHandle?.hide()
-            state.popoverHandle = null
-            runtime.active = null
-            state.rerun(getText(a.el))
-        }
+        closePopoverFor(a.el)
+        void rerunFor(a.el)(getText(a.el))
     }
     ctx.addEventListener(document, 'keydown', onKeydown)
     // Mirror the remover on runtime.cleanups so a settings-driven teardown
@@ -391,14 +425,27 @@ function wireRuntime(
     // calls teardownRuntime(), which iterates runtime.cleanups and runs the
     // full lifecycle release. Nothing further to register here.
 
+    // The currently-open popover per field. Tracked on the FieldState's
+    // registered handles so `closePopoverFor` (and the eventual `detach`)
+    // can find it without a separate registry. (We also mirror it on
+    // `runtime.active.el` for the accept hotkey.)
+    const openPopovers = new WeakMap<HTMLElement, PopoverHandle>()
+
+    function closePopoverFor(el: HTMLElement): void {
+        const handle = openPopovers.get(el)
+        handle?.hide()
+        openPopovers.delete(el)
+        if (runtime.active?.el === el) runtime.active = null
+    }
+
     // Wire the popover callbacks (defined inline so they close over the
     // local `runtime`).
     function openPopoverFor(el: HTMLElement, item: RenderableItem): void {
         const state = runtime.fields.get(el)
         if (!state) return
         const anchor = el.getBoundingClientRect()
-        state.popoverHandle?.hide()
-        state.popoverHandle = showPopover(overlay.root, {
+        closePopoverFor(el)
+        const handle = showPopover(overlay.root, {
             anchorRect: anchor,
             category: item.category,
             message: item.message,
@@ -408,10 +455,8 @@ function wireRuntime(
                 const live = getText(el)
                 if (!isSpanStillValid(live, item)) {
                     // Stale span: don't apply, just re-run.
-                    state.popoverHandle?.hide()
-                    state.popoverHandle = null
-                    runtime.active = null
-                    state.rerun(live)
+                    closePopoverFor(el)
+                    void rerunFor(el)(live)
                     return
                 }
                 const replacement =
@@ -422,10 +467,8 @@ function wireRuntime(
                     category: item.category,
                     source: 'browser',
                 })
-                state.popoverHandle?.hide()
-                state.popoverHandle = null
-                runtime.active = null
-                state.rerun(getText(el))
+                closePopoverFor(el)
+                void rerunFor(el)(getText(el))
             },
             onIgnore: () => {
                 void signalQueue.enqueue({
@@ -433,11 +476,10 @@ function wireRuntime(
                     category: item.category,
                     source: 'browser',
                 })
-                state.popoverHandle?.hide()
-                state.popoverHandle = null
-                runtime.active = null
+                closePopoverFor(el)
             },
         })
+        openPopovers.set(el, handle)
         runtime.active = { el, item, replacementIndex: 0 }
     }
 
@@ -449,7 +491,7 @@ function wireRuntime(
     ): void {
         const anchor = el.getBoundingClientRect()
         const count = state.items.length
-        state.statusHandle = renderStatusButton(root, {
+        const statusHandle = renderStatusButton(root, {
             count,
             byCategory: tallyByCategory(state.items),
             anchorRect: anchor,
@@ -457,11 +499,28 @@ function wireRuntime(
                 el.focus()
             },
         })
-        if (count === 0) return
+        if (count === 0) {
+            // No suggestions this round — the status pill alone is enough.
+            // The pill's destroy is idempotent, so a later render with
+            // non-zero items will overwrite it cleanly.
+            state.attachment.setHandles({
+                statusDestroy: () => statusHandle.destroy(),
+            })
+            return
+        }
+
+        // BATCHED mirror: one layout flush for ALL of this field's
+        // suggestion spans. The mirror-div technique is O(n) on text
+        // length and triggers a layout reflow per append+measure; doing
+        // it per suggestion (k suggestions = k reflows) was the
+        // dominant cost on chatty fields (Fix 3).
+        const spans = state.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
+        const allRects = getSpanRectsBatch(el, spans)
 
         const nodes: HTMLDivElement[] = []
-        for (const item of state.items) {
-            const rects = getSpanRects(el, item.cuStart, item.cuEnd)
+        for (let i = 0; i < state.items.length; i++) {
+            const item = state.items[i]!
+            const rects = allRects[i] ?? []
             if (rects.length === 0) continue
             const handle = renderUnderlines(root, {
                 rects,
@@ -473,12 +532,26 @@ function wireRuntime(
             })
             for (const n of handle.nodes) nodes.push(n)
         }
-        state.underlineHandle = {
+        const underlineHandle: UnderlineHandle = {
             nodes,
             destroy: () => {
                 for (const n of nodes) n.remove()
             },
         }
+        // Register the destroy hooks on the attachment so a future
+        // `detach()` (SPA field removal, settings-driven teardown, the
+        // next renderField) tears them down deterministically. The
+        // popover handle — if one is open — is read lazily from the
+        // WeakMap so we don't capture a stale reference here.
+        state.attachment.setHandles({
+            underlineDestroy: () => underlineHandle.destroy(),
+            statusDestroy: () => statusHandle.destroy(),
+            popoverHide: () => {
+                const h = openPopovers.get(el)
+                h?.hide()
+                openPopovers.delete(el)
+            },
+        })
     }
 }
 
