@@ -11,7 +11,7 @@
 
 import { createFieldObserver } from '@/input/observer'
 import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
-import { shouldCheckInput } from '@/input/paste-guard'
+import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { applyFix, getText } from '@/input/text'
 import { isSpanStillValid, runCheck, tallyByCategory, type RenderableItem } from '@/lib/pipeline'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
@@ -71,6 +71,16 @@ interface FieldState {
      * count.
      */
     checkSeq: number
+    /**
+     * Active paste-grace timer, or null. On a paste/drop we suppress the
+     * immediate grammar check and arm this timer (settings.pasteGraceMs) so the
+     * user can edit the pasted text BEFORE GrammarForge flags it. The timer
+     * fires the check on expiry; a non-paste edit clears it and checks
+     * immediately (whichever comes first). Re-armed on each paste. Always
+     * cleared on field detach / runtime teardown so it never fires against a
+     * torn-down overlay.
+     */
+    pasteGraceTimer: ReturnType<typeof setTimeout> | null
 }
 
 interface ActiveSuggestion {
@@ -314,6 +324,17 @@ function wireRuntime(
         }, TOOLTIP_HIDE_GRACE_MS)
     }
 
+    // Cancel a field's pending paste-grace timer (if any). Idempotent. Called
+    // when a non-paste edit ends the grace early, on each re-arm, and on
+    // detach / teardown so a stale timer never fires a check against a
+    // torn-down overlay.
+    const clearPasteGrace = (state: FieldState): void => {
+        if (state.pasteGraceTimer != null) {
+            clearTimeout(state.pasteGraceTimer)
+            state.pasteGraceTimer = null
+        }
+    }
+
     const rerunFor =
         (el: HTMLElement) =>
         async (text: string): Promise<void> => {
@@ -368,22 +389,41 @@ function wireRuntime(
         await rerunFor(el)(getText(el))
     }
 
-    const onInput =
+    // Decide whether an `input` event on `el` should schedule a check, and arm
+    // the paste-grace window as a side effect. This is the SINGLE authoritative
+    // input gate (passed to the attachment as onInputEvent — there is no longer
+    // a separate capture-phase listener). It reads settings live so realtime /
+    // paste-skip toggles take effect immediately. The actual text read happens
+    // at debounce FIRE time inside the attachment (Fix 2), not here.
+    //
+    // Paste-grace: on a paste/drop (when checkPastedText is on and
+    // pasteGraceMs > 0) we DON'T check yet — we arm a per-field timer so the
+    // user can edit the pasted text first. The check fires when that window
+    // expires OR earlier on the next non-paste edit (whichever comes first);
+    // each new paste re-arms it.
+    const onInputEventFor =
         (el: HTMLElement) =>
-        (e: Event): void => {
-            // The `input` event carries an `InputEvent` with `inputType`. Gate
-            // on it so a paste with checkPastedText=false never schedules a
-            // check, while typing and undo/redo still do. The check itself
-            // reads the field's text at FIRE time inside the debouncer, NOT
-            // here — so a typing burst doesn't pay for an O(textLen) text
-            // read on every keystroke (Fix 2).
+        (inputType: string): boolean => {
             const s = getSettings()
-            if (s.checkMode !== 'realtime') return
-            const inputType = (e as InputEvent).inputType ?? ''
-            if (!shouldCheckInput(inputType, { checkPastedText: s.checkPastedText })) return
+            if (s.checkMode !== 'realtime') return false
+            if (!shouldCheckInput(inputType, { checkPastedText: s.checkPastedText })) return false
             const state = runtime.fields.get(el)
-            if (!state) return
-            state.attachment.debouncedRun()
+            if (!state) return false
+            if (isPasteInput(inputType) && s.pasteGraceMs > 0) {
+                // Re-arm the grace window. Drop any debounce scheduled by typing
+                // just before the paste so it can't fire during the grace.
+                clearPasteGrace(state)
+                state.attachment.cancelPending()
+                state.pasteGraceTimer = setTimeout(() => {
+                    state.pasteGraceTimer = null
+                    void rerunFor(el)(getText(el))
+                }, s.pasteGraceMs)
+                return false
+            }
+            // Non-paste edit: ends any pending grace (whichever comes first) and
+            // schedules the normal debounced check.
+            clearPasteGrace(state)
+            return true
         }
 
     const attach = (el: HTMLElement): void => {
@@ -405,45 +445,37 @@ function wireRuntime(
                     // Flush pending signals on blur; the field is leaving focus.
                     void signalQueue.flush()
                 },
+                // The single authoritative input gate (realtime / paste-skip /
+                // paste-grace). The attachment consults this before scheduling
+                // any debounced check; there is no separate capture-phase
+                // listener anymore (which previously double-scheduled and
+                // silently defeated paste-skip / ondemand).
+                onInputEvent: onInputEventFor(el),
             },
             () => runtime.fieldCount,
             () => {
                 runtime.fieldCount -= 1
             },
         )
-        // Bind the per-field input gating (paste policy / realtime gate)
-        // on TOP of the attachment's debouncer. The attachment's input
-        // listener calls debouncedRun directly, but we need to apply the
-        // realtime + paste guard first. The cleanest way is to override
-        // the input handler: re-add a typed one and have it call into
-        // the attachment's debouncedRun.
-        // (The attachment already added a plain input listener — we
-        // replace it via a one-shot re-binding: removeEventListener on
-        // the attachment's closure-bound handler isn't possible from
-        // here, so instead we install a CAPTURING listener that runs
-        // FIRST and stops propagation when the gate says "skip". The
-        // attachment's handler still runs, but only with valid input
-        // events reaching it. This is the simplest robust layering that
-        // doesn't require the attachment to know about the gate.)
-        // -> See "gating capture" below.
         const state: FieldState = {
             attachment,
             items: [],
             itemRects: [],
             checkSeq: 0,
+            pasteGraceTimer: null,
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
 
-        // Gating capture: installed at the capture phase so it sees the
-        // event BEFORE the attachment's bubble-phase handler. When the
-        // realtime/paste gate says "skip", we stopImmediatePropagation so
-        // the attachment's listener never fires for this event. When the
-        // gate says "check", we do nothing — the attachment's listener
-        // runs normally and schedules the debounced run.
-        const gateHandler = onInput(el)
-        el.addEventListener('input', gateHandler, { capture: true })
-        runtime.cleanups.push(() => el.removeEventListener('input', gateHandler, { capture: true }))
+        // Release this field's paste-grace timer on a settings-driven teardown.
+        // teardownRuntime() iterates runtime.cleanups but does NOT walk the
+        // fields WeakMap, so without this a pending grace timer could fire a
+        // check against a torn-down overlay (a bridge call + a render into a
+        // detached shadow root). The field-removal path clears it in detach().
+        runtime.cleanups.push(() => {
+            const st = runtime.fields.get(el)
+            if (st) clearPasteGrace(st)
+        })
 
         // Field-level hover/click interaction. The underline overlay is
         // pointer-events:none, so interaction is detected on the FIELD itself
@@ -502,6 +534,9 @@ function wireRuntime(
     const detach = (el: HTMLElement): void => {
         const state = runtime.fields.get(el)
         if (!state) return
+        // Cancel any pending paste-grace timer first so it can't fire a check
+        // against a field that's leaving the DOM.
+        clearPasteGrace(state)
         // Release the per-field listeners, debouncer, and any registered
         // overlay handles. The attachment decrements runtime.fieldCount
         // exactly once (idempotent guard inside `detach`).

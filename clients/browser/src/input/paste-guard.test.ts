@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldCheckInput } from '@/input/paste-guard'
+import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 
 describe('shouldCheckInput', () => {
     it('checks normal typing', () => {
@@ -49,5 +49,31 @@ describe('shouldCheckInput', () => {
         // public type is `string` — we keep the type narrow and tolerate
         // undefined for the safe-default contract.
         expect(shouldCheckInput(undefined, { checkPastedText: false })).toBe(true)
+    })
+})
+
+describe('isPasteInput', () => {
+    it('is true for paste / quotation-paste / drop / yank', () => {
+        expect(isPasteInput('insertFromPaste')).toBe(true)
+        expect(isPasteInput('insertFromPasteAsQuotation')).toBe(true)
+        expect(isPasteInput('insertFromDrop')).toBe(true)
+        expect(isPasteInput('insertFromYank')).toBe(true)
+    })
+
+    it('is false for typing, deletion, and history edits', () => {
+        expect(isPasteInput('insertText')).toBe(false)
+        expect(isPasteInput('deleteContentBackward')).toBe(false)
+        expect(isPasteInput('deleteContentForward')).toBe(false)
+        expect(isPasteInput('historyUndo')).toBe(false)
+        expect(isPasteInput('historyRedo')).toBe(false)
+    })
+
+    it('is false for empty / missing inputType (not a recognisable paste)', () => {
+        // The paste-grace window is opt-IN to suppression: only a recognised
+        // bulk-paste inputType arms it. An unknown/empty type is treated as a
+        // normal edit so it never silently swallows a check.
+        expect(isPasteInput('')).toBe(false)
+        // @ts-expect-error: undefined permitted at runtime; narrow public type.
+        expect(isPasteInput(undefined)).toBe(false)
     })
 })

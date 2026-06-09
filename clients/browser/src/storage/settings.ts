@@ -9,6 +9,14 @@ export interface Settings {
     bridgeBaseUrl: string
     allowRemoteBridge: boolean
     realtimeDelayMs: number
+    /**
+     * After a paste/drop, suppress the grammar check for this many ms so the
+     * user can edit the pasted text before GrammarForge flags it. The check
+     * runs again on the next non-paste edit OR when this window expires,
+     * whichever comes first. Re-arms on every paste. 0 disables the grace
+     * (paste is checked on the normal realtime debounce like any other edit).
+     */
+    pasteGraceMs: number
     checkMode: 'realtime' | 'ondemand'
     enabled: boolean
     blockedSites: string[]
@@ -24,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
     bridgeBaseUrl: 'http://localhost:8000',
     allowRemoteBridge: false,
     realtimeDelayMs: 500,
+    pasteGraceMs: 4000,
     checkMode: 'realtime',
     enabled: true,
     blockedSites: [],

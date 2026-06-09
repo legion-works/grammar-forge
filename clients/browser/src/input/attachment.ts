@@ -39,6 +39,19 @@ export interface FieldAttachmentOptions {
     onRunCheck: (el: HTMLElement, text: string) => Promise<void> | void
     /** Synchronous blur callback (e.g. flush pending signals). */
     onBlur: () => void
+    /**
+     * Optional gate consulted on EVERY `input` event before a debounced check
+     * is scheduled. Receives the event's `inputType` ('' when unavailable) and
+     * returns whether to schedule the check. This is the SINGLE place the input
+     * policy lives — the orchestrator implements realtime-mode / paste-skip /
+     * paste-grace here (and may perform side effects such as arming a grace
+     * timer). When omitted, every input event schedules a check (legacy
+     * behaviour). NOTE: this is now the only `input` listener on the field —
+     * the orchestrator no longer installs a separate capture-phase gate, so
+     * this gate is authoritative (previously a duplicate listener scheduled a
+     * check regardless of the gate, silently breaking paste-skip / ondemand).
+     */
+    onInputEvent?: (inputType: string) => boolean
 }
 
 /** Reads the current count of fields in the caller's registry. */
@@ -49,6 +62,12 @@ export type FieldCountDecrement = () => void
 export interface FieldAttachment {
     /** Schedule a check (debounced). Reads `el` at fire time. */
     debouncedRun: () => void
+    /**
+     * Cancel any pending debounced check without detaching. Used by the
+     * orchestrator when arming a paste-grace window so a debounce scheduled by
+     * typing just before the paste does not fire during the grace.
+     */
+    cancelPending: () => void
     /** Run a check immediately (e.g. on-demand TRIGGER_CHECK, post-accept). */
     rerun: (text: string) => void
     /** Register/refresh the overlay handles the field currently owns. */
@@ -76,8 +95,16 @@ export function createFieldAttachment(
     let detached = false
     let handles: FieldHandles = {}
 
-    const onInput = (): void => {
+    const onInput = (e: Event): void => {
         if (detached) return
+        if (options.onInputEvent) {
+            // The orchestrator's gate decides (realtime-mode / paste-skip /
+            // paste-grace) and may arm a grace timer as a side effect. When it
+            // returns false we schedule nothing — this is the authoritative
+            // input gate (there is no longer a duplicate capture-phase listener).
+            const inputType = (e as InputEvent).inputType ?? ''
+            if (!options.onInputEvent(inputType)) return
+        }
         debouncedRun()
     }
     const onBlur = (): void => {
@@ -150,6 +177,7 @@ export function createFieldAttachment(
 
     return {
         debouncedRun,
+        cancelPending: () => debouncedRun.cancel(),
         rerun,
         setHandles,
         detach,

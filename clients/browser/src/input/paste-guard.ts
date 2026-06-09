@@ -12,6 +12,19 @@ const PASTE_TYPES: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Whether an `input` event's `inputType` is a bulk paste / drop / yank (as
+ * opposed to typing, deletion, or undo/redo). The content-script wiring uses
+ * this to arm the paste-grace window: on a paste we suppress the immediate
+ * grammar check so the user can edit the pasted text before GrammarForge
+ * kicks in (the check fires on the next non-paste edit or when the grace
+ * timer expires, whichever comes first). An empty / unrecognised inputType is
+ * NOT a paste — it falls through to normal edit handling.
+ */
+export function isPasteInput(inputType: string): boolean {
+    return PASTE_TYPES.has(inputType)
+}
+
+/**
  * Decide whether an `input` (or `beforeinput`) event's `inputType` should
  * trigger a grammar check. The browser client runs live on every keystroke; we
  * must skip bulk paste/drop/yank when the user has opted out, but undo/redo
@@ -29,6 +42,6 @@ export function shouldCheckInput(inputType: string, opts: { checkPastedText: boo
     // Safe default: empty / missing inputType → check.
     if (!inputType) return true
     if (inputType === 'historyUndo' || inputType === 'historyRedo') return true
-    if (!opts.checkPastedText && PASTE_TYPES.has(inputType)) return false
+    if (!opts.checkPastedText && isPasteInput(inputType)) return false
     return true
 }

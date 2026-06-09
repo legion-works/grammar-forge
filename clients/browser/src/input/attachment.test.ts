@@ -191,6 +191,63 @@ describe('createFieldAttachment', () => {
         att.detach()
     })
 
+    it('onInputEvent gate returning false suppresses the debounced check', () => {
+        const ta = document.createElement('textarea')
+        ta.value = 'a'
+        document.body.appendChild(ta)
+        const opts = mkOptions({ onInputEvent: vi.fn<(t: string) => boolean>(() => false) })
+        const att = createFieldAttachment(
+            ta,
+            opts,
+            () => 0,
+            () => {},
+        )
+        ta.value = 'ab'
+        ta.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste' }))
+        vi.advanceTimersByTime(500)
+        expect(opts.onRunCheck).not.toHaveBeenCalled()
+        att.detach()
+    })
+
+    it('onInputEvent gate receives the event inputType and gates per type', () => {
+        const ta = document.createElement('textarea')
+        document.body.appendChild(ta)
+        // Allow typing, block paste.
+        const gate = vi.fn<(t: string) => boolean>((t) => t !== 'insertFromPaste')
+        const opts = mkOptions({ onInputEvent: gate })
+        const att = createFieldAttachment(
+            ta,
+            opts,
+            () => 0,
+            () => {},
+        )
+        ta.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste' }))
+        ta.dispatchEvent(new InputEvent('input', { inputType: 'insertText' }))
+        vi.advanceTimersByTime(500)
+        expect(gate.mock.calls.map((c) => c[0])).toEqual(['insertFromPaste', 'insertText'])
+        // Only the allowed (typing) event scheduled a check.
+        expect(opts.onRunCheck).toHaveBeenCalledTimes(1)
+        att.detach()
+    })
+
+    it('cancelPending() drops a scheduled debounced check', () => {
+        const ta = document.createElement('textarea')
+        ta.value = 'a'
+        document.body.appendChild(ta)
+        const opts = mkOptions()
+        const att = createFieldAttachment(
+            ta,
+            opts,
+            () => 0,
+            () => {},
+        )
+        att.debouncedRun()
+        att.cancelPending()
+        vi.advanceTimersByTime(500)
+        expect(opts.onRunCheck).not.toHaveBeenCalled()
+        att.detach()
+    })
+
     it('blur event calls onBlur synchronously', () => {
         const ta = document.createElement('textarea')
         document.body.appendChild(ta)

@@ -26,6 +26,7 @@ describe('DEFAULT_SETTINGS', () => {
             bridgeBaseUrl: 'http://localhost:8000',
             allowRemoteBridge: false,
             realtimeDelayMs: 500,
+            pasteGraceMs: 4000,
             checkMode: 'realtime',
             enabled: true,
             blockedSites: [],
