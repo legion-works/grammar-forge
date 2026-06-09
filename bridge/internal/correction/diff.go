@@ -55,5 +55,30 @@ func diffToSuggestionsCategory(original, corrected string, category string) []Su
 			})
 		}
 	}
-	return out
+	return cancelNoOpSuggestions(original, out)
+}
+
+// cancelNoOpSuggestions drops suggestions that, applied to original, change
+// nothing (replacement byte-identical to the spanned original text, including
+// an empty span with an empty replacement). It is conservative: it removes ONLY
+// provable no-ops and never alters a real edit. original is the text the spans
+// index into (byte offsets). It deliberately does NOT try to cancel
+// insert/delete pairs — a positional heuristic cannot distinguish LLM churn
+// from a legitimate text move, and doing so would drop real corrections.
+func cancelNoOpSuggestions(original string, in []Suggestion) []Suggestion {
+	if len(in) == 0 {
+		return in
+	}
+	kept := make([]Suggestion, 0, len(in))
+	for _, s := range in {
+		if s.Span.Validate(len(original)) != nil {
+			kept = append(kept, s) // leave invalid spans for the harness to flag
+			continue
+		}
+		if original[s.Span.Start:s.Span.End] == s.Replacement {
+			continue // no-op: applying changes nothing
+		}
+		kept = append(kept, s)
+	}
+	return kept
 }

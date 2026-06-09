@@ -201,3 +201,47 @@ func TestDiffMultibyteByteSpanApplies(t *testing.T) {
 		t.Errorf("reverse-apply = %q, want %q", out, corrected)
 	}
 }
+
+// A suggestion whose replacement equals the spanned original text is a no-op
+// and must be dropped.
+func TestDiffDropsZeroEffectReplacement(t *testing.T) {
+	original := "the cat"
+	in := []Suggestion{
+		{Span: Span{Start: 0, End: 3}, Replacement: "the", Replacements: []string{"the"}, Model: ModelLLM},
+	}
+	require.Empty(t, cancelNoOpSuggestions(original, in),
+		"replacement byte-identical to spanned original is a no-op")
+}
+
+// A real edit must be preserved by the no-op filter.
+func TestDiffPreservesRealEditNearDeletion(t *testing.T) {
+	original := "She has went"
+	in := []Suggestion{
+		{Span: Span{Start: 4, End: 7}, Replacement: "had", Replacements: []string{"had"}, Model: ModelLLM},
+	}
+	got := cancelNoOpSuggestions(original, in)
+	require.Len(t, got, 1, "a genuine replacement must survive the no-op filter")
+	require.Equal(t, "had", got[0].Replacement)
+}
+
+// End-to-end: identical original/corrected yields no suggestions (no churn).
+func TestDiffPublicOutputHasNoNoOps(t *testing.T) {
+	sugs := diffToSuggestions("I have a cat", "I have a cat")
+	require.Empty(t, sugs)
+}
+
+// A legitimate word-move correction (delete a word, insert the same word
+// elsewhere) must NOT be cancelled — applying the suggestions in reverse must
+// reproduce the corrected text. Guards against an over-eager insert/delete
+// no-op filter that would drop real transpositions.
+func TestDiffPreservesWordMove(t *testing.T) {
+	original := "please sign and date sign form"
+	corrected := "please sign sign and date form"
+	sugs := diffToSuggestions(original, corrected)
+	require.NotEmpty(t, sugs, "a real word-move must produce suggestions")
+	out := original
+	for i := len(sugs) - 1; i >= 0; i-- {
+		out = sugs[i].Apply(out)
+	}
+	require.Equal(t, corrected, out, "reverse-apply must reproduce the move")
+}
