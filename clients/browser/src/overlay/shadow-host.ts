@@ -50,13 +50,6 @@ export function createOverlayHost(doc: Document = document): OverlayHost {
     const style = doc.createElement('style')
     style.textContent = OVERLAY_CSS
     root.appendChild(style)
-    // Liquid-glass edge displacement filter, applied to the glass elements' rim
-    // ::after via `filter: url(#gf-glass-distortion)` (a regular filter on an
-    // element — which DOES render, unlike SVG filter refs inside backdrop-filter,
-    // which Chromium ignores). Kept in the SAME shadow root so the url(#…)
-    // reference resolves locally. Progressive: where unsupported, the base blur
-    // + static rim still render.
-    root.appendChild(buildGlassFilter(doc))
     doc.body.appendChild(host)
 
     let destroyed = false
@@ -85,30 +78,4 @@ export function createOverlayHost(doc: Document = document): OverlayHost {
             host.remove()
         },
     }
-}
-
-/**
- * Build the inline SVG holding the liquid-glass displacement filter. fractal
- * noise drives a small displacement of whatever is BEHIND the glass; the glass
- * elements apply it only in a thin rim (via a masked ::before), so the page
- * content appears to refract/distort around the borders like real glass.
- */
-function buildGlassFilter(doc: Document): SVGSVGElement {
-    const NS = 'http://www.w3.org/2000/svg'
-    const svg = doc.createElementNS(NS, 'svg')
-    svg.setAttribute('width', '0')
-    svg.setAttribute('height', '0')
-    svg.setAttribute('aria-hidden', 'true')
-    svg.style.cssText = 'position:absolute;width:0;height:0;pointer-events:none'
-    svg.innerHTML =
-        `<defs>` +
-        `<filter id="gf-glass-distortion" x="-20%" y="-20%" width="140%" height="140%" ` +
-        `color-interpolation-filters="sRGB">` +
-        `<feTurbulence type="fractalNoise" baseFrequency="0.02 0.024" numOctaves="2" seed="7" result="n"/>` +
-        `<feGaussianBlur in="n" stdDeviation="1" result="nb"/>` +
-        `<feDisplacementMap in="SourceGraphic" in2="nb" scale="6" ` +
-        `xChannelSelector="R" yChannelSelector="G"/>` +
-        `</filter>` +
-        `</defs>`
-    return svg
 }
