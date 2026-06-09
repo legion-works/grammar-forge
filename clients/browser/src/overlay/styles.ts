@@ -574,13 +574,53 @@ export const OVERLAY_CSS = `
   }
 
   /* ============================================================
+   * Undo toast — transient bottom-center pill, e.g. "Ignored · Undo".
+   * Auto-dismisses (default 1.2s); the action button cancels the timer
+   * and fires onAction. Lives in the same shadow root as the rest of
+   * the overlay so overlay.destroy() removes it.
+   * ============================================================ */
+  .gf-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    z-index: ${Z_OVERLAY};
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 9999px;
+    pointer-events: auto;
+    background: light-dark(rgba(245, 245, 245, 0.92), rgba(28, 28, 30, 0.92));
+    color: light-dark(#111, #f5f5f5);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+    animation: gf-pill-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .gf-toast__action {
+    appearance: none;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: #60a5fa;
+    font: inherit;
+    font-weight: 600;
+    padding: 0;
+  }
+  .gf-toast__action:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+  }
+
+  /* ============================================================
    * Reduced-transparency: drop the glass, bump scrim to ~92% opaque
    * ============================================================ */
   @media (prefers-reduced-transparency: reduce) {
     .gf-panel,
     .gf-pill,
     .gf-pill-panel,
-    .gf-tooltip {
+    .gf-tooltip,
+    .gf-toast {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
       background: color-mix(in oklab, #1c1c1e 92%, transparent);
@@ -600,7 +640,7 @@ export const OVERLAY_CSS = `
     .gf-underline--wavy,
     .gf-underline--dotted { background-image: none; background: currentColor; }
     .gf-underline { height: 3px; }
-    .gf-panel, .gf-pill, .gf-tooltip, .gf-pill-panel {
+    .gf-panel, .gf-pill, .gf-tooltip, .gf-pill-panel, .gf-toast {
       backdrop-filter: none; -webkit-backdrop-filter: none;
     }
   }
@@ -624,7 +664,8 @@ export const OVERLAY_CSS = `
       animation-duration: 1ms;
       animation-name: gf-no-motion;
     }
-    .gf-tooltip {
+    .gf-tooltip,
+    .gf-toast {
       animation-duration: 1ms;
       animation-name: gf-no-motion;
     }

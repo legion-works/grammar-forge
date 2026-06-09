@@ -21,6 +21,7 @@ import { getSpanRectsBatch } from '@/overlay/rect'
 import { createUnderlineLayer, type UnderlineSpec } from '@/overlay/underline'
 import { showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
+import { showToast } from '@/overlay/toast'
 import { renderStatusButton } from '@/overlay/status-button'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
@@ -852,11 +853,33 @@ function wireRuntime(
                 void rerunFor(el)(getText(el))
             },
             onIgnore: () => {
+                // Capture the item + its index BEFORE mutating state.items so
+                // the Undo closure can restore it. The ignored signal is
+                // enqueued unconditionally — Undo is a CLIENT-SIDE visual
+                // restore only; we do NOT send a compensating signal (a future
+                // bridge `un-ignore` is out of scope, and the original
+                // 'ignored' event is the source of truth for the training loop).
+                const idx = state.items.indexOf(item)
+                if (idx >= 0) state.items.splice(idx, 1)
+                // Reconcile the persistent underline layer (the underline for
+                // this item disappears) and re-render the pill (count updates).
+                renderField(el, overlay.root, state)
+                updateFocusedCounts(runtime, el)
                 void signalQueue.enqueue({
                     id: item.id,
                     action: 'ignored',
                     category: item.category,
                     source: 'browser',
+                })
+                showToast(overlay.root, {
+                    message: 'Ignored',
+                    actionLabel: 'Undo',
+                    onAction: () => {
+                        if (idx < 0) return
+                        state.items.splice(idx, 0, item)
+                        renderField(el, overlay.root, state)
+                        updateFocusedCounts(runtime, el)
+                    },
                 })
                 closePopoverFor(el)
             },
