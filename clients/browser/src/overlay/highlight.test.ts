@@ -184,4 +184,24 @@ describe('createHighlightLayer', () => {
         expect(node.getAttribute('role')).toBeNull()
         expect(node.getAttribute('tabindex')).toBeNull()
     })
+
+    it('flashApplied adds the applied class to the matching item nodes', () => {
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'grammar', itemIndex: 1 },
+        ])
+        layer.flashApplied(0)
+        const nodes = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        expect(nodes[0]!.classList.contains('gf-highlight--applied')).toBe(true)
+        expect(nodes[1]!.classList.contains('gf-highlight--applied')).toBe(false)
+    })
+
+    it('flashApplied is a no-op for an index with no node', () => {
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 }])
+        expect(() => layer.flashApplied(5)).not.toThrow()
+    })
 })

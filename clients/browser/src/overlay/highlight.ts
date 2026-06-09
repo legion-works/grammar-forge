@@ -51,6 +51,11 @@ export interface HighlightLayer {
     reconcile: (specs: readonly HighlightSpec[]) => void
     /** Flip focus/hover intensity classes on every pooled node (no rebuild). */
     setState: (state: HighlightLayerState) => void
+    /** Briefly flash the applied-flourish class on the node(s) for an item
+     *  index (the fix was just applied). The class auto-removes after the
+     *  animation; the next reconcile is unaffected. No-op if the index has no
+     *  node. */
+    flashApplied: (itemIndex: number) => void
     /** Remove every pooled node. */
     destroy: () => void
 }
@@ -96,6 +101,14 @@ export function createHighlightLayer(root: ShadowRoot): HighlightLayer {
                     if (idx === prev.hoverItemIndex || idx === state.hoverItemIndex)
                         applyState(n, state)
                 }
+            }
+        },
+        flashApplied(itemIndex) {
+            for (const n of pool) {
+                if (Number(n.dataset.item) !== itemIndex) continue
+                n.classList.add('gf-highlight--applied')
+                const clear = (): void => n.classList.remove('gf-highlight--applied')
+                n.addEventListener('animationend', clear, { once: true })
             }
         },
         destroy() {

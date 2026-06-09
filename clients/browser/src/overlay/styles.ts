@@ -61,6 +61,20 @@ export const OVERLAY_CSS = `
   }
   .gf-highlight--focus { background: color-mix(in srgb, var(--gf-hl, #888) 20%, transparent); }
   .gf-highlight--hover { background: color-mix(in srgb, var(--gf-hl, #888) 37%, transparent); }
+
+  /* Transient applied flourish: a quick fade and lift the moment a fix is
+     applied, before the highlight reconciles away. Animation-only on a
+     transient class removed on animationend, so it never sticks to a reused
+     pooled node and never overrides the idle/focus/hover background. */
+  .gf-highlight--applied {
+    animation: gf-highlight-applied 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes gf-highlight-applied {
+    from { transform: scale(1); opacity: 1; }
+    60%  { transform: scale(1.08); opacity: 0.55; }
+    to   { transform: scale(0.96); opacity: 0; }
+  }
+
   @media (prefers-contrast: more) {
     .gf-highlight { background: color-mix(in srgb, var(--gf-hl, #888) 40%, transparent); outline: 1px solid var(--gf-hl, #888); }
   }
@@ -693,6 +707,7 @@ export const OVERLAY_CSS = `
       animation-name: gf-no-motion;
     }
     .gf-highlight { transition: none; }
+    .gf-highlight--applied { animation: none; }
   }
   @keyframes gf-no-motion {
     from { opacity: 0; }

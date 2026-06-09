@@ -1027,6 +1027,7 @@ function wireRuntime(
         }
         const replacement = a.item.replacements[a.replacementIndex] ?? a.item.replacements[0] ?? ''
         applyFix(a.el, { start: a.item.cuStart, end: a.item.cuEnd }, replacement)
+        flashAppliedOverlay(a.el, a.item)
         void signalQueue.enqueue({
             id: a.item.id,
             action: 'accepted',
@@ -1095,6 +1096,7 @@ function wireRuntime(
                 const replacement =
                     item.replacements[replacementIndex] ?? item.replacements[0] ?? ''
                 applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+                flashAppliedOverlay(el, item)
                 void signalQueue.enqueue({
                     id: item.id,
                     action: 'accepted',
@@ -1149,6 +1151,16 @@ function wireRuntime(
         runtime.active = { el, item, replacementIndex: 0 }
     }
 
+    // Overlay-only apply flourish: flash the just-applied item's highlight
+    // before the re-check reconciles it away. No-op for native-highlight fields
+    // (no element to flash) and when the layer/index is absent.
+    function flashAppliedOverlay(el: HTMLElement, item: RenderableItem): void {
+        const st = runtime.fields.get(el)
+        if (!st || st.useNativeHighlight || !st.highlightLayer) return
+        const idx = st.items.indexOf(item)
+        if (idx >= 0) st.highlightLayer.flashApplied(idx)
+    }
+
     // Apply an item's PRIMARY replacement (stale-guarded) + emit the accepted
     // signal. Returns false (no-op) when the span has gone stale. Does not
     // re-check — the caller batches that.
@@ -1171,6 +1183,7 @@ function wireRuntime(
         if (!item) return
         closePopoverFor(el)
         applyItemPrimary(el, item)
+        flashAppliedOverlay(el, item)
         void rerunFor(el)(getText(el))
     }
 
