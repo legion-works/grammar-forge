@@ -1,0 +1,316 @@
+// Adapted from codextde/textchecker @ 7b66d78e74379f9fc909f6d4a2d984cb50a5d088 (MIT)
+// Shadow-root CSS for the overlay. Implements the "Liquid Glass" material
+// described in spec §7.1 + the Liquid Glass CSS research:
+//
+//   - Glass panel (popover) + glass pill (status) with backdrop-filter +
+//     -webkit-backdrop-filter + saturate(). Default = near-opaque solid
+//     scrim (legible over arbitrary pages); @supports upgrades to true glass.
+//   - Dark scrim (~40% alpha) so text reads on any page background; text uses
+//     light-dark() + a text-shadow belt-and-braces.
+//   - Hairline border via color-mix, inset specular + outer drop shadow.
+//   - isolation: isolate + contain: layout paint to bound backdrop-filter
+//     sample region and reduce paint cost.
+//   - Underline classes are CRISP per category (NOT glass) — wavy / dotted /
+//     solid colors straight from CATEGORY_META. They render position:fixed
+//     children of the shadow root.
+//   - Appear animation: transform + opacity only (cubic-bezier(0.22,1,0.36,1)
+//     out-back); never animate backdrop-filter.
+//   - Accessibility: @media (prefers-reduced-transparency: reduce) strips the
+//     blur and bumps the scrim to ~92% opaque; @media (prefers-reduced-motion:
+//     reduce) drops the spring and keeps a short opacity fade only. Uses the
+//     additive pattern (default solid, glass added under
+//     prefers-reduced-transparency: no-preference).
+
+const Z_OVERLAY = 2147483647
+
+const SCALE_TOOLTIP = 0.96
+const DURATION_TOOLTIP_MS = 180
+
+export const OVERLAY_CSS = `
+  :host,
+  :host * {
+    box-sizing: border-box;
+  }
+  :host {
+    color-scheme: light dark;
+    /* Text adapts automatically to OS scheme; in the overlay, the page sets
+       the tone, but this keeps icons + scrim sane when the user is in
+       dark mode themselves. */
+    color: light-dark(#111, #f5f5f5);
+    font: 500 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  /* ============================================================
+   * Underline (CRISP, NOT glass) — one node per getClientRects() rect
+   * ============================================================ */
+  .gf-underline {
+    position: fixed;
+    pointer-events: auto;
+    cursor: pointer;
+    /* height is set per-category; baseline 2px. */
+    height: 2px;
+    background: transparent;
+    /* No transform on the static state — it would push fixed-position
+       children off by 1 device pixel on some Android WebViews. */
+    transform-origin: 50% 100%;
+    transition: opacity 120ms ease-out, transform 120ms ease-out;
+    will-change: opacity, transform;
+    z-index: ${Z_OVERLAY};
+  }
+  .gf-underline:hover {
+    transform: scaleY(1.4);
+  }
+  .gf-underline:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+  }
+
+  .gf-underline--wavy {
+    /* Real spellchecker squiggle: a 6x3 SVG wave tiled horizontally.
+       currentColor drives the stroke; the marker node sets style.color
+       per category so the same SVG is red for spelling, amber for
+       grammar, etc. The path is one full period of a sine (M Q T), so
+       the tiling is seamless. */
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3' viewBox='0 0 6 3'><path d='M0 2 Q 1.5 0 3 2 T 6 2' fill='none' stroke='currentColor' stroke-width='1' stroke-linecap='round'/></svg>");
+    background-repeat: repeat-x;
+    background-position: 0 100%;
+    background-size: 6px 3px;
+  }
+  .gf-underline--dotted {
+    background-image: radial-gradient(circle, currentColor 50%, transparent 50%);
+    background-repeat: repeat-x;
+    background-position: 0 100%;
+    background-size: 3px 100%;
+  }
+  .gf-underline--solid {
+    background: currentColor;
+  }
+
+  /* ============================================================
+   * Glass panel (popover) — base = near-opaque solid scrim so the
+   * popover reads on any page; @supports upgrades to true glass.
+   * ============================================================ */
+  .gf-panel {
+    position: fixed;
+    pointer-events: auto;
+    z-index: ${Z_OVERLAY};
+    min-width: 280px;
+    max-width: 380px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    isolation: isolate;
+    contain: layout paint;
+    /* default solid scrim (dark on light pages) — text reads either way */
+    background: rgba(28, 28, 30, 0.78);
+    color: #f5f5f5;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+      0 1px 2px rgba(0, 0, 0, 0.12),
+      0 8px 24px rgba(0, 0, 0, 0.20);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    /* enter animation: transform+opacity only */
+    transform-origin: 50% 100%;
+    animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes gf-popover-enter {
+    from { transform: scale(${SCALE_TOOLTIP}); opacity: 0; }
+    to   { transform: scale(1);       opacity: 1; }
+  }
+
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-panel {
+      background: color-mix(in oklab, #1c1c1e 40%, transparent);
+      border-color: color-mix(in oklab, white 14%, transparent);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      backdrop-filter: blur(16px) saturate(180%);
+    }
+  }
+
+  /* ============================================================
+   * Glass pill (status button) — same material, tighter blur, full radius
+   * ============================================================ */
+  .gf-pill {
+    position: fixed;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: auto;
+    z-index: ${Z_OVERLAY};
+    padding: 4px 12px;
+    border-radius: 9999px;
+    isolation: isolate;
+    contain: layout paint;
+    font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: rgba(28, 28, 30, 0.78);
+    color: #f5f5f5;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+      0 1px 3px rgba(0, 0, 0, 0.14),
+      0 4px 12px rgba(0, 0, 0, 0.10);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+    transform-origin: 50% 100%;
+    animation: gf-pill-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes gf-pill-enter {
+    from { transform: scale(${SCALE_TOOLTIP}); opacity: 0; }
+    to   { transform: scale(1);       opacity: 1; }
+  }
+
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-pill {
+      background: color-mix(in oklab, #1c1c1e 36%, transparent);
+      border-color: color-mix(in oklab, white 12%, transparent);
+      -webkit-backdrop-filter: blur(10px) saturate(160%);
+      backdrop-filter: blur(10px) saturate(160%);
+    }
+  }
+
+  /* ============================================================
+   * Popover internals
+   * ============================================================ */
+  .gf-panel__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .gf-panel__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    flex: 0 0 auto;
+  }
+  .gf-panel__label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .gf-panel__message {
+    font-size: 13px;
+    line-height: 1.4;
+    color: inherit;
+    margin: 4px 0 8px;
+  }
+  .gf-panel__replacement {
+    font-weight: 600;
+    color: #f5f5f5;
+  }
+  .gf-panel__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .gf-panel__btn {
+    appearance: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 120ms ease-out, border-color 120ms ease-out;
+  }
+  .gf-panel__btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.30);
+  }
+  .gf-panel__btn:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+  }
+  .gf-panel__btn--primary {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #fff;
+  }
+  .gf-panel__btn--primary:hover {
+    background: #1d4ed8;
+    border-color: #1e40af;
+  }
+  .gf-panel__btn--ghost {
+    background: transparent;
+    border-color: transparent;
+    color: rgba(245, 245, 245, 0.8);
+  }
+  .gf-panel__btn--ghost:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .gf-panel__alternatives {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+  }
+  .gf-panel__alternative {
+    appearance: none;
+    text-align: left;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.04);
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .gf-panel__alternative:hover {
+    background: rgba(255, 255, 255, 0.10);
+  }
+
+  /* ============================================================
+   * Reduced-transparency: drop the glass, bump scrim to ~92% opaque
+   * ============================================================ */
+  @media (prefers-reduced-transparency: reduce) {
+    .gf-panel,
+    .gf-pill {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      background: color-mix(in oklab, #1c1c1e 92%, transparent);
+      border-color: color-mix(in oklab, white 8%, transparent);
+    }
+  }
+
+  /* Additive pattern: only add the glass where the user has explicitly
+     opted into translucency. Browsers that don't implement the media
+     query fall through to the @supports block above, which is the safe
+     default. */
+  @media (prefers-reduced-transparency: no-preference) {
+    /* The base style is already solid; the @supports block above adds
+       the glass upgrade. This rule exists as a forward-compatible hook
+       for future tuning (e.g. theme-aware scrim direction). */
+  }
+
+  /* ============================================================
+   * Reduced-motion: kill spring, keep a short opacity fade
+   * ============================================================ */
+  @media (prefers-reduced-motion: reduce) {
+    .gf-panel,
+    .gf-pill {
+      animation-duration: 1ms;
+      animation-name: gf-no-motion;
+    }
+    .gf-underline {
+      transition: none;
+    }
+    .gf-underline:hover {
+      transform: none;
+    }
+  }
+  @keyframes gf-no-motion {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+`
