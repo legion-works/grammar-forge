@@ -10,9 +10,10 @@
 //   - Hairline border via color-mix, inset specular + outer drop shadow.
 //   - isolation: isolate + contain: layout paint to bound backdrop-filter
 //     sample region and reduce paint cost.
-//   - Underline classes are CRISP per category (NOT glass) — wavy / dotted /
-//     solid colors straight from CATEGORY_META. They render position:fixed
-//     children of the shadow root.
+//   - Highlight classes are translucent per category (NOT glass) — full-rect
+//     rects tinted by a `--gf-hl` custom property, intensity flipped by
+//     gf-highlight--focus / gf-highlight--hover modifier classes. They render
+//     position:fixed children of the shadow root.
 //   - Appear animation: transform + opacity only (cubic-bezier(0.22,1,0.36,1)
 //     out-back); never animate backdrop-filter.
 //   - Accessibility: @media (prefers-reduced-transparency: reduce) strips the
@@ -41,43 +42,27 @@ export const OVERLAY_CSS = `
   }
 
   /* ============================================================
-   * Underline (CRISP, NOT glass) — one node per getClientRects() rect
+   * Highlight (translucent, NOT glass) — one full-rect node per
+   * getClientRects() rect. The category colour is set per-node via the
+   * --gf-hl custom property; visible alpha is driven by intensity
+   * modifier classes (default 12% / --focus 20% / --hover 32%).
    * ============================================================ */
-  .gf-underline {
+  .gf-highlight {
     position: fixed;
     /* Purely visual: hover/click interaction is detected on the FIELD itself
        (content orchestrator hit-tests the pointer against the edit rects), so
-       the underline must NEVER intercept the page's mouse events — that keeps
+       the highlight must NEVER intercept the page's mouse events — that keeps
        the field fully editable and selectable under the overlay. */
     pointer-events: none;
-    /* height is set per-category; baseline 2px. */
-    height: 2px;
-    background: transparent;
-    /* No transform on the static state — it would push fixed-position
-       children off by 1 device pixel on some Android WebViews. */
-    transform-origin: 50% 100%;
     z-index: ${Z_OVERLAY};
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--gf-hl, #888) 12%, transparent);
+    transition: background 140ms ease-out;
   }
-
-  .gf-underline--wavy {
-    /* Real spellchecker squiggle: a 6x3 SVG wave tiled horizontally.
-       currentColor drives the stroke; the marker node sets style.color
-       per category so the same SVG is red for spelling, amber for
-       grammar, etc. The path is one full period of a sine (M Q T), so
-       the tiling is seamless. */
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3' viewBox='0 0 6 3'><path d='M0 2 Q 1.5 0 3 2 T 6 2' fill='none' stroke='currentColor' stroke-width='1' stroke-linecap='round'/></svg>");
-    background-repeat: repeat-x;
-    background-position: 0 100%;
-    background-size: 6px 3px;
-  }
-  .gf-underline--dotted {
-    background-image: radial-gradient(circle, currentColor 50%, transparent 50%);
-    background-repeat: repeat-x;
-    background-position: 0 100%;
-    background-size: 3px 100%;
-  }
-  .gf-underline--solid {
-    background: currentColor;
+  .gf-highlight--focus { background: color-mix(in srgb, var(--gf-hl, #888) 20%, transparent); }
+  .gf-highlight--hover { background: color-mix(in srgb, var(--gf-hl, #888) 32%, transparent); }
+  @media (prefers-contrast: more) {
+    .gf-highlight { background: color-mix(in srgb, var(--gf-hl, #888) 40%, transparent); outline: 1px solid var(--gf-hl, #888); }
   }
 
   /* ============================================================
@@ -643,13 +628,11 @@ export const OVERLAY_CSS = `
   }
 
   /* ============================================================
-   * High-contrast: solid underline stroke (no data-URI wave / dots),
-   * thicker underline, no glass blur so the rim stays crisp.
+   * High-contrast: no glass blur so the rim stays crisp. Highlight CSS
+   * has its own prefers-contrast override above (thicker outline + more
+   * opaque tint).
    * ============================================================ */
   @media (prefers-contrast: more) {
-    .gf-underline--wavy,
-    .gf-underline--dotted { background-image: none; background: currentColor; }
-    .gf-underline { height: 3px; }
     .gf-panel, .gf-pill, .gf-tooltip, .gf-pill-panel, .gf-toast {
       backdrop-filter: none; -webkit-backdrop-filter: none;
     }
@@ -679,6 +662,7 @@ export const OVERLAY_CSS = `
       animation-duration: 1ms;
       animation-name: gf-no-motion;
     }
+    .gf-highlight { transition: none; }
   }
   @keyframes gf-no-motion {
     from { opacity: 0; }

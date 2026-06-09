@@ -18,7 +18,7 @@ import { isSpanStillValid, runCheck, tallyByCategory, type RenderableItem } from
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
-import { createUnderlineLayer, type UnderlineSpec } from '@/overlay/underline'
+import { createHighlightLayer, type HighlightSpec } from '@/overlay/highlight'
 import { showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { showToast } from '@/overlay/toast'
@@ -84,10 +84,16 @@ interface FieldState {
      */
     pasteGraceTimer: ReturnType<typeof setTimeout> | null
     /**
-     * Persistent reconciling underline layer for this field (created lazily on
+     * Persistent reconciling highlight layer for this field (created lazily on
      * first render; reused across checks so nodes aren't destroyed+recreated).
      */
-    underlineLayer: import('@/overlay/underline').UnderlineLayer | null
+    highlightLayer: import('@/overlay/highlight').HighlightLayer | null
+    /**
+     * Index of the item the pointer is currently hovering (parallel to
+     * state.items), or null when nothing is hovered. Drives the per-word
+     * highlight intensity via highlightLayer.setState({hoverItemIndex}).
+     */
+    hoverItemIndex: number | null
 }
 
 interface ActiveSuggestion {
@@ -526,7 +532,8 @@ function wireRuntime(
             itemRects: [],
             checkSeq: 0,
             pasteGraceTimer: null,
-            underlineLayer: null,
+            highlightLayer: null,
+            hoverItemIndex: null,
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -583,7 +590,31 @@ function wireRuntime(
             el.removeEventListener('keydown', onFieldUndoRedo, { capture: true }),
         )
 
-        // Field-level hover/click interaction. The underline overlay is
+        // Focus/blur → drive the highlight intensity for this field. The
+        // highlight layer keeps the latest state internally (via setState),
+        // so we only push the new focus flag and preserve the current
+        // hoverItemIndex. Uses simple bubbling listeners; capture isn't
+        // needed since no other listener preventDefault's these.
+        const onFieldFocus = (): void => {
+            state.highlightLayer?.setState({
+                focused: true,
+                hoverItemIndex: state.hoverItemIndex,
+            })
+        }
+        const onFieldBlur = (): void => {
+            state.highlightLayer?.setState({
+                focused: false,
+                hoverItemIndex: state.hoverItemIndex,
+            })
+        }
+        el.addEventListener('focus', onFieldFocus)
+        el.addEventListener('blur', onFieldBlur)
+        runtime.cleanups.push(() => {
+            el.removeEventListener('focus', onFieldFocus)
+            el.removeEventListener('blur', onFieldBlur)
+        })
+
+        // Field-level hover/click interaction. The highlight overlay is
         // pointer-events:none, so interaction is detected on the FIELD itself
         // by hit-testing the pointer against the rendered edit rects
         // (state.itemRects). This keeps the field fully editable/selectable —
@@ -591,15 +622,31 @@ function wireRuntime(
         // the card. A throttled mousemove drives the hover tooltip; mouseleave
         // hides it after a grace delay (so moving onto an adjacent edit or a
         // tiny gap doesn't flicker).
+        //
+        // Highlight intensity (per-word hover) is updated on EVERY mousemove
+        // (instant) — the throttle is applied to the chip showTooltip path
+        // only, so the highlight flips without the 400ms lag.
         let lastMove = 0
         const onFieldMouseMove = (e: MouseEvent): void => {
+            // Hover-index tracking runs every move (no throttle) so the
+            // highlight intensity flips instantly when the pointer crosses
+            // a word boundary.
+            const hit = hitTest(state.itemRects, e.clientX, e.clientY)
+            const newHoverIdx = hit ? state.itemRects.findIndex((er) => er.item === hit.item) : -1
+            const nextIdx: number | null = newHoverIdx >= 0 ? newHoverIdx : null
+            if (nextIdx !== state.hoverItemIndex) {
+                state.hoverItemIndex = nextIdx
+                state.highlightLayer?.setState({
+                    focused: document.activeElement === el,
+                    hoverItemIndex: nextIdx,
+                })
+            }
             const now = Date.now()
             if (now - lastMove < HOVER_THROTTLE_MS) return
             lastMove = now
             // If a popover is open for this field, the chip must not reopen —
             // the popover is the single actionable surface while active.
             if (openPopovers.get(el)?.isOpen()) return
-            const hit = hitTest(state.itemRects, e.clientX, e.clientY)
             if (!hit) {
                 if (runtime.hoverItem) scheduleTooltipHide()
                 return
@@ -626,6 +673,13 @@ function wireRuntime(
             el.setAttribute('aria-describedby', 'gf-chip')
         }
         const onFieldMouseLeave = (): void => {
+            if (state.hoverItemIndex !== null) {
+                state.hoverItemIndex = null
+                state.highlightLayer?.setState({
+                    focused: document.activeElement === el,
+                    hoverItemIndex: null,
+                })
+            }
             scheduleTooltipHide()
         }
         const onFieldClick = (e: MouseEvent): void => {
@@ -654,17 +708,21 @@ function wireRuntime(
             requestAnimationFrame(() => {
                 remeasureScheduled = false
                 const st = runtime.fields.get(el)
-                if (!st || !st.underlineLayer || st.items.length === 0) return
+                if (!st || !st.highlightLayer || st.items.length === 0) return
                 const spans = st.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
                 const allRects = getSpanRectsBatch(el, spans)
                 st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
-                const specs: UnderlineSpec[] = []
+                const specs: HighlightSpec[] = []
                 for (let i = 0; i < st.items.length; i++) {
                     for (const rect of allRects[i] ?? []) {
-                        specs.push({ rect, category: st.items[i]!.category })
+                        specs.push({ rect, category: st.items[i]!.category, itemIndex: i })
                     }
                 }
-                st.underlineLayer.reconcile(specs)
+                st.highlightLayer.reconcile(specs)
+                st.highlightLayer.setState({
+                    focused: document.activeElement === el,
+                    hoverItemIndex: st.hoverItemIndex,
+                })
             })
         }
         const ro = new ResizeObserver(() => scheduleRemeasure())
@@ -684,12 +742,12 @@ function wireRuntime(
         // Cancel any pending paste-grace timer first so it can't fire a check
         // against a field that's leaving the DOM.
         clearPasteGrace(state)
-        // Destroy the persistent underline layer (its pooled nodes are
+        // Destroy the persistent highlight layer (its pooled nodes are
         // children of the shared shadow root; we MUST remove them so a
-        // detached field doesn't leave underlines behind when the field
+        // detached field doesn't leave highlights behind when the field
         // itself is gone).
-        state.underlineLayer?.destroy()
-        state.underlineLayer = null
+        state.highlightLayer?.destroy()
+        state.highlightLayer = null
         // Release the per-field listeners, debouncer, and any registered
         // overlay handles. The attachment decrements runtime.fieldCount
         // exactly once (idempotent guard inside `detach`).
@@ -992,13 +1050,13 @@ function wireRuntime(
             // The pill's destroy is idempotent, so a later render with
             // non-zero items will overwrite it cleanly. Also reconcile the
             // (possibly existing) layer with an empty spec list so any prior
-            // underlines clear instead of lingering.
-            if (state.underlineLayer) state.underlineLayer.reconcile([])
+            // highlights clear instead of lingering.
+            if (state.highlightLayer) state.highlightLayer.reconcile([])
             state.attachment.setHandles({
                 statusDestroy: () => statusHandle.destroy(),
                 underlineDestroy: () => {
-                    state.underlineLayer?.destroy()
-                    state.underlineLayer = null
+                    state.highlightLayer?.destroy()
+                    state.highlightLayer = null
                 },
                 popoverHide: () => {
                     const h = openPopovers.get(el)
@@ -1021,21 +1079,30 @@ function wireRuntime(
         state.itemRects = state.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
 
         // Flatten (item, rect) → specs and reconcile the persistent layer.
-        const specs: UnderlineSpec[] = []
+        const specs: HighlightSpec[] = []
         for (let i = 0; i < state.items.length; i++) {
             const item = state.items[i]!
-            for (const rect of allRects[i] ?? []) specs.push({ rect, category: item.category })
+            for (const rect of allRects[i] ?? []) {
+                specs.push({ rect, category: item.category, itemIndex: i })
+            }
         }
-        if (!state.underlineLayer) state.underlineLayer = createUnderlineLayer(root)
-        state.underlineLayer.reconcile(specs)
+        if (!state.highlightLayer) state.highlightLayer = createHighlightLayer(root)
+        state.highlightLayer.reconcile(specs)
+        // Push current intensity (focus + hover) onto the freshly-reconciled
+        // layer; reconcile reuses nodes, so the latest state must be
+        // re-applied to keep the visual consistent.
+        state.highlightLayer.setState({
+            focused: document.activeElement === el,
+            hoverItemIndex: state.hoverItemIndex,
+        })
 
         // The status pill is still rendered fresh each time (cheap); only the
-        // underline layer persists. Register destroy hooks so a detach/teardown
+        // highlight layer persists. Register destroy hooks so a detach/teardown
         // clears both.
         state.attachment.setHandles({
             underlineDestroy: () => {
-                state.underlineLayer?.destroy()
-                state.underlineLayer = null
+                state.highlightLayer?.destroy()
+                state.highlightLayer = null
             },
             statusDestroy: () => statusHandle.destroy(),
             popoverHide: () => {

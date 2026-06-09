@@ -134,13 +134,13 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
     function onOutsideMouseDown(event: MouseEvent): void {
         if (!panel.isConnected) return
         // composedPath() crosses shadow boundaries; if the click was inside
-        // the popover (or one of our underlines that is about to reopen us),
+        // the popover (or one of our highlights that is about to reopen us),
         // bail.
         const path = event.composedPath()
         if (path.includes(panel)) return
-        const underlines = root.querySelectorAll('.gf-underline')
-        for (const u of underlines) {
-            if (path.includes(u)) return
+        const highlights = root.querySelectorAll('.gf-highlight')
+        for (const h of highlights) {
+            if (path.includes(h)) return
         }
         handle.hide()
     }

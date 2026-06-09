@@ -173,31 +173,28 @@ describe('OVERLAY_CSS (Liquid Glass contract)', () => {
         expect(enterBlock?.[0]).toContain('opacity:')
     })
 
-    it('defines crisp (non-glass) per-category underline classes', () => {
-        // wavy / dotted / solid variants must each be present
-        expect(OVERLAY_CSS).toContain('.gf-underline--wavy')
-        expect(OVERLAY_CSS).toContain('.gf-underline--dotted')
-        expect(OVERLAY_CSS).toContain('.gf-underline--solid')
-        // the per-category color is set via `currentColor` on the element,
-        // and the underline classes paint a real (NOT translucent) line.
-        expect(OVERLAY_CSS).toContain('currentColor')
+    it('defines translucent per-category highlight classes', () => {
+        // base + intensity modifiers must each be present
+        expect(OVERLAY_CSS).toContain('.gf-highlight')
+        expect(OVERLAY_CSS).toContain('.gf-highlight--focus')
+        expect(OVERLAY_CSS).toContain('.gf-highlight--hover')
+        // the per-category color is set via the --gf-hl custom property, and
+        // the highlight paints a translucent tint via color-mix().
+        expect(OVERLAY_CSS).toContain('--gf-hl')
+        expect(OVERLAY_CSS).toMatch(/color-mix\(in srgb, var\(--gf-hl/)
     })
 
-    it('.gf-underline--wavy uses an SVG wave data-URI (real squiggle, not a dashed gradient)', () => {
-        // Extract the .gf-underline--wavy rule body and assert the
-        // background-image is an SVG data-URI containing a wave path.
-        const rule = OVERLAY_CSS.match(/\.gf-underline--wavy\s*\{([\s\S]*?)\n\s*\}/)
-        expect(rule).not.toBeNull()
-        const body = rule![1]!
-        // it must declare an svg+xml data URI
-        expect(body).toMatch(/background-image:\s*url\("?data:image\/svg\+xml/)
-        // ...and that data URI must contain a <path> with a quadratic curve
-        // (Q) — the spellchecker-squiggle primitive. The CSS uses single
-        // quotes around the d attribute, so we accept both quote styles.
-        expect(body).toMatch(/<path[^>]*\bd=['"][^'"]*\bQ\b/)
-        // the wave must tile horizontally
-        expect(body).toMatch(/background-repeat:\s*repeat-x/)
-        // and must NOT be a dashed linear-gradient (the old broken approach)
-        expect(body).not.toMatch(/linear-gradient/)
+    it('.gf-highlight uses color-mix alpha for the per-state tint ladder', () => {
+        // Extract the .gf-highlight, .gf-highlight--focus, .gf-highlight--hover
+        // rule bodies and assert the alpha ladder is 12% / 20% / 32%.
+        const idle = OVERLAY_CSS.match(/\.gf-highlight\s*\{([\s\S]*?)\n\s*\}/)
+        const focus = OVERLAY_CSS.match(/\.gf-highlight--focus\s*\{([\s\S]*?)\n\s*\}/)
+        const hover = OVERLAY_CSS.match(/\.gf-highlight--hover\s*\{([\s\S]*?)\n\s*\}/)
+        expect(idle).not.toBeNull()
+        expect(focus).not.toBeNull()
+        expect(hover).not.toBeNull()
+        expect(idle![1]!).toMatch(/12%/)
+        expect(focus![1]!).toMatch(/20%/)
+        expect(hover![1]!).toMatch(/32%/)
     })
 })
