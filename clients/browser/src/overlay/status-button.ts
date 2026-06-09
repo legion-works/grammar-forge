@@ -134,15 +134,19 @@ export function renderStatusButton(
         if (e.button !== 0) return
         dragStart = { x: e.clientX, y: e.clientY, left: pill.offsetLeft, top: pill.offsetTop }
         dragged = false
-        // setPointerCapture is missing from this jsdom build; guard so the
-        // real browser path is unchanged but the test path doesn't throw.
-        if (typeof pill.setPointerCapture === 'function') pill.setPointerCapture(e.pointerId)
     }
     const onPointerMove = (e: PointerEvent): void => {
         if (!dragStart) return
         const ddx = e.clientX - dragStart.x
         const ddy = e.clientY - dragStart.y
         if (!dragged && Math.hypot(ddx, ddy) < DRAG_THRESHOLD_PX) return
+        if (!dragged) {
+            // Capture the pointer only once a REAL drag begins. Capturing on
+            // pointerdown retargets the subsequent `click` to the pill, which
+            // swallowed clicks on the inner power/recheck buttons. (setPointerCapture
+            // is missing from the jsdom test build — guard it.)
+            if (typeof pill.setPointerCapture === 'function') pill.setPointerCapture(e.pointerId)
+        }
         dragged = true
         pill.classList.add('gf-pill--dragging')
         pill.style.left = `${dragStart.left + ddx}px`
@@ -291,15 +295,6 @@ function positionPanel(panel: HTMLElement, pillRect: DOMRect, view: Window): voi
     panel.style.top = `${top}px`
 }
 
-function escapeText(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;')
-}
-
 function buildPanel(doc: Document, options: StatusButtonOptions): HTMLElement {
     const panel = doc.createElement('div')
     panel.className = 'gf-pill-panel'
@@ -325,16 +320,14 @@ function buildPanel(doc: Document, options: StatusButtonOptions): HTMLElement {
 }
 
 function buildBodyHTML(options: StatusButtonOptions): string {
+    // The pill shows only a compact count badge + the per-category colour bar.
+    // The full "N issues · M spelling · …" breakdown lives in the toolbar popup
+    // (popup "Focused field" section), so the pill stays small + unobtrusive.
     if (options.count === 0) {
-        return `<span aria-hidden="true" style="color:#22c55e">✓</span> <span>No issues</span>`
+        return `<span class="gf-pill__badge gf-pill__badge--ok" aria-hidden="true">✓</span>`
     }
-    const summary = buildCategorySummary(options.byCategory)
     return (
-        `<span aria-hidden="true" style="color:#ef4444">!</span> ` +
-        `<span aria-live="polite" aria-atomic="true">` +
-        `<span>${options.count} issue${options.count === 1 ? '' : 's'}</span>` +
-        (summary ? ` <span style="opacity:.7">·</span> <span>${escapeText(summary)}</span>` : '') +
-        `</span>` +
+        `<span class="gf-pill__badge" aria-live="polite" aria-atomic="true">${options.count}</span>` +
         buildBreakdownBar(options.byCategory)
     )
 }
@@ -358,22 +351,4 @@ function buildBreakdownBar(byCategory: StatusButtonOptions['byCategory']): strin
         })
         .join('')
     return stripes ? `<span class="gf-pill-bar" aria-hidden="true">${stripes}</span>` : ''
-}
-
-function buildCategorySummary(byCategory: StatusButtonOptions['byCategory']): string {
-    if (!byCategory) return ''
-    const parts: string[] = []
-    const order: Category[] = [
-        'spelling',
-        'grammar',
-        'punctuation',
-        'style',
-        'typography',
-        'unknown',
-    ]
-    for (const c of order) {
-        const n = byCategory[c]
-        if (n && n > 0) parts.push(`${n} ${c}`)
-    }
-    return parts.join(' · ')
 }

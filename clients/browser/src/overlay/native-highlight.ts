@@ -57,9 +57,9 @@ export interface NativeHighlighter {
 }
 
 const STYLE_ID = 'gf-native-highlights'
-const IDLE_ALPHA = 12
+const IDLE_ALPHA = 17
 const STRONG_ALPHA = 20
-const HOVER_ALPHA = 32
+const HOVER_ALPHA = 37
 
 function registry(): Map<string, Highlight> | null {
     if (!isNativeHighlightSupported()) return null

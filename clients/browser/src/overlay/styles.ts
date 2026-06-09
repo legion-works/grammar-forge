@@ -56,11 +56,11 @@ export const OVERLAY_CSS = `
     pointer-events: none;
     z-index: ${Z_OVERLAY};
     border-radius: 3px;
-    background: color-mix(in srgb, var(--gf-hl, #888) 12%, transparent);
+    background: color-mix(in srgb, var(--gf-hl, #888) 17%, transparent);
     transition: background 140ms ease-out;
   }
   .gf-highlight--focus { background: color-mix(in srgb, var(--gf-hl, #888) 20%, transparent); }
-  .gf-highlight--hover { background: color-mix(in srgb, var(--gf-hl, #888) 32%, transparent); }
+  .gf-highlight--hover { background: color-mix(in srgb, var(--gf-hl, #888) 37%, transparent); }
   @media (prefers-contrast: more) {
     .gf-highlight { background: color-mix(in srgb, var(--gf-hl, #888) 40%, transparent); outline: 1px solid var(--gf-hl, #888); }
   }
@@ -136,11 +136,14 @@ export const OVERLAY_CSS = `
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     cursor: pointer;
     transform-origin: 50% 100%;
-    animation: gf-pill-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    /* Faint by default — the user opts in by hovering or dragging. Lifts
-       fully on :hover / .gf-pill--dragging. Smooth, but instant for
-       reduced-motion users (see @media below). */
-    opacity: 0.15;
+    /* Enter animation is TRANSFORM-ONLY (a scale pop). It must NOT animate
+       opacity: a filled opacity keyframe persists its end value and overrides
+       both the faint idle opacity below AND the :hover lift (animations beat
+       regular declarations). That is what kept the pill fully opaque. */
+    animation: gf-pill-pop ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    /* Nearly transparent by default — the user opts in by hovering or dragging.
+       Lifts fully on :hover / .gf-pill--dragging. */
+    opacity: 0.1;
     transition: opacity 150ms ease-out, box-shadow 150ms ease-out;
   }
   .gf-pill:hover,
@@ -148,9 +151,9 @@ export const OVERLAY_CSS = `
     opacity: 1;
   }
   .gf-pill--dragging { cursor: grabbing; user-select: none; }
-  @keyframes gf-pill-enter {
-    from { transform: scale(${SCALE_TOOLTIP}); opacity: 0; }
-    to   { transform: scale(1);       opacity: 1; }
+  @keyframes gf-pill-pop {
+    from { transform: scale(${SCALE_TOOLTIP}); }
+    to   { transform: scale(1); }
   }
 
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -208,6 +211,26 @@ export const OVERLAY_CSS = `
     gap: 6px;
     padding: 0;
     font-variant-numeric: tabular-nums;
+  }
+  /* Compact count badge (replaces the "N issues · …" text; detail is in the
+     toolbar popup). Red-tinted for issues, green for the clean state. */
+  .gf-pill__badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    background: color-mix(in srgb, #ef4444 22%, transparent);
+    color: light-dark(#b91c1c, #fecaca);
+  }
+  .gf-pill__badge--ok {
+    background: color-mix(in srgb, #22c55e 22%, transparent);
+    color: #16a34a;
   }
   .gf-pill-bar {
     display: inline-flex;
@@ -652,11 +675,14 @@ export const OVERLAY_CSS = `
    * Reduced-motion: kill spring, keep a short opacity fade
    * ============================================================ */
   @media (prefers-reduced-motion: reduce) {
-    .gf-panel,
-    .gf-pill {
+    .gf-panel {
       animation-duration: 1ms;
       animation-name: gf-no-motion;
     }
+    /* The pill's enter is transform-only; drop it entirely under reduced
+       motion (don't swap to gf-no-motion — that animates opacity and would
+       force the faint idle pill fully opaque). */
+    .gf-pill { animation: none; }
     .gf-tooltip,
     .gf-toast {
       animation-duration: 1ms;

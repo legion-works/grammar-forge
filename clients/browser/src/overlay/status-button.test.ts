@@ -49,21 +49,24 @@ describe('renderStatusButton', () => {
         expect(root.querySelector('.gf-pill__body')).not.toBeNull()
     })
 
-    it('shows "No issues" with a check when count is 0', () => {
+    it('shows an ok badge (✓) and no issue text when count is 0', () => {
         const root = mkRoot()
         renderStatusButton(root, mkOptions({ count: 0, corrections: [] }))
         const body = root.querySelector('.gf-pill__body') as HTMLElement
-        expect(body.textContent).toContain('No issues')
+        expect(body.querySelector('.gf-pill__badge--ok')).not.toBeNull()
+        expect(body.textContent).not.toContain('issue')
         expect(body.getAttribute('aria-label')).toBe('No grammar issues')
     })
 
-    it('shows the issue count and per-category summary', () => {
+    it('shows a count badge + breakdown bar, no per-category text', () => {
         const root = mkRoot()
         renderStatusButton(root, mkOptions({ count: 3, byCategory: { spelling: 2, grammar: 1 } }))
         const body = root.querySelector('.gf-pill__body') as HTMLElement
-        expect(body.textContent).toContain('3 issues')
-        expect(body.textContent).toContain('2 spelling')
-        expect(body.textContent).toContain('1 grammar')
+        // just the number in the badge — the "N issues · M spelling" text moved
+        // to the toolbar popup
+        expect(body.querySelector('.gf-pill__badge')?.textContent).toBe('3')
+        expect(body.textContent).not.toContain('spelling')
+        expect(body.querySelectorAll('.gf-pill-bar__stripe')).toHaveLength(2)
     })
 
     it('collapses to just the power button when disabled (no body / recheck)', () => {

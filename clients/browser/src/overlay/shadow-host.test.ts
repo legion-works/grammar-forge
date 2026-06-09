@@ -186,15 +186,15 @@ describe('OVERLAY_CSS (Liquid Glass contract)', () => {
 
     it('.gf-highlight uses color-mix alpha for the per-state tint ladder', () => {
         // Extract the .gf-highlight, .gf-highlight--focus, .gf-highlight--hover
-        // rule bodies and assert the alpha ladder is 12% / 20% / 32%.
+        // rule bodies and assert the alpha ladder is 17% / 20% / 37%.
         const idle = OVERLAY_CSS.match(/\.gf-highlight\s*\{([\s\S]*?)\n\s*\}/)
         const focus = OVERLAY_CSS.match(/\.gf-highlight--focus\s*\{([\s\S]*?)\n\s*\}/)
         const hover = OVERLAY_CSS.match(/\.gf-highlight--hover\s*\{([\s\S]*?)\n\s*\}/)
         expect(idle).not.toBeNull()
         expect(focus).not.toBeNull()
         expect(hover).not.toBeNull()
-        expect(idle![1]!).toMatch(/12%/)
+        expect(idle![1]!).toMatch(/17%/)
         expect(focus![1]!).toMatch(/20%/)
-        expect(hover![1]!).toMatch(/32%/)
+        expect(hover![1]!).toMatch(/37%/)
     })
 })
