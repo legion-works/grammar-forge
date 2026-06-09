@@ -17,6 +17,7 @@ Setup (uv; .venv is gitignored):
     # The "click<8.2" pin is required: typer (pulled in transitively) dropped the
     # click shim that spaCy 3.8's `spacy download` CLI still imports.
 """
+
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -66,14 +67,18 @@ def main() -> int:
 
     p, r, f05 = prf(tp, fp, fn)
     print("=" * 66)
-    print(f"ERRANT span-level   P={p:.3f}  R={r:.3f}  F0.5={f05:.3f}"
-          f"   (TP={tp} FP={fp} FN={fn})")
+    print(
+        f"ERRANT span-level   P={p:.3f}  R={r:.3f}  F0.5={f05:.3f}"
+        f"   (TP={tp} FP={fp} FN={fn})"
+    )
     print("=" * 66)
     print("Per-category (F0.5):")
     for cat in sorted(bycat):
         t, f, n = bycat[cat]
         cp, cr, cf = prf(t, f, n)
-        print(f"  {cat:11s} F0.5={cf:.2f}  P={cp:.2f} R={cr:.2f}  (TP={t} FP={f} FN={n})")
+        print(
+            f"  {cat:11s} F0.5={cf:.2f}  P={cp:.2f} R={cr:.2f}  (TP={t} FP={f} FN={n})"
+        )
     return 0
 
 

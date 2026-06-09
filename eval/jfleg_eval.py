@@ -19,6 +19,7 @@ Usage:
       bridge_url  default http://127.0.0.1:8000
       n           optional: only score the first n sentences (quick check)
 """
+
 import json
 import sys
 import urllib.request
@@ -28,15 +29,20 @@ from pathlib import Path
 BRIDGE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000").rstrip("/")
 LIMIT = int(sys.argv[2]) if len(sys.argv) > 2 else None
 HERE = Path(__file__).parent
-CASES = [json.loads(l) for l in (HERE / "jfleg_dev.jsonl").read_text().splitlines() if l.strip()]
+CASES = [
+    json.loads(line)
+    for line in (HERE / "jfleg_dev.jsonl").read_text().splitlines()
+    if line.strip()
+]
 if LIMIT:
     CASES = CASES[:LIMIT]
 
 
 def correct(text):
     body = json.dumps({"text": text, "source": "jfleg"}).encode()
-    req = urllib.request.Request(BRIDGE + "/correct", data=body,
-                                 headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        BRIDGE + "/correct", data=body, headers={"Content-Type": "application/json"}
+    )
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read())
 
@@ -55,7 +61,7 @@ ORDER = 4
 
 
 def ngrams(tokens, n):
-    return Counter(tuple(tokens[i:i + n]) for i in range(len(tokens) + 1 - n))
+    return Counter(tuple(tokens[i : i + n]) for i in range(len(tokens) + 1 - n))
 
 
 def ngram_diff(a, b):
@@ -87,12 +93,15 @@ def gleu_sentence_stats(hyp_toks, src_toks, ref_toks):
 def gleu_from_stats(stats, smooth=False):
     """Canonical GLEU from summed stats (c, r, num1, den1, ...)."""
     import math
+
     if smooth:
         stats = [s if s != 0 else 1 for s in stats]
     if any(x == 0 for x in stats):
         return 0.0
     c, r = stats[:2]
-    log_prec = sum(math.log(float(x) / y) for x, y in zip(stats[2::2], stats[3::2])) / ORDER
+    log_prec = (
+        sum(math.log(float(x) / y) for x, y in zip(stats[2::2], stats[3::2])) / ORDER
+    )
     return math.exp(min(0, 1 - float(r) / c) + log_prec)
 
 
@@ -135,9 +144,13 @@ def main():
     std = statistics.pstdev(per_iter) if len(per_iter) > 1 else 0.0
 
     print("=" * 60)
-    print(f"JFLEG dev  —  corpus GLEU = {mean:.4f}  (+/- {std:.4f})  over {n} sentences")
-    print(f"(left unchanged: {unchanged}/{n}; {iters} iters; "
-          f"human IAA GLEU ~0.62 for reference)")
+    print(
+        f"JFLEG dev  —  corpus GLEU = {mean:.4f}  (+/- {std:.4f})  over {n} sentences"
+    )
+    print(
+        f"(left unchanged: {unchanged}/{n}; {iters} iters; "
+        f"human IAA GLEU ~0.62 for reference)"
+    )
     print("=" * 60)
     return 0
 
