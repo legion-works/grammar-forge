@@ -205,11 +205,13 @@ function positionPill(pill: HTMLElement, anchor: DOMRect, view: Window): void {
     const width = pill.offsetWidth || PILL_WIDTH_FALLBACK
     const height = pill.offsetHeight || PILL_HEIGHT_FALLBACK
     let left = anchor.right - width - VIEWPORT_GUTTER
-    let top = anchor.bottom - height - VIEWPORT_GUTTER
+    // top-right by default: sit just inside the field's top edge
+    let top = anchor.top + VIEWPORT_GUTTER
+    // flip below the top edge only if it would clip the viewport top
+    if (top < VIEWPORT_GUTTER) top = VIEWPORT_GUTTER
+    if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     if (left > vw - width - VIEWPORT_GUTTER) left = vw - width - VIEWPORT_GUTTER
     if (top > vh - height - VIEWPORT_GUTTER) top = vh - height - VIEWPORT_GUTTER
-    if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
-    if (top < VIEWPORT_GUTTER) top = VIEWPORT_GUTTER
     pill.style.left = `${left}px`
     pill.style.top = `${top}px`
 }
@@ -270,8 +272,30 @@ function buildBodyHTML(options: StatusButtonOptions): string {
     return (
         `<span aria-hidden="true" style="color:#ef4444">!</span> ` +
         `<span>${options.count} issue${options.count === 1 ? '' : 's'}</span>` +
-        (summary ? ` <span style="opacity:.7">·</span> <span>${escapeText(summary)}</span>` : '')
+        (summary ? ` <span style="opacity:.7">·</span> <span>${escapeText(summary)}</span>` : '') +
+        buildBreakdownBar(options.byCategory)
     )
+}
+
+function buildBreakdownBar(byCategory: StatusButtonOptions['byCategory']): string {
+    if (!byCategory) return ''
+    const order: Category[] = [
+        'spelling',
+        'grammar',
+        'punctuation',
+        'style',
+        'typography',
+        'unknown',
+    ]
+    const stripes = order
+        .filter((c) => (byCategory[c] ?? 0) > 0)
+        .map((c) => {
+            const n = byCategory[c] ?? 0
+            const color = CATEGORY_META[c].badge
+            return `<span class="gf-pill-bar__stripe" style="flex-grow:${n};background:${color}" aria-hidden="true"></span>`
+        })
+        .join('')
+    return stripes ? `<span class="gf-pill-bar" aria-hidden="true">${stripes}</span>` : ''
 }
 
 function buildCategorySummary(byCategory: StatusButtonOptions['byCategory']): string {

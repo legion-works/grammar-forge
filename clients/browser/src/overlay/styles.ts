@@ -204,6 +204,23 @@ export const OVERLAY_CSS = `
     align-items: center;
     gap: 6px;
     padding: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .gf-pill-bar {
+    display: inline-flex;
+    gap: 2px;
+    align-items: center;
+    width: 28px;
+    height: 4px;
+    margin-left: 2px;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .gf-pill-bar__stripe {
+    height: 4px;
+    border-radius: 2px;
+    opacity: 0.6;
+    min-width: 3px;
   }
   /* Collapsed (disabled-on-this-site) pill: just the muted power icon */
   .gf-pill--disabled {

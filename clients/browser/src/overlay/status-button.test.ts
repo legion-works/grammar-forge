@@ -178,4 +178,20 @@ describe('renderStatusButton', () => {
         expect(root.querySelector('.gf-pill')).toBeNull()
         expect(root.querySelector('.gf-pill-panel')).toBeNull()
     })
+
+    it('renders a category breakdown bar with one stripe per non-zero category', () => {
+        const root = mkRoot()
+        renderStatusButton(root, mkOptions({ count: 4, byCategory: { spelling: 3, grammar: 1 } }))
+        const stripes = root.querySelectorAll('.gf-pill-bar__stripe')
+        expect(stripes).toHaveLength(2)
+        // proportional flex-grow reflects the counts (3 vs 1)
+        expect((stripes[0] as HTMLElement).style.flexGrow).toBe('3')
+        expect((stripes[1] as HTMLElement).style.flexGrow).toBe('1')
+    })
+
+    it('renders no breakdown bar when there are no issues', () => {
+        const root = mkRoot()
+        renderStatusButton(root, mkOptions({ count: 0, corrections: [], byCategory: {} }))
+        expect(root.querySelector('.gf-pill-bar')).toBeNull()
+    })
 })
