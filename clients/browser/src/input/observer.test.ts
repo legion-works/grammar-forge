@@ -265,6 +265,35 @@ describe('createFieldObserver (detached fields on SPA churn)', () => {
         stop()
     })
 
+    it('fires onFieldDetached when a NON-editable container of the field is removed (modal close)', async () => {
+        // WhatsApp/Slack modal case: the field is nested inside a wrapper that
+        // is NOT itself editable. Closing the modal removes the WRAPPER, so the
+        // field never appears directly in removedNodes — the observer must walk
+        // the removed subtree to find the discovered descendant and detach it,
+        // or the overlay pill is orphaned after the modal disappears.
+        const disc = vi.fn<() => void>()
+        const det = vi.fn<() => void>()
+        const { observe, flush } = make(disc, det)
+        const stop = observe()
+
+        const modal = document.createElement('div')
+        const inner = document.createElement('div')
+        const ta = document.createElement('textarea')
+        inner.appendChild(ta)
+        modal.appendChild(inner)
+        document.body.appendChild(modal)
+        await flush()
+        expect(disc).toHaveBeenCalledTimes(1)
+        expect(disc).toHaveBeenCalledWith(ta)
+
+        // Remove the OUTER non-editable container (as a modal teardown would).
+        modal.remove()
+        await flush()
+        expect(det).toHaveBeenCalledTimes(1)
+        expect(det).toHaveBeenCalledWith(ta)
+        stop()
+    })
+
     it('reports detach even when the editable ancestor itself is removed', async () => {
         // A nested structure: the OUTER ce div is the field. Removing it must
         // surface one detach event for the outer host.

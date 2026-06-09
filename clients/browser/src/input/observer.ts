@@ -135,11 +135,36 @@ export function createFieldObserver(opts: FieldObserverOptions): () => void {
                 // from `seen` so a re-insertion later is treated as a brand
                 // new field (a fresh onFieldDiscovered is the right call —
                 // the OLD onFieldDetached already cleaned up the old state).
+                //
+                // CRITICAL: removedNodes only contains the TOP-LEVEL removed
+                // nodes, not their descendants. A discovered field is often a
+                // DESCENDANT of the removed node (e.g. a modal/dialog closes by
+                // removing its container, with the editable field nested
+                // inside). So we must walk each removed node's subtree — exactly
+                // mirroring the addedNodes walk above — and detach every
+                // discovered field within it. Without this the overlay pill is
+                // orphaned when the field's container is removed.
                 for (const n of m.removedNodes) {
-                    if (n instanceof Element && reported.has(n)) {
-                        seen.delete(n)
-                        reported.delete(n)
-                        detachPending.add(n)
+                    if (!(n instanceof Element)) continue
+                    const stack: Element[] = [n]
+                    while (stack.length) {
+                        const cur = stack.pop()!
+                        if (reported.has(cur)) {
+                            seen.delete(cur)
+                            reported.delete(cur)
+                            detachPending.add(cur)
+                        } else if (seen.has(cur)) {
+                            // Discovered this frame but not yet announced
+                            // (still in `pending`): it left before drain, so
+                            // cancel the pending discovery instead of announcing
+                            // a field that is already gone.
+                            seen.delete(cur)
+                            pending.delete(cur)
+                        }
+                        const kids = cur.children
+                        for (let k = 0; k < kids.length; k++) {
+                            stack.push(kids[k] as Element)
+                        }
                     }
                 }
             } else if (m.type === 'attributes' && m.target instanceof Element) {
