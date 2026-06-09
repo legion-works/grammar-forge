@@ -23,7 +23,11 @@ import { getNativeHighlighter, isNativeHighlightSupported } from '@/overlay/nati
 import { dismissPopoversIn, showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { showToast } from '@/overlay/toast'
-import { renderStatusButton, type StatusButtonHandle, type StatusButtonOptions } from '@/overlay/status-button'
+import {
+    renderStatusButton,
+    type StatusButtonHandle,
+    type StatusButtonOptions,
+} from '@/overlay/status-button'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
 import {
@@ -34,7 +38,7 @@ import {
     type Settings,
 } from '@/storage/settings'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
-import { debugLog, debugWarn } from '@/lib/debug-log'
+import { debugLog, debugWarn, setDebugLoggingEnabled } from '@/lib/debug-log'
 import type { ContentScriptContext } from 'wxt/utils/content-script-context'
 import type { Category } from '@/api/types'
 
@@ -171,6 +175,9 @@ interface Runtime {
 
 async function start(ctx: ContentScriptContext): Promise<void> {
     let currentSettings: Settings = await getSettings()
+    // Drive the verbose logger from the setting (null = fall back to the
+    // localStorage.gfDebug manual override).
+    setDebugLoggingEnabled(currentSettings.debugLogging ? true : null)
     const hostname = location.hostname
     // The extension is globally on/off via settings.enabled; per-site disable
     // ("power off on this site") lives in the blockedSites deny-list.
@@ -337,6 +344,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     const unwatchSettings = settingsItem.watch((next) => {
         const prev = currentSettings
         currentSettings = next
+        setDebugLoggingEnabled(next.debugLogging ? true : null)
         if (
             runtime &&
             (prev.bridgeBaseUrl !== next.bridgeBaseUrl ||

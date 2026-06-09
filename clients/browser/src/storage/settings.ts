@@ -35,6 +35,11 @@ export interface Settings {
      * this only touches the page DOM, no network).
      */
     suppressNativeSpellcheck: boolean
+    /** When true, the content script emits verbose lifecycle logs to the page
+     *  console (field attach/detach, render, highlight reconcile). Off by
+     *  default. Never logs field TEXT (counts/offsets only). `localStorage
+     *  .gfDebug` remains a manual override for one-off debugging. */
+    debugLogging: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -52,6 +57,7 @@ export const DEFAULT_SETTINGS: Settings = {
     onDemandHotkey: 'Ctrl+Shift+Period',
     personalDictionary: [],
     suppressNativeSpellcheck: false,
+    debugLogging: false,
 }
 
 /**

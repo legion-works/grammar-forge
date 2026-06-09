@@ -231,6 +231,16 @@ export function SettingsForm() {
                         Hide the browser&rsquo;s own spellcheck on checked fields
                     </label>
                 </div>
+                <div className="gf-options__row">
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={settings.debugLogging}
+                            onChange={(e) => void patch({ debugLogging: e.currentTarget.checked })}
+                        />{' '}
+                        Verbose debug logging (page console)
+                    </label>
+                </div>
             </section>
 
             <section className="gf-options__section">

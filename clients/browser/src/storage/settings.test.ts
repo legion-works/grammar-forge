@@ -37,6 +37,7 @@ describe('DEFAULT_SETTINGS', () => {
             onDemandHotkey: 'Ctrl+Shift+Period',
             personalDictionary: [],
             suppressNativeSpellcheck: false,
+            debugLogging: false,
         })
     })
 })
