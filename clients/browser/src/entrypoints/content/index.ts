@@ -999,52 +999,42 @@ function wireRuntime(
     window.addEventListener('wxt:locationchange', onLocationChange)
     runtime.cleanups.push(() => window.removeEventListener('wxt:locationchange', onLocationChange))
 
-    // Accept hotkey (in-content keydown, NOT browser.commands — Ctrl+. is
-    // unreliable on the commands API cross-OS). The chord only fires when a
-    // suggestion is active; otherwise the event passes through to the field.
-    // Before applying the fix, verify the span is still valid against the
-    // LIVE field text (Fix 1: stale-span guard). If the text moved on, hide
-    // the popover + re-run the check instead of corrupting the field.
+    // Resolve the monitored field the user is currently editing. focus may sit
+    // on a CHILD of a contenteditable, so we match the tracked field that
+    // CONTAINS the active element (not just `=== activeElement`).
+    const focusedTrackedField = (): HTMLElement | null => {
+        const active = document.activeElement
+        if (!(active instanceof HTMLElement)) return null
+        if (runtime.fields.has(active)) return active
+        for (const el of runtime.trackedFields) {
+            if (el.contains(active)) return el
+        }
+        return null
+    }
+
+    // Accept hotkey (in-content keydown, NOT browser.commands — the commands
+    // API is unreliable for arbitrary chords cross-OS). Pressing the configured
+    // chord applies ALL of the FOCUSED field's suggestions at once (the same
+    // batched, stale-guarded path the pill's "Apply all" uses). The chord only
+    // acts when the focused field actually has suggestions; otherwise the event
+    // passes through so normal typing / key combos keep working.
     const onKeydown = (e: KeyboardEvent): void => {
         const s = getSettings()
+        const field = focusedTrackedField()
+        const hasSuggestions = field != null && (runtime.fields.get(field)?.items.length ?? 0) > 0
         if (
             !shouldAcceptHotkey(e, {
                 hotkey: s.acceptHotkey,
-                hasActiveSuggestion: runtime.active != null,
+                hasActiveSuggestion: hasSuggestions,
             })
         )
             return
-        const a = runtime.active
-        if (!a) return
+        if (!field) return
         e.preventDefault()
         e.stopPropagation()
-        const live = getText(a.el)
-        if (!isSpanStillValid(live, a.item)) {
-            // Stale span: don't apply. Tear down this popover + re-check.
-            closePopoverFor(a.el)
-            void rerunFor(a.el)(live)
-            return
-        }
-        const replacement = a.item.replacements[a.replacementIndex] ?? a.item.replacements[0] ?? ''
-        applyFix(a.el, { start: a.item.cuStart, end: a.item.cuEnd }, replacement)
-        flashAppliedOverlay(a.el, a.item)
-        void signalQueue.enqueue({
-            id: a.item.id,
-            action: 'accepted',
-            category: a.item.category,
-            source: 'browser',
-        })
-        closePopoverFor(a.el)
-        if (a.el instanceof HTMLInputElement || a.el instanceof HTMLTextAreaElement) {
-            a.el.focus()
-            const end = a.item.cuStart + replacement.length
-            try {
-                a.el.setSelectionRange(a.item.cuStart, end)
-            } catch {
-                // some input types (number, email) throw on setSelectionRange
-            }
-        }
-        void rerunFor(a.el)(getText(a.el))
+        // Apply every suggestion in the focused field (batched, last-to-first,
+        // each re-validated against live text — see applyAllFor).
+        void applyAllFor(field)
     }
     ctx.addEventListener(document, 'keydown', onKeydown)
     // Mirror the remover on runtime.cleanups so a settings-driven teardown
