@@ -18,6 +18,18 @@ import (
 
 const anthropicVersion = "2023-06-01"
 
+// anthropicThinkingHeadroom is added to the answer budget for max_tokens.
+// Anthropic reasoning models (e.g. MiniMax M2.x) spend output tokens on an
+// internal "thinking" block BEFORE the answer, and on M2.x thinking CANNOT be
+// disabled (the Anthropic `thinking:{type:disabled}` field is a documented
+// no-op; there is no reasoning_effort/enable_thinking lever). Because max_tokens
+// is the SHARED ceiling for thinking + answer, the small grammar/rephrase budget
+// from completionBudget (floor 64) is consumed entirely by thinking and the
+// model returns no text. max_tokens is a CAP, not a charge — only generated
+// tokens bill — so generous headroom is safe. MiniMax's own docs recommend a
+// large budget (>=4096) for these models.
+const anthropicThinkingHeadroom = 4096
+
 // AnthropicClient talks to an Anthropic-compatible Messages API.
 type AnthropicClient struct {
 	cfg  Config
@@ -34,7 +46,7 @@ func NewAnthropic(cfg Config) *AnthropicClient {
 func (c *AnthropicClient) Complete(ctx context.Context, p correction.Prompt) (string, error) {
 	payload := map[string]any{
 		"model":      c.cfg.Model,
-		"max_tokens": completionBudget(p.User),
+		"max_tokens": completionBudget(p.User) + anthropicThinkingHeadroom,
 		"messages":   []map[string]string{{"role": "user", "content": p.User}},
 	}
 	if p.System != "" {

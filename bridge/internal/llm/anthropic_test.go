@@ -25,6 +25,11 @@ func TestAnthropicComplete(t *testing.T) {
 		msgs := body["messages"].([]any)
 		first := msgs[0].(map[string]any)
 		require.Equal(t, "rewrite this", first["content"])
+		// max_tokens must carry generous thinking headroom: M2.x reasoning
+		// models spend the shared budget on a thinking block first and cannot
+		// disable it, so a tiny budget yields no answer text. Guard against a
+		// regression back to the small completionBudget value.
+		require.GreaterOrEqual(t, body["max_tokens"].(float64), float64(anthropicThinkingHeadroom))
 		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"rewritten"}]}`))
 	}))
 	defer srv.Close()
