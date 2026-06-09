@@ -8,6 +8,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -76,6 +77,31 @@ func main() {
 			EscalateOnFastEdit:    cfg.EscalateOnFastEdit,
 		},
 	)
+
+	// Inject the rephrase provider factory (this is where internal/llm is
+	// allowed — the correction core stays transport-free). The api_key is
+	// never logged (mirrors llm.Config.APIKey).
+	svc.SetRephraseFactory(func(b correction.RephraseBackend) (correction.LLMClient, error) {
+		lcfg := llm.Config{BaseURL: b.BaseURL, Model: b.Model, APIKey: b.APIKey, Seed: cfg.LLMSeed}
+		switch b.Provider {
+		case "", "openai":
+			return llm.New(lcfg), nil
+		case "anthropic":
+			return llm.NewAnthropic(lcfg), nil
+		default:
+			return nil, fmt.Errorf("unknown rephrase provider %q", b.Provider)
+		}
+	})
+	// A configured dedicated rephrase backend (GF_REPHRASE_*) is used when a
+	// request carries no per-request override.
+	if cfg.RephraseProvider != "" {
+		svc.SetRephraseDefaultBackend(&correction.RephraseBackend{
+			Provider: cfg.RephraseProvider,
+			BaseURL:  cfg.RephraseBaseURL,
+			Model:    cfg.RephraseModel,
+			APIKey:   cfg.RephraseAPIKey,
+		})
+	}
 
 	go func() {
 		lis, err := net.Listen("tcp", cfg.GRPCAddr)

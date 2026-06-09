@@ -3,6 +3,7 @@ package correction
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,11 @@ type fakeLLM struct {
 }
 
 func (f fakeLLM) Complete(context.Context, Prompt) (string, error) { return f.out, f.err }
+
+// llmFunc adapts a function to LLMClient for tests that need per-call output.
+type llmFunc func(ctx context.Context, p Prompt) (string, error)
+
+func (f llmFunc) Complete(ctx context.Context, p Prompt) (string, error) { return f(ctx, p) }
 
 type fakePB struct{}
 
@@ -284,6 +290,28 @@ func TestServiceRephraseNilLLM(t *testing.T) {
 	_, err := svc.Rephrase(context.Background(), RephraseRequest{Text: "x"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "llm")
+}
+
+func TestRephraseUsesOverrideAndReturnsAlternatives(t *testing.T) {
+	var gotBackend RephraseBackend
+	calls := 0
+	factory := func(b RephraseBackend) (LLMClient, error) {
+		gotBackend = b
+		return llmFunc(func(_ context.Context, _ Prompt) (string, error) {
+			calls++
+			return fmt.Sprintf("variant %d", calls), nil
+		}), nil
+	}
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "default"}, nil, "base", EscalationPolicy{})
+	svc.SetRephraseFactory(factory)
+	out, err := svc.Rephrase(context.Background(), RephraseRequest{
+		Text: "x", Alternatives: 3,
+		Override: &RephraseBackend{Provider: "anthropic", BaseURL: "u", Model: "m", APIKey: "k"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "anthropic", gotBackend.Provider)
+	require.Equal(t, "variant 1", out.Rephrased)
+	require.Len(t, out.Alternatives, 2) // 3 total - 1 primary
 }
 
 // pickyPB is a chat-style PromptBuilder for the picky-mode tests. It differs

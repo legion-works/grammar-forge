@@ -31,6 +31,11 @@ type LLMClient interface {
 	Complete(ctx context.Context, p Prompt) (string, error)
 }
 
+// RephraseClientFactory builds a one-shot LLMClient for a rephrase backend.
+// Injected by main (the transport layer) so the correction core stays free of
+// any concrete transport (llm) import. Returns an error for an unknown provider.
+type RephraseClientFactory func(b RephraseBackend) (LLMClient, error)
+
 // PromptBuilder turns a request into the model-family-specific prompt. The
 // implementation branches on model family (GRMR-native vs generic chat+system).
 type PromptBuilder interface {

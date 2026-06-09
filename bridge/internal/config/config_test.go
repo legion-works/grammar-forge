@@ -177,3 +177,19 @@ func TestLoad_LLMSeedOverride(t *testing.T) {
 	cfg := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	require.Equal(t, 123, cfg.LLMSeed)
 }
+
+func TestLoadRephraseBackend(t *testing.T) {
+	c := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, "", c.RephraseProvider) // default: use the main LLM
+	env := map[string]string{
+		"GF_REPHRASE_PROVIDER": "anthropic",
+		"GF_REPHRASE_BASE_URL": "https://api.anthropic.com",
+		"GF_REPHRASE_MODEL":    "claude-x",
+		"GF_REPHRASE_API_KEY":  "secret",
+	}
+	c2 := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	require.Equal(t, "anthropic", c2.RephraseProvider)
+	require.Equal(t, "https://api.anthropic.com", c2.RephraseBaseURL)
+	require.Equal(t, "claude-x", c2.RephraseModel)
+	require.Equal(t, "secret", c2.RephraseAPIKey)
+}

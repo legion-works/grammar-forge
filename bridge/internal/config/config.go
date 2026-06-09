@@ -23,8 +23,14 @@ type Config struct {
 	// pins sampling.
 	LLMSeed   int
 	LLMAPIKey string
-	DBPath    string
-	LogLevel  string
+	// Optional dedicated rephrase backend. When RephraseProvider is empty the
+	// rephrase endpoint uses the default LLM (LLMBaseURL/LLMModel/LLMAPIKey).
+	RephraseProvider string // "" | "openai" | "anthropic"
+	RephraseBaseURL  string
+	RephraseModel    string
+	RephraseAPIKey   string // env only, never logged
+	DBPath           string
+	LogLevel         string
 
 	// Fast path (Plan 1C): Harper + GECToR run in-process; the LLM is
 	// escalation-only (see correction.EscalationPolicy).
@@ -141,6 +147,11 @@ func Load(getenv Getenv) Config {
 		LLMAPIKey:  get("GF_LLM_API_KEY", ""),
 		DBPath:     get("GF_DB_PATH", "/data/corrections.db"),
 		LogLevel:   get("GF_LOG_LEVEL", "info"),
+
+		RephraseProvider: get("GF_REPHRASE_PROVIDER", ""),
+		RephraseBaseURL:  get("GF_REPHRASE_BASE_URL", ""),
+		RephraseModel:    get("GF_REPHRASE_MODEL", ""),
+		RephraseAPIKey:   get("GF_REPHRASE_API_KEY", ""),
 
 		GECToRModelDir:         get("GF_GECTOR_MODEL_DIR", "/models/gector"),
 		HarperEnabled:          getBool("GF_HARPER_ENABLED", true),

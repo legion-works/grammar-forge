@@ -20,13 +20,15 @@ import (
 //
 // The Service never mutates the text. Clients apply suggestions.
 type Service struct {
-	pb        PromptBuilder
-	fast      []Corrector
-	llm       LLMClient
-	store     Store
-	baseModel string
-	policy    EscalationPolicy
-	log       *slog.Logger
+	pb                     PromptBuilder
+	fast                   []Corrector
+	llm                    LLMClient
+	store                  Store
+	baseModel              string
+	policy                 EscalationPolicy
+	log                    *slog.Logger
+	rephraseFactory        RephraseClientFactory
+	rephraseDefaultBackend *RephraseBackend
 }
 
 // NewService wires the pipeline. baseModel is recorded on each logged event.
@@ -42,6 +44,15 @@ func NewService(pb PromptBuilder, fast []Corrector, llm LLMClient, store Store, 
 		log:       slog.Default(),
 	}
 }
+
+// SetRephraseFactory injects the one-shot provider builder used for rephrase
+// overrides (and the configured default rephrase backend). Optional; when
+// unset, all rephrase calls use the default llm.
+func (s *Service) SetRephraseFactory(f RephraseClientFactory) { s.rephraseFactory = f }
+
+// SetRephraseDefaultBackend sets a dedicated default rephrase backend, used when
+// a request carries NO override. nil => fall back to the service's default llm.
+func (s *Service) SetRephraseDefaultBackend(b *RephraseBackend) { s.rephraseDefaultBackend = b }
 
 // Correct runs the full pipeline and returns suggestions. It never mutates
 // the text. Fast corrector errors and LLM escalation errors are best-effort
@@ -262,18 +273,63 @@ func (s *Service) CountCorrections(ctx context.Context) (int64, error) {
 //   - surfaces LLM errors to the caller (no best-effort fallback);
 //   - does NOT log to the store (rephrase has no signal lifecycle / is not a
 //     grammar suggestion to accept-or-reject).
+//
+// Backend resolution: req.Override (if set AND factory injected) -> configured
+// default rephrase backend (if set AND factory injected) -> s.llm. When
+// Alternatives>0 the LLM is called up to min(req.Alternatives, 5) times; the
+// first non-empty response is the primary, the rest (de-duped) are
+// Alternatives. Deterministic backends collapse to 1 variant; acceptable.
 func (s *Service) Rephrase(ctx context.Context, req RephraseRequest) (RephraseResult, error) {
-	if s.llm == nil {
+	client := s.llm
+	switch {
+	case req.Override != nil && s.rephraseFactory != nil:
+		c, err := s.rephraseFactory(*req.Override)
+		if err != nil {
+			return RephraseResult{}, fmt.Errorf("rephrase: build override backend: %w", err)
+		}
+		client = c
+	case s.rephraseDefaultBackend != nil && s.rephraseFactory != nil:
+		c, err := s.rephraseFactory(*s.rephraseDefaultBackend)
+		if err != nil {
+			return RephraseResult{}, fmt.Errorf("rephrase: build default backend: %w", err)
+		}
+		client = c
+	}
+	if client == nil {
 		return RephraseResult{}, fmt.Errorf("rephrase requires an llm backend")
 	}
-	out, err := s.llm.Complete(ctx, s.pb.BuildRephrase(req))
-	if err != nil {
-		return RephraseResult{}, fmt.Errorf("rephrase: llm complete: %w", err)
+	n := req.Alternatives
+	if n < 1 {
+		n = 1
+	}
+	if n > 5 {
+		n = 5
+	}
+	prompt := s.pb.BuildRephrase(req)
+	variants := make([]string, 0, n)
+	seen := make(map[string]struct{}, n)
+	for i := 0; i < n; i++ {
+		out, err := client.Complete(ctx, prompt)
+		if err != nil {
+			if i == 0 {
+				return RephraseResult{}, fmt.Errorf("rephrase: llm complete: %w", err)
+			}
+			break // best-effort for extra variants
+		}
+		v := strings.TrimSpace(out)
+		if _, dup := seen[v]; dup || v == "" {
+			continue
+		}
+		seen[v] = struct{}{}
+		variants = append(variants, v)
+	}
+	if len(variants) == 0 {
+		return RephraseResult{}, fmt.Errorf("rephrase: llm returned no text")
 	}
 	return RephraseResult{
 		Original:     req.Text,
-		Rephrased:    strings.TrimSpace(out),
-		Alternatives: []string{},
+		Rephrased:    variants[0],
+		Alternatives: variants[1:],
 	}, nil
 }
 
