@@ -123,6 +123,35 @@ func mergeSuggestions(in []Suggestion) []Suggestion {
 
 func overlaps(a, b Span) bool { return a.Start < b.End && b.Start < a.End }
 
+// propagateFastCategories re-attaches a specific category (spelling /
+// punctuation / typography) from the fast path (Harper) onto the LLM-diff
+// suggestions. On escalation the LLM diff REPLACES the fast path, and every
+// diff edit is CategoryGrammar (""), so a misspelling the LLM fixed would show
+// as "grammar". Harper already classified those words; for each grammar-tagged
+// LLM edit that overlaps a non-grammar fast suggestion, adopt the fast
+// category. Category is display-only (it never changes the applied text), so
+// this is eval-neutral. Edits with no Harper overlap stay CategoryGrammar.
+func propagateFastCategories(llm, fast []Suggestion) []Suggestion {
+	if len(llm) == 0 || len(fast) == 0 {
+		return llm
+	}
+	for i := range llm {
+		if llm[i].Category != CategoryGrammar {
+			continue // already specific (or a style edit)
+		}
+		for _, f := range fast {
+			if f.Category == CategoryGrammar {
+				continue // grammar/structural fast edit carries no extra signal
+			}
+			if overlaps(llm[i].Span, f.Span) {
+				llm[i].Category = f.Category
+				break
+			}
+		}
+	}
+	return llm
+}
+
 // categoryPriority ranks categories for the overlap tie-breaker: higher wins.
 // Used ONLY as a tie-breaker after confidence and span-length, so it never
 // preempts the confidence ordering (applied output unchanged → eval-safe).

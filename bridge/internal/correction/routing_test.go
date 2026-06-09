@@ -197,3 +197,31 @@ func TestMergeNonOverlappingBothKept(t *testing.T) {
 	}
 	require.Len(t, mergeSuggestions(in), 2)
 }
+
+func TestPropagateFastCategoriesTagsSpelling(t *testing.T) {
+	// LLM diff edit (grammar/"") overlapping a Harper spelling span inherits
+	// spelling; a grammar edit with no overlap stays grammar.
+	llm := []Suggestion{
+		{Span: Span{8, 10}, Replacement: "ei", Category: CategoryGrammar}, // inside the misspelled word
+		{Span: Span{0, 3}, Replacement: "is", Category: CategoryGrammar},  // "are" -> "is"
+	}
+	fast := []Suggestion{
+		{Span: Span{4, 11}, Replacement: "receive", Category: CategorySpelling, Model: ModelHarper},
+	}
+	got := propagateFastCategories(llm, fast)
+	require.Equal(t, CategorySpelling, got[0].Category, "overlapping the Harper spelling span -> spelling")
+	require.Equal(t, CategoryGrammar, got[1].Category, "no overlap -> stays grammar")
+}
+
+func TestPropagateFastCategoriesNoopWhenEmpty(t *testing.T) {
+	llm := []Suggestion{{Span: Span{0, 3}, Category: CategoryGrammar}}
+	require.Equal(t, llm, propagateFastCategories(llm, nil))
+	require.Empty(t, propagateFastCategories(nil, []Suggestion{{Span: Span{0, 1}, Category: CategorySpelling}}))
+}
+
+func TestPropagateFastCategoriesDoesNotOverrideSpecific(t *testing.T) {
+	// An already-specific category (e.g. style) is not overwritten.
+	llm := []Suggestion{{Span: Span{0, 3}, Category: CategoryStyle}}
+	fast := []Suggestion{{Span: Span{0, 3}, Category: CategorySpelling}}
+	require.Equal(t, CategoryStyle, propagateFastCategories(llm, fast)[0].Category)
+}

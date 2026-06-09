@@ -87,7 +87,10 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 		if err != nil {
 			s.log.Warn("llm escalation failed; using fast path", "err", err)
 		} else {
-			all = diffToSuggestions(req.Text, strings.TrimSpace(llmText))
+			// Diff the LLM output, then re-attach Harper's spelling/punctuation
+			// categories onto overlapping edits (the diff is otherwise all
+			// CategoryGrammar). Display-only; does not change applied text.
+			all = propagateFastCategories(diffToSuggestions(req.Text, strings.TrimSpace(llmText)), fast)
 		}
 	}
 
