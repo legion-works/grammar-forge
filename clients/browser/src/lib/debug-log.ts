@@ -3,12 +3,17 @@
 // production install is silent — privacy invariant #1 means we never emit
 // telemetry, and a public install shouldn't spam the page console.
 //
-// Turn it on from the page console (persists across reloads, per-origin):
+// Turn it on from the page console (no reload needed — the flag is read fresh
+// on every call; the log sites are low-frequency render/attach/detach paths,
+// not per-frame):
 //   localStorage.gfDebug = '1'      // enable
 //   delete localStorage.gfDebug     // disable
-// Then reload. The flag is read ONCE at module init (cheap; no per-call
-// storage read on the hot path). A namespaced prefix ('[gf]') makes the lines
-// easy to filter in DevTools.
+//
+// IMPORTANT: we log at the `console.log` (Info) level, NOT `console.debug`.
+// `console.debug` maps to the DevTools "Verbose" level, which is HIDDEN unless
+// you tick Verbose in the console's level dropdown — so debug lines silently
+// vanished. `console.log` shows at the default Info level. A namespaced prefix
+// ('[gf]') keeps the lines filterable.
 //
 // This is the SINGLE place `console` is touched on the overlay hot path, so
 // the oxlint `no-console` disable lives here only; call sites stay clean.
@@ -16,33 +21,44 @@
 const PREFIX = '[gf]'
 
 /**
- * Whether debug logging is enabled. Read once at init from
- * `localStorage.gfDebug` (any truthy value enables). Guarded in a try/catch
- * because some sandboxed pages throw on `localStorage` access.
+ * Test-only override: when non-null it wins over the localStorage flag, so the
+ * vitest suite can force logging on/off deterministically. Production leaves it
+ * null and reads `localStorage.gfDebug` fresh on every call.
  */
-function readEnabled(): boolean {
+let override: boolean | null = null
+
+/**
+ * Read `localStorage.gfDebug` fresh (any value other than ''/'0'/absent
+ * enables). Guarded in a try/catch because some sandboxed pages throw on
+ * `localStorage` access. Reading per-call (rather than caching at module init)
+ * means toggling the flag takes effect immediately — no page reload required.
+ */
+function readLocalStorageFlag(): boolean {
     try {
-        return (
-            typeof localStorage !== 'undefined' &&
-            localStorage.getItem('gfDebug') != null &&
-            localStorage.getItem('gfDebug') !== '' &&
-            localStorage.getItem('gfDebug') !== '0'
-        )
+        if (typeof localStorage === 'undefined') return false
+        const v = localStorage.getItem('gfDebug')
+        return v != null && v !== '' && v !== '0'
     } catch {
         return false
     }
 }
 
-let enabled = readEnabled()
+/** Whether debug logging is currently on (override wins; else localStorage). */
+function enabled(): boolean {
+    return override ?? readLocalStorageFlag()
+}
 
-/** Force the enabled state (used by tests; production flips via localStorage). */
-export function setDebugLoggingEnabled(value: boolean): void {
-    enabled = value
+/**
+ * Force/clear the enabled state. Pass a boolean to pin it (used by tests);
+ * pass null to fall back to the live `localStorage.gfDebug` flag.
+ */
+export function setDebugLoggingEnabled(value: boolean | null): void {
+    override = value
 }
 
 /** Whether debug logging is currently on. */
 export function isDebugLoggingEnabled(): boolean {
-    return enabled
+    return enabled()
 }
 
 /**
@@ -52,11 +68,11 @@ export function isDebugLoggingEnabled(): boolean {
  * lengths / counts / offsets, not the user's content (privacy invariant #1).
  */
 export function debugLog(scope: string, message: string, data?: unknown): void {
-    if (!enabled) return
+    if (!enabled()) return
     // oxlint-disable-next-line no-console
-    if (data === undefined) console.debug(`${PREFIX} ${scope}: ${message}`)
+    if (data === undefined) console.log(`${PREFIX} ${scope}: ${message}`)
     // oxlint-disable-next-line no-console
-    else console.debug(`${PREFIX} ${scope}: ${message}`, data)
+    else console.log(`${PREFIX} ${scope}: ${message}`, data)
 }
 
 /**

@@ -164,6 +164,44 @@ describe('renderStatusButton', () => {
         expect(prevented).toBe(true)
     })
 
+    it('mousedown on the pill BODY (drag surface) does not steal field focus', () => {
+        // Regression: pressing the pill's draggable surface must preventDefault
+        // its mousedown so the focused textarea does NOT blur — otherwise the
+        // focus-only pill hides itself the instant you grab it, and the drag
+        // dies mid-gesture.
+        const root = mkRoot()
+        renderStatusButton(root, mkOptions())
+        const pill = root.querySelector('.gf-pill') as HTMLElement
+        const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+        const prevented = !pill.dispatchEvent(ev)
+        expect(prevented).toBe(true)
+    })
+
+    it('drag moves the pill from its current style position (no offsetLeft jump)', () => {
+        // The pill is position:fixed; its authoritative position is style.left/
+        // top (what we set), NOT offsetLeft (layout-derived, may differ → a
+        // visual jump at drag start). The drag must start from style.left/top.
+        const root = mkRoot()
+        // ANCHOR 400×200 → default bottom-right style.left = 500-110-8 = 382,
+        // style.top = 300-28-8 = 264.
+        renderStatusButton(root, mkOptions())
+        const pill = root.querySelector('.gf-pill') as HTMLElement
+        expect(parseFloat(pill.style.left)).toBe(382)
+        expect(parseFloat(pill.style.top)).toBe(264)
+        pill.dispatchEvent(
+            new PointerEvent('pointerdown', { clientX: 200, clientY: 200, bubbles: true }),
+        )
+        pill.dispatchEvent(
+            new PointerEvent('pointermove', { clientX: 230, clientY: 250, bubbles: true }),
+        )
+        // Moved +30,+50 from the style start (382,264) → 412, 314.
+        expect(parseFloat(pill.style.left)).toBe(412)
+        expect(parseFloat(pill.style.top)).toBe(314)
+        pill.dispatchEvent(
+            new PointerEvent('pointerup', { clientX: 230, clientY: 250, bubbles: true }),
+        )
+    })
+
     it('re-rendering replaces the prior pill + panel (no leaks)', () => {
         const root = mkRoot()
         renderStatusButton(root, mkOptions({ count: 2 }))

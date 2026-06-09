@@ -158,7 +158,16 @@ export function renderStatusButton(
     let dragged = false
     const onPointerDown = (e: PointerEvent): void => {
         if (e.button !== 0) return
-        dragStart = { x: e.clientX, y: e.clientY, left: pill.offsetLeft, top: pill.offsetTop }
+        // Start from the AUTHORITATIVE style position (what positionPill set),
+        // NOT pill.offsetLeft/Top: the pill is position:fixed, so offsetLeft is
+        // layout-derived relative to the offsetParent and can differ from our
+        // style.left — reading it caused a visual jump at drag start.
+        dragStart = {
+            x: e.clientX,
+            y: e.clientY,
+            left: parseFloat(pill.style.left) || 0,
+            top: parseFloat(pill.style.top) || 0,
+        }
         dragged = false
     }
     const onPointerMove = (e: PointerEvent): void => {
@@ -206,6 +215,18 @@ export function renderStatusButton(
             dragged = false
         }
     }
+    // Pressing the pill (anywhere — the draggable surface, the gaps, the
+    // badge) must NOT blur the focused field. Without this, mousedown's default
+    // action moves focus off the textarea → the orchestrator's blur handler
+    // hides the focus-only pill mid-press, and the in-flight drag dies on a
+    // now-`display:none` element. The inner buttons already preventDefault
+    // their own mousedown (bindButton); this covers everything else. We do NOT
+    // stopPropagation (nothing above needs the event) and do NOT preventDefault
+    // pointer/click events, so dragging + button clicks still work.
+    const onPillMouseDown = (e: MouseEvent): void => {
+        e.preventDefault()
+    }
+    pill.addEventListener('mousedown', onPillMouseDown)
     pill.addEventListener('pointerdown', onPointerDown)
     pill.addEventListener('pointermove', onPointerMove)
     pill.addEventListener('pointerup', onPointerUp)

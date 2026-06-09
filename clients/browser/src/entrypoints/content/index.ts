@@ -1216,9 +1216,10 @@ function wireRuntime(
                 pillPosition.dragOffset = offset
             },
             // FOCUS-ONLY: the pill shows only while its field is focused. Render
-            // hidden when the field isn't the active element; focus/blur toggle
-            // it via state.statusHandle.setVisible (below).
-            initiallyVisible: document.activeElement === el,
+            // hidden when the field isn't focused; focus/blur toggle it via
+            // state.statusHandle.setVisible (below). `contains` (not `===`)
+            // because rich editors can put focus on a child node of `el`.
+            initiallyVisible: el.contains(document.activeElement),
         })
         // Stash the handle so the shared scroll/resize loop can reposition the
         // pill as the field moves, and focus/blur can toggle its visibility.
