@@ -19,8 +19,10 @@ export interface StatusButtonHandle {
     isMounted: () => boolean
 }
 
-const PILL_WIDTH = 110
-const PILL_HEIGHT = 28
+// Fallbacks only — the pill is positioned from its MEASURED size after mount
+// (jsdom returns offsetWidth 0, so the fallbacks keep tests deterministic).
+const PILL_WIDTH_FALLBACK = 110
+const PILL_HEIGHT_FALLBACK = 28
 const VIEWPORT_GUTTER = 8
 
 /**
@@ -44,8 +46,6 @@ export function renderStatusButton(
         options.count === 0 ? 'No grammar issues' : `${options.count} grammar issues`,
     )
 
-    positionPill(pill, options.anchorRect, view)
-
     pill.innerHTML = buildInnerHTML(options)
 
     pill.addEventListener('mousedown', (event) => {
@@ -59,6 +59,11 @@ export function renderStatusButton(
     })
 
     root.appendChild(pill)
+    // Position AFTER mount so offsetWidth/offsetHeight reflect the REAL
+    // rendered size. The label width varies with the category summary
+    // (e.g. "3 issues · 3 grammar"); a hardcoded width mis-placed the pill
+    // and clipped it against the field's right edge.
+    positionPill(pill, options.anchorRect, view)
     return {
         destroy: () => pill.remove(),
         isMounted: () => pill.isConnected,
@@ -72,9 +77,17 @@ function destroyExisting(root: ShadowRoot): void {
 function positionPill(pill: HTMLElement, anchor: DOMRect, view: Window): void {
     const vw = view.innerWidth
     const vh = view.innerHeight
-    // anchor at the bottom-right of the field, clamped inside the viewport
-    let left = Math.min(anchor.right - PILL_WIDTH, vw - PILL_WIDTH - VIEWPORT_GUTTER)
-    let top = Math.min(anchor.bottom - PILL_HEIGHT, vh - PILL_HEIGHT - VIEWPORT_GUTTER)
+    // Use the pill's MEASURED size (set after mount); fall back to constants
+    // when layout is unavailable (jsdom). This is what fixes the clipping: the
+    // right edge is aligned to the field's right edge minus the real width.
+    const width = pill.offsetWidth || PILL_WIDTH_FALLBACK
+    const height = pill.offsetHeight || PILL_HEIGHT_FALLBACK
+    // Anchor inside the field's bottom-right corner, a gutter from each edge.
+    let left = anchor.right - width - VIEWPORT_GUTTER
+    let top = anchor.bottom - height - VIEWPORT_GUTTER
+    // Clamp into the viewport.
+    if (left > vw - width - VIEWPORT_GUTTER) left = vw - width - VIEWPORT_GUTTER
+    if (top > vh - height - VIEWPORT_GUTTER) top = vh - height - VIEWPORT_GUTTER
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     if (top < VIEWPORT_GUTTER) top = VIEWPORT_GUTTER
     pill.style.left = `${left}px`

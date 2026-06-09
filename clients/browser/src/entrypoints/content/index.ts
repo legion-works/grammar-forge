@@ -19,6 +19,7 @@ import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { renderUnderlines, type UnderlineHandle } from '@/overlay/underline'
 import { showPopover, type PopoverHandle } from '@/overlay/popover'
+import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { renderStatusButton } from '@/overlay/status-button'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
@@ -47,6 +48,13 @@ interface FieldState {
     attachment: FieldAttachment
     /** Latest runCheck result, used to render underlines + status pill. */
     items: RenderableItem[]
+    /**
+     * Per-item viewport rects from the LAST render, parallel to (a subset of)
+     * `items`. The field-level hover/click hit-test maps a pointer position to
+     * the edit under it via these rects. Rebuilt on every renderField; [] when
+     * there are no suggestions.
+     */
+    itemRects: Array<{ item: RenderableItem; rects: DOMRect[] }>
 }
 
 interface ActiveSuggestion {
@@ -65,6 +73,12 @@ interface Runtime {
     counts: Partial<Record<Category, number>>
     /** Total editable fields known to the observer (best-effort count). */
     fieldCount: number
+    /** The single hover tooltip (one per overlay), or null when hidden. */
+    tooltip: TooltipHandle | null
+    /** Pending tooltip-hide grace timer, or null. Cleared on teardown. */
+    hoverTimer: ReturnType<typeof setTimeout> | null
+    /** The item the tooltip currently previews (avoids redundant re-renders). */
+    hoverItem: RenderableItem | null
     stopObserver: (() => void) | null
     /**
      * Every remover that bound a listener to this runtime. teardownRuntime
@@ -107,6 +121,17 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         // 2. Stop discovering new fields.
         r.stopObserver?.()
         r.stopObserver = null
+        // 2b. Hide the hover tooltip + cancel its pending hide timer so the
+        //     timer doesn't fire against a torn-down runtime. The tooltip node
+        //     itself also goes away with the host in step 3, but the timer
+        //     must be cleared explicitly.
+        if (r.hoverTimer) {
+            clearTimeout(r.hoverTimer)
+            r.hoverTimer = null
+        }
+        r.tooltip?.hide()
+        r.tooltip = null
+        r.hoverItem = null
         // 3. Tear down the DOM.
         r.overlay.destroy()
         // 4. Flush any pending feedback (best-effort).
@@ -129,6 +154,9 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             fields: new WeakMap(),
             counts: {},
             fieldCount: 0,
+            tooltip: null,
+            hoverTimer: null,
+            hoverItem: null,
             stopObserver: null,
             cleanups: [],
         }
@@ -196,6 +224,34 @@ function wireRuntime(
 ): void {
     const { overlay, signalQueue } = runtime
 
+    // ---- Hover-tooltip lifecycle (shared across fields; one tooltip at a
+    // time). The tooltip itself holds no listeners/timers — the grace-delay
+    // hide timer lives here on the runtime so teardown can cancel it.
+    const HOVER_THROTTLE_MS = 50
+    const TOOLTIP_HIDE_GRACE_MS = 150
+
+    const clearTooltipHide = (): void => {
+        if (runtime.hoverTimer) {
+            clearTimeout(runtime.hoverTimer)
+            runtime.hoverTimer = null
+        }
+    }
+    const hideTooltipNow = (): void => {
+        clearTooltipHide()
+        runtime.tooltip?.hide()
+        runtime.tooltip = null
+        runtime.hoverItem = null
+    }
+    const scheduleTooltipHide = (): void => {
+        clearTooltipHide()
+        runtime.hoverTimer = setTimeout(() => {
+            runtime.hoverTimer = null
+            runtime.tooltip?.hide()
+            runtime.tooltip = null
+            runtime.hoverItem = null
+        }, TOOLTIP_HIDE_GRACE_MS)
+    }
+
     const rerunFor =
         (el: HTMLElement) =>
         async (text: string): Promise<void> => {
@@ -220,9 +276,7 @@ function wireRuntime(
                 })
                 if (!ctx.isValid) return
                 state.items = items
-                renderField(el, overlay.root, state, (next) => {
-                    runtime.active = next
-                })
+                renderField(el, overlay.root, state)
                 updateFocusedCounts(runtime, el)
             } catch (e) {
                 // The bridge is unreachable or rejected the URL. Surface nothing
@@ -302,6 +356,7 @@ function wireRuntime(
         const state: FieldState = {
             attachment,
             items: [],
+            itemRects: [],
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -315,6 +370,58 @@ function wireRuntime(
         const gateHandler = onInput(el)
         el.addEventListener('input', gateHandler, { capture: true })
         runtime.cleanups.push(() => el.removeEventListener('input', gateHandler, { capture: true }))
+
+        // Field-level hover/click interaction. The underline overlay is
+        // pointer-events:none, so interaction is detected on the FIELD itself
+        // by hit-testing the pointer against the rendered edit rects
+        // (state.itemRects). This keeps the field fully editable/selectable —
+        // we never preventDefault, so a click both places the caret AND opens
+        // the card. A throttled mousemove drives the hover tooltip; mouseleave
+        // hides it after a grace delay (so moving onto an adjacent edit or a
+        // tiny gap doesn't flicker).
+        let lastMove = 0
+        const onFieldMouseMove = (e: MouseEvent): void => {
+            const now = Date.now()
+            if (now - lastMove < HOVER_THROTTLE_MS) return
+            lastMove = now
+            const hit = hitTest(state.itemRects, e.clientX, e.clientY)
+            if (!hit) {
+                if (runtime.hoverItem) scheduleTooltipHide()
+                return
+            }
+            // Already previewing this exact edit: keep it open.
+            if (runtime.hoverItem === hit.item && runtime.tooltip?.isOpen()) {
+                clearTooltipHide()
+                return
+            }
+            clearTooltipHide()
+            runtime.hoverItem = hit.item
+            runtime.tooltip?.hide()
+            runtime.tooltip = showTooltip(overlay.root, {
+                anchorRect: hit.rect,
+                category: hit.item.category,
+                message: hit.item.message,
+                replacement: hit.item.replacements[0] ?? '',
+                original: hit.item.original,
+            })
+        }
+        const onFieldMouseLeave = (): void => {
+            scheduleTooltipHide()
+        }
+        const onFieldClick = (e: MouseEvent): void => {
+            const hit = hitTest(state.itemRects, e.clientX, e.clientY)
+            if (!hit) return
+            hideTooltipNow()
+            openPopoverFor(el, hit.item, hit.rect)
+        }
+        el.addEventListener('mousemove', onFieldMouseMove)
+        el.addEventListener('mouseleave', onFieldMouseLeave)
+        el.addEventListener('click', onFieldClick)
+        runtime.cleanups.push(() => {
+            el.removeEventListener('mousemove', onFieldMouseMove)
+            el.removeEventListener('mouseleave', onFieldMouseLeave)
+            el.removeEventListener('click', onFieldClick)
+        })
     }
 
     const detach = (el: HTMLElement): void => {
@@ -440,13 +547,12 @@ function wireRuntime(
 
     // Wire the popover callbacks (defined inline so they close over the
     // local `runtime`).
-    function openPopoverFor(el: HTMLElement, item: RenderableItem): void {
+    function openPopoverFor(el: HTMLElement, item: RenderableItem, anchorRect: DOMRect): void {
         const state = runtime.fields.get(el)
         if (!state) return
-        const anchor = el.getBoundingClientRect()
         closePopoverFor(el)
         const handle = showPopover(overlay.root, {
-            anchorRect: anchor,
+            anchorRect,
             category: item.category,
             message: item.message,
             replacements: item.replacements,
@@ -483,12 +589,11 @@ function wireRuntime(
         runtime.active = { el, item, replacementIndex: 0 }
     }
 
-    function renderField(
-        el: HTMLElement,
-        root: ShadowRoot,
-        state: FieldState,
-        setActive: (next: ActiveSuggestion | null) => void,
-    ): void {
+    function renderField(el: HTMLElement, root: ShadowRoot, state: FieldState): void {
+        // Reset the hit-test rects every render; repopulated below when there
+        // are suggestions. Cleared first so the count===0 early-return leaves
+        // no stale rects for the hover/click hit-test to match.
+        state.itemRects = []
         const anchor = el.getBoundingClientRect()
         const count = state.items.length
         const statusHandle = renderStatusButton(root, {
@@ -516,6 +621,9 @@ function wireRuntime(
         // dominant cost on chatty fields (Fix 3).
         const spans = state.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
         const allRects = getSpanRectsBatch(el, spans)
+        // Cache the rects for the field-level hover/click hit-test (parallel to
+        // items; an item with no rects still occupies a slot but never matches).
+        state.itemRects = state.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
 
         const nodes: HTMLDivElement[] = []
         for (let i = 0; i < state.items.length; i++) {
@@ -525,10 +633,6 @@ function wireRuntime(
             const handle = renderUnderlines(root, {
                 rects,
                 category: item.category,
-                onClick: () => {
-                    openPopoverFor(el, item)
-                    setActive({ el, item, replacementIndex: 0 })
-                },
             })
             for (const n of handle.nodes) nodes.push(n)
         }
@@ -572,4 +676,26 @@ function buildTabStatus(runtime: Runtime): GfMessageMap['TAB_STATUS'] {
         fieldCount: runtime.fieldCount,
         counts: { ...runtime.counts },
     }
+}
+
+/**
+ * Find the edit whose viewport rect contains (x, y). Returns the item plus the
+ * specific rect that was hit (used to anchor the tooltip / card). Returns null
+ * when the pointer is over no edit. A wrapped edit has multiple rects; the
+ * first containing rect wins. Earlier items take precedence on overlap (the
+ * merge step upstream already dropped overlapping spans, so this is rare).
+ */
+function hitTest(
+    itemRects: ReadonlyArray<{ item: RenderableItem; rects: DOMRect[] }>,
+    x: number,
+    y: number,
+): { item: RenderableItem; rect: DOMRect } | null {
+    for (const entry of itemRects) {
+        for (const r of entry.rects) {
+            if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+                return { item: entry.item, rect: r }
+            }
+        }
+    }
+    return null
 }

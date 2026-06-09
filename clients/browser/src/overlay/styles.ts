@@ -45,24 +45,18 @@ export const OVERLAY_CSS = `
    * ============================================================ */
   .gf-underline {
     position: fixed;
-    pointer-events: auto;
-    cursor: pointer;
+    /* Purely visual: hover/click interaction is detected on the FIELD itself
+       (content orchestrator hit-tests the pointer against the edit rects), so
+       the underline must NEVER intercept the page's mouse events — that keeps
+       the field fully editable and selectable under the overlay. */
+    pointer-events: none;
     /* height is set per-category; baseline 2px. */
     height: 2px;
     background: transparent;
     /* No transform on the static state — it would push fixed-position
        children off by 1 device pixel on some Android WebViews. */
     transform-origin: 50% 100%;
-    transition: opacity 120ms ease-out, transform 120ms ease-out;
-    will-change: opacity, transform;
     z-index: ${Z_OVERLAY};
-  }
-  .gf-underline:hover {
-    transform: scaleY(1.4);
-  }
-  .gf-underline:focus-visible {
-    outline: 2px solid #2563eb;
-    outline-offset: 1px;
   }
 
   .gf-underline--wavy {
@@ -166,6 +160,78 @@ export const OVERLAY_CSS = `
       -webkit-backdrop-filter: blur(10px) saturate(160%);
       backdrop-filter: blur(10px) saturate(160%);
     }
+  }
+
+  /* ============================================================
+   * Hover tooltip — read-only preview (no buttons). Same glass material
+   * as the pill, pointer-events:none so it never blocks the field.
+   * ============================================================ */
+  .gf-tooltip {
+    position: fixed;
+    pointer-events: none;
+    z-index: ${Z_OVERLAY};
+    max-width: 320px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    isolation: isolate;
+    contain: layout paint;
+    background: rgba(28, 28, 30, 0.82);
+    color: #f5f5f5;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
+      0 1px 3px rgba(0, 0, 0, 0.14),
+      0 6px 18px rgba(0, 0, 0, 0.18);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    transform-origin: 50% 100%;
+    animation: gf-pill-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-tooltip {
+      background: color-mix(in oklab, #1c1c1e 38%, transparent);
+      border-color: color-mix(in oklab, white 12%, transparent);
+      -webkit-backdrop-filter: blur(10px) saturate(160%);
+      backdrop-filter: blur(10px) saturate(160%);
+    }
+  }
+  .gf-tooltip__header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+  .gf-tooltip__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    flex: 0 0 auto;
+  }
+  .gf-tooltip__label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .gf-tooltip__message {
+    font-size: 12px;
+    line-height: 1.35;
+    margin: 2px 0;
+  }
+  .gf-tooltip__fix {
+    font-size: 12px;
+    margin: 2px 0;
+  }
+  .gf-tooltip__arrow {
+    opacity: 0.7;
+  }
+  .gf-tooltip__replacement {
+    font-weight: 600;
+  }
+  .gf-tooltip__hint {
+    font-size: 10px;
+    opacity: 0.6;
+    margin-top: 3px;
   }
 
   /* ============================================================
@@ -275,7 +341,8 @@ export const OVERLAY_CSS = `
    * ============================================================ */
   @media (prefers-reduced-transparency: reduce) {
     .gf-panel,
-    .gf-pill {
+    .gf-pill,
+    .gf-tooltip {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
       background: color-mix(in oklab, #1c1c1e 92%, transparent);
@@ -302,11 +369,9 @@ export const OVERLAY_CSS = `
       animation-duration: 1ms;
       animation-name: gf-no-motion;
     }
-    .gf-underline {
-      transition: none;
-    }
-    .gf-underline:hover {
-      transform: none;
+    .gf-tooltip {
+      animation-duration: 1ms;
+      animation-name: gf-no-motion;
     }
   }
   @keyframes gf-no-motion {

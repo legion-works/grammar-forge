@@ -13,6 +13,7 @@
 // overlay down (ctx.onInvalidated), so any leak here would persist for
 // the lifetime of the page.
 import { dismissPopoversIn } from '@/overlay/popover'
+import { dismissTooltipsIn } from '@/overlay/tooltip'
 import { OVERLAY_CSS } from '@/overlay/styles'
 
 export interface OverlayHost {
@@ -64,6 +65,10 @@ export function createOverlayHost(doc: Document = document): OverlayHost {
             //    mount-delay setTimeout, both of which would leak past
             //    the page lifetime if we removed the host first.
             dismissPopoversIn(root)
+            // 1b. remove any hover tooltip (a pure shadow-root child with no
+            //     listeners/timers of its own; the orchestrator also hides it
+            //     on teardown, this is belt-and-braces).
+            dismissTooltipsIn(root)
             // 2. remove any underline + status-pill nodes we may have
             //    rendered. We don't have a registry of those, but the
             //    popover is the only thing that installs document-level
