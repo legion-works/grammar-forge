@@ -1,12 +1,11 @@
-// Lightweight hover tooltip (read-only). Shows the category, the bridge
-// message, and the primary fix for the edit under the pointer. Unlike the
-// popover (click -> actionable card), the tooltip has NO buttons and installs
-// NO document-level listeners or timers: it is purely informational and is
-// shown/hidden by the content orchestrator on hover. It is pointer-events:none
-// so it never intercepts the page's mouse events (the field stays fully
-// editable and selectable under it).
+// Lightweight hover tooltip — a minimal "preview chip" (category dot +
+// diff). The popover (click → actionable card) is the single source of
+// rich information; the hover chip is intentionally stripped down to a
+// glanceable diff so it never duplicates the card. pointer-events:none
+// keeps the field fully editable/selectable under it; the orchestrator
+// shows/hides it.
 import { CATEGORY_META } from '@/api/category'
-import { diffInnerHTML, escapeText } from '@/overlay/diff-view'
+import { diffInnerHTML } from '@/overlay/diff-view'
 import type { Category } from '@/api/types'
 
 const TOOLTIP_WIDTH_MAX = 320
@@ -18,8 +17,6 @@ export interface TooltipOptions {
     /** Viewport rect of the edit (word) the tooltip is anchored to. */
     anchorRect: DOMRect
     category: Category
-    /** Bridge-supplied explanation. May be empty. */
-    message: string
     /** Word-level diff: original word(s) (shown red, struck) -> corrected
      *  word(s) (shown green). e.g. "was" -> "were". */
     diffOriginal: string
@@ -34,11 +31,11 @@ export interface TooltipHandle {
 }
 
 /**
- * Mount a hover tooltip in the supplied shadow root, anchored to the given
- * rect. Only one tooltip per root at a time (a new one dismisses the prior).
- * Returns a handle with hide() / isOpen(); the caller hides it on mouse-leave,
- * on opening the click card, and on teardown. The tooltip holds no listeners
- * or timers, so hide() is just a node removal.
+ * Mount a hover chip in the supplied shadow root, anchored to the given
+ * rect. Only one chip per root at a time (a new one dismisses the prior).
+ * Returns a handle with hide() / isOpen(); the caller hides it on
+ * mouse-leave, on opening the click card, and on teardown. The chip holds
+ * no listeners or timers, so hide() is just a node removal.
  */
 export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipHandle {
     dismissTooltipsIn(root)
@@ -50,7 +47,7 @@ export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipH
     tip.setAttribute('role', 'tooltip')
 
     const meta = CATEGORY_META[options.category]
-    tip.innerHTML = renderInnerHTML(meta.label, meta.badge, options)
+    tip.innerHTML = renderInnerHTML(meta.badge, options)
 
     positionTooltip(tip, options.anchorRect, view)
     root.appendChild(tip)
@@ -88,15 +85,11 @@ function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void 
     }
 }
 
-function renderInnerHTML(label: string, badge: string, opts: TooltipOptions): string {
-    const hasMessage = opts.message.trim().length > 0
-    return `
-        <div class="gf-tooltip__header">
-            <span class="gf-tooltip__dot" style="background:${badge}"></span>
-            <span class="gf-tooltip__label">${escapeText(label)}</span>
-        </div>
-        ${hasMessage ? `<div class="gf-tooltip__message">${escapeText(opts.message)}</div>` : ''}
-        <div class="gf-tooltip__fix">${diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion)}</div>
-        <div class="gf-tooltip__hint">Click to fix</div>
-    `
+function renderInnerHTML(badge: string, opts: TooltipOptions): string {
+    return (
+        `<span class="gf-tooltip__dot" style="background:${badge}"></span>` +
+        `<span class="gf-tooltip__chip-diff">` +
+        diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion) +
+        `</span>`
+    )
 }

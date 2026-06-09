@@ -7,16 +7,14 @@ function mkRoot(): ShadowRoot {
     document.body.appendChild(host)
     return host.attachShadow({ mode: 'open' })
 }
-
 const ANCHOR = new DOMRect(100, 100, 40, 16)
 
-describe('showTooltip', () => {
-    it('mounts a tooltip with the category label, message and red->green diff', () => {
+describe('showTooltip (preview chip)', () => {
+    it('mounts a chip with the category dot and red->green diff, no buttons/message', () => {
         const root = mkRoot()
         showTooltip(root, {
             anchorRect: ANCHOR,
             category: 'grammar',
-            message: 'Subject-verb agreement',
             diffOriginal: 'was',
             diffCorrected: 'were',
             diffIsDeletion: false,
@@ -24,52 +22,32 @@ describe('showTooltip', () => {
         const tip = root.querySelector('.gf-tooltip') as HTMLElement
         expect(tip).not.toBeNull()
         expect(tip.getAttribute('role')).toBe('tooltip')
-        expect(tip.textContent).toContain('Grammar')
-        expect(tip.textContent).toContain('Subject-verb agreement')
-        // diff: old (red) + new (green)
+        expect(tip.querySelector('.gf-tooltip__dot')).not.toBeNull()
         expect(tip.querySelector('.gf-diff__old')?.textContent).toBe('was')
         expect(tip.querySelector('.gf-diff__new')?.textContent).toBe('were')
-        // It is purely informational — no buttons.
         expect(tip.querySelector('button')).toBeNull()
+        expect(tip.querySelector('.gf-tooltip__message')).toBeNull()
     })
 
-    it('shows a "removed" marker for a deletion (no green side)', () => {
+    it('shows a "removed" marker for a deletion', () => {
         const root = mkRoot()
         showTooltip(root, {
             anchorRect: ANCHOR,
             category: 'grammar',
-            message: '',
             diffOriginal: 'has',
             diffCorrected: '',
             diffIsDeletion: true,
         })
         const tip = root.querySelector('.gf-tooltip') as HTMLElement
-        expect(tip.querySelector('.gf-diff__old')?.textContent).toBe('has')
         expect(tip.querySelector('.gf-diff__removed')).not.toBeNull()
         expect(tip.querySelector('.gf-diff__new')).toBeNull()
     })
 
-    it('omits the message block when the message is empty', () => {
-        const root = mkRoot()
-        showTooltip(root, {
-            anchorRect: ANCHOR,
-            category: 'spelling',
-            message: '',
-            diffOriginal: 'thier',
-            diffCorrected: 'their',
-            diffIsDeletion: false,
-        })
-        const tip = root.querySelector('.gf-tooltip') as HTMLElement
-        expect(tip.querySelector('.gf-tooltip__message')).toBeNull()
-        expect(tip.querySelector('.gf-diff__new')?.textContent).toBe('their')
-    })
-
-    it('keeps only one tooltip per root (a new one replaces the prior)', () => {
+    it('keeps only one chip per root', () => {
         const root = mkRoot()
         showTooltip(root, {
             anchorRect: ANCHOR,
             category: 'grammar',
-            message: 'first',
             diffOriginal: 'a',
             diffCorrected: 'b',
             diffIsDeletion: false,
@@ -77,55 +55,48 @@ describe('showTooltip', () => {
         showTooltip(root, {
             anchorRect: ANCHOR,
             category: 'grammar',
-            message: 'second',
             diffOriginal: 'c',
             diffCorrected: 'd',
             diffIsDeletion: false,
         })
         expect(root.querySelectorAll('.gf-tooltip')).toHaveLength(1)
-        expect(root.querySelector('.gf-tooltip')?.textContent).toContain('second')
+        expect(root.querySelector('.gf-diff__new')?.textContent).toBe('d')
     })
 
-    it('hide() removes the tooltip and isOpen() reflects state', () => {
+    it('hide() removes the chip and isOpen() reflects state', () => {
         const root = mkRoot()
-        const handle = showTooltip(root, {
+        const h = showTooltip(root, {
             anchorRect: ANCHOR,
             category: 'grammar',
-            message: 'x',
             diffOriginal: 'y',
             diffCorrected: 'z',
             diffIsDeletion: false,
         })
-        expect(handle.isOpen()).toBe(true)
-        handle.hide()
-        expect(handle.isOpen()).toBe(false)
+        expect(h.isOpen()).toBe(true)
+        h.hide()
+        expect(h.isOpen()).toBe(false)
         expect(root.querySelector('.gf-tooltip')).toBeNull()
     })
 
-    it('escapes HTML in message / diff (no injection)', () => {
+    it('escapes HTML in the diff (no injection)', () => {
         const root = mkRoot()
         showTooltip(root, {
             anchorRect: ANCHOR,
             category: 'grammar',
-            message: '<img src=x onerror=alert(1)>',
-            diffOriginal: '<b>bad</b>',
-            diffCorrected: '<i>x</i>',
+            diffOriginal: '<b>x</b>',
+            diffCorrected: '<i>y</i>',
             diffIsDeletion: false,
         })
         const tip = root.querySelector('.gf-tooltip') as HTMLElement
-        expect(tip.querySelector('img')).toBeNull()
         expect(tip.querySelector('b')).toBeNull()
         expect(tip.querySelector('i')).toBeNull()
     })
-})
 
-describe('dismissTooltipsIn', () => {
-    it('removes every tooltip in the root', () => {
+    it('dismissTooltipsIn removes every chip', () => {
         const root = mkRoot()
         showTooltip(root, {
             anchorRect: ANCHOR,
             category: 'grammar',
-            message: 'x',
             diffOriginal: 'y',
             diffCorrected: 'z',
             diffIsDeletion: false,

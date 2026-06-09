@@ -332,7 +332,7 @@ export const OVERLAY_CSS = `
     pointer-events: none;
     z-index: ${Z_OVERLAY};
     max-width: 320px;
-    padding: 8px 10px;
+    padding: 4px 8px;
     border-radius: 10px;
     isolation: isolate;
     contain: layout paint;
@@ -346,7 +346,11 @@ export const OVERLAY_CSS = `
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     transform-origin: 50% 100%;
     animation: gf-pill-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
+  .gf-tooltip__chip-diff { font-size: 12px; white-space: nowrap; }
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .gf-tooltip {
       background: color-mix(in oklab, #1c1c1e 38%, transparent);

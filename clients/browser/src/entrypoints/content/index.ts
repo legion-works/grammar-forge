@@ -305,7 +305,7 @@ function wireRuntime(
     // ---- Hover-tooltip lifecycle (shared across fields; one tooltip at a
     // time). The tooltip itself holds no listeners/timers — the grace-delay
     // hide timer lives here on the runtime so teardown can cancel it.
-    const HOVER_THROTTLE_MS = 50
+    const HOVER_THROTTLE_MS = 400
     const TOOLTIP_HIDE_GRACE_MS = 150
     // Minimum delay before reading a field's text after a paste, so rich editors
     // (Lexical/Discord) that apply the paste ASYNC have reconciled. Also the
@@ -560,6 +560,9 @@ function wireRuntime(
             const now = Date.now()
             if (now - lastMove < HOVER_THROTTLE_MS) return
             lastMove = now
+            // If a popover is open for this field, the chip must not reopen —
+            // the popover is the single actionable surface while active.
+            if (openPopovers.get(el)?.isOpen()) return
             const hit = hitTest(state.itemRects, e.clientX, e.clientY)
             if (!hit) {
                 if (runtime.hoverItem) scheduleTooltipHide()
@@ -576,7 +579,6 @@ function wireRuntime(
             runtime.tooltip = showTooltip(overlay.root, {
                 anchorRect: hit.rect,
                 category: hit.item.category,
-                message: hit.item.message,
                 diffOriginal: hit.item.diffOriginal,
                 diffCorrected: hit.item.diffCorrected,
                 diffIsDeletion: hit.item.diffIsDeletion,
