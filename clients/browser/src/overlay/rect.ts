@@ -143,7 +143,7 @@ export function getSpanRectsBatch(el: HTMLElement, spans: readonly CodeUnitSpan[
     if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
         return getInputMirrorRectsBatch(el, spans)
     }
-    return spans.map((s) => getRangeRects(el, s.start, s.end))
+    return getRangeRectsBatch(el, spans)
 }
 
 function getInputMirrorRectsBatch(
@@ -285,19 +285,84 @@ function getInputMirrorRects(
 }
 
 function getRangeRects(el: HTMLElement, cuStart: number, cuEnd: number): DOMRect[] {
-    const start = findTextNodeForOffset(el, cuStart)
-    const end = findTextNodeForOffset(el, cuEnd)
-    if (!start || !end) return []
-    const range = el.ownerDocument.createRange()
+    const [rects] = getRangeRectsBatch(el, [{ start: cuStart, end: cuEnd }])
+    return rects ?? []
+}
+
+/**
+ * Batch contenteditable rect resolution. Resolves every span's (start, end)
+ * in a SINGLE TreeWalker pass (vs. the naive 2K walks of the per-span path)
+ * and reuses one Range object across all spans.
+ *
+ * Semantics match the per-span `getRangeRects` path exactly: for each
+ * offset, the first text node where `consumed + len >= codeUnitOffset`
+ * wins, with the node-local offset = `codeUnitOffset - consumed` (see
+ * `findTextNodeForOffset`). A Map keyed by the numeric offset dedups
+ * the walk when a span's end equals the next span's start.
+ */
+function getRangeRectsBatch(el: HTMLElement, spans: readonly CodeUnitSpan[]): DOMRect[][] {
+    if (spans.length === 0) return []
+    const owner = el.ownerDocument
+
+    // Collect every needed offset and dedup via a Map<offset, {node, offset}>.
+    // We iterate the sorted unique offsets during the walk, and the Map lets
+    // each span pick up the same (node, offset) pair for a shared boundary.
+    const needed: number[] = []
+    const seen = new Set<number>()
+    for (const s of spans) {
+        if (!seen.has(s.start)) {
+            seen.add(s.start)
+            needed.push(s.start)
+        }
+        if (!seen.has(s.end)) {
+            seen.add(s.end)
+            needed.push(s.end)
+        }
+    }
+    needed.sort((a, b) => a - b)
+
+    const positions = new Map<number, { node: Text; offset: number }>()
+    {
+        const walker = owner.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+        let consumed = 0
+        let node = walker.nextNode() as Text | null
+        let i = 0
+        while (node && i < needed.length) {
+            const len = node.length
+            // Walk through every needed offset that falls in [consumed, consumed+len].
+            // The first node satisfying `codeUnitOffset <= consumed + len` wins,
+            // matching findTextNodeForOffset's boundary semantics.
+            while (i < needed.length && needed[i]! <= consumed + len) {
+                positions.set(needed[i]!, { node, offset: needed[i]! - consumed })
+                i++
+            }
+            consumed += len
+            node = walker.nextNode() as Text | null
+        }
+    }
+
+    // jsdom does not implement Range.getClientRects (no layout engine);
+    // detect once so every span yields a clean [] in test environments.
+    const range = owner.createRange()
+    const hasGetClientRects = typeof range.getClientRects === 'function'
+    const out: DOMRect[][] = []
     try {
-        range.setStart(start.node, start.offset)
-        range.setEnd(end.node, end.offset)
-        // jsdom does not implement Range.getClientRects (no layout engine);
-        // guard so the caller still gets a clean [] in test environments.
-        if (typeof range.getClientRects !== 'function') return []
-        return Array.from(range.getClientRects())
-    } catch {
-        return []
+        for (const s of spans) {
+            const a = positions.get(s.start)
+            const b = positions.get(s.end)
+            if (!a || !b) {
+                out.push([])
+                continue
+            }
+            try {
+                range.setStart(a.node, a.offset)
+                range.setEnd(b.node, b.offset)
+                out.push(hasGetClientRects ? Array.from(range.getClientRects()) : [])
+            } catch {
+                out.push([])
+            }
+        }
+        return out
     } finally {
         range.detach?.()
     }

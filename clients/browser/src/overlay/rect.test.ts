@@ -217,8 +217,9 @@ describe('getSpanRectsBatch (mirror-div layout-thrash killer)', () => {
     it('still works for the contenteditable path (one-pass Range over each span)', async () => {
         const el = document.createElement('div')
         el.append(document.createTextNode('hello world'))
-        // spy on createRange to confirm the contenteditable branch is hit
-        // and that one Range per span is built (not a shared Range).
+        // spy on createRange to confirm the contenteditable branch is hit.
+        // The batch reuses ONE Range across spans (mutated via setStart/setEnd)
+        // instead of building one per span, so createRange is called once.
         const createRangeSpy = vi.spyOn(el.ownerDocument, 'createRange')
         // jsdom has no getClientRects; inject a fake
         const fakeRange = {
@@ -238,7 +239,9 @@ describe('getSpanRectsBatch (mirror-div layout-thrash killer)', () => {
             { start: 0, end: 5 },
             { start: 6, end: 11 },
         ])
-        expect(createRangeSpy).toHaveBeenCalledTimes(2)
+        expect(createRangeSpy).toHaveBeenCalledTimes(1)
+        expect(fakeRange.setStart as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(2)
+        expect(fakeRange.setEnd as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(2)
         expect(out).toHaveLength(2)
         expect(out[0]?.[0]?.width).toBe(10)
         expect(out[1]?.[0]?.width).toBe(10)
