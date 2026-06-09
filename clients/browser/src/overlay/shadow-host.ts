@@ -50,6 +50,12 @@ export function createOverlayHost(doc: Document = document): OverlayHost {
     const style = doc.createElement('style')
     style.textContent = OVERLAY_CSS
     root.appendChild(style)
+    // Liquid-glass edge displacement filter (referenced by the glass elements'
+    // rim ::before via backdrop-filter: url(#gf-glass-distortion)). Kept in the
+    // SAME shadow root so the url(#…) reference resolves locally. It is a
+    // progressive enhancement — if the browser ignores backdrop-filter filter
+    // refs, the base blur + refractive rim still render.
+    root.appendChild(buildGlassFilter(doc))
     doc.body.appendChild(host)
 
     let destroyed = false
@@ -78,4 +84,30 @@ export function createOverlayHost(doc: Document = document): OverlayHost {
             host.remove()
         },
     }
+}
+
+/**
+ * Build the inline SVG holding the liquid-glass displacement filter. fractal
+ * noise drives a small displacement of whatever is BEHIND the glass; the glass
+ * elements apply it only in a thin rim (via a masked ::before), so the page
+ * content appears to refract/distort around the borders like real glass.
+ */
+function buildGlassFilter(doc: Document): SVGSVGElement {
+    const NS = 'http://www.w3.org/2000/svg'
+    const svg = doc.createElementNS(NS, 'svg')
+    svg.setAttribute('width', '0')
+    svg.setAttribute('height', '0')
+    svg.setAttribute('aria-hidden', 'true')
+    svg.style.cssText = 'position:absolute;width:0;height:0;pointer-events:none'
+    svg.innerHTML =
+        `<defs>` +
+        `<filter id="gf-glass-distortion" x="-20%" y="-20%" width="140%" height="140%" ` +
+        `color-interpolation-filters="sRGB">` +
+        `<feTurbulence type="fractalNoise" baseFrequency="0.012 0.014" numOctaves="2" seed="7" result="n"/>` +
+        `<feGaussianBlur in="n" stdDeviation="1.4" result="nb"/>` +
+        `<feDisplacementMap in="SourceGraphic" in2="nb" scale="16" ` +
+        `xChannelSelector="R" yChannelSelector="G"/>` +
+        `</filter>` +
+        `</defs>`
+    return svg
 }

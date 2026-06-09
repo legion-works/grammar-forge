@@ -116,8 +116,8 @@ export const OVERLAY_CSS = `
     .gf-panel {
       background: color-mix(in oklab, #1c1c1e 40%, transparent);
       border-color: color-mix(in oklab, white 14%, transparent);
-      -webkit-backdrop-filter: blur(16px) saturate(180%);
-      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%) url(#gf-glass-distortion);
+      backdrop-filter: blur(16px) saturate(180%) url(#gf-glass-distortion);
     }
   }
 
@@ -157,8 +157,8 @@ export const OVERLAY_CSS = `
     .gf-pill {
       background: color-mix(in oklab, #1c1c1e 36%, transparent);
       border-color: color-mix(in oklab, white 12%, transparent);
-      -webkit-backdrop-filter: blur(10px) saturate(160%);
-      backdrop-filter: blur(10px) saturate(160%);
+      -webkit-backdrop-filter: blur(10px) saturate(160%) url(#gf-glass-distortion);
+      backdrop-filter: blur(10px) saturate(160%) url(#gf-glass-distortion);
     }
   }
 
@@ -234,8 +234,8 @@ export const OVERLAY_CSS = `
     .gf-pill-panel {
       background: color-mix(in oklab, #1c1c1e 40%, transparent);
       border-color: color-mix(in oklab, white 14%, transparent);
-      -webkit-backdrop-filter: blur(16px) saturate(180%);
-      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%) url(#gf-glass-distortion);
+      backdrop-filter: blur(16px) saturate(180%) url(#gf-glass-distortion);
     }
   }
   .gf-pill-panel__header {
@@ -327,8 +327,8 @@ export const OVERLAY_CSS = `
     .gf-tooltip {
       background: color-mix(in oklab, #1c1c1e 38%, transparent);
       border-color: color-mix(in oklab, white 12%, transparent);
-      -webkit-backdrop-filter: blur(10px) saturate(160%);
-      backdrop-filter: blur(10px) saturate(160%);
+      -webkit-backdrop-filter: blur(10px) saturate(160%) url(#gf-glass-distortion);
+      backdrop-filter: blur(10px) saturate(160%) url(#gf-glass-distortion);
     }
   }
   .gf-tooltip__header {
@@ -369,6 +369,29 @@ export const OVERLAY_CSS = `
     font-size: 10px;
     opacity: 0.6;
     margin-top: 3px;
+  }
+
+  /* ============================================================
+   * Liquid-glass refractive RIM — an additive highlight ring (does not touch
+   * the base box-shadow). Bright specular top edge + a hairline all around so
+   * the panel edge reads as a glass lens. The backdrop displacement filter
+   * (gf-glass-distortion, wired into backdrop-filter above) supplies the
+   * refraction; this is the bright rim that sells it.
+   * ============================================================ */
+  .gf-panel::after,
+  .gf-pill-panel::after,
+  .gf-tooltip::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      inset 0 1px 1.5px rgba(255, 255, 255, 0.5),
+      inset 1px 0 1px rgba(255, 255, 255, 0.18),
+      inset -1px 0 1px rgba(255, 255, 255, 0.18),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+      inset 0 -1px 1px rgba(0, 0, 0, 0.18);
   }
 
   /* ============================================================
