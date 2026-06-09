@@ -31,6 +31,7 @@ function mkOptions(overrides: Partial<StatusButtonOptions> = {}): StatusButtonOp
         ],
         onFocusField: vi.fn<() => void>(),
         onTogglePower: vi.fn<() => void>(),
+        onRecheck: vi.fn<() => void>(),
         onApplyAll: vi.fn<() => void>(),
         onApplyOne: vi.fn<(i: number) => void>(),
         ...overrides,
@@ -63,12 +64,23 @@ describe('renderStatusButton', () => {
         expect(body.textContent).toContain('1 grammar')
     })
 
-    it('collapses to just the power button when disabled', () => {
+    it('collapses to just the power button when disabled (no body / recheck)', () => {
         const root = mkRoot()
         renderStatusButton(root, mkOptions({ disabled: true }))
         expect(root.querySelector('.gf-pill--disabled')).not.toBeNull()
         expect(root.querySelector('.gf-pill__power')).not.toBeNull()
         expect(root.querySelector('.gf-pill__body')).toBeNull()
+        expect(root.querySelector('.gf-pill__recheck')).toBeNull()
+    })
+
+    it('recheck button fires onRecheck', () => {
+        const root = mkRoot()
+        const onRecheck = vi.fn<() => void>()
+        renderStatusButton(root, mkOptions({ onRecheck }))
+        ;(root.querySelector('.gf-pill__recheck') as HTMLElement).dispatchEvent(
+            new MouseEvent('click', { bubbles: true, cancelable: true }),
+        )
+        expect(onRecheck).toHaveBeenCalledOnce()
     })
 
     it('power button fires onTogglePower', () => {

@@ -215,6 +215,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             corrections: [],
             onFocusField: () => {},
             onTogglePower: () => void togglePower(),
+            onRecheck: () => {},
             onApplyAll: () => {},
             onApplyOne: () => {},
         })
@@ -694,40 +695,37 @@ function wireRuntime(
         void rerunFor(el)(getText(el))
     }
 
-    // Pill panel: apply ALL corrections. We must NOT run a sync loop of
-    // applyFix/execCommand on a contenteditable — the editor (e.g. Lexical)
-    // reconciles asynchronously, so the 2nd edit reads stale offsets and
-    // corrupts the text. Instead build the fully-corrected text as a STRING
-    // (apply every still-valid edit last-to-first so earlier offsets stay
-    // valid) and write it in ONE applyFix over the whole field — a single
-    // execCommand, no race. Signals are deduped by correction id (all
-    // suggestions of one /correct share the same logged id).
-    function applyAllFor(el: HTMLElement): void {
+    // Pill panel: apply ALL corrections. Apply them ONE AT A TIME (the same
+    // single-edit path individual Apply uses, which works), last-to-first so
+    // earlier offsets stay valid — but YIELD A FRAME between edits so an async
+    // editor (e.g. Lexical) reconciles before the next applyFix. A synchronous
+    // loop corrupts the text (the next edit reads stale offsets); a whole-field
+    // replace doesn't reconcile cleanly on Lexical either. Each item is
+    // re-validated against the live text; signals deduped by correction id.
+    async function applyAllFor(el: HTMLElement): Promise<void> {
         const st = runtime.fields.get(el)
         if (!st) return
         closePopoverFor(el)
-        const original = getText(el)
-        const valid = st.items.filter((it) => isSpanStillValid(original, it))
-        let text = original
-        for (const item of [...valid].sort((a, b) => b.cuStart - a.cuStart)) {
-            text =
-                text.slice(0, item.cuStart) + (item.replacements[0] ?? '') + text.slice(item.cuEnd)
-        }
-        if (text !== original) {
-            applyFix(el, { start: 0, end: original.length }, text)
-            const signaled = new Set<number>()
-            for (const item of valid) {
-                if (typeof item.id === 'number' && item.id > 0 && !signaled.has(item.id)) {
-                    signaled.add(item.id)
-                    void signalQueue.enqueue({
-                        id: item.id,
-                        action: 'accepted',
-                        category: item.category,
-                        source: 'browser',
-                    })
-                }
+        const ordered = [...st.items].sort((a, b) => b.cuStart - a.cuStart)
+        const signaled = new Set<number>()
+        for (const item of ordered) {
+            if (!ctx.isValid) return
+            if (!isSpanStillValid(getText(el), item)) continue
+            applyFix(el, { start: item.cuStart, end: item.cuEnd }, item.replacements[0] ?? '')
+            if (typeof item.id === 'number' && item.id > 0 && !signaled.has(item.id)) {
+                signaled.add(item.id)
+                void signalQueue.enqueue({
+                    id: item.id,
+                    action: 'accepted',
+                    category: item.category,
+                    source: 'browser',
+                })
             }
+            // Let the editor reconcile so the next isSpanStillValid reads fresh
+            // text and the next execCommand applies cleanly.
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
         }
+        if (!ctx.isValid) return
         void rerunFor(el)(getText(el))
     }
 
@@ -753,7 +751,8 @@ function wireRuntime(
                 el.focus()
             },
             onTogglePower: togglePower,
-            onApplyAll: () => applyAllFor(el),
+            onRecheck: () => void rerunFor(el)(getText(el)),
+            onApplyAll: () => void applyAllFor(el),
             onApplyOne: (i) => applyOneFor(el, i),
         })
         if (count === 0) {

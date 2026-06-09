@@ -40,6 +40,8 @@ export interface StatusButtonOptions {
     onFocusField: () => void
     /** Click the power button — toggle site disable. */
     onTogglePower: () => void
+    /** Click the recheck button — force a fresh check of the field now. */
+    onRecheck: () => void
     /** "Apply all" in the hover panel. */
     onApplyAll: () => void
     /** Click a single correction row in the hover panel. */
@@ -55,6 +57,11 @@ const POWER_SVG =
     `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ` +
     `stroke-width="2.4" stroke-linecap="round" aria-hidden="true">` +
     `<path d="M12 4 L12 12" /><path d="M7.5 6.5 A7 7 0 1 0 16.5 6.5" /></svg>`
+
+const REFRESH_SVG =
+    `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ` +
+    `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    `<path d="M20 11 A8 8 0 1 0 18.4 16"/><path d="M20 4 L20 11 L13 11"/></svg>`
 
 /**
  * Render the per-field status pill (+ its hover panel) in the supplied shadow
@@ -98,6 +105,16 @@ export function renderStatusButton(
         body.innerHTML = buildBodyHTML(options)
         bindButton(body, options.onFocusField)
         pill.appendChild(body)
+
+        // Recheck button — force a fresh check of the field now.
+        const recheck = doc.createElement('button')
+        recheck.type = 'button'
+        recheck.className = 'gf-pill__recheck'
+        recheck.setAttribute('aria-label', 'Recheck now')
+        recheck.title = 'Recheck now'
+        recheck.innerHTML = REFRESH_SVG
+        bindButton(recheck, options.onRecheck)
+        pill.appendChild(recheck)
     }
 
     root.appendChild(pill)

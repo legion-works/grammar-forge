@@ -162,8 +162,9 @@ export const OVERLAY_CSS = `
     }
   }
 
-  /* Power button + body inside the pill */
-  .gf-pill__power {
+  /* Power + recheck icon buttons + body inside the pill */
+  .gf-pill__power,
+  .gf-pill__recheck {
     appearance: none;
     display: inline-flex;
     align-items: center;
@@ -179,12 +180,18 @@ export const OVERLAY_CSS = `
     flex: 0 0 auto;
     transition: background 120ms ease-out, color 120ms ease-out;
   }
-  .gf-pill__power:hover {
+  .gf-pill__power:hover,
+  .gf-pill__recheck:hover {
     background: rgba(255, 255, 255, 0.18);
   }
-  .gf-pill__power:focus-visible {
+  .gf-pill__power:focus-visible,
+  .gf-pill__recheck:focus-visible {
     outline: 2px solid #93c5fd;
     outline-offset: 1px;
+  }
+  .gf-pill__recheck:active svg {
+    transform: rotate(180deg);
+    transition: transform 200ms ease-out;
   }
   .gf-pill__body {
     appearance: none;
