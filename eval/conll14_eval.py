@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """CoNLL-2014-test eval via the official M2 scorer (F0.5), comparable to
-published GEC numbers. Source is PRE-TOKENIZED — fed to /correct as-is; the
-hyp is re-tokenized with nltk.word_tokenize to match the gold's PTB spacing
-(m2scorer is token-level). Data + scorer are gitignored; run
+published GEC numbers. The M2 S-lines are PTB-tokenized; we de-tokenize them
+via lib_m2.detokenize before submitting to /correct (a real client sends
+natural text, not PTB tokens), then re-PTB-tokenize the hypothesis via
+nltk.word_tokenize so the m2scorer comparison stays token-level. The gold
+side is unchanged. Data + scorer are gitignored; run
 eval/get_benchmarks.sh first.
 
 Run with eval/.venv/bin/python (needs nltk + errant).
@@ -15,6 +17,8 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+
+from lib_m2 import detokenize
 
 try:
     from nltk.tokenize import word_tokenize
@@ -90,12 +94,13 @@ def main():
     sysout = HERE / "benchmarks" / "conll14" / "system.txt"
     with open(sysout, "w", encoding="utf-8") as f:
         for src in sources:
+            natural = detokenize(src)  # what a real client would actually type
             try:
-                resp = correct(src)
-                hyp = apply_suggestions(src, resp.get("suggestions") or [])
+                resp = correct(natural)
+                hyp = apply_suggestions(natural, resp.get("suggestions") or [])
             except Exception as e:  # noqa: BLE001
                 print(f"request error: {e!r}", file=sys.stderr)
-                hyp = src
+                hyp = natural
             hyp_tokenized = " ".join(word_tokenize(hyp))
             f.write(hyp_tokenized.replace("\n", " ") + "\n")
     # m2scorer scores the first LIMIT sentences only if we also subset the gold;

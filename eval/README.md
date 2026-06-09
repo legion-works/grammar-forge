@@ -88,15 +88,17 @@ non-redistributable) — regenerate with `get_benchmarks.sh`.
   3.0.2`, whose tokenization differs slightly and inflates FP. The slow-path LLM also
   over-corrects learner text vs the minimal-edit gold. Treat CoNLL-2014 as the headline.
 
-**Definitive result (FULL sets, 2026-06-09):** CoNLL-2014-test **F0.5 = 59.78** (P 64.97 /
-R 45.32, 1312 sents, ~4 min) — a strong single-model GEC result, ~5–6 F0.5 below published
+**Definitive result (FULL sets, 2026-06-09):** CoNLL-2014-test **F0.5 = 60.86** (P 65.00 /
+R 48.50, 1312 sents, ~4 min) — a strong single-model GEC result, ~4–5 F0.5 below published
 GECToR single-model (65.3) and below the ensemble SOTA (76). The shape is **precision-leaning**
 (the cascade is conservative — it doesn't over-correct, good for a writing assistant, but
-recall 45% means it misses over half the aggressive gold edits; the top quality lever is a
+recall 48% means it misses over half the aggressive gold edits; the top quality lever is a
 2nd GEC model for majority-vote before LLM escalation). BEA-2019-dev **F0.5 = 14.53**
 (4384 sents, ~12 min) is **directional only** — see the errant-2.0.0-vs-3.0.2 + over-correction
 caveat above; do not read it as our true BEA standing. (A 25-sentence subset gave a rosier
-66.9 — small-sample optimism; the full set is the honest number.)
+66.9 — small-sample optimism; the full set is the honest number.) The prior 59.78 was inflated
+by PTB-tokenized-source punctuation false positives (the LLM strips the space around `"risk ?"`),
+now removed by submitting de-tokenized source to the bridge — a real-client-faithful measurement.
 
 ## ERRANT / benchmark venv setup (`.venv`, gitignored)
 
