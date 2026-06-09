@@ -116,6 +116,9 @@ interface Runtime {
      *  aria-describedby on the right element when the chip hides. */
     hoverField: HTMLElement | null
     stopObserver: (() => void) | null
+    /** Session drag offset for the status pill (bottom-right default anchor).
+     *  Persists across re-renders in this runtime; null = no drag yet. */
+    pillDragOffset: { dx: number; dy: number } | null
     /**
      * Every remover that bound a listener to this runtime. teardownRuntime
      * iterates and runs them, so a disable→enable cycle on the same page
@@ -208,6 +211,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             hoverItem: null,
             hoverField: null,
             stopObserver: null,
+            pillDragOffset: null,
             cleanups: [],
         }
     }
@@ -233,7 +237,9 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     // Standalone collapsed "power" pill shown when the site is paused, so the
     // user can re-enable in-page. It is NOT part of the checking runtime (which
     // is torn down while paused); it lives on its own overlay host pinned to the
-    // viewport's bottom-right corner.
+    // viewport's bottom-right corner. The collapsed pill also accepts the
+    // shared drag offset so dragging the re-enable pill works and stays
+    // consistent with active fields.
     const mountDisabledPill = (): void => {
         if (disabledHost) return
         const host = (disabledHost = createOverlayHost())
@@ -247,6 +253,10 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             onRecheck: () => {},
             onApplyAll: () => {},
             onApplyOne: () => {},
+            dragOffset: runtime?.pillDragOffset ?? undefined,
+            onDragMove: (offset) => {
+                if (runtime) runtime.pillDragOffset = offset
+            },
         })
     }
     const unmountDisabledPill = (): void => {
@@ -972,6 +982,10 @@ function wireRuntime(
             onRecheck: () => void rerunFor(el)(getText(el)),
             onApplyAll: () => void applyAllFor(el),
             onApplyOne: (i) => applyOneFor(el, i),
+            dragOffset: runtime.pillDragOffset ?? undefined,
+            onDragMove: (offset) => {
+                runtime.pillDragOffset = offset
+            },
         })
         if (count === 0) {
             // No suggestions this round — the status pill alone is enough.

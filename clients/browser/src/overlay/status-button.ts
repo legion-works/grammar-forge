@@ -16,6 +16,7 @@ const PILL_WIDTH_FALLBACK = 110
 const PILL_HEIGHT_FALLBACK = 28
 const VIEWPORT_GUTTER = 8
 const PANEL_HIDE_GRACE_MS = 150
+const DRAG_THRESHOLD_PX = 4
 
 /** One correction shown in the hover panel (display-only diff + category). */
 export interface PillCorrection {
@@ -46,6 +47,10 @@ export interface StatusButtonOptions {
     onApplyAll: () => void
     /** Click a single correction row in the hover panel. */
     onApplyOne: (index: number) => void
+    /** Session drag offset (dx,dy) applied to the default bottom-right anchor. */
+    dragOffset?: { dx: number; dy: number }
+    /** Called when the user finishes dragging the pill; reports the new offset. */
+    onDragMove?: (offset: { dx: number; dy: number }) => void
 }
 
 export interface StatusButtonHandle {
@@ -118,7 +123,59 @@ export function renderStatusButton(
     }
 
     root.appendChild(pill)
-    positionPill(pill, options.anchorRect, view)
+    positionPill(pill, options.anchorRect, view, options.dragOffset)
+
+    // Pointer-drag (session). A move past DRAG_THRESHOLD_PX starts a drag; a
+    // plain click (no move) still reaches the inner buttons. On drop, report the
+    // new offset from the field's default bottom-right anchor.
+    let dragStart: { x: number; y: number; left: number; top: number } | null = null
+    let dragged = false
+    const onPointerDown = (e: PointerEvent): void => {
+        if (e.button !== 0) return
+        dragStart = { x: e.clientX, y: e.clientY, left: pill.offsetLeft, top: pill.offsetTop }
+        dragged = false
+        // setPointerCapture is missing from this jsdom build; guard so the
+        // real browser path is unchanged but the test path doesn't throw.
+        if (typeof pill.setPointerCapture === 'function') pill.setPointerCapture(e.pointerId)
+    }
+    const onPointerMove = (e: PointerEvent): void => {
+        if (!dragStart) return
+        const ddx = e.clientX - dragStart.x
+        const ddy = e.clientY - dragStart.y
+        if (!dragged && Math.hypot(ddx, ddy) < DRAG_THRESHOLD_PX) return
+        dragged = true
+        pill.classList.add('gf-pill--dragging')
+        pill.style.left = `${dragStart.left + ddx}px`
+        pill.style.top = `${dragStart.top + ddy}px`
+    }
+    const onPointerUp = (e: PointerEvent): void => {
+        if (!dragStart) return
+        try {
+            if (typeof pill.releasePointerCapture === 'function')
+                pill.releasePointerCapture(e.pointerId)
+        } catch {
+            /* not captured */
+        }
+        if (dragged) {
+            pill.classList.remove('gf-pill--dragging')
+            const base = options.dragOffset ?? { dx: 0, dy: 0 }
+            const ddx = e.clientX - dragStart.x
+            const ddy = e.clientY - dragStart.y
+            options.onDragMove?.({ dx: base.dx + ddx, dy: base.dy + ddy })
+        }
+        dragStart = null
+    }
+    const onClickCapture = (e: MouseEvent): void => {
+        if (dragged) {
+            e.preventDefault()
+            e.stopPropagation()
+            dragged = false
+        }
+    }
+    pill.addEventListener('pointerdown', onPointerDown)
+    pill.addEventListener('pointermove', onPointerMove)
+    pill.addEventListener('pointerup', onPointerUp)
+    pill.addEventListener('click', onClickCapture, { capture: true })
 
     // Hover panel (only when there are corrections to show).
     let panel: HTMLElement | null = null
@@ -199,19 +256,22 @@ function destroyExisting(root: ShadowRoot): void {
     root.querySelectorAll('.gf-pill, .gf-pill-panel').forEach((el) => el.remove())
 }
 
-function positionPill(pill: HTMLElement, anchor: DOMRect, view: Window): void {
+function positionPill(
+    pill: HTMLElement,
+    anchor: DOMRect,
+    view: Window,
+    offset: { dx: number; dy: number } = { dx: 0, dy: 0 },
+): void {
     const vw = view.innerWidth
     const vh = view.innerHeight
     const width = pill.offsetWidth || PILL_WIDTH_FALLBACK
     const height = pill.offsetHeight || PILL_HEIGHT_FALLBACK
-    let left = anchor.right - width - VIEWPORT_GUTTER
-    // top-right by default: sit just inside the field's top edge
-    let top = anchor.top + VIEWPORT_GUTTER
-    // flip below the top edge only if it would clip the viewport top
-    if (top < VIEWPORT_GUTTER) top = VIEWPORT_GUTTER
-    if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
+    let left = anchor.right - width - VIEWPORT_GUTTER + offset.dx
+    let top = anchor.bottom - height - VIEWPORT_GUTTER + offset.dy
     if (left > vw - width - VIEWPORT_GUTTER) left = vw - width - VIEWPORT_GUTTER
     if (top > vh - height - VIEWPORT_GUTTER) top = vh - height - VIEWPORT_GUTTER
+    if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
+    if (top < VIEWPORT_GUTTER) top = VIEWPORT_GUTTER
     pill.style.left = `${left}px`
     pill.style.top = `${top}px`
 }

@@ -152,7 +152,17 @@ export const OVERLAY_CSS = `
     cursor: pointer;
     transform-origin: 50% 100%;
     animation: gf-pill-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    /* Faint by default — the user opts in by hovering or dragging. Lifts
+       fully on :hover / .gf-pill--dragging. Smooth, but instant for
+       reduced-motion users (see @media below). */
+    opacity: 0.15;
+    transition: opacity 150ms ease-out, box-shadow 150ms ease-out;
   }
+  .gf-pill:hover,
+  .gf-pill.gf-pill--dragging {
+    opacity: 1;
+  }
+  .gf-pill--dragging { cursor: grabbing; user-select: none; }
   @keyframes gf-pill-enter {
     from { transform: scale(${SCALE_TOOLTIP}); opacity: 0; }
     to   { transform: scale(1);       opacity: 1; }
