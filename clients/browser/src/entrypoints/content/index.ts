@@ -19,6 +19,7 @@ import { isMessage, type GfMessageMap } from '@/messaging/schema'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightSpec } from '@/overlay/highlight'
+import { getNativeHighlighter, isNativeHighlightSupported } from '@/overlay/native-highlight'
 import { showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { showToast } from '@/overlay/toast'
@@ -94,6 +95,14 @@ interface FieldState {
      * highlight intensity via highlightLayer.setState({hoverItemIndex}).
      */
     hoverItemIndex: number | null
+    /**
+     * True when this field renders highlights via the document-global
+     * CSS Custom Highlight API (contenteditable, when the API is
+     * available). False for textarea/input, or as a fallback when the API
+     * is missing — those fields use the per-field overlay layer
+     * (state.highlightLayer) instead.
+     */
+    useNativeHighlight: boolean
 }
 
 interface ActiveSuggestion {
@@ -192,6 +201,12 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         r.hoverField = null
         // 3. Tear down the DOM.
         r.overlay.destroy()
+        // 3b. Destroy the document-global native highlighter too — it
+        //     holds entries in the page's `CSS.highlights` registry and
+        //     an injected `<style>` on the page; on a settings-driven
+        //     teardown the page is going back to its unmonitored state
+        //     and both must go away.
+        getNativeHighlighter().destroy()
         // 4. Flush any pending feedback (best-effort).
         void r.signalQueue.flush()
         r.active = null
@@ -534,6 +549,10 @@ function wireRuntime(
             pasteGraceTimer: null,
             highlightLayer: null,
             hoverItemIndex: null,
+            useNativeHighlight:
+                isNativeHighlightSupported() &&
+                !(el instanceof HTMLTextAreaElement) &&
+                !(el instanceof HTMLInputElement),
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -590,18 +609,31 @@ function wireRuntime(
             el.removeEventListener('keydown', onFieldUndoRedo, { capture: true }),
         )
 
-        // Focus/blur → drive the highlight intensity for this field. The
-        // highlight layer keeps the latest state internally (via setState),
-        // so we only push the new focus flag and preserve the current
-        // hoverItemIndex. Uses simple bubbling listeners; capture isn't
-        // needed since no other listener preventDefault's these.
+        // Focus/blur → drive the highlight intensity for this field. For
+        // native-highlight fields, swap which bucket (idle vs `-strong`)
+        // the field's ranges live in; for overlay fields, flip the
+        // existing `.gf-highlight--focus` class via setState. Uses simple
+        // bubbling listeners; capture isn't needed since no other listener
+        // preventDefault's these.
         const onFieldFocus = (): void => {
+            if (state.useNativeHighlight) {
+                getNativeHighlighter().setFocusedField(el)
+                return
+            }
             state.highlightLayer?.setState({
                 focused: true,
                 hoverItemIndex: state.hoverItemIndex,
             })
         }
         const onFieldBlur = (): void => {
+            if (state.useNativeHighlight) {
+                // Only clear focus if WE were the focused field — the
+                // native highlighter's focused state is global to the
+                // document, but only one field can have focus at a time
+                // anyway, so this matches reality.
+                getNativeHighlighter().setFocusedField(null)
+                return
+            }
             state.highlightLayer?.setState({
                 focused: false,
                 hoverItemIndex: state.hoverItemIndex,
@@ -636,10 +668,14 @@ function wireRuntime(
             const nextIdx: number | null = newHoverIdx >= 0 ? newHoverIdx : null
             if (nextIdx !== state.hoverItemIndex) {
                 state.hoverItemIndex = nextIdx
-                state.highlightLayer?.setState({
-                    focused: document.activeElement === el,
-                    hoverItemIndex: nextIdx,
-                })
+                if (state.useNativeHighlight) {
+                    getNativeHighlighter().setHoverItem(el, nextIdx)
+                } else {
+                    state.highlightLayer?.setState({
+                        focused: document.activeElement === el,
+                        hoverItemIndex: nextIdx,
+                    })
+                }
             }
             const now = Date.now()
             if (now - lastMove < HOVER_THROTTLE_MS) return
@@ -675,10 +711,14 @@ function wireRuntime(
         const onFieldMouseLeave = (): void => {
             if (state.hoverItemIndex !== null) {
                 state.hoverItemIndex = null
-                state.highlightLayer?.setState({
-                    focused: document.activeElement === el,
-                    hoverItemIndex: null,
-                })
+                if (state.useNativeHighlight) {
+                    getNativeHighlighter().setHoverItem(el, null)
+                } else {
+                    state.highlightLayer?.setState({
+                        focused: document.activeElement === el,
+                        hoverItemIndex: null,
+                    })
+                }
             }
             scheduleTooltipHide()
         }
@@ -701,6 +741,13 @@ function wireRuntime(
         // the field resizes, so the underlines track the text instead of drifting
         // from their render-time viewport coords. rAF-coalesced; cheap because
         // reconcile reuses the pooled nodes.
+        //
+        // For native-highlight fields the browser tracks reflow / scroll /
+        // wrapping natively — the registry's Ranges stay valid and the
+        // visual tracks the text without our help. We only need to keep
+        // the per-field hit-test rects fresh (for the pointer → item
+        // mapping), so we re-measure the rects and update itemRects, but
+        // skip the overlay reconcile + setState.
         let remeasureScheduled = false
         const scheduleRemeasure = (): void => {
             if (remeasureScheduled) return
@@ -708,10 +755,16 @@ function wireRuntime(
             requestAnimationFrame(() => {
                 remeasureScheduled = false
                 const st = runtime.fields.get(el)
-                if (!st || !st.highlightLayer || st.items.length === 0) return
+                if (!st || st.items.length === 0) return
                 const spans = st.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
                 const allRects = getSpanRectsBatch(el, spans)
                 st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
+                if (st.useNativeHighlight) {
+                    // Visual: browser tracks it. itemRects (above) is the
+                    // only thing we need to refresh.
+                    return
+                }
+                if (!st.highlightLayer) return
                 const specs: HighlightSpec[] = []
                 for (let i = 0; i < st.items.length; i++) {
                     for (const rect of allRects[i] ?? []) {
@@ -742,12 +795,15 @@ function wireRuntime(
         // Cancel any pending paste-grace timer first so it can't fire a check
         // against a field that's leaving the DOM.
         clearPasteGrace(state)
-        // Destroy the persistent highlight layer (its pooled nodes are
-        // children of the shared shadow root; we MUST remove them so a
-        // detached field doesn't leave highlights behind when the field
-        // itself is gone).
-        state.highlightLayer?.destroy()
-        state.highlightLayer = null
+        // Destroy the per-field renderer. For overlay fields that's the
+        // pooled DOM nodes inside the shared shadow root. For native fields
+        // it's the document-global registry entries owned by this field.
+        if (state.useNativeHighlight) {
+            getNativeHighlighter().clearField(el)
+        } else {
+            state.highlightLayer?.destroy()
+            state.highlightLayer = null
+        }
         // Release the per-field listeners, debouncer, and any registered
         // overlay handles. The attachment decrements runtime.fieldCount
         // exactly once (idempotent guard inside `detach`).
@@ -801,6 +857,11 @@ function wireRuntime(
     // by hand.)
     const onLocationChange = (): void => {
         overlay.destroy()
+        // Drop the page-global native highlighter too — the page we're
+        // leaving might have styled content that's about to be torn down
+        // by the navigation, and the new page should not inherit our
+        // injected `<style>` or stale registry entries.
+        getNativeHighlighter().destroy()
         void signalQueue.flush()
     }
     window.addEventListener('wxt:locationchange', onLocationChange)
@@ -1048,10 +1109,16 @@ function wireRuntime(
         if (count === 0) {
             // No suggestions this round — the status pill alone is enough.
             // The pill's destroy is idempotent, so a later render with
-            // non-zero items will overwrite it cleanly. Also reconcile the
-            // (possibly existing) layer with an empty spec list so any prior
-            // highlights clear instead of lingering.
-            if (state.highlightLayer) state.highlightLayer.reconcile([])
+            // non-zero items will overwrite it cleanly. For overlay fields
+            // reconcile an empty spec list so any prior highlights clear
+            // instead of lingering; for native fields, clear the field's
+            // entries from the registry (its ranges were registered with
+            // the previous render and would otherwise stay).
+            if (state.useNativeHighlight) {
+                getNativeHighlighter().setFieldHighlights(el, [])
+            } else {
+                if (state.highlightLayer) state.highlightLayer.reconcile([])
+            }
             state.attachment.setHandles({
                 statusDestroy: () => statusHandle.destroy(),
                 underlineDestroy: () => {
@@ -1072,37 +1139,69 @@ function wireRuntime(
         // length and triggers a layout reflow per append+measure; doing
         // it per suggestion (k suggestions = k reflows) was the
         // dominant cost on chatty fields (Fix 3).
+        //
+        // Used by BOTH the overlay layer (visual) and the native renderer
+        // (hover/click hit-test rects). The native renderer doesn't need
+        // these to draw (the browser tracks layout natively), but the
+        // orchestrator's hit-test still needs them to map a pointer
+        // position to a `RenderableItem`.
         const spans = state.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
         const allRects = getSpanRectsBatch(el, spans)
         // Cache the rects for the field-level hover/click hit-test (parallel to
         // items; an item with no rects still occupies a slot but never matches).
         state.itemRects = state.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
 
-        // Flatten (item, rect) → specs and reconcile the persistent layer.
-        const specs: HighlightSpec[] = []
-        for (let i = 0; i < state.items.length; i++) {
-            const item = state.items[i]!
-            for (const rect of allRects[i] ?? []) {
-                specs.push({ rect, category: item.category, itemIndex: i })
+        if (state.useNativeHighlight) {
+            // Push code-unit spans into the document-global registry. The
+            // browser draws `::highlight()` for us; reflow/scroll tracking
+            // is native. Any previous overlay layer (left over from a
+            // renderer switch — shouldn't happen, but defensive) is
+            // destroyed so we don't leave a stale shadow-root node behind.
+            if (state.highlightLayer) {
+                state.highlightLayer.destroy()
+                state.highlightLayer = null
             }
+            getNativeHighlighter().setFieldHighlights(
+                el,
+                state.items.map((it) => ({
+                    cuStart: it.cuStart,
+                    cuEnd: it.cuEnd,
+                    category: it.category,
+                })),
+            )
+        } else {
+            // Flatten (item, rect) → specs and reconcile the persistent
+            // overlay layer.
+            const specs: HighlightSpec[] = []
+            for (let i = 0; i < state.items.length; i++) {
+                const item = state.items[i]!
+                for (const rect of allRects[i] ?? []) {
+                    specs.push({ rect, category: item.category, itemIndex: i })
+                }
+            }
+            if (!state.highlightLayer) state.highlightLayer = createHighlightLayer(root)
+            state.highlightLayer.reconcile(specs)
+            // Push current intensity (focus + hover) onto the
+            // freshly-reconciled layer; reconcile reuses nodes, so the
+            // latest state must be re-applied to keep the visual
+            // consistent.
+            state.highlightLayer.setState({
+                focused: document.activeElement === el,
+                hoverItemIndex: state.hoverItemIndex,
+            })
         }
-        if (!state.highlightLayer) state.highlightLayer = createHighlightLayer(root)
-        state.highlightLayer.reconcile(specs)
-        // Push current intensity (focus + hover) onto the freshly-reconciled
-        // layer; reconcile reuses nodes, so the latest state must be
-        // re-applied to keep the visual consistent.
-        state.highlightLayer.setState({
-            focused: document.activeElement === el,
-            hoverItemIndex: state.hoverItemIndex,
-        })
 
         // The status pill is still rendered fresh each time (cheap); only the
         // highlight layer persists. Register destroy hooks so a detach/teardown
         // clears both.
         state.attachment.setHandles({
             underlineDestroy: () => {
-                state.highlightLayer?.destroy()
-                state.highlightLayer = null
+                if (state.useNativeHighlight) {
+                    getNativeHighlighter().clearField(el)
+                } else {
+                    state.highlightLayer?.destroy()
+                    state.highlightLayer = null
+                }
             },
             statusDestroy: () => statusHandle.destroy(),
             popoverHide: () => {

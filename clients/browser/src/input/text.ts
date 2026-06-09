@@ -54,7 +54,7 @@ export function applyFix(el: HTMLElement, span: CodeUnitSpan, replacement: strin
     // browser.
     const sel = el.ownerDocument.getSelection()
     if (!sel) return
-    const range = selectCodeUnitSpan(el, span)
+    const range = codeUnitSpanToRange(el, span)
     if (!range) return
     sel.removeAllRanges()
     sel.addRange(range)
@@ -64,8 +64,10 @@ export function applyFix(el: HTMLElement, span: CodeUnitSpan, replacement: strin
 /**
  * Map a [start,end) code-unit span on the flattened textContent of `el` to a
  * DOM Range. Returns null if the span is out of range (caller should drop).
+ * Exported so the native highlighter (overlay/native-highlight.ts) can build
+ * DOM Ranges from the same UTF-16 code-unit offsets that `applyFix` uses.
  */
-function selectCodeUnitSpan(el: HTMLElement, span: CodeUnitSpan): Range | null {
+export function codeUnitSpanToRange(el: HTMLElement, span: CodeUnitSpan): Range | null {
     const text = el.textContent ?? ''
     if (span.start < 0 || span.end < span.start || span.start > text.length) return null
 
