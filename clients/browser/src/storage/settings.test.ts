@@ -38,6 +38,9 @@ describe('DEFAULT_SETTINGS', () => {
             personalDictionary: [],
             suppressNativeSpellcheck: false,
             debugLogging: false,
+            rephraseTone: '',
+            rephraseStyle: '',
+            rephraseAlternatives: 1,
         })
     })
 })

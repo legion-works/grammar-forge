@@ -40,6 +40,19 @@ export interface Settings {
      *  default. Never logs field TEXT (counts/offsets only). `localStorage
      *  .gfDebug` remains a manual override for one-off debugging. */
     debugLogging: boolean
+    /** Rephrase tone/style presets ('' = none) + alternatives count (1 = single). */
+    rephraseTone: string
+    rephraseStyle: string
+    rephraseAlternatives: number
+    /** Optional rephrase backend override (provider/base_url/model/api_key).
+     *  Absent => use the bridge's default rephrase backend. The api_key lives in
+     *  browser.storage.local (user opt-in) and is sent to the bridge per call. */
+    rephraseOverride?: {
+        provider: 'openai' | 'anthropic'
+        baseUrl: string
+        model: string
+        apiKey: string
+    }
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -58,6 +71,9 @@ export const DEFAULT_SETTINGS: Settings = {
     personalDictionary: [],
     suppressNativeSpellcheck: false,
     debugLogging: false,
+    rephraseTone: '',
+    rephraseStyle: '',
+    rephraseAlternatives: 1,
 }
 
 /**

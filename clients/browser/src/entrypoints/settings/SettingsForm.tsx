@@ -266,6 +266,132 @@ export function SettingsForm() {
             </section>
 
             <section className="gf-options__section">
+                <h2>Rephrase</h2>
+                <div className="gf-options__row">
+                    <label htmlFor="gf-reph-tone">Tone</label>
+                    <select
+                        id="gf-reph-tone"
+                        value={settings.rephraseTone}
+                        onChange={(e) => void patch({ rephraseTone: e.currentTarget.value })}
+                    >
+                        <option value="">Neutral</option>
+                        <option value="formal">Formal</option>
+                        <option value="casual">Casual</option>
+                        <option value="friendly">Friendly</option>
+                    </select>
+                </div>
+                <div className="gf-options__row">
+                    <label htmlFor="gf-reph-style">Style</label>
+                    <select
+                        id="gf-reph-style"
+                        value={settings.rephraseStyle}
+                        onChange={(e) => void patch({ rephraseStyle: e.currentTarget.value })}
+                    >
+                        <option value="">Default</option>
+                        <option value="concise">Concise</option>
+                        <option value="detailed">Detailed</option>
+                        <option value="simple">Simple</option>
+                    </select>
+                </div>
+                <div className="gf-options__row">
+                    <label htmlFor="gf-reph-alts">Alternatives</label>
+                    <select
+                        id="gf-reph-alts"
+                        value={String(settings.rephraseAlternatives)}
+                        onChange={(e) =>
+                            void patch({ rephraseAlternatives: Number(e.currentTarget.value) })
+                        }
+                    >
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                    </select>
+                </div>
+                <div className="gf-options__row">
+                    <label htmlFor="gf-reph-provider">Model override</label>
+                    <select
+                        id="gf-reph-provider"
+                        value={settings.rephraseOverride?.provider ?? ''}
+                        onChange={(e) => {
+                            const provider = e.currentTarget.value
+                            if (!provider) {
+                                void patch({ rephraseOverride: undefined })
+                                return
+                            }
+                            void patch({
+                                rephraseOverride: {
+                                    provider: provider as 'openai' | 'anthropic',
+                                    baseUrl: settings.rephraseOverride?.baseUrl ?? '',
+                                    model: settings.rephraseOverride?.model ?? '',
+                                    apiKey: settings.rephraseOverride?.apiKey ?? '',
+                                },
+                            })
+                        }}
+                    >
+                        <option value="">Use bridge default</option>
+                        <option value="openai">OpenAI-compatible</option>
+                        <option value="anthropic">Anthropic</option>
+                    </select>
+                </div>
+                {settings.rephraseOverride && (
+                    <>
+                        <div className="gf-options__row">
+                            <label htmlFor="gf-reph-url">Override base URL</label>
+                            <input
+                                id="gf-reph-url"
+                                type="url"
+                                value={settings.rephraseOverride.baseUrl}
+                                onChange={(e) =>
+                                    void patch({
+                                        rephraseOverride: {
+                                            ...settings.rephraseOverride!,
+                                            baseUrl: e.currentTarget.value,
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="gf-options__row">
+                            <label htmlFor="gf-reph-model">Override model</label>
+                            <input
+                                id="gf-reph-model"
+                                type="text"
+                                value={settings.rephraseOverride.model}
+                                onChange={(e) =>
+                                    void patch({
+                                        rephraseOverride: {
+                                            ...settings.rephraseOverride!,
+                                            model: e.currentTarget.value,
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="gf-options__row">
+                            <label htmlFor="gf-reph-key">Override API key</label>
+                            <input
+                                id="gf-reph-key"
+                                type="password"
+                                value={settings.rephraseOverride.apiKey}
+                                onChange={(e) =>
+                                    void patch({
+                                        rephraseOverride: {
+                                            ...settings.rephraseOverride!,
+                                            apiKey: e.currentTarget.value,
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                        <p className="gf-options__warning">
+                            An override sends your selected text (and key) to this endpoint via the
+                            bridge. Leave unset to use your local bridge.
+                        </p>
+                    </>
+                )}
+            </section>
+
+            <section className="gf-options__section">
                 <h2>Blocked sites</h2>
                 <p className="gf-options__lead" style={{ margin: '0 0 6px' }}>
                     GrammarForge is enabled on every site except these. Add exact hostnames (no
