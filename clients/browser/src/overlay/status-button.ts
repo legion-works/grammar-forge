@@ -47,20 +47,24 @@ export interface StatusButtonOptions {
     onApplyAll: () => void
     /** Click a single correction row in the hover panel. */
     onApplyOne: (index: number) => void
-    /** Absolute viewport position override (left,top). When set, the pill is
-     *  placed here (clamped) instead of at the default field/viewport anchor —
-     *  used to persist a dragged position across re-renders and the
-     *  enabled↔disabled pill swap. */
-    position?: { left: number; top: number }
-    /** Called when the user finishes dragging; reports the new ABSOLUTE position. */
-    onDragMove?: (position: { left: number; top: number }) => void
-    /** Called after the pill is positioned, with its final absolute left/top. */
-    onPositioned?: (left: number, top: number) => void
+    /** Drag OFFSET from the field's default bottom-right anchor (dx,dy). When
+     *  set, the pill is placed at (anchor + offset), clamped — so a dragged
+     *  position is RELATIVE to the field and re-anchors as the field moves
+     *  (scroll/reflow). Persisted across re-renders and the enabled↔disabled
+     *  pill swap. */
+    dragOffset?: { dx: number; dy: number }
+    /** Called when the user finishes dragging; reports the new accumulated
+     *  offset from the field's default anchor. */
+    onDragMove?: (offset: { dx: number; dy: number }) => void
 }
 
 export interface StatusButtonHandle {
     destroy: () => void
     isMounted: () => boolean
+    /** Re-anchor the pill to a fresh field rect, re-applying the live drag
+     *  offset. Called by the shared scroll/resize loop so the pill tracks its
+     *  field instead of staying pinned while the field scrolls away. */
+    reposition: (anchorRect: DOMRect) => void
 }
 
 const POWER_SVG =
@@ -128,12 +132,11 @@ export function renderStatusButton(
     }
 
     root.appendChild(pill)
-    if (options.position) {
-        positionAbsolute(pill, options.position, view)
-    } else {
-        positionPill(pill, options.anchorRect, view)
-    }
-    options.onPositioned?.(parseFloat(pill.style.left) || 0, parseFloat(pill.style.top) || 0)
+    // Live drag offset from the field's default bottom-right anchor. Seeded
+    // from the persisted session offset; drag-end accumulates into it; the
+    // shared scroll/resize loop re-anchors via `reposition` using this value.
+    let currentOffset = options.dragOffset ?? { dx: 0, dy: 0 }
+    positionPill(pill, options.anchorRect, view, currentOffset)
 
     // Pointer-drag (session). A move past DRAG_THRESHOLD_PX starts a drag; a
     // plain click (no move) still reaches the inner buttons. On drop, report the
@@ -174,9 +177,12 @@ export function renderStatusButton(
             pill.classList.remove('gf-pill--dragging')
             const ddx = e.clientX - dragStart.x
             const ddy = e.clientY - dragStart.y
-            // Report the new ABSOLUTE viewport position so it persists verbatim
-            // across re-renders and the enabled↔disabled pill swap.
-            options.onDragMove?.({ left: dragStart.left + ddx, top: dragStart.top + ddy })
+            // Accumulate this drag's delta into the field-relative offset so the
+            // pill keeps tracking its field (the shared scroll/resize loop calls
+            // reposition with this offset) and the spot persists across
+            // re-renders and the enabled↔disabled pill swap.
+            currentOffset = { dx: currentOffset.dx + ddx, dy: currentOffset.dy + ddy }
+            options.onDragMove?.(currentOffset)
         }
         dragStart = null
     }
@@ -251,6 +257,7 @@ export function renderStatusButton(
             pill.remove()
         },
         isMounted: () => pill.isConnected,
+        reposition: (anchorRect: DOMRect) => positionPill(pill, anchorRect, view, currentOffset),
     }
 }
 
@@ -271,15 +278,21 @@ function destroyExisting(root: ShadowRoot): void {
     root.querySelectorAll('.gf-pill, .gf-pill-panel').forEach((el) => el.remove())
 }
 
-function positionPill(pill: HTMLElement, anchor: DOMRect, view: Window): void {
+function positionPill(
+    pill: HTMLElement,
+    anchor: DOMRect,
+    view: Window,
+    offset: { dx: number; dy: number } = { dx: 0, dy: 0 },
+): void {
     const width = pill.offsetWidth || PILL_WIDTH_FALLBACK
     const height = pill.offsetHeight || PILL_HEIGHT_FALLBACK
-    // Default anchor: bottom-right of the field.
+    // Default anchor: bottom-right of the field, shifted by the live drag
+    // offset so a dragged pill re-anchors to the field as it moves.
     positionAbsolute(
         pill,
         {
-            left: anchor.right - width - VIEWPORT_GUTTER,
-            top: anchor.bottom - height - VIEWPORT_GUTTER,
+            left: anchor.right - width - VIEWPORT_GUTTER + offset.dx,
+            top: anchor.bottom - height - VIEWPORT_GUTTER + offset.dy,
         },
         view,
     )

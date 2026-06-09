@@ -34,9 +34,8 @@ function mkOptions(overrides: Partial<StatusButtonOptions> = {}): StatusButtonOp
         onRecheck: vi.fn<() => void>(),
         onApplyAll: vi.fn<() => void>(),
         onApplyOne: vi.fn<(i: number) => void>(),
-        position: undefined,
-        onDragMove: vi.fn<(p: { left: number; top: number }) => void>(),
-        onPositioned: vi.fn<(left: number, top: number) => void>(),
+        dragOffset: undefined,
+        onDragMove: vi.fn<(o: { dx: number; dy: number }) => void>(),
         ...overrides,
     }
 }
@@ -210,19 +209,32 @@ describe('renderStatusButton', () => {
         expect(live.textContent).toContain('3')
     })
 
-    it('places the pill at an explicit absolute position when given', () => {
+    it('applies the drag offset to the default field anchor when given', () => {
         const root = mkRoot()
-        renderStatusButton(root, mkOptions({ position: { left: 300, top: 200 } }))
+        renderStatusButton(root, mkOptions({ dragOffset: { dx: 50, dy: 50 } }))
         const pill = root.querySelector('.gf-pill') as HTMLElement
-        // jsdom has no layout (offsetWidth 0 → fallback), and the viewport is
-        // large, so the position passes through the clamp unchanged.
-        expect(parseFloat(pill.style.left)).toBe(300)
-        expect(parseFloat(pill.style.top)).toBe(200)
+        // jsdom has no layout (offsetWidth 0 → fallback 110×28). Default anchor
+        // = anchor.right - width - gutter = 500 - 110 - 8 = 382 (top: 300 - 28 -
+        // 8 = 264). The offset shifts it by (+50,+50); the viewport is large so
+        // the clamp passes it through.
+        expect(parseFloat(pill.style.left)).toBe(432)
+        expect(parseFloat(pill.style.top)).toBe(314)
     })
 
-    it('dragging the pill past the threshold reports a new absolute position', () => {
+    it('reposition() re-anchors the pill to a fresh field rect with the live offset', () => {
         const root = mkRoot()
-        const onDragMove = vi.fn<(p: { left: number; top: number }) => void>()
+        const handle = renderStatusButton(root, mkOptions({ dragOffset: { dx: 10, dy: 20 } }))
+        const pill = root.querySelector('.gf-pill') as HTMLElement
+        // Re-anchor to a field that has scrolled up by 100px.
+        handle.reposition(new DOMRect(100, 0, 400, 200))
+        // right=500, bottom=200 → 500-110-8+10 = 392 ; 200-28-8+20 = 184
+        expect(parseFloat(pill.style.left)).toBe(392)
+        expect(parseFloat(pill.style.top)).toBe(184)
+    })
+
+    it('dragging the pill past the threshold reports a new accumulated offset', () => {
+        const root = mkRoot()
+        const onDragMove = vi.fn<(o: { dx: number; dy: number }) => void>()
         renderStatusButton(root, mkOptions({ onDragMove }))
         const pill = root.querySelector('.gf-pill') as HTMLElement
         pill.dispatchEvent(
@@ -235,15 +247,35 @@ describe('renderStatusButton', () => {
             new PointerEvent('pointerup', { clientX: 140, clientY: 130, bubbles: true }),
         )
         expect(onDragMove).toHaveBeenCalledTimes(1)
-        const pos = onDragMove.mock.calls[0]![0]
-        // jsdom offsetLeft/Top are 0, so the absolute position == the drag delta.
-        expect(pos.left).toBe(40)
-        expect(pos.top).toBe(30)
+        const off = onDragMove.mock.calls[0]![0]
+        // started from a zero offset, so the reported offset == the drag delta.
+        expect(off.dx).toBe(40)
+        expect(off.dy).toBe(30)
+    })
+
+    it('a drag accumulates on top of the seeded offset', () => {
+        const root = mkRoot()
+        const onDragMove = vi.fn<(o: { dx: number; dy: number }) => void>()
+        renderStatusButton(root, mkOptions({ onDragMove, dragOffset: { dx: 5, dy: 7 } }))
+        const pill = root.querySelector('.gf-pill') as HTMLElement
+        pill.dispatchEvent(
+            new PointerEvent('pointerdown', { clientX: 100, clientY: 100, bubbles: true }),
+        )
+        pill.dispatchEvent(
+            new PointerEvent('pointermove', { clientX: 110, clientY: 120, bubbles: true }),
+        )
+        pill.dispatchEvent(
+            new PointerEvent('pointerup', { clientX: 110, clientY: 120, bubbles: true }),
+        )
+        const off = onDragMove.mock.calls[0]![0]
+        // seeded (5,7) + delta (10,20) = (15,27)
+        expect(off.dx).toBe(15)
+        expect(off.dy).toBe(27)
     })
 
     it('a click without movement does NOT start a drag (buttons still work)', () => {
         const root = mkRoot()
-        const onDragMove = vi.fn<(p: { left: number; top: number }) => void>()
+        const onDragMove = vi.fn<(o: { dx: number; dy: number }) => void>()
         const onTogglePower = vi.fn<() => void>()
         renderStatusButton(root, mkOptions({ onDragMove, onTogglePower }))
         const power = root.querySelector('.gf-pill__power') as HTMLElement

@@ -23,7 +23,7 @@ import { getNativeHighlighter, isNativeHighlightSupported } from '@/overlay/nati
 import { dismissPopoversIn, showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { showToast } from '@/overlay/toast'
-import { renderStatusButton } from '@/overlay/status-button'
+import { renderStatusButton, type StatusButtonHandle } from '@/overlay/status-button'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
 import {
@@ -103,6 +103,15 @@ interface FieldState {
      * (state.highlightLayer) instead.
      */
     useNativeHighlight: boolean
+    /**
+     * The live status-pill handle from the LAST renderField, or null before
+     * the first render. The shared scroll/resize loop calls
+     * `statusHandle.reposition(el.getBoundingClientRect())` so the pill tracks
+     * its field (re-anchoring with the live drag offset) instead of staying
+     * pinned while the field scrolls away. Replaced on each render; the prior
+     * pill is destroyed by the attachment's setHandles swap.
+     */
+    statusHandle: StatusButtonHandle | null
 }
 
 interface ActiveSuggestion {
@@ -118,12 +127,16 @@ interface Runtime {
     active: ActiveSuggestion | null
     fields: WeakMap<HTMLElement, FieldState>
     /**
-     * Overlay-path (textarea/input + fallback) fields currently attached, for
-     * the SHARED scroll/resize remeasure loop. Native-highlight fields are NOT
-     * added (the browser tracks their reflow). Iterable (unlike `fields`, a
-     * WeakMap) so one shared listener can re-measure them all.
+     * ALL editable fields currently attached (native + overlay), for the
+     * SHARED scroll/resize remeasure loop. Iterable (unlike `fields`, a
+     * WeakMap) so one shared listener can re-process them all. Every tracked
+     * field needs per-scroll work: overlay fields re-measure their span rects
+     * + reconcile highlights; native fields re-measure their hit-test rects
+     * (the CSS Custom Highlight visuals self-track, but `state.itemRects` —
+     * used by the hover/click hit-test — would otherwise go stale on scroll);
+     * and BOTH re-anchor their status pill to the field via reposition.
      */
-    overlayFields: Set<HTMLElement>
+    trackedFields: Set<HTMLElement>
     /** Per-category counts for the FOCUSED field's last runCheck (used by the popup). */
     counts: Partial<Record<Category, number>>
     /** Total editable fields known to the observer (best-effort count). */
@@ -162,15 +175,14 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     // user can re-enable in-page (disabledHost).
     let runtime: Runtime | null = null
     let disabledHost: ReturnType<typeof createOverlayHost> | null = null
-    // Status-pill position state — kept in start() scope (NOT on the runtime) so
+    // Status-pill drag offset — kept in start() scope (NOT on the runtime) so
     // it survives a settings-driven teardown: dragging the pill, then disabling
-    // the site, must keep the re-enable pill where the pill was (the runtime,
-    // and anything on it, is destroyed on teardown). `dragged` is the explicit
-    // dragged position (null until the user drags); `lastRendered` tracks
-    // wherever the pill last rendered (default field/viewport anchor) so the
-    // disabled pill can fall back to it. A shared object so wireRuntime (where
-    // the active pill renders) mutates the same state as the disabled pill here.
-    const pillPosition: PillPosition = { dragged: null, lastRendered: null }
+    // the site, must keep the re-enable pill at the same drag offset (the
+    // runtime, and anything on it, is destroyed on teardown). `dragOffset` is
+    // the field-relative shift from the pill's default bottom-right anchor
+    // (null until the user drags). A shared object so wireRuntime (where the
+    // active pill renders) mutates the same state as the disabled pill here.
+    const pillPosition: PillPosition = { dragOffset: null }
 
     const teardownRuntime = (): void => {
         if (!runtime) return
@@ -238,7 +250,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             overlay: createOverlayHost(),
             active: null,
             fields: new WeakMap(),
-            overlayFields: new Set(),
+            trackedFields: new Set(),
             counts: {},
             fieldCount: 0,
             tooltip: null,
@@ -287,15 +299,12 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             onRecheck: () => {},
             onApplyAll: () => {},
             onApplyOne: () => {},
-            // Appear where the active pill last was (dragged position, else the
-            // last default anchor); fall back to viewport bottom-right (anchorRect).
-            position: pillPosition.dragged ?? pillPosition.lastRendered ?? undefined,
-            onDragMove: (pos) => {
-                pillPosition.dragged = pos
-                pillPosition.lastRendered = pos
-            },
-            onPositioned: (left, top) => {
-                pillPosition.lastRendered = { left, top }
+            // Anchored to the viewport bottom-right (the full-viewport anchorRect
+            // above) plus the persisted drag offset, so the re-enable pill
+            // "respects the drag" rather than snapping to a fixed corner.
+            dragOffset: pillPosition.dragOffset ?? undefined,
+            onDragMove: (offset) => {
+                pillPosition.dragOffset = offset
             },
         })
     }
@@ -364,10 +373,11 @@ async function start(ctx: ContentScriptContext): Promise<void> {
  * survives a settings-driven runtime teardown.
  */
 interface PillPosition {
-    /** Explicit dragged position (null until the user drags the pill). */
-    dragged: { left: number; top: number } | null
-    /** Wherever the pill last rendered (default anchor when not dragged). */
-    lastRendered: { left: number; top: number } | null
+    /** Field-relative drag offset (dx,dy) from the pill's default bottom-right
+     *  anchor; null until the user drags the pill. Applied on render AND on
+     *  every scroll/resize remeasure (via statusHandle.reposition) so the pill
+     *  tracks its field. */
+    dragOffset: { dx: number; dy: number } | null
 }
 
 function wireRuntime(
@@ -543,42 +553,67 @@ function wireRuntime(
             return true
         }
 
-    // Shared, rAF-coalesced loop that re-measures every overlay-path field's
-    // span rects + reconciles its overlay highlights. One document scroll +
-    // window resize listener drives it (installed in wireRuntime, not per
-    // field), so an N-field page incurs N remeasures per frame IN TOTAL, not
-    // N × (scroll-fires-per-frame). The per-field ResizeObserver (which
-    // observes THIS element's box, not the viewport) still routes here so a
-    // single-element resize also coalesces.
+    // Shared, rAF-coalesced loop that re-processes every tracked field on
+    // scroll/resize. One document scroll (capture) + window resize listener
+    // drives it (installed in wireRuntime, not per field), so an N-field page
+    // incurs N field updates per frame IN TOTAL, not N × (scroll-fires-per-
+    // frame). The per-field ResizeObserver (which observes THIS element's box,
+    // not the viewport) still routes here so a single-element resize also
+    // coalesces.
     let remeasureScheduled = false
     const scheduleRemeasureAll = (): void => {
         if (remeasureScheduled) return
         remeasureScheduled = true
         requestAnimationFrame(() => {
             remeasureScheduled = false
-            for (const el of runtime.overlayFields) remeasureFieldOverlay(el)
+            for (const el of runtime.trackedFields) remeasureField(el)
         })
     }
-    // Re-measure a field's span rects + reconcile its overlay highlights.
-    // Used by the shared scroll/resize loop and the per-field ResizeObserver.
-    // No-op for native-highlight fields (browser tracks their reflow) and
-    // empty fields.
-    const remeasureFieldOverlay = (el: HTMLElement): void => {
+    // Re-measure a field's hit-test rects (+ reconcile its OVERLAY highlights)
+    // and re-anchor its status pill, on scroll/resize. Runs for BOTH native and
+    // overlay fields:
+    //   - itemRects is rebuilt for every field — the hover/click hit-test reads
+    //     it, and on a native field it would otherwise go stale on scroll
+    //     (breaking the hover popup + click popover after scrolling).
+    //   - The overlay highlight layer is reconciled ONLY for overlay fields
+    //     (native CSS Custom Highlight visuals self-track reflow).
+    //   - The pill is re-anchored to the field's live rect (with the drag
+    //     offset) so it tracks the field instead of staying pinned.
+    // Defensive: getSpanRectsBatch is wrapped so a measurement throw can't kill
+    // the loop (or the pill reposition) for the rest of the fields.
+    const remeasureField = (el: HTMLElement): void => {
         const st = runtime.fields.get(el)
-        if (!st || st.useNativeHighlight || !st.highlightLayer || st.items.length === 0) return
-        const spans = st.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
-        const allRects = getSpanRectsBatch(el, spans)
-        st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
-        const specs: HighlightSpec[] = []
-        for (let i = 0; i < st.items.length; i++) {
-            for (const rect of allRects[i] ?? [])
-                specs.push({ rect, category: st.items[i]!.category, itemIndex: i })
+        if (!st) return
+        if (st.items.length > 0) {
+            const spans = st.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
+            let allRects: DOMRect[][]
+            try {
+                allRects = getSpanRectsBatch(el, spans)
+            } catch {
+                // Measurement failed (detached node / odd layout) — leave the
+                // prior rects in place and still reposition the pill below.
+                allRects = []
+            }
+            if (allRects.length > 0) {
+                st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
+                if (!st.useNativeHighlight && st.highlightLayer) {
+                    const specs: HighlightSpec[] = []
+                    for (let i = 0; i < st.items.length; i++) {
+                        for (const rect of allRects[i] ?? [])
+                            specs.push({ rect, category: st.items[i]!.category, itemIndex: i })
+                    }
+                    st.highlightLayer.reconcile(specs)
+                    st.highlightLayer.setState({
+                        focused: document.activeElement === el,
+                        hoverItemIndex: st.hoverItemIndex,
+                    })
+                }
+            }
         }
-        st.highlightLayer.reconcile(specs)
-        st.highlightLayer.setState({
-            focused: document.activeElement === el,
-            hoverItemIndex: st.hoverItemIndex,
-        })
+        // Re-anchor the pill to the field's current position (with the live
+        // drag offset). Cheap; runs even when there are no items so the pill
+        // tracks the field whether or not it has suggestions.
+        st.statusHandle?.reposition(el.getBoundingClientRect())
     }
     document.addEventListener('scroll', scheduleRemeasureAll, { capture: true, passive: true })
     window.addEventListener('resize', scheduleRemeasureAll, { passive: true })
@@ -630,6 +665,7 @@ function wireRuntime(
                 isNativeHighlightSupported() &&
                 !(el instanceof HTMLTextAreaElement) &&
                 !(el instanceof HTMLInputElement),
+            statusHandle: null,
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -813,18 +849,20 @@ function wireRuntime(
             el.removeEventListener('click', onFieldClick)
         })
 
-        // Re-measure span rects + reconcile highlights when the field's box
-        // resizes (so the highlights track the text instead of drifting from
-        // their render-time viewport coords). The shared document-scroll +
+        // Re-measure rects + reconcile highlights + re-anchor the pill when the
+        // field's box resizes or the page scrolls (so highlights/hit-test rects
+        // track the text and the pill tracks the field instead of drifting from
+        // render-time viewport coords). The shared document-scroll +
         // window-resize listeners are installed ONCE in wireRuntime, not per
-        // field — this field only observes ITSELF.
+        // field — this field only observes ITSELF via the ResizeObserver, which
+        // routes through the same coalesced loop.
         //
-        // Native-highlight fields self-track reflow (the registry's Ranges
-        // stay valid), so we skip them in the overlay remeasure set; the
-        // ResizeObserver is still attached for symmetry but the shared
-        // loop's overlayFields iteration will no-op for them.
-        const useNative = state.useNativeHighlight
-        if (!useNative) runtime.overlayFields.add(el)
+        // ALL fields (native + overlay) are tracked: overlay fields re-measure
+        // their highlight rects, native fields re-measure their hit-test rects
+        // (the CSS Custom Highlight visuals self-track reflow, but the
+        // hover/click hit-test rects would go stale on scroll), and both
+        // re-anchor their status pill.
+        runtime.trackedFields.add(el)
         const ro = new ResizeObserver(() => scheduleRemeasureAll())
         ro.observe(el)
         runtime.cleanups.push(() => ro.disconnect())
@@ -844,10 +882,12 @@ function wireRuntime(
         } else {
             state.highlightLayer?.destroy()
             state.highlightLayer = null
-            // Drop from the shared remeasure set so the global scroll/resize
-            // loop stops calling remeasureFieldOverlay on a detached field.
-            runtime.overlayFields.delete(el)
         }
+        // Drop from the shared tracked set so the global scroll/resize loop
+        // stops calling remeasureField on a detached field. Done for BOTH
+        // field types (native + overlay are both tracked now).
+        runtime.trackedFields.delete(el)
+        state.statusHandle = null
         // Release the per-field listeners, debouncer, and any registered
         // overlay handles. The attachment decrements runtime.fieldCount
         // exactly once (idempotent guard inside `detach`).
@@ -1156,17 +1196,17 @@ function wireRuntime(
             onRecheck: () => void rerunFor(el)(getText(el)),
             onApplyAll: () => void applyAllFor(el),
             onApplyOne: (i) => applyOneFor(el, i),
-            // Persisted (session) pill position — a dragged spot survives
-            // re-renders and the enabled↔disabled swap (state in start() scope).
-            position: pillPosition.dragged ?? undefined,
-            onDragMove: (pos) => {
-                pillPosition.dragged = pos
-                pillPosition.lastRendered = pos
-            },
-            onPositioned: (left, top) => {
-                pillPosition.lastRendered = { left, top }
+            // Persisted (session) pill drag offset — a dragged spot survives
+            // re-renders and the enabled↔disabled swap (state in start() scope),
+            // and re-anchors to the field on scroll/resize (via reposition).
+            dragOffset: pillPosition.dragOffset ?? undefined,
+            onDragMove: (offset) => {
+                pillPosition.dragOffset = offset
             },
         })
+        // Stash the handle so the shared scroll/resize loop can reposition the
+        // pill as the field moves.
+        state.statusHandle = statusHandle
         if (count === 0) {
             // No suggestions this round — the status pill alone is enough.
             // The pill's destroy is idempotent, so a later render with
@@ -1207,7 +1247,17 @@ function wireRuntime(
         // orchestrator's hit-test still needs them to map a pointer
         // position to a `RenderableItem`.
         const spans = state.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
-        const allRects = getSpanRectsBatch(el, spans)
+        // Defensive: a rect-measurement throw must NOT abort the highlight
+        // dispatch below. On a contenteditable, skipping setFieldHighlights
+        // leaves the stale CSS.highlights ranges un-rebuilt — the bug where the
+        // highlight "goes away forever" after an edit. Fall back to empty rects
+        // (no hit-test targets this round) but still push the highlights.
+        let allRects: DOMRect[][]
+        try {
+            allRects = getSpanRectsBatch(el, spans)
+        } catch {
+            allRects = spans.map(() => [])
+        }
         // Cache the rects for the field-level hover/click hit-test (parallel to
         // items; an item with no rects still occupies a slot but never matches).
         state.itemRects = state.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
