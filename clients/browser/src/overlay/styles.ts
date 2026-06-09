@@ -116,8 +116,8 @@ export const OVERLAY_CSS = `
     .gf-panel {
       background: color-mix(in oklab, #1c1c1e 40%, transparent);
       border-color: color-mix(in oklab, white 14%, transparent);
-      -webkit-backdrop-filter: blur(16px) saturate(180%) url(#gf-glass-distortion);
-      backdrop-filter: blur(16px) saturate(180%) url(#gf-glass-distortion);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      backdrop-filter: blur(16px) saturate(180%);
     }
   }
 
@@ -157,8 +157,8 @@ export const OVERLAY_CSS = `
     .gf-pill {
       background: color-mix(in oklab, #1c1c1e 36%, transparent);
       border-color: color-mix(in oklab, white 12%, transparent);
-      -webkit-backdrop-filter: blur(10px) saturate(160%) url(#gf-glass-distortion);
-      backdrop-filter: blur(10px) saturate(160%) url(#gf-glass-distortion);
+      -webkit-backdrop-filter: blur(10px) saturate(160%);
+      backdrop-filter: blur(10px) saturate(160%);
     }
   }
 
@@ -234,8 +234,8 @@ export const OVERLAY_CSS = `
     .gf-pill-panel {
       background: color-mix(in oklab, #1c1c1e 40%, transparent);
       border-color: color-mix(in oklab, white 14%, transparent);
-      -webkit-backdrop-filter: blur(16px) saturate(180%) url(#gf-glass-distortion);
-      backdrop-filter: blur(16px) saturate(180%) url(#gf-glass-distortion);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      backdrop-filter: blur(16px) saturate(180%);
     }
   }
   .gf-pill-panel__header {
@@ -327,8 +327,8 @@ export const OVERLAY_CSS = `
     .gf-tooltip {
       background: color-mix(in oklab, #1c1c1e 38%, transparent);
       border-color: color-mix(in oklab, white 12%, transparent);
-      -webkit-backdrop-filter: blur(10px) saturate(160%) url(#gf-glass-distortion);
-      backdrop-filter: blur(10px) saturate(160%) url(#gf-glass-distortion);
+      -webkit-backdrop-filter: blur(10px) saturate(160%);
+      backdrop-filter: blur(10px) saturate(160%);
     }
   }
   .gf-tooltip__header {
@@ -386,12 +386,18 @@ export const OVERLAY_CSS = `
     inset: 0;
     border-radius: inherit;
     pointer-events: none;
+    /* Bright specular top edge + a faint refractive ring all around. */
+    border: 1px solid rgba(255, 255, 255, 0.14);
     box-shadow:
       inset 0 1px 1.5px rgba(255, 255, 255, 0.5),
       inset 1px 0 1px rgba(255, 255, 255, 0.18),
       inset -1px 0 1px rgba(255, 255, 255, 0.18),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.12),
       inset 0 -1px 1px rgba(0, 0, 0, 0.18);
+    /* Distort the rim itself (filter url() works on elements, unlike inside
+       backdrop-filter) so the glass EDGE refracts/wobbles like real glass.
+       Subtle on purpose — a strong scale turns the rim into noise. */
+    -webkit-filter: url(#gf-glass-distortion);
+    filter: url(#gf-glass-distortion);
   }
 
   /* ============================================================

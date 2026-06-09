@@ -50,11 +50,12 @@ export function createOverlayHost(doc: Document = document): OverlayHost {
     const style = doc.createElement('style')
     style.textContent = OVERLAY_CSS
     root.appendChild(style)
-    // Liquid-glass edge displacement filter (referenced by the glass elements'
-    // rim ::before via backdrop-filter: url(#gf-glass-distortion)). Kept in the
-    // SAME shadow root so the url(#…) reference resolves locally. It is a
-    // progressive enhancement — if the browser ignores backdrop-filter filter
-    // refs, the base blur + refractive rim still render.
+    // Liquid-glass edge displacement filter, applied to the glass elements' rim
+    // ::after via `filter: url(#gf-glass-distortion)` (a regular filter on an
+    // element — which DOES render, unlike SVG filter refs inside backdrop-filter,
+    // which Chromium ignores). Kept in the SAME shadow root so the url(#…)
+    // reference resolves locally. Progressive: where unsupported, the base blur
+    // + static rim still render.
     root.appendChild(buildGlassFilter(doc))
     doc.body.appendChild(host)
 
@@ -103,9 +104,9 @@ function buildGlassFilter(doc: Document): SVGSVGElement {
         `<defs>` +
         `<filter id="gf-glass-distortion" x="-20%" y="-20%" width="140%" height="140%" ` +
         `color-interpolation-filters="sRGB">` +
-        `<feTurbulence type="fractalNoise" baseFrequency="0.012 0.014" numOctaves="2" seed="7" result="n"/>` +
-        `<feGaussianBlur in="n" stdDeviation="1.4" result="nb"/>` +
-        `<feDisplacementMap in="SourceGraphic" in2="nb" scale="16" ` +
+        `<feTurbulence type="fractalNoise" baseFrequency="0.02 0.024" numOctaves="2" seed="7" result="n"/>` +
+        `<feGaussianBlur in="n" stdDeviation="1" result="nb"/>` +
+        `<feDisplacementMap in="SourceGraphic" in2="nb" scale="6" ` +
         `xChannelSelector="R" yChannelSelector="G"/>` +
         `</filter>` +
         `</defs>`

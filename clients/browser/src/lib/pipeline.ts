@@ -76,7 +76,10 @@ export async function runCheck(text: string, deps: RunCheckDeps): Promise<RunChe
 
     const items: RenderableItem[] = []
     let dropped = 0
-    for (const s of res.suggestions) {
+    // Defensive: a malformed response (missing/non-array suggestions) must not
+    // throw inside the orchestrator and kill the check; treat it as "no edits".
+    const suggestions = Array.isArray(res?.suggestions) ? res.suggestions : []
+    for (const s of suggestions) {
         const cu = verify(text, s.span)
         if (!cu) {
             // oxlint-disable-next-line no-console

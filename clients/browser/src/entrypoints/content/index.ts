@@ -694,15 +694,40 @@ function wireRuntime(
         void rerunFor(el)(getText(el))
     }
 
-    // Pill panel: apply ALL corrections. Last-to-first so earlier byte offsets
-    // stay valid as later spans are replaced; each is re-validated against the
-    // live text (stale ones are skipped). One re-check at the end.
+    // Pill panel: apply ALL corrections. We must NOT run a sync loop of
+    // applyFix/execCommand on a contenteditable — the editor (e.g. Lexical)
+    // reconciles asynchronously, so the 2nd edit reads stale offsets and
+    // corrupts the text. Instead build the fully-corrected text as a STRING
+    // (apply every still-valid edit last-to-first so earlier offsets stay
+    // valid) and write it in ONE applyFix over the whole field — a single
+    // execCommand, no race. Signals are deduped by correction id (all
+    // suggestions of one /correct share the same logged id).
     function applyAllFor(el: HTMLElement): void {
         const st = runtime.fields.get(el)
         if (!st) return
         closePopoverFor(el)
-        const ordered = [...st.items].sort((a, b) => b.cuStart - a.cuStart)
-        for (const item of ordered) applyItemPrimary(el, item)
+        const original = getText(el)
+        const valid = st.items.filter((it) => isSpanStillValid(original, it))
+        let text = original
+        for (const item of [...valid].sort((a, b) => b.cuStart - a.cuStart)) {
+            text =
+                text.slice(0, item.cuStart) + (item.replacements[0] ?? '') + text.slice(item.cuEnd)
+        }
+        if (text !== original) {
+            applyFix(el, { start: 0, end: original.length }, text)
+            const signaled = new Set<number>()
+            for (const item of valid) {
+                if (typeof item.id === 'number' && item.id > 0 && !signaled.has(item.id)) {
+                    signaled.add(item.id)
+                    void signalQueue.enqueue({
+                        id: item.id,
+                        action: 'accepted',
+                        category: item.category,
+                        source: 'browser',
+                    })
+                }
+            }
+        }
         void rerunFor(el)(getText(el))
     }
 
