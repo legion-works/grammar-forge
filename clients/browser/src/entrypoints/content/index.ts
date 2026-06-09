@@ -161,6 +161,12 @@ interface Runtime {
     /** The field the current chip belongs to; needed to clear our
      *  aria-describedby on the right element when the chip hides. */
     hoverField: HTMLElement | null
+    /** The field whose click-popover is currently open, or null. Single-popover
+     *  invariant across fields: opening a popover on field B closes any popover
+     *  on field A. `openPopovers` is a WeakMap (not iterable), so this explicit
+     *  back-reference lets openPopoverFor close the previous field's popover and
+     *  detach/teardown clear it. */
+    activePopoverField: HTMLElement | null
     stopObserver: (() => void) | null
     /**
      * Every remover that bound a listener to this runtime. teardownRuntime
@@ -271,6 +277,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             hoverTimer: null,
             hoverItem: null,
             hoverField: null,
+            activePopoverField: null,
             stopObserver: null,
             cleanups: [],
         }
@@ -939,6 +946,13 @@ function wireRuntime(
         state.attachment.detach()
         runtime.fields.delete(el)
         if (runtime.active?.el === el) runtime.active = null
+        // Close this field's popover if open (clears runtime.activePopoverField
+        // via closePopoverFor) so a detached field can't leave a dangling
+        // active-popover reference.
+        if (runtime.activePopoverField === el) closePopoverFor(el)
+        // Hide the chip if it was previewing this field — otherwise a chip with
+        // aria-describedby pointing at a removed field lingers.
+        if (runtime.hoverField === el) hideTooltipNow()
     }
 
     runtime.stopObserver = createFieldObserver({
@@ -994,6 +1008,9 @@ function wireRuntime(
         // anchored UI whose rects are now stale, and flush pending feedback.
         dismissPopoversIn(overlay.root)
         runtime.active = null
+        // dismissPopoversIn removes the popover DOM directly (not via
+        // closePopoverFor), so clear the active-field back-reference too.
+        runtime.activePopoverField = null
         if (runtime.hoverTimer) {
             clearTimeout(runtime.hoverTimer)
             runtime.hoverTimer = null
@@ -1066,6 +1083,7 @@ function wireRuntime(
         handle?.hide()
         openPopovers.delete(el)
         if (runtime.active?.el === el) runtime.active = null
+        if (runtime.activePopoverField === el) runtime.activePopoverField = null
     }
 
     // Wire the popover callbacks (defined inline so they close over the
@@ -1073,6 +1091,12 @@ function wireRuntime(
     function openPopoverFor(el: HTMLElement, item: RenderableItem, anchorRect: DOMRect): void {
         const state = runtime.fields.get(el)
         if (!state) return
+        // Single-popover invariant: a popover open on a DIFFERENT field must
+        // close before this one opens (openPopovers is a WeakMap, so we track
+        // the active field explicitly to find it).
+        if (runtime.activePopoverField && runtime.activePopoverField !== el) {
+            closePopoverFor(runtime.activePopoverField)
+        }
         closePopoverFor(el)
         const handle = showPopover(overlay.root, {
             anchorRect,
@@ -1147,6 +1171,7 @@ function wireRuntime(
         })
         openPopovers.set(el, handle)
         runtime.active = { el, item, replacementIndex: 0 }
+        runtime.activePopoverField = el
     }
 
     // Overlay-only apply flourish: flash the just-applied item's highlight
