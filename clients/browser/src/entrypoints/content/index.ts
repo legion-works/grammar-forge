@@ -55,6 +55,16 @@ interface FieldState {
      * there are no suggestions.
      */
     itemRects: Array<{ item: RenderableItem; rects: DOMRect[] }>
+    /**
+     * Monotonic check counter. Each rerunFor call takes the next value before
+     * its async bridge request; when the request resolves it only renders if it
+     * is STILL the latest (its value equals checkSeq). Drops stale results from
+     * overlapping checks — e.g. applying a fix fires both a direct re-check and
+     * the edit-event debounced re-check; without this, an older check (text
+     * still had an error) could resolve last and leave the pill showing a stale
+     * count.
+     */
+    checkSeq: number
 }
 
 interface ActiveSuggestion {
@@ -274,6 +284,7 @@ function wireRuntime(
             // and are swapped out atomically when renderField calls
             // setHandles(new) — which destroys the previous set. Clearing here
             // instead would blink the underlines off for the whole round-trip.
+            const seq = ++state.checkSeq
             try {
                 const s = getSettings()
                 const { items } = await runCheck(text, {
@@ -281,6 +292,10 @@ function wireRuntime(
                         runtime.client.correct({ text: t, picky: s.picky, source: 'browser' }),
                 })
                 if (!ctx.isValid) return
+                // Drop a stale result: a newer check superseded this one while
+                // its request was in flight (e.g. apply → direct re-check +
+                // debounced re-check race). Only the latest check renders.
+                if (seq !== state.checkSeq) return
                 state.items = items
                 renderField(el, overlay.root, state)
                 updateFocusedCounts(runtime, el)
@@ -363,6 +378,7 @@ function wireRuntime(
             attachment,
             items: [],
             itemRects: [],
+            checkSeq: 0,
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
