@@ -184,6 +184,44 @@ func TestSignalRejectsTrailingGarbage(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
+// A3: POST /rephrase must accept an optional int `alternatives` and an
+// optional `override` object. The override selects a non-default LLM
+// backend (provider="openai"|"anthropic"|""=default). The service must
+// receive the decoded values; the response must round-trip alternatives
+// (always as an array, never null).
+func TestRephrasePassesAlternativesAndOverride(t *testing.T) {
+	svc := &fakeService{rephraseOut: correction.RephraseResult{
+		Original: "x", Rephrased: "y", Alternatives: []string{"z"},
+	}}
+	body := `{"text":"x","alternatives":2,"override":{"provider":"anthropic","base_url":"u","model":"m","api_key":"k"}}`
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rephrase", strings.NewReader(body))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Equal(t, 2, svc.rephraseSeen.Alternatives)
+	require.NotNil(t, svc.rephraseSeen.Override)
+	require.Equal(t, "anthropic", svc.rephraseSeen.Override.Provider)
+	require.Equal(t, "u", svc.rephraseSeen.Override.BaseURL)
+	require.Equal(t, "m", svc.rephraseSeen.Override.Model)
+	require.Equal(t, "k", svc.rephraseSeen.Override.APIKey)
+	var got struct {
+		Alternatives []string `json:"alternatives"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, []string{"z"}, got.Alternatives)
+}
+
+// Unknown provider in the override is a 400 — the handler must reject
+// before the service is called (no backend lookup with a bogus name).
+func TestRephraseRejectsUnknownProvider(t *testing.T) {
+	svc := &fakeService{}
+	body := `{"text":"x","override":{"provider":"bogus"}}`
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rephrase", strings.NewReader(body))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
 // Picky-mode round-trip: POST /correct with {"picky":true} must (a) decode
 // the flag, (b) pass it through to the service as correction.Request.Picky,
 // and (c) serialise a category:"style" suggestion back in the JSON response

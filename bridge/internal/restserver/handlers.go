@@ -24,12 +24,25 @@ type signalRequest struct {
 }
 
 // rephraseRequest is the JSON shape of POST /rephrase. Tone/Style/Source are
-// optional; only Text is required.
+// optional; only Text is required. Alternatives is the requested variant
+// count (0 = service default). Override, when present, routes the call to a
+// non-default LLM backend (provider must be "" | "openai" | "anthropic").
 type rephraseRequest struct {
-	Text   string `json:"text"`
-	Tone   string `json:"tone,omitempty"`
-	Style  string `json:"style,omitempty"`
-	Source string `json:"source,omitempty"`
+	Text         string            `json:"text"`
+	Tone         string            `json:"tone,omitempty"`
+	Style        string            `json:"style,omitempty"`
+	Alternatives int               `json:"alternatives,omitempty"`
+	Source       string            `json:"source,omitempty"`
+	Override     *rephraseOverride `json:"override,omitempty"`
+}
+
+// rephraseOverride is the wire shape of the optional backend override on
+// /rephrase. api_key is never logged (the service layer's contract).
+type rephraseOverride struct {
+	Provider string `json:"provider,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
+	Model    string `json:"model,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
 }
 
 // rephraseResult is the JSON shape of the /rephrase response. Alternatives
@@ -110,11 +123,28 @@ func (s *Server) handleRephrase(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text is required"})
 		return
 	}
+	var override *correction.RephraseBackend
+	if req.Override != nil {
+		switch req.Override.Provider {
+		case "", "openai", "anthropic":
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown provider"})
+			return
+		}
+		override = &correction.RephraseBackend{
+			Provider: req.Override.Provider,
+			BaseURL:  req.Override.BaseURL,
+			Model:    req.Override.Model,
+			APIKey:   req.Override.APIKey,
+		}
+	}
 	result, err := s.svc.Rephrase(r.Context(), correction.RephraseRequest{
-		Text:   req.Text,
-		Tone:   req.Tone,
-		Style:  req.Style,
-		Source: correction.Source(req.Source),
+		Text:         req.Text,
+		Tone:         req.Tone,
+		Style:        req.Style,
+		Alternatives: req.Alternatives,
+		Override:     override,
+		Source:       correction.Source(req.Source),
 	})
 	if err != nil {
 		s.log.Error("rephrase failed", "err", err)
