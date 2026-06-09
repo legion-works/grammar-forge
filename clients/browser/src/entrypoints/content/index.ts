@@ -12,6 +12,7 @@
 import { createFieldObserver } from '@/input/observer'
 import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
+import { isUndoRedoKeydown } from '@/input/undo-redo'
 import { applyFix, getText } from '@/input/text'
 import { isSpanStillValid, runCheck, tallyByCategory, type RenderableItem } from '@/lib/pipeline'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
@@ -301,6 +302,11 @@ function wireRuntime(
     // hide timer lives here on the runtime so teardown can cancel it.
     const HOVER_THROTTLE_MS = 50
     const TOOLTIP_HIDE_GRACE_MS = 150
+    // Minimum delay before reading a field's text after a paste, so rich editors
+    // (Lexical/Discord) that apply the paste ASYNC have reconciled. Also the
+    // floor for the paste-grace window (a user-configured grace below this would
+    // read pre-paste text).
+    const PASTE_SETTLE_MS = 150
 
     const clearTooltipHide = (): void => {
         if (runtime.hoverTimer) {
@@ -389,6 +395,26 @@ function wireRuntime(
         await rerunFor(el)(getText(el))
     }
 
+    // Arm (or re-arm) the paste-grace window for a field: suppress the check for
+    // `pasteGraceMs`, then re-check the LIVE text. Cancels any pending debounce
+    // (so typing just before the paste can't fire mid-grace) and any prior grace
+    // timer. A minimum settle floor (PASTE_SETTLE_MS) ensures rich editors
+    // (Lexical/Discord) that apply the paste ASYNC have reconciled before we read
+    // the text — important when the grace is configured very short / 0. Used by
+    // BOTH the input-gate paste branch (plain fields, which fire an
+    // inputType='insertFromPaste' event) and the native `paste` listener (rich
+    // editors, which apply paste programmatically and fire NO such input event).
+    const armPasteGrace = (el: HTMLElement, state: FieldState): void => {
+        const s = getSettings()
+        clearPasteGrace(state)
+        state.attachment.cancelPending()
+        const graceMs = Math.max(s.pasteGraceMs, PASTE_SETTLE_MS)
+        state.pasteGraceTimer = setTimeout(() => {
+            state.pasteGraceTimer = null
+            void rerunFor(el)(getText(el))
+        }, graceMs)
+    }
+
     // Decide whether an `input` event on `el` should schedule a check, and arm
     // the paste-grace window as a side effect. This is the SINGLE authoritative
     // input gate (passed to the attachment as onInputEvent — there is no longer
@@ -409,15 +435,11 @@ function wireRuntime(
             if (!shouldCheckInput(inputType, { checkPastedText: s.checkPastedText })) return false
             const state = runtime.fields.get(el)
             if (!state) return false
-            if (isPasteInput(inputType) && s.pasteGraceMs > 0) {
-                // Re-arm the grace window. Drop any debounce scheduled by typing
-                // just before the paste so it can't fire during the grace.
-                clearPasteGrace(state)
-                state.attachment.cancelPending()
-                state.pasteGraceTimer = setTimeout(() => {
-                    state.pasteGraceTimer = null
-                    void rerunFor(el)(getText(el))
-                }, s.pasteGraceMs)
+            if (isPasteInput(inputType)) {
+                // Plain field paste (fires inputType='insertFromPaste'): arm the
+                // grace window instead of checking now, then suppress the
+                // immediate debounced check.
+                armPasteGrace(el, state)
                 return false
             }
             // Non-paste edit: ends any pending grace (whichever comes first) and
@@ -476,6 +498,48 @@ function wireRuntime(
             const st = runtime.fields.get(el)
             if (st) clearPasteGrace(st)
         })
+
+        // Native `paste` fallback. Rich editors (Discord/Lexical, Slack, Google
+        // Docs) intercept the paste ClipboardEvent and insert content via their
+        // OWN reconciler, which fires NO `input` event with
+        // inputType='insertFromPaste' — so the input gate above never sees the
+        // paste. Listen to the native event directly (CAPTURE phase so we see it
+        // even if the editor stops propagation; we never preventDefault, so the
+        // editor is unaffected) and arm the same grace window. For plain fields
+        // the input gate ALSO fires — arming is idempotent (re-arm just resets
+        // the timer; the bridge dedupes identical text).
+        const onFieldPaste = (): void => {
+            const s = getSettings()
+            if (s.checkMode !== 'realtime') return
+            if (!s.checkPastedText) return
+            const st = runtime.fields.get(el)
+            if (!st) return
+            armPasteGrace(el, st)
+        }
+        el.addEventListener('paste', onFieldPaste, { capture: true })
+        runtime.cleanups.push(() =>
+            el.removeEventListener('paste', onFieldPaste, { capture: true }),
+        )
+
+        // Undo/redo fallback (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z). Same problem: rich
+        // editors apply undo/redo programmatically and fire no historyUndo/redo
+        // `input` event. Detect the chord (capture phase, never preventing
+        // default) and schedule a debounced check — the debounce window lets the
+        // editor reconcile before the text is read at fire time, and coalesces
+        // key-repeat. An explicit undo/redo also ends any pending paste grace.
+        const onFieldUndoRedo = (e: KeyboardEvent): void => {
+            const s = getSettings()
+            if (s.checkMode !== 'realtime') return
+            if (!isUndoRedoKeydown(e)) return
+            const st = runtime.fields.get(el)
+            if (!st) return
+            clearPasteGrace(st)
+            st.attachment.debouncedRun()
+        }
+        el.addEventListener('keydown', onFieldUndoRedo, { capture: true })
+        runtime.cleanups.push(() =>
+            el.removeEventListener('keydown', onFieldUndoRedo, { capture: true }),
+        )
 
         // Field-level hover/click interaction. The underline overlay is
         // pointer-events:none, so interaction is detected on the FIELD itself

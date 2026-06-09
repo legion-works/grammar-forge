@@ -53,9 +53,17 @@ export const settingsItem = storage.defineItem<Settings>('local:settings', {
     fallback: DEFAULT_SETTINGS,
 })
 
-/** Read the persisted settings (returns defaults when nothing is stored). */
+/**
+ * Read the persisted settings (returns defaults when nothing is stored).
+ *
+ * Merges the stored object OVER DEFAULT_SETTINGS so a settings object written
+ * by an OLDER build (missing a field added since, e.g. `pasteGraceMs`) still
+ * gets that field's default instead of `undefined`. Without this, a field
+ * added later reads back undefined for existing users and silently disables
+ * the feature that depends on it.
+ */
 export async function getSettings(): Promise<Settings> {
-    return await settingsItem.getValue()
+    return { ...DEFAULT_SETTINGS, ...(await settingsItem.getValue()) }
 }
 
 /**
