@@ -9,9 +9,10 @@
 // The registry is GLOBAL to a document: `CSS.highlights` is a single Map keyed
 // by string. We share highlight names across fields ("gf-spelling" idle,
 // "gf-spelling-strong" for the focused field, "gf-hover" for the single
-// hovered item) and bucket ranges per field internally; every state change
-// triggers a full `rebuild()` that clears our entries and repopulates them.
-// That's the contract the tests pin: keys + range counts.
+// hovered item) and bucket ranges per field internally. Field/focus changes
+// call `rebuildCategories()` (clears + repopulates gf-<cat> / gf-<cat>-strong);
+// hover calls only `applyHover()` (touches gf-hover). That's the contract the
+// tests pin: keys + range counts + object identity after hover.
 //
 // On first use we inject a `<style id="gf-native-highlights">` into the page's
 // <head> with `::highlight()` rules for every category (idle / strong / hover
@@ -44,7 +45,7 @@ interface FieldEntry {
 }
 
 export interface NativeHighlighter {
-    /** Replace this field's items; rebuilds the registry. Skips null ranges. */
+    /** Replace this field's items; rebuilds category buckets + reapplies hover. Skips null ranges. */
     setFieldHighlights: (el: HTMLElement, items: readonly NativeHighlightItem[]) => void
     /** Mark one field as focused — its ranges go into the `-strong` bucket. */
     setFocusedField: (el: HTMLElement | null) => void
@@ -110,15 +111,22 @@ function makeHighlighter(doc: Document): NativeHighlighter {
     const fields = new Map<HTMLElement, FieldEntry>()
     let focused: HTMLElement | null = null
     let hover: { el: HTMLElement; index: number } | null = null
+    // Tracked alongside `hover` so applyHover() can paint the registry in O(1)
+    // without re-walking `fields`. Updated by setFieldHighlights / setHoverItem
+    // / clearField; cleared on destroy.
+    let hoverRange: Range | null = null
 
-    const rebuild = (): void => {
+    // Rebuild ONLY the per-category buckets (gf-<cat> / gf-<cat>-strong).
+    // Called on field/focus changes — NOT on hover.
+    const rebuildCategories = (): void => {
         if (!isNativeHighlightSupported()) return
         ensureStyleInjected(doc)
         const reg = registry()
         if (!reg) return
-        // Clear our entries. Leave any other consumer's entries alone.
+        // Clear our category entries only. Leave `gf-hover` and any other
+        // consumer's entries alone.
         for (const key of Array.from(reg.keys())) {
-            if (key.startsWith('gf-')) reg.delete(key)
+            if (key.startsWith('gf-') && key !== 'gf-hover') reg.delete(key)
         }
         if (fields.size === 0) return
 
@@ -145,60 +153,79 @@ function makeHighlighter(doc: Document): NativeHighlighter {
         for (const [cat, ranges] of strongByCat) {
             reg.set(`gf-${cat}-strong`, new Highlight(...ranges))
         }
-        // Single hover range.
-        if (hover) {
-            const entry = fields.get(hover.el)
-            const item = entry?.items[hover.index]
-            if (item?.range) {
-                reg.set('gf-hover', new Highlight(item.range))
-            }
-        }
+    }
+
+    // Apply ONLY the single hover highlight (O(1)). Touches one registry key.
+    const applyHover = (): void => {
+        if (!isNativeHighlightSupported()) return
+        const reg = registry()
+        if (!reg) return
+        if (hoverRange) reg.set('gf-hover', new Highlight(hoverRange))
+        else reg.delete('gf-hover')
     }
 
     return {
         setFieldHighlights(el, items) {
             if (!isNativeHighlightSupported()) return
+            ensureStyleInjected(doc)
+            // M6: skip when nothing to do (already-empty field, empty list).
+            if (items.length === 0 && !fields.has(el)) return
             const built: FieldEntry['items'] = items.map((it) => ({
                 item: it,
                 range: codeUnitSpanToRange(el, { start: it.cuStart, end: it.cuEnd }),
             }))
             fields.set(el, { items: built })
-            // Hover is anchored by (el, index) — re-validate it's still in range.
-            if (
-                hover &&
-                hover.el === el &&
-                (hover.index >= built.length || !built[hover.index]?.range)
-            ) {
-                hover = null
+            // Hover is anchored by (el, index) — re-validate its range / index.
+            if (hover && hover.el === el) {
+                const r = built[hover.index]?.range ?? null
+                hoverRange = r
+                if (!r) hover = null
             }
-            rebuild()
+            rebuildCategories()
+            applyHover()
         },
         setFocusedField(el) {
             if (!isNativeHighlightSupported()) {
                 focused = null
                 return
             }
+            if (el === focused) return
             focused = el
-            rebuild()
+            rebuildCategories()
         },
         setHoverItem(el, index) {
             if (!isNativeHighlightSupported()) {
                 hover = null
+                hoverRange = null
                 return
             }
-            hover = index == null ? null : { el, index }
-            rebuild()
+            // M5: no-op guard — same (el, index) twice, or clearing when already
+            // clear. Skip the registry write entirely.
+            if ((hover?.el === el && hover?.index === index) || (index == null && !hover)) return
+            if (index == null) {
+                hover = null
+                hoverRange = null
+            } else {
+                hover = { el, index }
+                hoverRange = fields.get(el)?.items[index]?.range ?? null
+            }
+            applyHover()
         },
         clearField(el) {
             if (!fields.delete(el)) return
             if (focused === el) focused = null
-            if (hover?.el === el) hover = null
-            rebuild()
+            if (hover?.el === el) {
+                hover = null
+                hoverRange = null
+            }
+            rebuildCategories()
+            applyHover()
         },
         destroy() {
             fields.clear()
             focused = null
             hover = null
+            hoverRange = null
             if (isNativeHighlightSupported()) {
                 const reg = registry()
                 if (reg) {

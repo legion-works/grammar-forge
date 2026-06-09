@@ -58,6 +58,17 @@ const mkField = (html: string): HTMLElement => {
 // Each field gets text into a single text node for deterministic ranges.
 const field = (): HTMLElement => mkField('the teh cat')
 
+// Single-text-node contenteditable helper for the hover/category split tests.
+// `setFieldHighlights` / `codeUnitSpanToRange` walk real text nodes, so a plain
+// `div` with `textContent` and a body attachment is enough — no layout needed.
+const makeContentEditable = (text: string): HTMLElement => {
+    const el = document.createElement('div')
+    el.setAttribute('contenteditable', 'true')
+    el.textContent = text
+    document.body.appendChild(el)
+    return el
+}
+
 describe('isNativeHighlightSupported', () => {
     afterEach(removeHighlightStub)
 
@@ -233,5 +244,50 @@ describe('getNativeHighlighter (with stub)', () => {
         h.setFieldHighlights(el, [{ cuStart: 0, cuEnd: 99, category: 'spelling' }])
         const reg = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights
         expect(reg.has('gf-spelling')).toBe(false)
+    })
+
+    it('setHoverItem only touches gf-hover, not the category buckets', () => {
+        const h = getNativeHighlighter()
+        const el = makeContentEditable('the cat sat')
+        h.setFieldHighlights(el, [{ cuStart: 4, cuEnd: 7, category: 'spelling' }])
+        const before = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights.get(
+            'gf-spelling',
+        )
+        h.setHoverItem(el, 0)
+        const reg = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights
+        expect(reg.get('gf-hover')).toBeDefined()
+        // the category Highlight object identity is UNCHANGED (no rebuild)
+        expect(reg.get('gf-spelling')).toBe(before)
+    })
+
+    it('setHoverItem with the same index is a no-op (no gf-hover churn)', () => {
+        const h = getNativeHighlighter()
+        const el = makeContentEditable('the cat sat')
+        h.setFieldHighlights(el, [{ cuStart: 4, cuEnd: 7, category: 'spelling' }])
+        h.setHoverItem(el, 0)
+        const hov = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights.get(
+            'gf-hover',
+        )
+        h.setHoverItem(el, 0)
+        // same object, not recreated
+        expect(
+            (CSS as unknown as { highlights: Map<string, Highlight> }).highlights.get('gf-hover'),
+        ).toBe(hov)
+    })
+
+    it('setFocusedField with the already-focused field is a no-op', () => {
+        const h = getNativeHighlighter()
+        const el = makeContentEditable('the cat sat')
+        h.setFieldHighlights(el, [{ cuStart: 4, cuEnd: 7, category: 'spelling' }])
+        h.setFocusedField(el)
+        const strong = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights.get(
+            'gf-spelling-strong',
+        )
+        h.setFocusedField(el)
+        expect(
+            (CSS as unknown as { highlights: Map<string, Highlight> }).highlights.get(
+                'gf-spelling-strong',
+            ),
+        ).toBe(strong)
     })
 })
