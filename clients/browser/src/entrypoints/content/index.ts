@@ -23,7 +23,13 @@ import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { renderStatusButton } from '@/overlay/status-button'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
-import { getSettings, isSiteBlocked, settingsItem, type Settings } from '@/storage/settings'
+import {
+    getSettings,
+    isSiteBlocked,
+    setSettings,
+    settingsItem,
+    type Settings,
+} from '@/storage/settings'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
 import type { ContentScriptContext } from 'wxt/utils/content-script-context'
 import type { Category } from '@/api/types'
@@ -103,12 +109,17 @@ interface Runtime {
 
 async function start(ctx: ContentScriptContext): Promise<void> {
     let currentSettings: Settings = await getSettings()
-    const siteAllowed = (s: Settings): boolean => s.enabled && !isSiteBlocked(s, location.hostname)
+    const hostname = location.hostname
+    // The extension is globally on/off via settings.enabled; per-site disable
+    // ("power off on this site") lives in the blockedSites deny-list.
+    const extensionOn = (s: Settings): boolean => s.enabled
+    const sitePaused = (s: Settings): boolean => isSiteBlocked(s, hostname)
 
-    // The runtime is created/destroyed as settings flip. When the site becomes
-    // blocked or the user disables the extension, the runtime tears down
-    // (overlay + observer + listeners) and re-initialises on re-enable.
+    // Full checking runtime (exists only when on + site not paused). When the
+    // site is paused we instead show a small standalone "power" pill so the
+    // user can re-enable in-page (disabledHost).
     let runtime: Runtime | null = null
+    let disabledHost: ReturnType<typeof createOverlayHost> | null = null
 
     const teardownRuntime = (): void => {
         if (!runtime) return
@@ -172,51 +183,87 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         }
     }
 
-    const initRuntime = (s: Settings): void => {
-        if (runtime) return
-        if (!siteAllowed(s)) return
-        const r = (runtime = makeRuntime(s))
-        wireRuntime(ctx, r, () => currentSettings)
+    // Toggle the current site in the blockedSites deny-list (the pill's power
+    // button). Persisted; the settings watcher below reconciles the UI
+    // (teardown + show the re-enable pill, or re-init checking).
+    const togglePower = async (): Promise<void> => {
+        const s = await getSettings()
+        const blocked = isSiteBlocked(s, hostname)
+        const blockedSites = blocked
+            ? s.blockedSites.filter((h) => h !== hostname)
+            : [...s.blockedSites, hostname]
+        await setSettings({ blockedSites })
     }
 
-    // Settings watcher — recreate the bridge client when the URL or remote
-    // opt-in changes; tear down the whole runtime when the user disables the
-    // extension or the site becomes blocked. Per-check flags (checkPastedText,
-    // picky, checkMode) are read live from the closure each time.
+    const initRuntime = (s: Settings): void => {
+        if (runtime) return
+        const r = (runtime = makeRuntime(s))
+        wireRuntime(ctx, r, () => currentSettings, togglePower)
+    }
+
+    // Standalone collapsed "power" pill shown when the site is paused, so the
+    // user can re-enable in-page. It is NOT part of the checking runtime (which
+    // is torn down while paused); it lives on its own overlay host pinned to the
+    // viewport's bottom-right corner.
+    const mountDisabledPill = (): void => {
+        if (disabledHost) return
+        const host = (disabledHost = createOverlayHost())
+        renderStatusButton(host.root, {
+            count: 0,
+            anchorRect: new DOMRect(0, 0, window.innerWidth, window.innerHeight),
+            disabled: true,
+            corrections: [],
+            onFocusField: () => {},
+            onTogglePower: () => void togglePower(),
+            onApplyAll: () => {},
+            onApplyOne: () => {},
+        })
+    }
+    const unmountDisabledPill = (): void => {
+        disabledHost?.destroy()
+        disabledHost = null
+    }
+
+    // Reconcile the page state to the current settings: globally off -> nothing;
+    // site paused -> re-enable pill only; otherwise -> full checking runtime.
+    const reconcile = (s: Settings): void => {
+        if (!extensionOn(s)) {
+            teardownRuntime()
+            unmountDisabledPill()
+            return
+        }
+        if (sitePaused(s)) {
+            teardownRuntime()
+            mountDisabledPill()
+            return
+        }
+        unmountDisabledPill()
+        initRuntime(s)
+    }
+
+    // Settings watcher — rebind the bridge client when the URL/remote opt-in
+    // changes, then reconcile the runtime/pill to the new settings. Per-check
+    // flags (checkPastedText, picky, checkMode) are read live from the closure.
     const unwatchSettings = settingsItem.watch((next) => {
         const prev = currentSettings
         currentSettings = next
-        const wasAllowed = siteAllowed(prev)
-        const nowAllowed = siteAllowed(next)
-        if (wasAllowed && !nowAllowed) {
-            teardownRuntime()
-            return
-        }
-        if (!wasAllowed && nowAllowed) {
-            initRuntime(next)
-            return
-        }
         if (
             runtime &&
             (prev.bridgeBaseUrl !== next.bridgeBaseUrl ||
                 prev.allowRemoteBridge !== next.allowRemoteBridge)
         ) {
-            // Recreate the client + signal queue's sender so a remote-opt-out
-            // takes effect immediately. (The signal queue's `send` is a
-            // closure that captures the OLD client; rebind it.)
+            // Recreate the client + signal queue's sender so a remote opt-out
+            // takes effect immediately (the queue's `send` closes over the OLD
+            // client; rebind it).
             const newClient = new BridgeClient(next.bridgeBaseUrl, next.allowRemoteBridge)
             runtime.client = newClient
-            // createSignalQueue has no public setter; replace the queue with a
-            // fresh one. Pending events are dropped — acceptable on a config
-            // change (the user just toggled privacy).
             runtime.signalQueue = createSignalQueue({ send: (events) => newClient.signal(events) })
         }
+        reconcile(next)
     })
     ctx.onInvalidated(() => unwatchSettings())
 
-    if (siteAllowed(currentSettings)) {
-        initRuntime(currentSettings)
-    }
+    reconcile(currentSettings)
 
     // Script-invalidation teardown is the SAME as a settings-driven teardown:
     // every listener we registered is on `runtime.cleanups` (we mirror the
@@ -224,13 +271,17 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     // here releases everything. The function is idempotent — the `runtime =
     // null` guard makes a second call (e.g. if a settings-driven teardown
     // already ran) a no-op.
-    ctx.onInvalidated(() => teardownRuntime())
+    ctx.onInvalidated(() => {
+        teardownRuntime()
+        unmountDisabledPill()
+    })
 }
 
 function wireRuntime(
     ctx: ContentScriptContext,
     runtime: Runtime,
     getSettings: () => Settings,
+    togglePower: () => void,
 ): void {
     const { overlay, signalQueue } = runtime
 
@@ -618,6 +669,43 @@ function wireRuntime(
         runtime.active = { el, item, replacementIndex: 0 }
     }
 
+    // Apply an item's PRIMARY replacement (stale-guarded) + emit the accepted
+    // signal. Returns false (no-op) when the span has gone stale. Does not
+    // re-check — the caller batches that.
+    function applyItemPrimary(el: HTMLElement, item: RenderableItem): boolean {
+        if (!isSpanStillValid(getText(el), item)) return false
+        applyFix(el, { start: item.cuStart, end: item.cuEnd }, item.replacements[0] ?? '')
+        void signalQueue.enqueue({
+            id: item.id,
+            action: 'accepted',
+            category: item.category,
+            source: 'browser',
+        })
+        return true
+    }
+
+    // Pill panel: apply ONE correction by index, then re-check.
+    function applyOneFor(el: HTMLElement, index: number): void {
+        const st = runtime.fields.get(el)
+        const item = st?.items[index]
+        if (!item) return
+        closePopoverFor(el)
+        applyItemPrimary(el, item)
+        void rerunFor(el)(getText(el))
+    }
+
+    // Pill panel: apply ALL corrections. Last-to-first so earlier byte offsets
+    // stay valid as later spans are replaced; each is re-validated against the
+    // live text (stale ones are skipped). One re-check at the end.
+    function applyAllFor(el: HTMLElement): void {
+        const st = runtime.fields.get(el)
+        if (!st) return
+        closePopoverFor(el)
+        const ordered = [...st.items].sort((a, b) => b.cuStart - a.cuStart)
+        for (const item of ordered) applyItemPrimary(el, item)
+        void rerunFor(el)(getText(el))
+    }
+
     function renderField(el: HTMLElement, root: ShadowRoot, state: FieldState): void {
         // Reset the hit-test rects every render; repopulated below when there
         // are suggestions. Cleared first so the count===0 early-return leaves
@@ -629,9 +717,19 @@ function wireRuntime(
             count,
             byCategory: tallyByCategory(state.items),
             anchorRect: anchor,
-            onClick: () => {
+            disabled: false,
+            corrections: state.items.map((it) => ({
+                category: it.category,
+                diffOriginal: it.diffOriginal,
+                diffCorrected: it.diffCorrected,
+                diffIsDeletion: it.diffIsDeletion,
+            })),
+            onFocusField: () => {
                 el.focus()
             },
+            onTogglePower: togglePower,
+            onApplyAll: () => applyAllFor(el),
+            onApplyOne: (i) => applyOneFor(el, i),
         })
         if (count === 0) {
             // No suggestions this round — the status pill alone is enough.

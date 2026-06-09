@@ -162,6 +162,143 @@ export const OVERLAY_CSS = `
     }
   }
 
+  /* Power button + body inside the pill */
+  .gf-pill__power {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f5f5f5;
+    cursor: pointer;
+    flex: 0 0 auto;
+    transition: background 120ms ease-out, color 120ms ease-out;
+  }
+  .gf-pill__power:hover {
+    background: rgba(255, 255, 255, 0.18);
+  }
+  .gf-pill__power:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+  }
+  .gf-pill__body {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+  }
+  /* Collapsed (disabled-on-this-site) pill: just the muted power icon */
+  .gf-pill--disabled {
+    padding: 4px;
+    opacity: 0.65;
+  }
+  .gf-pill--disabled .gf-pill__power {
+    background: transparent;
+    color: #9ca3af;
+  }
+
+  /* Pill hover panel — corrections list + Apply all (glass like the popover) */
+  .gf-pill-panel {
+    position: fixed;
+    pointer-events: auto;
+    z-index: ${Z_OVERLAY};
+    min-width: 220px;
+    max-width: 360px;
+    padding: 8px;
+    border-radius: 12px;
+    isolation: isolate;
+    contain: layout paint;
+    background: rgba(28, 28, 30, 0.82);
+    color: #f5f5f5;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
+      0 1px 2px rgba(0, 0, 0, 0.12),
+      0 8px 24px rgba(0, 0, 0, 0.20);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    transform-origin: 50% 100%;
+    animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-pill-panel {
+      background: color-mix(in oklab, #1c1c1e 40%, transparent);
+      border-color: color-mix(in oklab, white 14%, transparent);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      backdrop-filter: blur(16px) saturate(180%);
+    }
+  }
+  .gf-pill-panel__header {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.8;
+    margin: 2px 4px 6px;
+  }
+  .gf-pill-panel__list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .gf-pill-panel__row {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 5px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .gf-pill-panel__row:hover {
+    background: rgba(255, 255, 255, 0.10);
+  }
+  .gf-pill-panel__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+  }
+  .gf-pill-panel__apply-all {
+    appearance: none;
+    width: 100%;
+    margin-top: 8px;
+    border: 1px solid #1d4ed8;
+    background: #2563eb;
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    font-size: 12px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 120ms ease-out;
+  }
+  .gf-pill-panel__apply-all:hover {
+    background: #1d4ed8;
+  }
+  .gf-pill-panel__apply-all:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+  }
+
   /* ============================================================
    * Hover tooltip — read-only preview (no buttons). Same glass material
    * as the pill, pointer-events:none so it never blocks the field.
@@ -372,6 +509,7 @@ export const OVERLAY_CSS = `
   @media (prefers-reduced-transparency: reduce) {
     .gf-panel,
     .gf-pill,
+    .gf-pill-panel,
     .gf-tooltip {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
