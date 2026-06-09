@@ -117,6 +117,13 @@ interface Runtime {
     overlay: ReturnType<typeof createOverlayHost>
     active: ActiveSuggestion | null
     fields: WeakMap<HTMLElement, FieldState>
+    /**
+     * Overlay-path (textarea/input + fallback) fields currently attached, for
+     * the SHARED scroll/resize remeasure loop. Native-highlight fields are NOT
+     * added (the browser tracks their reflow). Iterable (unlike `fields`, a
+     * WeakMap) so one shared listener can re-measure them all.
+     */
+    overlayFields: Set<HTMLElement>
     /** Per-category counts for the FOCUSED field's last runCheck (used by the popup). */
     counts: Partial<Record<Category, number>>
     /** Total editable fields known to the observer (best-effort count). */
@@ -231,6 +238,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             overlay: createOverlayHost(),
             active: null,
             fields: new WeakMap(),
+            overlayFields: new Set(),
             counts: {},
             fieldCount: 0,
             tooltip: null,
@@ -535,6 +543,50 @@ function wireRuntime(
             return true
         }
 
+    // Shared, rAF-coalesced loop that re-measures every overlay-path field's
+    // span rects + reconciles its overlay highlights. One document scroll +
+    // window resize listener drives it (installed in wireRuntime, not per
+    // field), so an N-field page incurs N remeasures per frame IN TOTAL, not
+    // N × (scroll-fires-per-frame). The per-field ResizeObserver (which
+    // observes THIS element's box, not the viewport) still routes here so a
+    // single-element resize also coalesces.
+    let remeasureScheduled = false
+    const scheduleRemeasureAll = (): void => {
+        if (remeasureScheduled) return
+        remeasureScheduled = true
+        requestAnimationFrame(() => {
+            remeasureScheduled = false
+            for (const el of runtime.overlayFields) remeasureFieldOverlay(el)
+        })
+    }
+    // Re-measure a field's span rects + reconcile its overlay highlights.
+    // Used by the shared scroll/resize loop and the per-field ResizeObserver.
+    // No-op for native-highlight fields (browser tracks their reflow) and
+    // empty fields.
+    const remeasureFieldOverlay = (el: HTMLElement): void => {
+        const st = runtime.fields.get(el)
+        if (!st || st.useNativeHighlight || !st.highlightLayer || st.items.length === 0) return
+        const spans = st.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
+        const allRects = getSpanRectsBatch(el, spans)
+        st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
+        const specs: HighlightSpec[] = []
+        for (let i = 0; i < st.items.length; i++) {
+            for (const rect of allRects[i] ?? [])
+                specs.push({ rect, category: st.items[i]!.category, itemIndex: i })
+        }
+        st.highlightLayer.reconcile(specs)
+        st.highlightLayer.setState({
+            focused: document.activeElement === el,
+            hoverItemIndex: st.hoverItemIndex,
+        })
+    }
+    document.addEventListener('scroll', scheduleRemeasureAll, { capture: true, passive: true })
+    window.addEventListener('resize', scheduleRemeasureAll, { passive: true })
+    runtime.cleanups.push(() => {
+        document.removeEventListener('scroll', scheduleRemeasureAll, { capture: true })
+        window.removeEventListener('resize', scheduleRemeasureAll)
+    })
+
     const attach = (el: HTMLElement): void => {
         if (runtime.fields.has(el)) return
         const s = getSettings()
@@ -762,56 +814,21 @@ function wireRuntime(
             el.removeEventListener('click', onFieldClick)
         })
 
-        // Re-measure span rects + reconcile highlights when the page scrolls or
-        // the field resizes, so the highlights track the text instead of drifting
-        // from their render-time viewport coords. rAF-coalesced; cheap because
-        // reconcile reuses the pooled nodes.
+        // Re-measure span rects + reconcile highlights when the field's box
+        // resizes (so the highlights track the text instead of drifting from
+        // their render-time viewport coords). The shared document-scroll +
+        // window-resize listeners are installed ONCE in wireRuntime, not per
+        // field — this field only observes ITSELF.
         //
-        // For native-highlight fields the browser tracks reflow / scroll /
-        // wrapping natively — the registry's Ranges stay valid and the
-        // visual tracks the text without our help. We only need to keep
-        // the per-field hit-test rects fresh (for the pointer → item
-        // mapping), so we re-measure the rects and update itemRects, but
-        // skip the overlay reconcile + setState.
-        let remeasureScheduled = false
-        const scheduleRemeasure = (): void => {
-            if (remeasureScheduled) return
-            remeasureScheduled = true
-            requestAnimationFrame(() => {
-                remeasureScheduled = false
-                const st = runtime.fields.get(el)
-                if (!st || st.items.length === 0) return
-                const spans = st.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
-                const allRects = getSpanRectsBatch(el, spans)
-                st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
-                if (st.useNativeHighlight) {
-                    // Visual: browser tracks it. itemRects (above) is the
-                    // only thing we need to refresh.
-                    return
-                }
-                if (!st.highlightLayer) return
-                const specs: HighlightSpec[] = []
-                for (let i = 0; i < st.items.length; i++) {
-                    for (const rect of allRects[i] ?? []) {
-                        specs.push({ rect, category: st.items[i]!.category, itemIndex: i })
-                    }
-                }
-                st.highlightLayer.reconcile(specs)
-                st.highlightLayer.setState({
-                    focused: document.activeElement === el,
-                    hoverItemIndex: st.hoverItemIndex,
-                })
-            })
-        }
-        const ro = new ResizeObserver(() => scheduleRemeasure())
+        // Native-highlight fields self-track reflow (the registry's Ranges
+        // stay valid), so we skip them in the overlay remeasure set; the
+        // ResizeObserver is still attached for symmetry but the shared
+        // loop's overlayFields iteration will no-op for them.
+        const useNative = state.useNativeHighlight
+        if (!useNative) runtime.overlayFields.add(el)
+        const ro = new ResizeObserver(() => scheduleRemeasureAll())
         ro.observe(el)
-        document.addEventListener('scroll', scheduleRemeasure, { capture: true, passive: true })
-        window.addEventListener('resize', scheduleRemeasure, { passive: true })
-        runtime.cleanups.push(() => {
-            ro.disconnect()
-            document.removeEventListener('scroll', scheduleRemeasure, { capture: true })
-            window.removeEventListener('resize', scheduleRemeasure)
-        })
+        runtime.cleanups.push(() => ro.disconnect())
     }
 
     const detach = (el: HTMLElement): void => {
@@ -828,6 +845,9 @@ function wireRuntime(
         } else {
             state.highlightLayer?.destroy()
             state.highlightLayer = null
+            // Drop from the shared remeasure set so the global scroll/resize
+            // loop stops calling remeasureFieldOverlay on a detached field.
+            runtime.overlayFields.delete(el)
         }
         // Release the per-field listeners, debouncer, and any registered
         // overlay handles. The attachment decrements runtime.fieldCount
