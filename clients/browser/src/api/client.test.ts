@@ -163,14 +163,12 @@ describe('BridgeClient.rephrase', () => {
     })
 
     it('omits the override when none is configured', async () => {
-        const fetchMock = vi
-            .fn<typeof fetch>()
-            .mockResolvedValue(
-                new Response(JSON.stringify({ original: 'x', rephrased: 'y', alternatives: [] }), {
-                    status: 200,
-                    headers: { 'content-type': 'application/json' },
-                }),
-            )
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+            new Response(JSON.stringify({ original: 'x', rephrased: 'y', alternatives: [] }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            }),
+        )
         vi.stubGlobal('fetch', fetchMock)
         const c = new BridgeClient('http://localhost:8000', true)
         await c.rephrase({ text: 'x', source: 'browser' })
