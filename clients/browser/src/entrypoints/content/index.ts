@@ -18,7 +18,7 @@ import { isSpanStillValid, runCheck, tallyByCategory, type RenderableItem } from
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
-import { renderUnderlines, type UnderlineHandle } from '@/overlay/underline'
+import { createUnderlineLayer, type UnderlineSpec } from '@/overlay/underline'
 import { showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { renderStatusButton } from '@/overlay/status-button'
@@ -82,6 +82,11 @@ interface FieldState {
      * torn-down overlay.
      */
     pasteGraceTimer: ReturnType<typeof setTimeout> | null
+    /**
+     * Persistent reconciling underline layer for this field (created lazily on
+     * first render; reused across checks so nodes aren't destroyed+recreated).
+     */
+    underlineLayer: import('@/overlay/underline').UnderlineLayer | null
 }
 
 interface ActiveSuggestion {
@@ -485,6 +490,7 @@ function wireRuntime(
             itemRects: [],
             checkSeq: 0,
             pasteGraceTimer: null,
+            underlineLayer: null,
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -593,6 +599,40 @@ function wireRuntime(
             el.removeEventListener('mouseleave', onFieldMouseLeave)
             el.removeEventListener('click', onFieldClick)
         })
+
+        // Re-measure span rects + reconcile underlines when the page scrolls or
+        // the field resizes, so the underlines track the text instead of drifting
+        // from their render-time viewport coords. rAF-coalesced; cheap because
+        // reconcile reuses the pooled nodes.
+        let remeasureScheduled = false
+        const scheduleRemeasure = (): void => {
+            if (remeasureScheduled) return
+            remeasureScheduled = true
+            requestAnimationFrame(() => {
+                remeasureScheduled = false
+                const st = runtime.fields.get(el)
+                if (!st || !st.underlineLayer || st.items.length === 0) return
+                const spans = st.items.map((it) => ({ start: it.cuStart, end: it.cuEnd }))
+                const allRects = getSpanRectsBatch(el, spans)
+                st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
+                const specs: UnderlineSpec[] = []
+                for (let i = 0; i < st.items.length; i++) {
+                    for (const rect of allRects[i] ?? []) {
+                        specs.push({ rect, category: st.items[i]!.category })
+                    }
+                }
+                st.underlineLayer.reconcile(specs)
+            })
+        }
+        const ro = new ResizeObserver(() => scheduleRemeasure())
+        ro.observe(el)
+        document.addEventListener('scroll', scheduleRemeasure, { capture: true, passive: true })
+        window.addEventListener('resize', scheduleRemeasure, { passive: true })
+        runtime.cleanups.push(() => {
+            ro.disconnect()
+            document.removeEventListener('scroll', scheduleRemeasure, { capture: true })
+            window.removeEventListener('resize', scheduleRemeasure)
+        })
     }
 
     const detach = (el: HTMLElement): void => {
@@ -601,6 +641,12 @@ function wireRuntime(
         // Cancel any pending paste-grace timer first so it can't fire a check
         // against a field that's leaving the DOM.
         clearPasteGrace(state)
+        // Destroy the persistent underline layer (its pooled nodes are
+        // children of the shared shadow root; we MUST remove them so a
+        // detached field doesn't leave underlines behind when the field
+        // itself is gone).
+        state.underlineLayer?.destroy()
+        state.underlineLayer = null
         // Release the per-field listeners, debouncer, and any registered
         // overlay handles. The attachment decrements runtime.fieldCount
         // exactly once (idempotent guard inside `detach`).
@@ -857,9 +903,21 @@ function wireRuntime(
         if (count === 0) {
             // No suggestions this round — the status pill alone is enough.
             // The pill's destroy is idempotent, so a later render with
-            // non-zero items will overwrite it cleanly.
+            // non-zero items will overwrite it cleanly. Also reconcile the
+            // (possibly existing) layer with an empty spec list so any prior
+            // underlines clear instead of lingering.
+            if (state.underlineLayer) state.underlineLayer.reconcile([])
             state.attachment.setHandles({
                 statusDestroy: () => statusHandle.destroy(),
+                underlineDestroy: () => {
+                    state.underlineLayer?.destroy()
+                    state.underlineLayer = null
+                },
+                popoverHide: () => {
+                    const h = openPopovers.get(el)
+                    h?.hide()
+                    openPopovers.delete(el)
+                },
             })
             return
         }
@@ -875,30 +933,23 @@ function wireRuntime(
         // items; an item with no rects still occupies a slot but never matches).
         state.itemRects = state.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
 
-        const nodes: HTMLDivElement[] = []
+        // Flatten (item, rect) → specs and reconcile the persistent layer.
+        const specs: UnderlineSpec[] = []
         for (let i = 0; i < state.items.length; i++) {
             const item = state.items[i]!
-            const rects = allRects[i] ?? []
-            if (rects.length === 0) continue
-            const handle = renderUnderlines(root, {
-                rects,
-                category: item.category,
-            })
-            for (const n of handle.nodes) nodes.push(n)
+            for (const rect of allRects[i] ?? []) specs.push({ rect, category: item.category })
         }
-        const underlineHandle: UnderlineHandle = {
-            nodes,
-            destroy: () => {
-                for (const n of nodes) n.remove()
-            },
-        }
-        // Register the destroy hooks on the attachment so a future
-        // `detach()` (SPA field removal, settings-driven teardown, the
-        // next renderField) tears them down deterministically. The
-        // popover handle — if one is open — is read lazily from the
-        // WeakMap so we don't capture a stale reference here.
+        if (!state.underlineLayer) state.underlineLayer = createUnderlineLayer(root)
+        state.underlineLayer.reconcile(specs)
+
+        // The status pill is still rendered fresh each time (cheap); only the
+        // underline layer persists. Register destroy hooks so a detach/teardown
+        // clears both.
         state.attachment.setHandles({
-            underlineDestroy: () => underlineHandle.destroy(),
+            underlineDestroy: () => {
+                state.underlineLayer?.destroy()
+                state.underlineLayer = null
+            },
             statusDestroy: () => statusHandle.destroy(),
             popoverHide: () => {
                 const h = openPopovers.get(el)

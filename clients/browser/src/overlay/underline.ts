@@ -39,6 +39,33 @@ export interface RenderUnderlinesOptions {
     category: Category
 }
 
+export interface UnderlineSpec {
+    rect: DOMRect
+    category: Category
+}
+
+/** Apply per-category styling + position to one pooled node, in place. */
+function styleUnderlineNode(node: HTMLDivElement, spec: UnderlineSpec): void {
+    if (node.getAttribute('aria-hidden') !== 'true') node.setAttribute('aria-hidden', 'true')
+    const meta = CATEGORY_META[spec.category]
+    const cls = `gf-underline gf-underline--${meta.underlineStyle}`
+    if (node.className !== cls) node.className = cls
+    if (spec.rect.width <= 0 || spec.rect.height <= 0) {
+        node.style.display = 'none'
+        return
+    }
+    node.style.display = ''
+    node.style.color = meta.underline
+    // wavy can't read currentColor in a data-URI bg; bake the colour. Other
+    // variants use CSS currentColor, so clear any stale baked bg when leaving wavy.
+    node.style.backgroundImage =
+        meta.underlineStyle === 'wavy' ? wavyBackgroundImage(meta.underline) : ''
+    node.style.width = `${Math.max(spec.rect.width, 4)}px`
+    node.style.height = `${meta.underlineWidth}px`
+    node.style.left = `${spec.rect.left}px`
+    node.style.top = `${spec.rect.bottom - meta.underlineWidth}px`
+}
+
 /**
  * Append one underline node per rect into `root`, styled per category. The
  * returned handle owns those nodes and is the only safe way to remove them
@@ -50,24 +77,11 @@ export function renderUnderlines(
     options: RenderUnderlinesOptions,
 ): UnderlineHandle {
     const { rects, category } = options
-    const meta = CATEGORY_META[category]
     const nodes: HTMLDivElement[] = []
     for (const rect of rects) {
         if (rect.width <= 0 || rect.height <= 0) continue
         const node = root.ownerDocument.createElement('div')
-        node.className = `gf-underline gf-underline--${meta.underlineStyle}`
-        node.setAttribute('aria-hidden', 'true')
-        node.style.color = meta.underline
-        // Wavy uses an SVG background that can't read `currentColor`; bake the
-        // colour in (the dotted/solid variants use CSS currentColor, which
-        // works, so they're left to the stylesheet).
-        if (meta.underlineStyle === 'wavy') {
-            node.style.backgroundImage = wavyBackgroundImage(meta.underline)
-        }
-        node.style.width = `${Math.max(rect.width, 4)}px`
-        node.style.height = `${meta.underlineWidth}px`
-        node.style.left = `${rect.left}px`
-        node.style.top = `${rect.bottom - meta.underlineWidth}px`
+        styleUnderlineNode(node, { rect, category })
         root.appendChild(node)
         nodes.push(node)
     }
@@ -75,6 +89,39 @@ export function renderUnderlines(
         nodes,
         destroy: () => {
             for (const n of nodes) n.remove()
+        },
+    }
+}
+
+export interface UnderlineLayer {
+    /** Diff the flat spec list against the pooled nodes; update in place. */
+    reconcile: (specs: readonly UnderlineSpec[]) => void
+    /** Remove every pooled node. */
+    destroy: () => void
+}
+
+/**
+ * A reconciling underline layer: owns ONE flat pool of nodes and updates it in
+ * place on each reconcile (grow/shrink + restyle/reposition) instead of the
+ * destroy-and-recreate that flickered. Nodes are interchangeable: a node's
+ * category/colour/position are set per reconcile, so the same DOM node survives
+ * across checks when the count is stable (§2.5).
+ */
+export function createUnderlineLayer(root: ShadowRoot): UnderlineLayer {
+    const pool: HTMLDivElement[] = []
+    return {
+        reconcile(specs) {
+            while (pool.length > specs.length) pool.pop()!.remove()
+            while (pool.length < specs.length) {
+                const n = root.ownerDocument.createElement('div')
+                root.appendChild(n)
+                pool.push(n)
+            }
+            for (let i = 0; i < specs.length; i++) styleUnderlineNode(pool[i]!, specs[i]!)
+        },
+        destroy() {
+            for (const n of pool) n.remove()
+            pool.length = 0
         },
     }
 }

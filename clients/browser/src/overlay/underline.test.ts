@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { renderUnderlines } from '@/overlay/underline'
+import { createUnderlineLayer, renderUnderlines } from '@/overlay/underline'
 
 function mkRoot(): ShadowRoot {
     const host = document.createElement('div')
@@ -84,6 +84,77 @@ describe('renderUnderlines', () => {
         })
         expect(root.querySelectorAll('.gf-underline')).toHaveLength(2)
         handle.destroy()
+        expect(root.querySelectorAll('.gf-underline')).toHaveLength(0)
+    })
+})
+
+describe('createUnderlineLayer', () => {
+    it('reconciles a flat pool: one node per (item,rect), reused across calls', () => {
+        const root = mkRoot()
+        const layer = createUnderlineLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(10, 20, 100, 16), category: 'spelling' },
+            { rect: new DOMRect(10, 40, 80, 16), category: 'grammar' },
+        ])
+        const first = Array.from(root.querySelectorAll('.gf-underline'))
+        expect(first).toHaveLength(2)
+        // second reconcile with the SAME count reuses the SAME nodes (no churn)
+        layer.reconcile([
+            { rect: new DOMRect(15, 20, 90, 16), category: 'spelling' },
+            { rect: new DOMRect(10, 40, 80, 16), category: 'grammar' },
+        ])
+        const second = Array.from(root.querySelectorAll('.gf-underline'))
+        expect(second).toHaveLength(2)
+        expect(second[0]).toBe(first[0]) // same node object, repositioned in place
+        expect((second[0] as HTMLElement).style.left).toBe('15px')
+    })
+
+    it('grows and shrinks the pool to match the spec count', () => {
+        const root = mkRoot()
+        const layer = createUnderlineLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 50, 16), category: 'spelling' },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'spelling' },
+            { rect: new DOMRect(0, 40, 50, 16), category: 'spelling' },
+        ])
+        expect(root.querySelectorAll('.gf-underline')).toHaveLength(3)
+        layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling' }])
+        expect(root.querySelectorAll('.gf-underline')).toHaveLength(1)
+    })
+
+    it('updates class + baked colour when a node changes category', () => {
+        const root = mkRoot()
+        const layer = createUnderlineLayer(root)
+        layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling' }])
+        const node = root.querySelector('.gf-underline') as HTMLElement
+        expect(node.classList.contains('gf-underline--wavy')).toBe(true)
+        layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'typography' }])
+        expect(node.classList.contains('gf-underline--solid')).toBe(true)
+        expect(node.classList.contains('gf-underline--wavy')).toBe(false)
+    })
+
+    it('hides (display:none) zero-area rects without removing the pooled node', () => {
+        const root = mkRoot()
+        const layer = createUnderlineLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 0, 0), category: 'spelling' },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'spelling' },
+        ])
+        const nodes = root.querySelectorAll('.gf-underline')
+        expect(nodes).toHaveLength(2)
+        expect((nodes[0] as HTMLElement).style.display).toBe('none')
+        expect((nodes[1] as HTMLElement).style.display).toBe('')
+    })
+
+    it('destroy() removes every pooled node', () => {
+        const root = mkRoot()
+        const layer = createUnderlineLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 50, 16), category: 'spelling' },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'grammar' },
+        ])
+        expect(root.querySelectorAll('.gf-underline')).toHaveLength(2)
+        layer.destroy()
         expect(root.querySelectorAll('.gf-underline')).toHaveLength(0)
     })
 })
