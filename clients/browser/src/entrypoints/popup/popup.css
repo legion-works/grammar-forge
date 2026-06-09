@@ -103,6 +103,75 @@ textarea {
   gap: 12px;
 }
 
+/* Tabs */
+.gf-popup__tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--gf-radius-pill);
+  background: color-mix(in oklab, Canvas 30%, transparent);
+  border: 1px solid var(--gf-border);
+}
+.gf-popup__tab {
+  flex: 1;
+  height: 28px;
+  border: 0;
+  border-radius: var(--gf-radius-pill);
+  background: transparent;
+  color: var(--gf-text-dim);
+  font-size: 13px;
+  font-weight: 600;
+}
+.gf-popup__tab--active {
+  background: color-mix(in oklab, Canvas 60%, transparent);
+  color: var(--gf-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.gf-popup__tab:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 1px;
+}
+
+/* Overlay-matched specular rim on the popup panel (echoes the in-page glass). */
+.gf-popup {
+  position: relative;
+}
+.gf-popup::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.5),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.16);
+}
+
+/* Status tab health variants (match the in-page dot semantics). */
+.gf-popup__ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #16a34a;
+  font-size: 13px;
+}
+.gf-popup__bad {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: light-dark(#b91c1c, #fca5a5);
+  font-size: 13px;
+}
+
+/* Keep the shared settings-form inputs from overflowing the narrow popup. */
+.gf-popup .gf-options__row > input[type='text'],
+.gf-popup .gf-options__row > input[type='url'] {
+  flex: 1;
+  min-width: 0;
+}
+
 .gf-popup__header h1 {
   font-size: 16px;
 }
