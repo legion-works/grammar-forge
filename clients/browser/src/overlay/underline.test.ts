@@ -44,8 +44,8 @@ describe('renderUnderlines', () => {
         })
         const bg = handle.nodes[0]!.style.backgroundImage
         expect(bg).toContain('data:image/svg+xml')
-        // grammar underline colour is #d97706 -> %23d97706 in the data URI.
-        expect(bg).toContain('%23d97706')
+        // grammar underline colour is #ca8a04 -> %23ca8a04 in the data URI.
+        expect(bg).toContain('%23ca8a04')
         expect(bg).not.toContain('currentColor')
     })
 

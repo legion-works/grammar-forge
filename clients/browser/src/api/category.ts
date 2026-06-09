@@ -21,8 +21,8 @@ export const CATEGORY_META: Record<
     },
     grammar: {
         label: 'Grammar',
-        badge: '#f59e0b',
-        underline: '#d97706',
+        badge: '#eab308',
+        underline: '#ca8a04',
         underlineStyle: 'wavy',
         underlineWidth: 2,
         priority: 4,

@@ -96,7 +96,8 @@ export const OVERLAY_CSS = `
     contain: layout paint;
     /* default solid scrim (dark on light pages) — text reads either way */
     background: rgba(28, 28, 30, 0.78);
-    color: #f5f5f5;
+    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow:
       inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
@@ -114,7 +115,10 @@ export const OVERLAY_CSS = `
 
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .gf-panel {
-      background: color-mix(in oklab, #1c1c1e 40%, transparent);
+      background: light-dark(
+        color-mix(in oklab, #f5f5f5 50%, transparent),
+        color-mix(in oklab, #1c1c1e 40%, transparent)
+      );
       border-color: color-mix(in oklab, white 14%, transparent);
       -webkit-backdrop-filter: blur(16px) saturate(180%);
       backdrop-filter: blur(16px) saturate(180%);
@@ -137,7 +141,8 @@ export const OVERLAY_CSS = `
     contain: layout paint;
     font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     background: rgba(28, 28, 30, 0.78);
-    color: #f5f5f5;
+    background: light-dark(rgba(245, 245, 245, 0.78), rgba(28, 28, 30, 0.78));
+    color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow:
       inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
@@ -155,7 +160,10 @@ export const OVERLAY_CSS = `
 
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .gf-pill {
-      background: color-mix(in oklab, #1c1c1e 36%, transparent);
+      background: light-dark(
+        color-mix(in oklab, #f5f5f5 50%, transparent),
+        color-mix(in oklab, #1c1c1e 36%, transparent)
+      );
       border-color: color-mix(in oklab, white 12%, transparent);
       -webkit-backdrop-filter: blur(10px) saturate(160%);
       backdrop-filter: blur(10px) saturate(160%);
@@ -244,7 +252,8 @@ export const OVERLAY_CSS = `
     isolation: isolate;
     contain: layout paint;
     background: rgba(28, 28, 30, 0.82);
-    color: #f5f5f5;
+    background: light-dark(rgba(245, 245, 245, 0.82), rgba(28, 28, 30, 0.82));
+    color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow:
       inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
@@ -256,7 +265,10 @@ export const OVERLAY_CSS = `
   }
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .gf-pill-panel {
-      background: color-mix(in oklab, #1c1c1e 40%, transparent);
+      background: light-dark(
+        color-mix(in oklab, #f5f5f5 50%, transparent),
+        color-mix(in oklab, #1c1c1e 40%, transparent)
+      );
       border-color: color-mix(in oklab, white 14%, transparent);
       -webkit-backdrop-filter: blur(16px) saturate(180%);
       backdrop-filter: blur(16px) saturate(180%);
@@ -337,7 +349,8 @@ export const OVERLAY_CSS = `
     isolation: isolate;
     contain: layout paint;
     background: rgba(28, 28, 30, 0.82);
-    color: #f5f5f5;
+    background: light-dark(rgba(245, 245, 245, 0.82), rgba(28, 28, 30, 0.82));
+    color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow:
       inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
@@ -353,7 +366,10 @@ export const OVERLAY_CSS = `
   .gf-tooltip__chip-diff { font-size: 12px; white-space: nowrap; }
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .gf-tooltip {
-      background: color-mix(in oklab, #1c1c1e 38%, transparent);
+      background: light-dark(
+        color-mix(in oklab, #f5f5f5 50%, transparent),
+        color-mix(in oklab, #1c1c1e 38%, transparent)
+      );
       border-color: color-mix(in oklab, white 12%, transparent);
       -webkit-backdrop-filter: blur(10px) saturate(160%);
       backdrop-filter: blur(10px) saturate(160%);
@@ -435,7 +451,7 @@ export const OVERLAY_CSS = `
     word-break: break-word;
   }
   .gf-diff__old {
-    color: #fca5a5;
+    color: light-dark(#b91c1c, #fca5a5);
     text-decoration: line-through;
     text-decoration-color: #ef4444;
   }
@@ -444,8 +460,8 @@ export const OVERLAY_CSS = `
     margin: 0 2px;
   }
   .gf-diff__new {
-    color: #86efac;
-    font-weight: 600;
+    color: #4ade80;
+    font-weight: 700;
   }
   .gf-diff__removed {
     color: #9ca3af;
@@ -568,7 +584,24 @@ export const OVERLAY_CSS = `
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
       background: color-mix(in oklab, #1c1c1e 92%, transparent);
+      background: light-dark(
+        color-mix(in oklab, #f5f5f5 92%, transparent),
+        color-mix(in oklab, #1c1c1e 92%, transparent)
+      );
       border-color: color-mix(in oklab, white 8%, transparent);
+    }
+  }
+
+  /* ============================================================
+   * High-contrast: solid underline stroke (no data-URI wave / dots),
+   * thicker underline, no glass blur so the rim stays crisp.
+   * ============================================================ */
+  @media (prefers-contrast: more) {
+    .gf-underline--wavy,
+    .gf-underline--dotted { background-image: none; background: currentColor; }
+    .gf-underline { height: 3px; }
+    .gf-panel, .gf-pill, .gf-tooltip, .gf-pill-panel {
+      backdrop-filter: none; -webkit-backdrop-filter: none;
     }
   }
 
