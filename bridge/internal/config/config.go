@@ -80,6 +80,13 @@ type Config struct {
 	// opt in with GF_SKIP_LLM_FOR_SPELLING_ONLY=true.
 	SkipLLMForSpellingOnly bool
 
+	// MergeFastEditsMode selects the escalation result composition
+	// (correction.MergeFastEdits*): "" (default) = legacy replace semantics
+	// (the LLM diff is the whole escalation result); "gector" / "all" =
+	// merge-not-replace SPIKE — fast edits that do not conflict with any
+	// LLM edit are appended, trading precision for recall. Experimental;
+	// gate any non-default value on the full cold golden eval + CoNLL.
+	MergeFastEditsMode string
 	// OverEditFilterEnabled wires the LLM over-edit repair chain
 	// (correction.DefaultOverEditRules) that deterministically reverts
 	// measured LLM over-edit classes — nor/or proximity-agreement flips and
@@ -194,6 +201,7 @@ func Load(getenv Getenv) Config {
 		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),
 		EscalateOnFastEdit:     getBool("GF_ESCALATE_ON_FAST_EDIT", true),
 		SkipLLMForSpellingOnly: getBool("GF_SKIP_LLM_FOR_SPELLING_ONLY", false),
+		MergeFastEditsMode:     get("GF_MERGE_FAST_EDITS", ""),
 		OverEditFilterEnabled:  getBool("GF_OVEREDIT_FILTER", true),
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),

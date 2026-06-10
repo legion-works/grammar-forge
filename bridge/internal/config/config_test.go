@@ -276,3 +276,16 @@ func TestOverEditFilterDefaultsTrueAndCanBeDisabled(t *testing.T) {
 	}
 	require.False(t, Load(off).OverEditFilterEnabled)
 }
+
+func TestMergeFastEditsDefaultsOffAndReadsEnv(t *testing.T) {
+	empty := func(string) (string, bool) { return "", false }
+	require.Equal(t, "", Load(empty).MergeFastEditsMode, "default must be replace semantics")
+
+	gector := func(k string) (string, bool) {
+		if k == "GF_MERGE_FAST_EDITS" {
+			return "gector", true
+		}
+		return "", false
+	}
+	require.Equal(t, "gector", Load(gector).MergeFastEditsMode)
+}

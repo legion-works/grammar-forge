@@ -118,6 +118,11 @@ func main() {
 	if cfg.OverEditFilterEnabled {
 		svc.SetOverEditRules(correction.DefaultOverEditRules())
 	}
+	// Merge-not-replace escalation composition (experimental spike; default
+	// "" keeps the measured replace semantics). See correction.MergeFastEdits*.
+	if cfg.MergeFastEditsMode != "" {
+		svc.SetMergeFastEditsMode(cfg.MergeFastEditsMode)
+	}
 
 	// Inject the rephrase provider factory (this is where internal/llm is
 	// allowed — the correction core stays transport-free). The api_key is

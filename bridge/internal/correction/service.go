@@ -43,11 +43,26 @@ type Service struct {
 	// (byte-identical legacy behaviour). NOT applied to the style pass or
 	// rephrase (intentional rewrites).
 	overEditRules []OverEditRule
+	// mergeFastEditsMode selects the escalation result composition
+	// (GF_MERGE_FAST_EDITS spike). "" (default) = legacy REPLACE semantics:
+	// the LLM diff is the whole result and fast-path edits are advisory
+	// only. MergeFastEditsGECToR / MergeFastEditsAll = merge-not-replace:
+	// fast edits that do not conflict with any LLM edit are appended (the
+	// LLM stays authoritative on conflicts), trading precision for recall.
+	mergeFastEditsMode string
 	// sentenceCache memoizes per-sentence suggestion sets. nil => legacy
 	// whole-text path; populated by SetSentenceCache to enable the sentence
 	// pipeline (segment + per-sentence cache lookup + span reassembly).
 	sentenceCache *sentenceCache
 }
+
+// MergeFastEditsMode values for Service.mergeFastEditsMode
+// (config GF_MERGE_FAST_EDITS).
+const (
+	MergeFastEditsOff    = ""       // legacy replace semantics (default)
+	MergeFastEditsGECToR = "gector" // merge non-conflicting GECToR edits only
+	MergeFastEditsAll    = "all"    // merge all non-conflicting fast edits
+)
 
 // NewService wires the pipeline. baseModel is recorded on each logged event.
 // policy gates when the LLM is consulted; see EscalationPolicy.
@@ -85,6 +100,10 @@ func (s *Service) SetWordAllowlist(a WordAllowlist) { s.allowlist = a }
 // SetOverEditRules injects the LLM over-edit repair chain applied to LLM
 // grammar output before diffing (see overedit.go). Optional; nil = no repair.
 func (s *Service) SetOverEditRules(rules []OverEditRule) { s.overEditRules = rules }
+
+// SetMergeFastEditsMode selects the escalation result composition (see the
+// MergeFastEdits* constants). Optional; zero value = legacy replace semantics.
+func (s *Service) SetMergeFastEditsMode(mode string) { s.mergeFastEditsMode = mode }
 
 // Correct runs the full pipeline and returns suggestions. It never mutates
 // the text. Fast corrector errors and LLM escalation errors are best-effort
@@ -204,6 +223,10 @@ func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, e
 			// the diff splits it into suggestions.
 			repaired := s.repairOverEdits(req.Text, strings.TrimSpace(llmText))
 			all = propagateFastCategories(diffToSuggestions(req.Text, repaired), fast)
+			// Merge-not-replace spike (GF_MERGE_FAST_EDITS): append fast
+			// edits the LLM did not contradict. Off by default — replace
+			// semantics above are the measured baseline.
+			all = s.mergeNonConflictingFastEdits(all, fast)
 		}
 	}
 
@@ -518,6 +541,44 @@ func (s *Service) repairOverEdits(original, corrected string) string {
 	}
 	return corrected
 }
+
+// mergeNonConflictingFastEdits implements the merge-not-replace escalation
+// composition (GF_MERGE_FAST_EDITS spike): fast-path edits whose spans do
+// not CONFLICT with any LLM edit are appended to the LLM result. The LLM
+// stays authoritative wherever it edited. Conflict is closed-interval (a
+// touching span counts): a zero-width fast insertion at the boundary of an
+// LLM edit would otherwise double-apply the same insertion. In
+// MergeFastEditsGECToR mode only GECToR edits merge (the structural-recall
+// hypothesis); MergeFastEditsAll also merges Harper edits. Returns llm
+// unchanged in MergeFastEditsOff mode. The caller's finalize sorts the
+// combined set by span start, so append order is irrelevant.
+func (s *Service) mergeNonConflictingFastEdits(llm, fast []Suggestion) []Suggestion {
+	if s.mergeFastEditsMode == MergeFastEditsOff || len(fast) == 0 {
+		return llm
+	}
+	out := llm
+	for _, f := range fast {
+		if s.mergeFastEditsMode == MergeFastEditsGECToR && f.Model != ModelGECToR {
+			continue
+		}
+		conflict := false
+		for _, l := range llm {
+			if spansConflict(l.Span, f.Span) {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// spansConflict is the closed-interval overlap used by the merge: spans
+// conflict when they overlap OR touch (shared boundary). Stricter than
+// overlaps() on purpose — see mergeNonConflictingFastEdits.
+func spansConflict(a, b Span) bool { return a.Start <= b.End && b.Start <= a.End }
 
 // dominantModel returns the most-frequent Model in sugs. On a tie, ModelLLM
 // wins (the LLM is the authoritative source when it ran). Returns "" for

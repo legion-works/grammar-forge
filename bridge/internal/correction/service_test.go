@@ -949,3 +949,103 @@ func TestCorrectWithoutOverEditRulesIsUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, got.Suggestions, "nil rules must keep byte-identical legacy behaviour")
 }
+
+// ---- merge-not-replace escalation (GF_MERGE_FAST_EDITS spike) ----
+
+// mergeTestService builds a service with one low-confidence fast corrector
+// (forces escalation) whose suggestions are pre-baked, an LLM with fixed
+// output, and the given merge mode.
+func mergeTestService(st *fakeStore, fastSugs []Suggestion, llmOut, mode string) *Service {
+	fc := fakeCorrector{name: string(ModelGECToR), sugs: fastSugs}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: llmOut}, st, "m", fastPolicy())
+	svc.SetMergeFastEditsMode(mode)
+	return svc
+}
+
+func TestCorrectMergeModeOffReplacesFastEdits(t *testing.T) {
+	// Default (""): legacy replace semantics — the non-overlapping fast edit
+	// is NOT in the result.
+	st := &fakeStore{}
+	fast := []Suggestion{
+		{Span: Span{0, 1}, Replacement: "X", Model: ModelGECToR, Confidence: 0.3},
+		{Span: Span{12, 15}, Replacement: "cats", Model: ModelGECToR, Confidence: 0.3},
+	}
+	svc := mergeTestService(st, fast, "I have a big cat", "")
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a big cat"})
+	require.NoError(t, err)
+	for _, s := range got.Suggestions {
+		require.Equal(t, ModelLLM, s.Model, "replace semantics: only LLM edits")
+	}
+}
+
+func TestCorrectMergeGECToRAddsNonOverlappingEdit(t *testing.T) {
+	// gector mode: the fast edit on a span the LLM left alone joins the
+	// result; the overlapping one is dropped (LLM authoritative).
+	st := &fakeStore{}
+	fast := []Suggestion{
+		{Span: Span{2, 5}, Replacement: "had", Model: ModelGECToR, Confidence: 0.3},    // overlaps LLM has->have
+		{Span: Span{12, 15}, Replacement: "cats", Model: ModelGECToR, Confidence: 0.3}, // LLM silent here
+	}
+	svc := mergeTestService(st, fast, "I have a big cat", "gector")
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a big cat"})
+	require.NoError(t, err)
+	var gectorEdits []Suggestion
+	for _, s := range got.Suggestions {
+		if s.Model == ModelGECToR {
+			gectorEdits = append(gectorEdits, s)
+		}
+	}
+	require.Len(t, gectorEdits, 1, "exactly the non-overlapping fast edit merges")
+	require.Equal(t, Span{12, 15}, gectorEdits[0].Span)
+	require.Equal(t, "I have a big cats", st.lastEvent.Suggestion, "combined application")
+}
+
+func TestCorrectMergeGECToRExcludesHarperEdits(t *testing.T) {
+	// gector mode merges ONLY GECToR edits; a Harper edit stays out even
+	// when non-overlapping.
+	st := &fakeStore{}
+	fc := fakeCorrector{name: string(ModelHarper), sugs: []Suggestion{
+		{Span: Span{12, 15}, Replacement: "kat", Model: ModelHarper, Category: CategorySpelling, Confidence: 0.3},
+	}}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: "I have a big cat"}, st, "m", fastPolicy())
+	svc.SetMergeFastEditsMode("gector")
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a big cat"})
+	require.NoError(t, err)
+	for _, s := range got.Suggestions {
+		require.NotEqual(t, ModelHarper, s.Model, "harper edits excluded in gector mode")
+	}
+}
+
+func TestCorrectMergeAllIncludesHarperEdits(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{name: string(ModelHarper), sugs: []Suggestion{
+		{Span: Span{12, 15}, Replacement: "hat", Model: ModelHarper, Category: CategorySpelling, Confidence: 0.3},
+	}}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: "I have a big cat"}, st, "m", fastPolicy())
+	svc.SetMergeFastEditsMode("all")
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a big cat"})
+	require.NoError(t, err)
+	models := map[Model]bool{}
+	for _, s := range got.Suggestions {
+		models[s.Model] = true
+	}
+	require.True(t, models[ModelHarper], "all mode merges harper edits too")
+}
+
+func TestCorrectMergeDropsTouchingInsertion(t *testing.T) {
+	// A zero-width fast insertion at the boundary of an LLM edit must be
+	// dropped (closed-interval conflict) — merging both would double-insert.
+	st := &fakeStore{}
+	fast := []Suggestion{
+		{Span: Span{15, 15}, Replacement: "s", Model: ModelGECToR, Confidence: 0.3},
+	}
+	svc := mergeTestService(st, fast, "I has a big cats", "gector")
+	// LLM already appends the trailing "s" via its own edit ending at 15.
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a big cat"})
+	require.NoError(t, err)
+	require.Equal(t, "I has a big cats", st.lastEvent.Suggestion,
+		"no double-applied insertion")
+	for _, s := range got.Suggestions {
+		require.Equal(t, ModelLLM, s.Model, "touching fast insertion dropped")
+	}
+}
