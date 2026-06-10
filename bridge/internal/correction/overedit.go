@@ -301,3 +301,13 @@ func isWordBoundedAt(s string, start, end int) bool {
 	}
 	return true
 }
+
+// DefaultOverEditRules returns the over-edit repair chain wired by main when
+// GF_OVEREDIT_FILTER is enabled (the default). Rules are registered
+// explicitly — one entry per measured over-edit class.
+func DefaultOverEditRules() []OverEditRule {
+	return []OverEditRule{
+		RepairProximityAgreementFlip,
+		RepairProperNounCommaRestructure,
+	}
+}

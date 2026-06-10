@@ -132,3 +132,26 @@ func TestRepairProperNounCommaRestructureNoOpWithoutCommaPair(t *testing.T) {
 	corrected := "We flew to Paris in France last April."
 	require.Equal(t, corrected, RepairProperNounCommaRestructure(original, corrected))
 }
+
+// ---- framework ----
+
+func TestDefaultOverEditRulesContainsBothRules(t *testing.T) {
+	require.Len(t, DefaultOverEditRules(), 2)
+}
+
+func TestOverEditRuleChainComposesAndIsIdempotent(t *testing.T) {
+	// Both rule classes in one input: the chain repairs both, and applying
+	// the chain to its own output changes nothing (idempotent).
+	original := "neither the manager nor the employees were in paris in france."
+	corrected := "Neither the manager nor the employees was in Paris, France."
+	apply := func(orig, corr string) string {
+		for _, rule := range DefaultOverEditRules() {
+			corr = rule(orig, corr)
+		}
+		return corr
+	}
+	want := "Neither the manager nor the employees were in Paris in France."
+	once := apply(original, corrected)
+	require.Equal(t, want, once)
+	require.Equal(t, once, apply(original, once), "repair must be idempotent")
+}
