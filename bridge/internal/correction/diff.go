@@ -1,6 +1,11 @@
 package correction
 
-import "github.com/sergi/go-diff/diffmatchpatch"
+import (
+	"strings"
+	"unicode"
+
+	"github.com/sergi/go-diff/diffmatchpatch"
+)
 
 // diffToSuggestions computes a character diff between original and corrected and
 // returns minimal edit Suggestions with BYTE-offset spans into original. A
@@ -55,7 +60,60 @@ func diffToSuggestionsCategory(original, corrected string, category string) []Su
 			})
 		}
 	}
+	// Cancel no-ops BEFORE coalescing (so a no-op fragment doesn't widen a
+	// merged span) and again AFTER (a merge of complementary edits — e.g. a
+	// transposition the LLM made and unmade — can net out to identity).
+	out = cancelNoOpSuggestions(original, out)
+	out = coalesceSameWordEdits(original, out)
 	return cancelNoOpSuggestions(original, out)
+}
+
+// coalesceSameWordEdits merges consecutive suggestions whose spans have no
+// whitespace between them (i.e. fragments of the SAME whitespace-delimited
+// word) into one suggestion spanning the union, with the constituent edits
+// netted into a single replacement. The char-level diff can split one
+// logical word fix into several minimal edits (verified live 2026-06-10:
+// "tset"->"test" became [delete "s"] + [insert "s"], so the client's
+// per-item word diff showed the nonsense "tset -> tet", a single Apply
+// produced a half-edit, and accept/reject signals attributed to half a
+// word). Input must be ordered by ascending span start (diffToSuggestions'
+// output contract). Applying the coalesced set yields byte-identical text
+// to applying the input set. Suggestions with invalid or out-of-order spans
+// are never merged (Span.Validate is the source of truth; the rest of the
+// pipeline is robust to them).
+func coalesceSameWordEdits(original string, in []Suggestion) []Suggestion {
+	if len(in) < 2 {
+		return in
+	}
+	out := make([]Suggestion, 0, len(in))
+	cur := in[0]
+	for _, next := range in[1:] {
+		mergeable := cur.Span.Validate(len(original)) == nil &&
+			next.Span.Validate(len(original)) == nil &&
+			next.Span.Start >= cur.Span.End &&
+			!containsWhitespace(original[cur.Span.End:next.Span.Start])
+		if mergeable {
+			// Ordered, gap-separated edits net into: cur's replacement +
+			// the untouched gap text + next's replacement.
+			merged := cur.Replacement + original[cur.Span.End:next.Span.Start] + next.Replacement
+			cur = Suggestion{
+				Span:         Span{Start: cur.Span.Start, End: next.Span.End},
+				Replacement:  merged,
+				Replacements: []string{merged},
+				Model:        cur.Model,
+				Category:     cur.Category,
+			}
+			continue
+		}
+		out = append(out, cur)
+		cur = next
+	}
+	return append(out, cur)
+}
+
+// containsWhitespace reports whether s contains any Unicode whitespace rune.
+func containsWhitespace(s string) bool {
+	return strings.IndexFunc(s, unicode.IsSpace) >= 0
 }
 
 // cancelNoOpSuggestions drops suggestions that, applied to original, change

@@ -245,3 +245,86 @@ func TestDiffPreservesWordMove(t *testing.T) {
 	}
 	require.Equal(t, corrected, out, "reverse-apply must reproduce the move")
 }
+
+// ---- same-word edit coalescing (verified live UX bug, 2026-06-10) ----
+// The char-level diff can split ONE logical word fix into multiple minimal
+// edits inside the SAME word (live: "tset"->"test" became [delete "s"] +
+// [insert "s"], so the client's per-item word diff showed the nonsense
+// "tset -> tet" and applying a single item produced a half-edit). Edits with
+// no whitespace between their spans are coalesced into one suggestion whose
+// replacement nets out the constituent edits.
+
+func TestCoalesceMergesSameWordEdits(t *testing.T) {
+	// "aa tset bb": delete "s" at [4,5) + insert "s" at [6,6) == "test".
+	original := "aa tset bb" //nolint:misspell // intentional fixture
+	in := []Suggestion{
+		{Span: Span{4, 5}, Replacement: "", Replacements: []string{""}, Model: ModelLLM, Category: CategorySpelling},
+		{Span: Span{6, 6}, Replacement: "s", Replacements: []string{"s"}, Model: ModelLLM, Category: CategorySpelling},
+	}
+	got := coalesceSameWordEdits(original, in)
+	require.Len(t, got, 1, "two edits inside one word must coalesce")
+	require.Equal(t, Span{4, 6}, got[0].Span)
+	require.Equal(t, "es", got[0].Replacement)
+	require.Equal(t, []string{"es"}, got[0].Replacements)
+	require.Equal(t, ModelLLM, got[0].Model)
+	require.Equal(t, CategorySpelling, got[0].Category)
+	require.Equal(t, "aa test bb", applyAll(original, got),
+		"coalescing must preserve the net applied text")
+}
+
+func TestCoalesceKeepsEditsInDifferentWords(t *testing.T) {
+	// Fixture (misspelled article + verb): [0,3)->"the" and [8,14)->"ran"
+	// sit in different words (whitespace in the gap) and must NOT merge.
+	original := "teh cat runned" //nolint:misspell // intentional fixture
+	in := []Suggestion{
+		{Span: Span{0, 3}, Replacement: "the", Replacements: []string{"the"}, Model: ModelLLM},
+		{Span: Span{8, 14}, Replacement: "ran", Replacements: []string{"ran"}, Model: ModelLLM},
+	}
+	got := coalesceSameWordEdits(original, in)
+	require.Len(t, got, 2, "edits in different words stay separate")
+	require.Equal(t, "the cat ran", applyAll(original, got))
+}
+
+func TestCoalesceChainsThreeEditsInOneWord(t *testing.T) {
+	// Three minimal edits in one word collapse transitively into one.
+	original := "x abcdef y"
+	in := []Suggestion{
+		{Span: Span{2, 3}, Replacement: "A", Replacements: []string{"A"}, Model: ModelLLM},
+		{Span: Span{4, 5}, Replacement: "C", Replacements: []string{"C"}, Model: ModelLLM},
+		{Span: Span{6, 6}, Replacement: "Z", Replacements: []string{"Z"}, Model: ModelLLM},
+	}
+	got := coalesceSameWordEdits(original, in)
+	require.Len(t, got, 1)
+	require.Equal(t, Span{2, 6}, got[0].Span)
+	require.Equal(t, "AbCdZ", got[0].Replacement)
+	require.Equal(t, "x AbCdZef y", applyAll(original, got))
+}
+
+func TestCoalesceSingleEditUnchanged(t *testing.T) {
+	in := []Suggestion{{Span: Span{2, 5}, Replacement: "have", Replacements: []string{"have"}, Model: ModelLLM}}
+	got := coalesceSameWordEdits("I has a cat", in)
+	require.Equal(t, in, got, "a lone edit passes through unchanged")
+}
+
+func TestCoalesceLeavesInvalidSpansAlone(t *testing.T) {
+	// An out-of-bounds span must pass through unmerged (Span.Validate is the
+	// source of truth; the rest of the pipeline is robust to it).
+	original := "ab"
+	in := []Suggestion{
+		{Span: Span{0, 1}, Replacement: "x", Replacements: []string{"x"}, Model: ModelLLM},
+		{Span: Span{5, 9}, Replacement: "y", Replacements: []string{"y"}, Model: ModelLLM},
+	}
+	got := coalesceSameWordEdits(original, in)
+	require.Len(t, got, 2, "invalid spans are never merged")
+}
+
+func TestDiffToSuggestionsCoalescesSplitWordFix(t *testing.T) {
+	// End-to-end: whatever shape the char diff emits for a transposition
+	// fix, the public output must be ONE suggestion per affected word and
+	// applying it must yield the corrected text.
+	original := "aa tset bb" //nolint:misspell // intentional fixture
+	corrected := "aa test bb"
+	got := diffToSuggestions(original, corrected)
+	require.Len(t, got, 1, "one word fix -> one suggestion")
+	require.Equal(t, corrected, applyAll(original, got))
+}
