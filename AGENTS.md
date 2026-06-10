@@ -142,7 +142,10 @@ GECToR + Harper have **no port** — they run inside the bridge process.
   GRMR-V3-vLLM-FP8 default on both axes. On-disk filename is
   `gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` (note the `UD-` infix in the filename; the
   `--alias` and `GF_LLM_MODEL` drop it). Source repo: `unsloth/gemma-4-E4B-it-qat-GGUF`.
-  Place at `models/llm/` (gitignored via `*.gguf`).
+  Place at `models/llm/` (gitignored via `*.gguf`). A 2026-06-10 4B-class bake-off
+  confirmed the champion (Qwen3.5-4B 102/125, Qwen3-4B-Instruct-2507 97/125 vs 125/125
+  golden; no GEC-specialised 4B fine-tune exists) — don't re-run without a bigger VRAM
+  budget. See `.opencode/specs/2026-06-10-llm-bakeoff-4b-spike.md`.
 - **GRMR-V3 + vLLM (documented BYO alternate):** `qingy2024/GRMR-V3-Q4B` (Qwen3-4B BF16, "Q4"
   = the 4B size class, NOT 4-bit), served by **vLLM at FP8**
   (`--quantization fp8 --kv-cache-dtype fp8`): spike-measured 4.19 GiB weights, quality
