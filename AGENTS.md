@@ -11,9 +11,11 @@ authoritative, but **still v0.1 draft**; confirm details before treating them as
 
 ## Current state
 
-- **Greenfield. No application code yet** — only docs + tooling config committed. First work
-  is scaffolding per the spec (Phase 1). Polyglot repo — each service brings its own toolchain.
-- There is **no build/test/lint system yet**; wire up the toolchain below when scaffolding.
+- **Phases 1–2 + browser client shipped.** The Go bridge (`bridge/`: fast path, LLM
+  escalation, sentence cache, REST + native `/v2/check` + gRPC, SQLite edit-level signal
+  log) and the WXT browser extension (`clients/browser/`) are implemented, tested, and
+  deployed for live testing. Vencord/OpenCode clients and the Phase-3 learning loop are
+  not started. Polyglot repo — each service brings its own toolchain (below).
 
 ## Where things live
 
@@ -25,19 +27,25 @@ authoritative, but **still v0.1 draft**; confirm details before treating them as
 
 ## Architecture in one breath
 
-Clients → **LanguageTool (Java)** → gRPC → **Bridge (Go, the core)**. The bridge runs the
-**fast path IN-PROCESS** — Harper (Rust, ~10ms, CGo) → GECToR (ONNX via `hugot`) — and
-escalates to the **slow-path LLM** (default **llama.cpp**, OpenAI-compatible). A separate offline
-**Python learning loop** fine-tunes a LoRA adapter from logged corrections.
+Clients → **Bridge (Go, the core)**. The bridge runs the **fast path IN-PROCESS** —
+Harper (Rust, ~10ms, CGo) → GECToR (ONNX via `hugot`) — and escalates to the
+**slow-path LLM** (default **llama.cpp**, OpenAI-compatible), with a **per-sentence
+LRU cache** so unchanged sentences never re-hit the pipeline. A separate offline
+**Python learning loop** fine-tunes a LoRA adapter from logged corrections (Phase 3,
+not started).
 
-> **No model sidecar.** GECToR + Harper run inside the bridge (changed from the original
-> Triton/FastAPI `gector/` service). The only other runtime services are LanguageTool and the
-> LLM backend.
+> **No model sidecar, no LanguageTool container.** GECToR + Harper run inside the
+> bridge. The bridge serves the LT wire protocol itself (`internal/ltcompat`); a real
+> LanguageTool container is an OPTIONAL compose profile for users who also want LT's
+> native Java rules (fed via the bridge's gRPC RemoteRule). The only other runtime
+> service is the LLM backend.
 
 The **Bridge runs two listeners**, which is easy to miss:
-- a **gRPC server** implementing LanguageTool's `RemoteRule` (consumed by LT), and
-- a **REST server** (`/correct`, `/rephrase`, `/signal`, `/health`, `/stats`) consumed
-  *directly* by Vencord, OpenCode, and the extension's rephrase button — bypassing LT.
+- a **REST server** (`/correct`, `/rephrase`, `/signal`, `/health`, `/stats`, plus the
+  LT-compatible `POST /v2/check` + `GET /v2/languages`) consumed directly by every
+  client, and
+- a **gRPC server** implementing LanguageTool's `RemoteRule` — used ONLY by the
+  optional real-LT profile; vestigial otherwise (kept deliberately).
 
 ## Planned layout (from the compose build contexts in SPEC §8)
 
@@ -90,15 +98,16 @@ The **Bridge runs two listeners**, which is easy to miss:
   is an opt-in client config, off by default** (e.g. a browser-extension setting). Keep
   hotkeys/autocorrect/overlay in the client; the bridge stays UI-agnostic.
 - **External API contracts — don't reshape casually:** `/v2/check` must stay
-  LanguageTool-compatible (drop-in for existing clients); `/correct` is GrammarLLM-compatible
-  JSON. On OSS LanguageTool, `software.premium` and per-match `isPremium` are dropped unless an
-  `org.languagetool.PremiumOn` class is on the LT classpath — a classpath shim we found
-  non-functional on the OSS build and removed (not viable without a premium LT). The
-  bridge's gRPC `Rule.isPremium` is ignored by OSS `GRPCRule` and is kept only for future /
-  premium LT builds. For bridge-native clients the source of truth is
-  the bridge's own REST `GET /health`, which advertises `premium: true`. The upstream LT
-  browser add-on is closed-source/outdated and cannot be patched (fork `codextde/textchecker`
-  for the custom UI instead).
+  LanguageTool-compatible (drop-in for existing clients) — it is served NATIVELY by the
+  bridge (`internal/ltcompat`): offsets are **UTF-16 code units** (Java String semantics,
+  converted from the bridge's byte spans — the load-bearing detail), zero-length
+  insertions are widened onto an adjacent rune, and `software.premium` + per-rule
+  `isPremium` DO surface (the old OSS-LT serializer limitation no longer applies).
+  `/correct` is GrammarLLM-compatible JSON. The bridge's gRPC `Rule.isPremium` is ignored
+  by OSS `GRPCRule` (kept for premium LT builds). For bridge-native clients the premium
+  source of truth remains REST `GET /health`. The upstream LT browser add-on is
+  closed-source/outdated and cannot be patched (fork `codextde/textchecker` for the
+  custom UI instead).
 - **Phase order matters.** Phase-1 personalisation is a prompt-level accept/reject cache,
   **not training**. We log `base_model`/`adapter` now to *architect* for the Phase-3 QLoRA
   loop, but don't build it before ~500 accepted corrections.
@@ -107,10 +116,13 @@ The **Bridge runs two listeners**, which is easy to miss:
 
 | Service | Host | Container | Endpoint |
 |---|---|---|---|
-| LanguageTool | 8081 | 8010 | `/v2/check` |
-| Bridge gRPC | 8082 | 8082 | RemoteRule (consumed by LT) |
-| Bridge REST | 8000 | 8000 | `/correct`, `/rephrase`, `/signal`, ... |
+| Bridge REST | 8000 | 8000 | `/correct`, `/rephrase`, `/signal`, `/health`, `/stats`, **`/v2/check` + `/v2/languages` (LT-compatible, served natively)** |
+| Bridge gRPC | 8082 | 8082 | RemoteRule (only consumed by the OPTIONAL real-LT profile) |
+| LanguageTool (optional profile) | 8081 | 8010 | real LT's `/v2/check` (union of LT rules + bridge matches) |
 | LLM backend | — | 8000 (llama.cpp / vLLM) / 11434 (Ollama) | internal only — clients hit the bridge, not the LLM |
+
+> On the live your-server deploy, host `:8081` is bound to the BRIDGE's REST port so
+> LT-protocol clients configured for the old LanguageTool URL keep working.
 
 GECToR + Harper have **no port** — they run inside the bridge process.
 

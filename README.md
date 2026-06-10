@@ -5,10 +5,12 @@ for LanguageTool Premium with custom Vencord + OpenCode integrations and a
 local style-learning loop. Full design lives in
 [`.opencode/specs/SPEC.md`](.opencode/specs/SPEC.md).
 
-> **Status:** Phase 1 (core stack) complete. The fast path (Harper + GECToR)
-> and the slow path (llama.cpp-served Gemma-4-E4B QAT GGUF) are wired through
-> LanguageTool's gRPC RemoteRule interface. Bring-your-own LLM, single-user,
-> English-only.
+> **Status:** Core stack + browser extension working. The fast path
+> (Harper + GECToR) and the slow path (llama.cpp-served Gemma-4-E4B QAT GGUF)
+> run in-process behind a per-sentence cache, and the bridge serves the
+> LanguageTool wire protocol (`/v2/check`) natively — no LanguageTool
+> container required (optional compose profile for LT's native Java rules).
+> Bring-your-own LLM, single-user, English-only.
 
 ## Privacy stance
 
@@ -21,7 +23,8 @@ local style-learning loop. Full design lives in
 - **No telemetry, no analytics, no phone-home of our own.** The only outbound
   traffic is to the LLM endpoint you configure.
 - **No model sidecar.** GECToR and Harper run in-process inside the Go bridge.
-  The only runtime services are LanguageTool, the bridge, and the LLM backend.
+  The only runtime services are the bridge and the LLM backend (plus an
+  optional LanguageTool container if you enable its compose profile).
 
 ## Quickstart
 

@@ -1,7 +1,13 @@
-# GrammarForge full stack: LanguageTool -> bridge (gRPC) -> fast path + llama.cpp.
+# GrammarForge stack: bridge (REST + native LT-compatible /v2/check) + llama.cpp.
 # `docker compose up`. llama.cpp needs an NVIDIA GPU. To use a different backend
 # (CPU host, remote, vLLM, Ollama), point the bridge service's GF_LLM_BASE_URL /
 # GF_LLM_MODEL / GF_LLM_FORMAT below at it (see the commented BYO blocks).
+#
+# The bridge serves the LanguageTool wire protocol itself (POST /v2/check,
+# GET /v2/languages on the REST port), so a LanguageTool container is OPTIONAL:
+# enable the `languagetool` profile only if you also want LT's native Java
+# rules as a second correction source (the bridge then feeds LT via gRPC):
+#   docker compose --profile languagetool up
 name: grammarforge
 
 services:
@@ -21,14 +27,17 @@ services:
       GF_DB_PATH: "/data/corrections.db"
       # GF_LLM_API_KEY: set via an .env file or secret if your backend needs it (never commit)
     ports:
-      - "127.0.0.1:8000:8000"  # REST (/correct, /rephrase, /signal, /health, /stats)
-      - "127.0.0.1:8082:8082"  # gRPC (LanguageTool RemoteRule)
+      - "127.0.0.1:8000:8000"  # REST (/correct, /rephrase, /signal, /health, /stats, /v2/check)
+      - "127.0.0.1:8082:8082"  # gRPC (LanguageTool RemoteRule; used only by the optional LT profile)
     restart: unless-stopped
 
-  # NOTE: /v2/check premium signalling (software.premium / per-rule isPremium) is
-  # NOT achievable on the OSS LanguageTool build. Bridge-native clients gate
-  # premium on the bridge's REST GET /health instead.
+  # OPTIONAL second correction source (profile-gated; see header). The bridge's
+  # own /v2/check serves LT-protocol clients without this container — and
+  # unlike OSS LanguageTool's serializer, it DOES surface software.premium /
+  # per-rule isPremium. Run real LT only if you want its native Java rules
+  # merged in via the gRPC RemoteRule (its /v2/check then proxies the union).
   languagetool:
+    profiles: ["languagetool"]
     image: erikvl87/languagetool:6.7
     depends_on: [bridge]
     volumes:
