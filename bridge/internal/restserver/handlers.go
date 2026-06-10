@@ -111,13 +111,41 @@ func (s *Server) handleSignal(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// statsResponse is the GET /stats payload. AcceptanceRate is
+// accepted/(accepted+rejected+ignored), omitted until at least one signal
+// exists. Edit counts come from the edit-level signal log.
+type statsResponse struct {
+	Corrections    int64    `json:"corrections"`
+	EditsTotal     int64    `json:"edits_total"`
+	EditsAccepted  int64    `json:"edits_accepted"`
+	EditsRejected  int64    `json:"edits_rejected"`
+	EditsIgnored   int64    `json:"edits_ignored"`
+	AcceptanceRate *float64 `json:"acceptance_rate,omitempty"`
+}
+
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	n, err := s.svc.CountCorrections(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"corrections": n})
+	sc, err := s.svc.CountSignals(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+		return
+	}
+	resp := statsResponse{
+		Corrections:   n,
+		EditsTotal:    sc.TotalEdits,
+		EditsAccepted: sc.Accepted,
+		EditsRejected: sc.Rejected,
+		EditsIgnored:  sc.Ignored,
+	}
+	if signaled := sc.Accepted + sc.Rejected + sc.Ignored; signaled > 0 {
+		rate := float64(sc.Accepted) / float64(signaled)
+		resp.AcceptanceRate = &rate
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleDictionaryList returns the current user-dictionary word list.

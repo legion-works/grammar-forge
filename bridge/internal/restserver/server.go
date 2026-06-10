@@ -23,6 +23,7 @@ type CorrectionService interface {
 	Correct(ctx context.Context, req correction.Request) (correction.Correction, error)
 	Signal(ctx context.Context, correctionID int64, signal correction.Signal) error
 	CountCorrections(ctx context.Context) (int64, error)
+	CountSignals(ctx context.Context) (correction.SignalCounts, error)
 	Rephrase(ctx context.Context, req correction.RephraseRequest) (correction.RephraseResult, error)
 }
 

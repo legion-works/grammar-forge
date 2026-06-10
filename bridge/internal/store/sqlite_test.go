@@ -187,6 +187,43 @@ func TestOpenEnablesWALAndBusyTimeout(t *testing.T) {
 	require.Equal(t, 5000, timeout)
 }
 
+// CountSignals aggregates the edits table by signal value for /stats.
+// 3 edits logged, 1 accepted + 1 rejected, the third left unsignaled —
+// the count is the unit /signal attributes to, NOT the correction.
+func TestCountSignalsAggregatesBySignal(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+		Source: correction.SourceVencord, Original: "x", Suggestion: "y", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{
+			{Original: "a", Replacement: "b", Model: correction.ModelLLM},
+			{Original: "c", Replacement: "d", Model: correction.ModelLLM},
+			{Original: "e", Replacement: "f", Model: correction.ModelLLM},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
+	require.NoError(t, s.LogSignal(ctx, editIDs[1], correction.SignalRejected))
+	// editIDs[2] intentionally left unsignaled
+
+	got, err := s.CountSignals(ctx)
+	require.NoError(t, err)
+	require.Equal(t, correction.SignalCounts{
+		TotalEdits: 3,
+		Accepted:   1,
+		Rejected:   1,
+		Ignored:    0,
+	}, got)
+}
+
+// Empty store: all four counts must be exactly zero (no rows, no error).
+func TestCountSignalsEmpty(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.CountSignals(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, correction.SignalCounts{}, got)
+}
+
 func TestPruneOlderThanKeepsSignaledRows(t *testing.T) {
 	s := newTestStore(t)
 	// Old row WITH a signal (must survive — it is training data).

@@ -137,6 +137,21 @@ func (s *SQLite) CountCorrections(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// CountSignals aggregates the edits table by signal value for /stats.
+func (s *SQLite) CountSignals(ctx context.Context) (correction.SignalCounts, error) {
+	var c correction.SignalCounts
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+		       COUNT(CASE WHEN signal = 'accepted' THEN 1 END),
+		       COUNT(CASE WHEN signal = 'rejected' THEN 1 END),
+		       COUNT(CASE WHEN signal = 'ignored'  THEN 1 END)
+		FROM edits`).Scan(&c.TotalEdits, &c.Accepted, &c.Rejected, &c.Ignored)
+	if err != nil {
+		return correction.SignalCounts{}, fmt.Errorf("count signals: %w", err)
+	}
+	return c, nil
+}
+
 // PersonalizationExamples aggregates the signal log into the few-shot pairs
 // the prompt builder injects into the chat system prompt. Both accepted
 // and rejected pairs are ordered most-recent-first (MAX(ts) DESC, then

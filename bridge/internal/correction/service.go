@@ -410,6 +410,11 @@ func (s *Service) CountCorrections(ctx context.Context) (int64, error) {
 	return s.store.CountCorrections(ctx)
 }
 
+// CountSignals exposes the store's edit-signal aggregate for /stats.
+func (s *Service) CountSignals(ctx context.Context) (SignalCounts, error) {
+	return s.store.CountSignals(ctx)
+}
+
 // Rephrase asks the LLM to rewrite req.Text for clarity/fluency. It is
 // LLM-only (no fast path; rephrase is a chat-model feature and GRMR-V3's
 // native format is correction-tuned). Unlike Correct, this method:

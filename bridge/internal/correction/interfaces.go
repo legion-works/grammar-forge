@@ -74,6 +74,17 @@ type EditPair struct {
 	Count      int
 }
 
+// SignalCounts aggregates the edit-level signal log (the /stats payload's
+// source). TotalEdits counts every logged edit; the per-signal counts are the
+// edits a user explicitly reacted to. TotalEdits - (Accepted+Rejected+Ignored)
+// edits are still unsignaled.
+type SignalCounts struct {
+	TotalEdits int64
+	Accepted   int64
+	Rejected   int64
+	Ignored    int64
+}
+
 // PersonalizationData is the aggregated accept/reject history used to build the
 // prompt-cache few-shot examples (SPEC §5.5 — zero-compute personalisation).
 type PersonalizationData struct {
@@ -109,6 +120,8 @@ type Store interface {
 	LogSignal(ctx context.Context, correctionID int64, signal Signal) error
 	// CountCorrections returns the total number of logged corrections.
 	CountCorrections(ctx context.Context) (int64, error)
+	// CountSignals aggregates the edits table by signal value for /stats.
+	CountSignals(ctx context.Context) (SignalCounts, error)
 	// PersonalizationExamples aggregates the signal log into the few-shot
 	// pairs used to personalise the chat system prompt. Implementations must
 	// cap the result (e.g. 20 accepted / 20 rejected) and drop rejected

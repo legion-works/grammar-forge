@@ -18,6 +18,7 @@ type fakeService struct {
 	lastSignal   correction.Signal
 	lastID       int64
 	count        int64
+	signalCounts correction.SignalCounts
 	rephraseOut  correction.RephraseResult
 	rephraseErr  error
 	rephraseSeen correction.RephraseRequest
@@ -34,6 +35,10 @@ func (f *fakeService) Signal(_ context.Context, id int64, s correction.Signal) e
 	return nil
 }
 func (f *fakeService) CountCorrections(context.Context) (int64, error) { return f.count, nil }
+func (f *fakeService) CountSignals(context.Context) (correction.SignalCounts, error) {
+	return f.signalCounts, nil
+}
+
 func (f *fakeService) Rephrase(_ context.Context, req correction.RephraseRequest) (correction.RephraseResult, error) {
 	f.rephraseSeen = req
 	return f.rephraseOut, f.rephraseErr
@@ -113,6 +118,57 @@ func TestStats(t *testing.T) {
 	serve(&fakeService{count: 5}).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
 	require.Equal(t, http.StatusOK, rr.Code)
 	require.Contains(t, rr.Body.String(), "5")
+}
+
+// /stats surfaces edit-level signal counts and an acceptance rate. The rate is
+// accepted / (accepted+rejected+ignored) — the denominator EXCLUDES TotalEdits
+// because not every edit has been signalled yet. It is OMITTED from the JSON
+// when no signals exist (acceptance rate is undefined, not zero).
+func TestStatsReportsEditSignalCountsAndAcceptanceRate(t *testing.T) {
+	svc := &fakeService{
+		count: 10,
+		signalCounts: correction.SignalCounts{
+			TotalEdits: 20, Accepted: 2, Rejected: 1, Ignored: 1,
+		},
+	}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		Corrections    int64    `json:"corrections"`
+		EditsTotal     int64    `json:"edits_total"`
+		EditsAccepted  int64    `json:"edits_accepted"`
+		EditsRejected  int64    `json:"edits_rejected"`
+		EditsIgnored   int64    `json:"edits_ignored"`
+		AcceptanceRate *float64 `json:"acceptance_rate,omitempty"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, int64(10), got.Corrections)
+	require.Equal(t, int64(20), got.EditsTotal)
+	require.Equal(t, int64(2), got.EditsAccepted)
+	require.Equal(t, int64(1), got.EditsRejected)
+	require.Equal(t, int64(1), got.EditsIgnored)
+	require.NotNil(t, got.AcceptanceRate, "acceptance_rate must be present when any signal exists")
+	require.InDelta(t, 0.5, *got.AcceptanceRate, 1e-9, "2 / (2+1+1) = 0.5")
+}
+
+// No signals ever recorded -> acceptance_rate is OMITTED (not 0.0). The field
+// would be misleading as zero — zero is a real rate, "no data" is a missing
+// field. omitempty on the pointer field is the contract.
+func TestStatsOmitsAcceptanceRateWhenNoSignals(t *testing.T) {
+	svc := &fakeService{
+		count: 0,
+		signalCounts: correction.SignalCounts{
+			TotalEdits: 5, // edits exist, but none signalled
+		},
+	}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	body := rr.Body.String()
+	require.Contains(t, body, `"edits_total":5`)
+	require.NotContains(t, body, "acceptance_rate",
+		"acceptance_rate must be omitted from JSON when no signals exist")
 }
 
 // Rephrase endpoint contract. 200 with {original, rephrased, alternatives}.

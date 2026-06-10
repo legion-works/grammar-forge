@@ -60,6 +60,10 @@ func (f *fakeStore) LogSignal(_ context.Context, id int64, s Signal) error {
 	return nil
 }
 func (f *fakeStore) CountCorrections(context.Context) (int64, error) { return f.count, nil }
+func (f *fakeStore) CountSignals(context.Context) (SignalCounts, error) {
+	return SignalCounts{}, nil
+}
+
 func (f *fakeStore) PersonalizationExamples(context.Context) (PersonalizationData, error) {
 	return PersonalizationData{}, nil
 }
