@@ -3,6 +3,7 @@ package restserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,11 +24,19 @@ type fakeService struct {
 	rephraseErr  error
 	rephraseSeen correction.RephraseRequest
 	lastCorrect  correction.Request
+	fastSugs     []correction.Suggestion
 }
 
 func (f *fakeService) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
 	f.lastCorrect = req
 	return f.correctOut, f.correctErr
+}
+
+func (f *fakeService) CorrectStaged(ctx context.Context, req correction.Request, onFast func(correction.Correction)) (correction.Correction, error) {
+	if onFast != nil {
+		onFast(correction.Correction{Original: req.Text, Suggestions: f.fastSugs, Score: 90})
+	}
+	return f.Correct(ctx, req)
 }
 
 func (f *fakeService) Signal(_ context.Context, id int64, s correction.Signal) error {
@@ -416,4 +425,93 @@ func TestDictionaryRoutes503WhenUnset(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dictionary", nil))
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+// ---- SSE /correct/stream ----
+
+// extractSSEEventData returns the data payload of the named event in an SSE
+// body, failing the test when the event is absent.
+func extractSSEEventData(t *testing.T, body, event string) string {
+	t.Helper()
+	marker := "event: " + event + "\ndata: "
+	i := strings.Index(body, marker)
+	require.GreaterOrEqual(t, i, 0, "missing SSE event %q in body:\n%s", event, body)
+	rest := body[i+len(marker):]
+	end := strings.Index(rest, "\n\n")
+	require.GreaterOrEqual(t, end, 0, "unterminated SSE event %q", event)
+	return rest[:end]
+}
+
+func TestCorrectStreamEmitsFastThenFinal(t *testing.T) {
+	svc := &fakeService{
+		correctOut: correction.Correction{
+			Original: "I has a cat",
+			Suggestions: []correction.Suggestion{{
+				ID: 7, Span: correction.Span{Start: 2, End: 5},
+				Replacement: "have", Model: correction.ModelLLM,
+			}},
+			Score: 95,
+		},
+		fastSugs: []correction.Suggestion{{
+			Span:        correction.Span{Start: 2, End: 5},
+			Replacement: "have", Model: correction.ModelGECToR,
+		}},
+	}
+	srv := New(Config{}, svc)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/correct/stream",
+		strings.NewReader(`{"text":"I has a cat","source":"browser"}`))
+	srv.Handler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+	body := rec.Body.String()
+	require.Less(t, strings.Index(body, "event: fast\n"), strings.Index(body, "event: final\n"),
+		"fast frame must precede final")
+
+	fastData := extractSSEEventData(t, body, "fast")
+	require.Contains(t, fastData, `"stage":"fast"`)
+	require.NotContains(t, fastData, `"id"`, "preview suggestions carry no ids")
+
+	finalData := extractSSEEventData(t, body, "final")
+	require.Contains(t, finalData, `"id":7`)
+	require.NotContains(t, finalData, `"stage"`)
+}
+
+func TestCorrectStreamErrorAfterFast(t *testing.T) {
+	svc := &fakeService{correctErr: errors.New("backend down")}
+	srv := New(Config{}, svc)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/correct/stream",
+		strings.NewReader(`{"text":"x y z","source":"browser"}`))
+	srv.Handler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, "stream already started; error travels in-band")
+	body := rec.Body.String()
+	require.Contains(t, body, "event: fast\n")
+	require.Contains(t, body, "event: error\n")
+	require.NotContains(t, body, "event: final\n")
+	require.Contains(t, extractSSEEventData(t, body, "error"), "unavailable")
+}
+
+func TestCorrectStreamBadJSONIsPlainHTTP400(t *testing.T) {
+	srv := New(Config{}, &fakeService{})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/correct/stream", strings.NewReader(`{nope`))
+	srv.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.NotContains(t, rec.Body.String(), "event:")
+}
+
+func TestCorrectStreamRequiresFlusher(t *testing.T) {
+	srv := New(Config{}, &fakeService{})
+	rec := httptest.NewRecorder()
+	// Wrapping the recorder in an anonymous struct hides its Flush method,
+	// so the handler's http.Flusher assertion fails.
+	noFlush := struct{ http.ResponseWriter }{rec}
+	req := httptest.NewRequest(http.MethodPost, "/correct/stream",
+		strings.NewReader(`{"text":"a b c","source":"browser"}`))
+	srv.Handler().ServeHTTP(noFlush, req)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.NotContains(t, rec.Body.String(), "event:")
 }

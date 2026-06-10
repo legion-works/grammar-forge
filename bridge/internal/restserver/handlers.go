@@ -81,6 +81,61 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{Status: "ok", Premium: true})
 }
 
+// correctStreamFastPayload is the `event: fast` body: the /correct response
+// shape plus a stage marker so clients can distinguish frames generically.
+// Preview suggestions are unlogged, so Suggestion.ID is zero and elided by
+// its omitempty tag.
+type correctStreamFastPayload struct {
+	correction.Correction
+	Stage string `json:"stage"`
+}
+
+// handleCorrectStream is POST /correct/stream — the SSE variant of /correct
+// (spec: .opencode/specs/2026-06-10-sse-fast-path-stream-design.md). Events:
+// `fast` (fast-path preview, no ids) then `final` (exactly the /correct
+// response), or `error` instead of final when the pipeline fails after the
+// stream has started. Pre-stream failures use plain HTTP status codes. The
+// stream's lifetime is one correction; client disconnect cancels r.Context()
+// which aborts the in-flight LLM call.
+func (s *Server) handleCorrectStream(w http.ResponseWriter, r *http.Request) {
+	var req correctRequest
+	if err := decodeStrict(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	flusher, canFlush := w.(http.Flusher)
+	if !canFlush {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	writeEvent := func(event string, payload any) {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			s.log.Error("encode SSE payload failed", "event", event, "err", err)
+			return
+		}
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, encoded)
+		flusher.Flush()
+	}
+
+	result, err := s.svc.CorrectStaged(r.Context(), correction.Request{
+		Text: req.Text, Source: correction.Source(req.Source), Picky: req.Picky,
+	}, func(fast correction.Correction) {
+		writeEvent("fast", correctStreamFastPayload{Correction: fast, Stage: "fast"})
+	})
+	if err != nil {
+		s.log.Error("correct stream failed", "err", err)
+		writeEvent("error", map[string]string{"error": "correction backend unavailable"})
+		return
+	}
+	writeEvent("final", result)
+}
+
 func (s *Server) handleCorrect(w http.ResponseWriter, r *http.Request) {
 	var req correctRequest
 	if err := decodeStrict(r, &req); err != nil {

@@ -21,6 +21,9 @@ const maxRequestBodyBytes = 256 << 10 // 256 KiB
 // CorrectionService is the slice of the correction core the REST layer needs.
 type CorrectionService interface {
 	Correct(ctx context.Context, req correction.Request) (correction.Correction, error)
+	// CorrectStaged is Correct plus a pre-LLM fast-path preview callback,
+	// consumed by the SSE /correct/stream handler.
+	CorrectStaged(ctx context.Context, req correction.Request, onFast func(correction.Correction)) (correction.Correction, error)
 	Signal(ctx context.Context, correctionID int64, signal correction.Signal) error
 	CountCorrections(ctx context.Context) (int64, error)
 	CountSignals(ctx context.Context) (correction.SignalCounts, error)
@@ -65,6 +68,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /correct", s.handleCorrect)
+	mux.HandleFunc("POST /correct/stream", s.handleCorrectStream)
 	mux.HandleFunc("POST /rephrase", s.handleRephrase)
 	mux.HandleFunc("POST /signal", s.handleSignal)
 	mux.HandleFunc("GET /stats", s.handleStats)
