@@ -47,6 +47,12 @@ export interface StatusButtonOptions {
     onApplyAll: () => void
     /** Click a single correction row in the hover panel. */
     onApplyOne: (index: number) => void
+    /** "Undo last apply" in the panel action row. */
+    onUndo: () => void
+    /** "Rephrase" in the panel action row (selection, else whole field). */
+    onRephrase: () => void
+    /** Enables the panel's Undo button (the field has an undoable apply). */
+    undoAvailable: boolean
     /** Drag OFFSET from the field's default bottom-right anchor (dx,dy). When
      *  set, the pill is placed at (anchor + offset), clamped — so a dragged
      *  position is RELATIVE to the field and re-anchors as the field moves
@@ -99,6 +105,18 @@ const REFRESH_SVG =
     `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
     `<path d="M20 11 A8 8 0 1 0 18.4 16"/><path d="M20 4 L20 11 L13 11"/></svg>`
 
+const UNDO_SVG =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" ` +
+    `fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ` +
+    `stroke-linejoin="round" aria-hidden="true">` +
+    `<path d="M9 14 L4 9 L9 4"/><path d="M4 9 H14 A6 6 0 1 1 14 21 H10"/></svg>`
+
+const REPHRASE_SVG =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" ` +
+    `fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ` +
+    `stroke-linejoin="round" aria-hidden="true">` +
+    `<path d="M4 7 H20 M4 12 H14 M4 17 H10"/><path d="M17 14 L21 18 L17 22"/></svg>`
+
 // Parse a TRUSTED, hardcoded SVG constant into a real element. DOMParser with
 // image/svg+xml never executes scripts, and going through it (instead of
 // innerHTML on the live element) keeps the "no innerHTML" rule greppable and
@@ -139,46 +157,24 @@ export function renderStatusButton(
     pill.className = 'gf-pill'
     if (current.disabled) pill.classList.add('gf-pill--disabled')
 
-    // Power button (always present).
-    const power = doc.createElement('button')
-    power.type = 'button'
-    power.className = 'gf-pill__power'
-    power.setAttribute(
-        'aria-label',
-        current.disabled ? 'Enable grammar checking on this site' : 'Disable on this site',
-    )
-    power.title = power.getAttribute('aria-label') ?? ''
-    power.appendChild(svgFromConstant(doc, POWER_SVG))
-    bindButton(power, () => current.onTogglePower())
-    pill.appendChild(power)
+    // Body (count badge / paused glyph) — always present. Held so update()
+    // can refresh its innerHTML + aria-label in place. Click focuses the
+    // field AND opens the panel (hover alone is unreliable for touch
+    // discoverability; click is the parity path).
+    const body = doc.createElement('button')
+    body.type = 'button'
+    body.className = 'gf-pill__body'
+    bindButton(body, () => {
+        current.onFocusField()
+        clearHide()
+        showPanel()
+    })
+    pill.appendChild(body)
 
-    // Body (count) — only present in the enabled state. Held so update() can
-    // refresh its innerHTML + aria-label in place.
-    let body: HTMLButtonElement | null = null
-    // Body (count) — hidden in the collapsed/disabled state.
-    if (!current.disabled) {
-        body = doc.createElement('button')
-        body.type = 'button'
-        body.className = 'gf-pill__body'
-        bindButton(body, () => current.onFocusField())
-        pill.appendChild(body)
-
-        // Recheck button — force a fresh check of the field now.
-        const recheck = doc.createElement('button')
-        recheck.type = 'button'
-        recheck.className = 'gf-pill__recheck'
-        recheck.setAttribute('aria-label', 'Recheck now')
-        recheck.title = 'Recheck now'
-        recheck.appendChild(svgFromConstant(doc, REFRESH_SVG))
-        bindButton(recheck, () => current.onRecheck())
-        pill.appendChild(recheck)
-    }
-
-    // Fill (or refill) the body's count badge + breakdown bar + aria-label from
-    // `current`. Called on mount and on every update(). No-op when disabled
-    // (no body element exists).
+    // Fill (or refill) the body's badge + breakdown bar + aria-label from
+    // `current`. Called on mount and on every update(). The disabled
+    // (paused) branch renders the power-glyph badge instead of the count.
     const renderBody = (): void => {
-        if (!body) return
         body.setAttribute(
             'aria-label',
             current.count === 0 ? 'No grammar issues' : `${current.count} grammar issues`,
@@ -293,7 +289,7 @@ export function renderStatusButton(
         hideTimer = view.setTimeout(hidePanel, PANEL_HIDE_GRACE_MS)
     }
     const showPanel = (): void => {
-        if (panel || current.disabled || current.corrections.length === 0) return
+        if (panel) return
         panel = buildPanel(doc, current)
         root.appendChild(panel)
         positionPanel(panel, pill.getBoundingClientRect(), view)
@@ -304,6 +300,9 @@ export function renderStatusButton(
             const target = event.target as HTMLElement | null
             const btn = target?.closest<HTMLElement>('[data-action]')
             if (!btn) return
+            // Disabled buttons (Undo when undoAvailable is false) never fire
+            // click in browsers/jsdom — no extra guard needed.
+            if (btn.disabled) return
             event.preventDefault()
             event.stopPropagation()
             if (btn.dataset.action === 'apply-all') {
@@ -317,6 +316,27 @@ export function renderStatusButton(
                     hidePanel()
                     current.onApplyOne(i)
                 }
+                return
+            }
+            if (btn.dataset.action === 'undo') {
+                hidePanel()
+                current.onUndo()
+                return
+            }
+            if (btn.dataset.action === 'recheck') {
+                hidePanel()
+                current.onRecheck()
+                return
+            }
+            if (btn.dataset.action === 'rephrase') {
+                hidePanel()
+                current.onRephrase()
+                return
+            }
+            if (btn.dataset.action === 'power') {
+                hidePanel()
+                current.onTogglePower()
+                return
             }
         })
     }
@@ -463,29 +483,79 @@ function buildPanel(doc: Document, options: StatusButtonOptions): HTMLElement {
     panel.className = 'gf-pill-panel'
     panel.setAttribute('role', 'dialog')
     panel.setAttribute('aria-label', 'Corrections')
-    const n = options.corrections.length
-    const rows = options.corrections
-        .map((c, i) => {
-            const dot = CATEGORY_META[c.category].badge
-            return (
-                `<button class="gf-pill-panel__row" data-action="apply-one" data-index="${i}" type="button">` +
-                `<span class="gf-pill-panel__dot" style="background:${dot}"></span>` +
-                diffInnerHTML(c.diffOriginal, c.diffCorrected, c.diffIsDeletion) +
-                `</button>`
-            )
-        })
-        .join('')
-    panel.innerHTML =
-        `<div class="gf-pill-panel__header">${n} correction${n === 1 ? '' : 's'}</div>` +
-        `<div class="gf-pill-panel__list">${rows}</div>` +
-        `<button class="gf-pill-panel__apply-all" data-action="apply-all" type="button">Apply all</button>`
+    // Corrections list — exactly today's rows: per-correction diff +
+    // per-row Apply. Hidden when paused or when count is 0 (the empty
+    // action-row panel still opens for Recheck / Rephrase / Power).
+    if (!options.disabled && options.corrections.length > 0) {
+        const n = options.corrections.length
+        const rows = options.corrections
+            .map((c, i) => {
+                const dot = CATEGORY_META[c.category].badge
+                return (
+                    `<button class="gf-pill-panel__row" data-action="apply-one" data-index="${i}" type="button">` +
+                    `<span class="gf-pill-panel__dot" style="background:${dot}"></span>` +
+                    diffInnerHTML(c.diffOriginal, c.diffCorrected, c.diffIsDeletion) +
+                    `</button>`
+                )
+            })
+            .join('')
+        const header = doc.createElement('div')
+        header.className = 'gf-pill-panel__header'
+        header.textContent = `${n} correction${n === 1 ? '' : 's'}`
+        const list = doc.createElement('div')
+        list.className = 'gf-pill-panel__list'
+        list.innerHTML = rows
+        panel.append(header, list)
+    }
+    // Action row — always present: Apply all (count>0) · Undo · Recheck ·
+    // Rephrase · Power. The paused-site panel short-circuits to just the
+    // Enable affordance.
+    panel.appendChild(buildActionRow(doc, options))
     return panel
+}
+
+function buildActionRow(doc: Document, options: StatusButtonOptions): HTMLElement {
+    const row = doc.createElement('div')
+    row.className = 'gf-pill-panel__actions'
+    const add = (
+        action: string,
+        svg: string | null,
+        label: string,
+        opts?: { disabled?: boolean },
+    ): void => {
+        const btn = doc.createElement('button')
+        btn.type = 'button'
+        btn.className = 'gf-pill-panel__action'
+        btn.dataset.action = action
+        if (opts?.disabled) {
+            btn.disabled = true
+            btn.setAttribute('aria-disabled', 'true')
+        }
+        if (svg) btn.appendChild(svgFromConstant(doc, svg))
+        const text = doc.createElement('span')
+        text.textContent = label
+        btn.appendChild(text)
+        row.appendChild(btn)
+    }
+    if (options.disabled) {
+        add('power', POWER_SVG, 'Enable')
+        return row
+    }
+    if (options.count > 0) add('apply-all', null, 'Apply all')
+    add('undo', UNDO_SVG, 'Undo', { disabled: !options.undoAvailable })
+    add('recheck', REFRESH_SVG, 'Recheck')
+    add('rephrase', REPHRASE_SVG, 'Rephrase')
+    add('power', POWER_SVG, 'Disable on this site')
+    return row
 }
 
 function buildBodyHTML(options: StatusButtonOptions): string {
     // The pill shows only a compact count badge + the per-category colour bar.
     // The full "N issues · M spelling · …" breakdown lives in the toolbar popup
     // (popup "Focused field" section), so the pill stays small + unobtrusive.
+    if (options.disabled) {
+        return `<span class="gf-pill__badge gf-pill__badge--power" aria-hidden="true">${POWER_SVG}</span>`
+    }
     if (options.count === 0) {
         return `<span class="gf-pill__badge gf-pill__badge--ok" aria-hidden="true">✓</span>`
     }

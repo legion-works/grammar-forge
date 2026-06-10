@@ -39,18 +39,27 @@ function mkOptions(overrides: Partial<StatusButtonOptions> = {}): StatusButtonOp
         onRecheck: vi.fn<() => void>(),
         onApplyAll: vi.fn<() => void>(),
         onApplyOne: vi.fn<(i: number) => void>(),
+        onUndo: vi.fn<() => void>(),
+        onRephrase: vi.fn<() => void>(),
+        undoAvailable: false,
         dragOffset: undefined,
         onDragMove: vi.fn<(o: { dx: number; dy: number }) => void>(),
         ...overrides,
     }
 }
 
+function openPanel(root: ShadowRoot): HTMLElement {
+    const pill = root.querySelector('.gf-pill') as HTMLElement
+    pill.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+    return root.querySelector('.gf-pill-panel') as HTMLElement
+}
+
 describe('renderStatusButton', () => {
-    it('renders a pill with a power button and a body', () => {
+    it('pill row is badge-only (no inline power/recheck buttons)', () => {
         const root = mkRoot()
-        renderStatusButton(root, mkOptions())
-        expect(root.querySelector('.gf-pill')).not.toBeNull()
-        expect(root.querySelector('.gf-pill__power')).not.toBeNull()
+        renderStatusButton(root, mkOptions({ count: 2 }))
+        expect(root.querySelector('.gf-pill__power')).toBeNull()
+        expect(root.querySelector('.gf-pill__recheck')).toBeNull()
         expect(root.querySelector('.gf-pill__body')).not.toBeNull()
     })
 
@@ -74,32 +83,38 @@ describe('renderStatusButton', () => {
         expect(body.querySelectorAll('.gf-pill-bar__stripe')).toHaveLength(2)
     })
 
-    it('collapses to just the power button when disabled (no body / recheck)', () => {
+    it('paused pill shows the power glyph in the body badge and a disabled modifier class', () => {
         const root = mkRoot()
-        renderStatusButton(root, mkOptions({ disabled: true }))
+        renderStatusButton(root, mkOptions({ disabled: true, count: 0, corrections: [] }))
         expect(root.querySelector('.gf-pill--disabled')).not.toBeNull()
-        expect(root.querySelector('.gf-pill__power')).not.toBeNull()
-        expect(root.querySelector('.gf-pill__body')).toBeNull()
+        // Power glyph badge replaces the count badge when paused.
+        expect(root.querySelector('.gf-pill__badge--power svg')).not.toBeNull()
+        // The body button is created unconditionally (per spec) and its
+        // click still opens the panel — the panel's action row short-circuits
+        // to just the Enable affordance (covered below).
+        expect(root.querySelector('.gf-pill__body')).not.toBeNull()
+        // No inline power/recheck buttons in the pill row.
+        expect(root.querySelector('.gf-pill__power')).toBeNull()
         expect(root.querySelector('.gf-pill__recheck')).toBeNull()
     })
 
-    it('recheck button fires onRecheck', () => {
+    it('recheck action (in the panel) fires onRecheck', () => {
         const root = mkRoot()
         const onRecheck = vi.fn<() => void>()
         renderStatusButton(root, mkOptions({ onRecheck }))
-        ;(root.querySelector('.gf-pill__recheck') as HTMLElement).dispatchEvent(
-            new MouseEvent('click', { bubbles: true, cancelable: true }),
-        )
+        const panel = openPanel(root)
+        const recheck = panel.querySelector<HTMLElement>('[data-action="recheck"]')!
+        recheck.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
         expect(onRecheck).toHaveBeenCalledOnce()
     })
 
-    it('power button fires onTogglePower', () => {
+    it('power action (in the panel) fires onTogglePower', () => {
         const root = mkRoot()
         const onTogglePower = vi.fn<() => void>()
         renderStatusButton(root, mkOptions({ onTogglePower }))
-        ;(root.querySelector('.gf-pill__power') as HTMLElement).dispatchEvent(
-            new MouseEvent('click', { bubbles: true, cancelable: true }),
-        )
+        const panel = openPanel(root)
+        const power = panel.querySelector<HTMLElement>('[data-action="power"]')!
+        power.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
         expect(onTogglePower).toHaveBeenCalledOnce()
     })
 
@@ -121,7 +136,9 @@ describe('renderStatusButton', () => {
         const panel = root.querySelector('.gf-pill-panel') as HTMLElement
         expect(panel).not.toBeNull()
         expect(panel.querySelectorAll('.gf-pill-panel__row')).toHaveLength(2)
-        expect(panel.querySelector('.gf-pill-panel__apply-all')).not.toBeNull()
+        // Apply all moved into the action row (data-action attr is the public
+        // contract; the legacy .gf-pill-panel__apply-all class is gone).
+        expect(panel.querySelector('[data-action="apply-all"]')).not.toBeNull()
         // the row shows the red->green diff
         expect(panel.querySelector('.gf-diff__old')?.textContent).toBe('was')
         expect(panel.querySelector('.gf-diff__new')?.textContent).toBe('were')
@@ -131,11 +148,9 @@ describe('renderStatusButton', () => {
         const root = mkRoot()
         const onApplyAll = vi.fn<() => void>()
         renderStatusButton(root, mkOptions({ onApplyAll }))
-        const pill = root.querySelector('.gf-pill') as HTMLElement
-        pill.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
-        ;(root.querySelector('.gf-pill-panel__apply-all') as HTMLElement).dispatchEvent(
-            new MouseEvent('click', { bubbles: true, cancelable: true }),
-        )
+        openPanel(root)
+        const applyAll = root.querySelector<HTMLElement>('[data-action="apply-all"]')!
+        applyAll.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
         expect(onApplyAll).toHaveBeenCalledOnce()
     })
 
@@ -143,8 +158,7 @@ describe('renderStatusButton', () => {
         const root = mkRoot()
         const onApplyOne = vi.fn<(i: number) => void>()
         renderStatusButton(root, mkOptions({ onApplyOne }))
-        const pill = root.querySelector('.gf-pill') as HTMLElement
-        pill.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+        openPanel(root)
         const rows = root.querySelectorAll('.gf-pill-panel__row')
         ;(rows[1] as HTMLElement).dispatchEvent(
             new MouseEvent('click', { bubbles: true, cancelable: true }),
@@ -152,21 +166,93 @@ describe('renderStatusButton', () => {
         expect(onApplyOne).toHaveBeenCalledWith(1)
     })
 
-    it('does not open a panel when there are no corrections', () => {
+    it('panel opens on hover even with count 0 and shows the action row', () => {
         const root = mkRoot()
         renderStatusButton(root, mkOptions({ count: 0, corrections: [] }))
-        const pill = root.querySelector('.gf-pill') as HTMLElement
-        pill.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
-        expect(root.querySelector('.gf-pill-panel')).toBeNull()
+        const panel = openPanel(root)
+        expect(panel).not.toBeNull()
+        expect(panel.querySelector('[data-action="recheck"]')).not.toBeNull()
+        expect(panel.querySelector('[data-action="rephrase"]')).not.toBeNull()
+        expect(panel.querySelector('[data-action="power"]')).not.toBeNull()
+        // No corrections -> no Apply all, no rows.
+        expect(panel.querySelector('[data-action="apply-all"]')).toBeNull()
     })
 
-    it('mousedown on the pill power does not steal focus', () => {
+    it('panel also opens on pill click (touch parity)', () => {
         const root = mkRoot()
-        renderStatusButton(root, mkOptions())
-        const power = root.querySelector('.gf-pill__power') as HTMLElement
-        const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
-        const prevented = !power.dispatchEvent(ev)
-        expect(prevented).toBe(true)
+        renderStatusButton(root, mkOptions({ count: 0, corrections: [] }))
+        const body = root.querySelector('.gf-pill__body') as HTMLElement
+        body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        expect(root.querySelector('.gf-pill-panel')).not.toBeNull()
+    })
+
+    it('action buttons dispatch their callbacks', () => {
+        const root = mkRoot()
+        const onUndo = vi.fn<() => void>()
+        const onRecheck = vi.fn<() => void>()
+        const onRephrase = vi.fn<() => void>()
+        const onTogglePower = vi.fn<() => void>()
+        renderStatusButton(
+            root,
+            mkOptions({
+                count: 0,
+                corrections: [],
+                undoAvailable: true,
+                onUndo,
+                onRecheck,
+                onRephrase,
+                onTogglePower,
+            }),
+        )
+        const panel = openPanel(root)
+        for (const [action, spy] of [
+            ['undo', onUndo],
+            ['recheck', onRecheck],
+            ['rephrase', onRephrase],
+            ['power', onTogglePower],
+        ] as const) {
+            const btn = panel.querySelector<HTMLElement>(`[data-action="${action}"]`)!
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+            expect(spy).toHaveBeenCalledTimes(1)
+        }
+    })
+
+    it('undo is disabled until undoAvailable', () => {
+        const root = mkRoot()
+        const onUndo = vi.fn<() => void>()
+        renderStatusButton(
+            root,
+            mkOptions({ count: 0, corrections: [], undoAvailable: false, onUndo }),
+        )
+        const panel = openPanel(root)
+        const undo = panel.querySelector<HTMLButtonElement>('[data-action="undo"]')!
+        expect(undo.disabled).toBe(true)
+        expect(undo.getAttribute('aria-disabled')).toBe('true')
+        undo.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(onUndo).not.toHaveBeenCalled()
+    })
+
+    it('paused pill shows an Enable-only panel', () => {
+        const root = mkRoot()
+        renderStatusButton(root, mkOptions({ count: 0, corrections: [], disabled: true }))
+        const panel = openPanel(root)
+        expect(panel.querySelector('[data-action="power"]')).not.toBeNull()
+        for (const a of ['apply-all', 'undo', 'recheck', 'rephrase']) {
+            expect(panel.querySelector(`[data-action="${a}"]`)).toBeNull()
+        }
+        const power = panel.querySelector('[data-action="power"]') as HTMLElement
+        expect(power.textContent).toContain('Enable')
+    })
+
+    it('panel action icons are real namespaced SVGs', () => {
+        const root = mkRoot()
+        renderStatusButton(root, mkOptions({ count: 1, undoAvailable: true }))
+        const panel = openPanel(root)
+        for (const a of ['undo', 'recheck', 'rephrase', 'power']) {
+            const svg = panel.querySelector(`[data-action="${a}"] svg`)
+            expect(svg, `action ${a} must render an svg`).not.toBeNull()
+            expect(svg!.namespaceURI).toBe('http://www.w3.org/2000/svg')
+        }
     })
 
     it('mousedown on the pill BODY (drag surface) does not steal field focus', () => {
@@ -354,21 +440,21 @@ describe('renderStatusButton', () => {
         expect(pill.classList.contains('gf-pill--hidden')).toBe(true)
     })
 
-    it('a click without movement does NOT start a drag (buttons still work)', () => {
+    it('a click without movement does NOT start a drag (body click still works)', () => {
         const root = mkRoot()
         const onDragMove = vi.fn<(o: { dx: number; dy: number }) => void>()
-        const onTogglePower = vi.fn<() => void>()
-        renderStatusButton(root, mkOptions({ onDragMove, onTogglePower }))
-        const power = root.querySelector('.gf-pill__power') as HTMLElement
-        power.dispatchEvent(
+        const onFocusField = vi.fn<() => void>()
+        renderStatusButton(root, mkOptions({ onDragMove, onFocusField }))
+        const body = root.querySelector('.gf-pill__body') as HTMLElement
+        body.dispatchEvent(
             new PointerEvent('pointerdown', { clientX: 10, clientY: 10, bubbles: true }),
         )
-        power.dispatchEvent(
+        body.dispatchEvent(
             new PointerEvent('pointerup', { clientX: 11, clientY: 10, bubbles: true }),
         )
-        power.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        body.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
         expect(onDragMove).not.toHaveBeenCalled()
-        expect(onTogglePower).toHaveBeenCalledTimes(1)
+        expect(onFocusField).toHaveBeenCalledTimes(1)
     })
 
     it('update() refreshes the badge + stripe in place, reusing the same pill node', () => {
@@ -405,25 +491,5 @@ describe('renderStatusButton', () => {
         renderStatusButton(root, mkOptions({ count: 1 }))
         const pill = root.querySelector('.gf-pill') as HTMLElement
         expect(pill.style.transform).toMatch(/translate/)
-    })
-
-    it('renders the power and recheck icons without using innerHTML on buttons', () => {
-        // Structural assertion: icons are real <svg> children. (The innerHTML
-        // ban is enforced by review/lint convention; this test pins the DOM
-        // shape so the refactor can't silently drop the icons.)
-        const root = mkRoot()
-        const handle = renderStatusButton(root, mkOptions({ count: 1 }))
-        const power = root.querySelector('.gf-pill__power svg')
-        const recheck = root.querySelector('.gf-pill__recheck svg')
-        expect(power).not.toBeNull()
-        expect(recheck).not.toBeNull()
-        // NAMESPACE is the load-bearing detail: DOMParser('image/svg+xml') is
-        // a strict XML parser — without xmlns on the constant, the elements
-        // land in NO namespace and the browser renders nothing (live bug:
-        // invisible pill icons). querySelector('svg') matches by local name
-        // regardless, so the structural check alone cannot catch it.
-        expect(power!.namespaceURI).toBe('http://www.w3.org/2000/svg')
-        expect(recheck!.namespaceURI).toBe('http://www.w3.org/2000/svg')
-        handle.destroy()
     })
 })

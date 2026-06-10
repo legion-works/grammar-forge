@@ -375,6 +375,39 @@ export const OVERLAY_CSS = `
     outline-offset: 1px;
   }
 
+  /* Unified pill panel — action row (Apply all · Undo · Recheck · Rephrase ·
+     Power). Glass-like chips, wrapping on narrow widths. */
+  .gf-pill-panel__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .gf-pill-panel__action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font: inherit;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    border: none;
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    cursor: pointer;
+  }
+  .gf-pill-panel__action:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.18);
+  }
+  .gf-pill-panel__action:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  /* Paused-site badge: a power-glyph <span> (not a button) sits inside the
+     pill body — needs its inner <svg> to actually paint at full size. */
+  .gf-pill__badge--power svg { display: block; }
+
   /* ============================================================
    * Hover tooltip — read-only preview (no buttons). Same glass material
    * as the pill, pointer-events:none so it never blocks the field.
