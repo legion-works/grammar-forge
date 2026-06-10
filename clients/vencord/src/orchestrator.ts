@@ -49,14 +49,16 @@ export type InputDecision = 'check' | 'skip' | 'grace'
 /** Compact, log-safe description of the current selection RELATIVE to a
  *  composer element: flat code-unit offsets when resolvable (the same model
  *  applyFix uses), else the raw container/offset pair. Debug-logging only. */
-function selectionDebugInfo(el: HTMLElement): unknown {
+function selectionDebugInfo(el: HTMLElement): string {
     const sel = el.ownerDocument.getSelection()
     if (!sel || sel.rangeCount === 0) return 'no-selection'
     const range = sel.getRangeAt(0)
     if (!el.contains(range.startContainer)) return 'outside-composer'
     const start = domPointToFlatOffset(el, range.startContainer, range.startOffset)
     const end = domPointToFlatOffset(el, range.endContainer, range.endOffset)
-    return { start, end, collapsed: range.collapsed }
+    // Stringified so the console prints it INLINE — collapsed `{…}` objects
+    // in pasted logs hid exactly the offsets this exists to capture.
+    return `[${String(start)},${String(end)})${range.collapsed ? ' collapsed' : ''}`
 }
 
 /** Pure input-event policy: typing checks; pastes skip (default) or defer
