@@ -83,3 +83,52 @@ func TestIsPluralLookingNoun(t *testing.T) {
 	require.False(t, isPluralLookingNoun("is"))        // too short
 	require.False(t, isPluralLookingNoun("Paris1s"))   // non-letter rune
 }
+
+// ---- Rule 2: proper-noun comma restore ----
+
+func TestRepairProperNounCommaRestructureGolden91(t *testing.T) {
+	// Golden case 91: the LLM rewrites "paris in france" -> "Paris, France,"
+	// fusing the WANTED capitalization with an UNWANTED comma restructure.
+	// The rule restores the preposition while keeping the capitalization.
+	original := "we flew to paris in france last april."
+	corrected := "We flew to Paris, France, last April."
+	want := "We flew to Paris in France last April."
+	require.Equal(t, want, RepairProperNounCommaRestructure(original, corrected))
+}
+
+func TestRepairProperNounCommaRestructureKeepsRealAppositive(t *testing.T) {
+	// The original already uses the comma form -> there is no "x <prep> y"
+	// in the original, so the rule must not fire.
+	original := "He lives in springfield, ohio, near the lake."
+	corrected := "He lives in Springfield, Ohio, near the lake."
+	require.Equal(t, corrected, RepairProperNounCommaRestructure(original, corrected))
+}
+
+func TestRepairProperNounCommaRestructureRestoresOriginalComma(t *testing.T) {
+	// The original had a comma AFTER the preposition form; the revert keeps it.
+	original := "we met at tower of london, then left."
+	corrected := "We met at Tower, London, then left."
+	want := "We met at Tower of London, then left."
+	require.Equal(t, want, RepairProperNounCommaRestructure(original, corrected))
+}
+
+func TestRepairProperNounCommaRestructureIgnoresUnlistedPreposition(t *testing.T) {
+	// "near" is not in the preposition set -> conservative no-op.
+	original := "we flew to paris near france last april."
+	corrected := "We flew to Paris, France, last April."
+	require.Equal(t, corrected, RepairProperNounCommaRestructure(original, corrected))
+}
+
+func TestRepairProperNounCommaRestructureRequiresWordBoundary(t *testing.T) {
+	// "paris in france" appears only as a SUBSTRING of "mcparis in france";
+	// the boundary check must reject it.
+	original := "we flew to mcparis in france last april."
+	corrected := "We flew to McParis, France, last April."
+	require.Equal(t, corrected, RepairProperNounCommaRestructure(original, corrected))
+}
+
+func TestRepairProperNounCommaRestructureNoOpWithoutCommaPair(t *testing.T) {
+	original := "we flew to paris in france last april."
+	corrected := "We flew to Paris in France last April."
+	require.Equal(t, corrected, RepairProperNounCommaRestructure(original, corrected))
+}

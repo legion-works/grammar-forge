@@ -1,6 +1,7 @@
 package correction
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -220,6 +221,81 @@ func isPluralLookingNoun(token string) bool {
 	}
 	for _, r := range core {
 		if !unicode.IsLetter(r) && r != '\'' {
+			return false
+		}
+	}
+	return true
+}
+
+// properNounCommaPattern matches "X, Y" (optionally "X, Y,") where X and Y
+// are capitalized words — the shape the LLM produces when it restructures
+// "x <prep> y" into a geographic appositive ("Paris, France,").
+var properNounCommaPattern = regexp.MustCompile(`(\p{Lu}\p{Ll}+), (\p{Lu}\p{Ll}+)(,?)`)
+
+// commaRestorePreps are the prepositions the comma-restore rule recognises in
+// the original. Small and literal on purpose: the rule must only fire when
+// the LLM itself converted a preposition into a comma.
+var commaRestorePreps = []string{"in", "at", "of", "on"}
+
+// RepairProperNounCommaRestructure reverts the LLM's "x <prep> y" ->
+// "X, Y[,]" proper-noun restructure (golden case 91's class). For each
+// capitalized "X, Y[,]" pair in corrected, if the ORIGINAL contains
+// "x <prep> y" as whole words (case-insensitive), the corrected region is
+// rewritten to "X <prep> Y" — keeping corrected's casing (the wanted
+// capitalization edit survives) and restoring the trailing punctuation the
+// original had after y (the inserted comma is dropped when the original had
+// none). Genuine appositives are safe: an original already written as
+// "x, y" has no preposition form, so the rule never fires on it.
+func RepairProperNounCommaRestructure(original, corrected string) string {
+	return properNounCommaPattern.ReplaceAllStringFunc(corrected, func(match string) string {
+		sub := properNounCommaPattern.FindStringSubmatch(match)
+		x, y := sub[1], sub[2]
+		prep, end := findPrepositionForm(original, x, y)
+		if prep == "" {
+			return match
+		}
+		restored := x + " " + prep + " " + y
+		if end < len(original) && original[end] == ',' {
+			restored += ","
+		}
+		return restored
+	})
+}
+
+// findPrepositionForm searches original case-insensitively for "x <prep> y"
+// as whole words and returns the matched preposition and the byte offset just
+// past the match, or ("", -1) when no preposition form exists.
+func findPrepositionForm(original, x, y string) (prep string, end int) {
+	lowerOriginal := strings.ToLower(original)
+	for _, p := range commaRestorePreps {
+		needle := strings.ToLower(x) + " " + p + " " + strings.ToLower(y)
+		for from := 0; ; {
+			i := strings.Index(lowerOriginal[from:], needle)
+			if i < 0 {
+				break
+			}
+			i += from
+			if isWordBoundedAt(lowerOriginal, i, i+len(needle)) {
+				return p, i + len(needle)
+			}
+			from = i + 1
+		}
+	}
+	return "", -1
+}
+
+// isWordBoundedAt reports whether s[start:end] is bounded by non-word runes
+// (or the string edges) on both sides.
+func isWordBoundedAt(s string, start, end int) bool {
+	if start > 0 {
+		r, _ := utf8.DecodeLastRuneInString(s[:start])
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
+	}
+	if end < len(s) {
+		r, _ := utf8.DecodeRuneInString(s[end:])
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			return false
 		}
 	}
