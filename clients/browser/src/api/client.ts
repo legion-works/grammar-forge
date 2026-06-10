@@ -68,6 +68,21 @@ export class BridgeClient {
         }
     }
 
+    private async del(path: string): Promise<void> {
+        this.guard()
+        const ctrl = new AbortController()
+        const t = setTimeout(() => ctrl.abort(), this.timeoutMs)
+        try {
+            const r = await fetch(`${this.baseUrl}${path}`, {
+                method: 'DELETE',
+                signal: ctrl.signal,
+            })
+            if (!r.ok && r.status !== 204) throw new Error(`bridge ${path} ${r.status}`)
+        } finally {
+            clearTimeout(t)
+        }
+    }
+
     correct(req: CorrectRequest): Promise<CorrectResponse> {
         try {
             this.guard()
@@ -130,5 +145,17 @@ export class BridgeClient {
             }
         }
         return this.post<RephraseResponse>('/rephrase', body, REPHRASE_TIMEOUT_MS)
+    }
+
+    dictionaryList(): Promise<{ words: string[] }> {
+        return this.get<{ words: string[] }>('/dictionary')
+    }
+
+    dictionaryAdd(word: string): Promise<unknown> {
+        return this.post('/dictionary', { word })
+    }
+
+    dictionaryRemove(word: string): Promise<void> {
+        return this.del(`/dictionary/${encodeURIComponent(word)}`)
     }
 }

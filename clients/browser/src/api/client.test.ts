@@ -199,3 +199,44 @@ describe('BridgeClient.rephrase', () => {
         globalThis.fetch = originalFetch
     })
 })
+
+describe('BridgeClient.dictionary', () => {
+    it('dictionaryList GETs /dictionary', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+            new Response(JSON.stringify({ words: ['alpha', 'beta'] }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            }),
+        )
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', false)
+        const res = await c.dictionaryList()
+        expect(res.words).toEqual(['alpha', 'beta'])
+        expect(String(fetchMock.mock.calls[0]![0])).toBe('http://localhost:8000/dictionary')
+    })
+
+    it('dictionaryAdd POSTs the word', async () => {
+        const fetchMock = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(new Response(null, { status: 204 }))
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', false)
+        await c.dictionaryAdd('gamma')
+        const init = fetchMock.mock.calls[0]![1] as RequestInit
+        expect(init.method).toBe('POST')
+        expect(JSON.parse(init.body as string)).toEqual({ word: 'gamma' })
+    })
+
+    it('dictionaryRemove DELETEs the url-encoded word', async () => {
+        const fetchMock = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(new Response(null, { status: 204 }))
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', false)
+        await c.dictionaryRemove('two words')
+        expect(String(fetchMock.mock.calls[0]![0])).toBe(
+            'http://localhost:8000/dictionary/two%20words',
+        )
+        expect((fetchMock.mock.calls[0]![1] as RequestInit).method).toBe('DELETE')
+    })
+})
