@@ -1,0 +1,8 @@
+# pnpm reads project settings from here (not package.json "pnpm").
+# esbuild ships prebuilt platform binaries; its postinstall is optional —
+# approve it and keep installs non-strict (same rationale as clients/browser).
+strictDepBuilds: false
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: set this to true or false
