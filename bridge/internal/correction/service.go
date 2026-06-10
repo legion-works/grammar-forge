@@ -85,6 +85,15 @@ const (
 	MergeFastEditsOff    = ""       // legacy replace semantics (default)
 	MergeFastEditsGECToR = "gector" // merge non-conflicting GECToR edits only
 	MergeFastEditsAll    = "all"    // merge all non-conflicting fast edits
+	// *-word variants: conflict is decided on whitespace-delimited WORD
+	// zones instead of raw spans, with a zero-width insertion claiming
+	// BOTH flanking words. Fixes the span spike's kill class 1 (the same
+	// logical insertion at a different offset — "listen to to me") but by
+	// construction NOT class 2 (confident-wrong fast edits on words the
+	// LLM deliberately left alone). Spike 2026-06-10; gated on the full
+	// benchmark ladder.
+	MergeFastEditsGECToRWord = "gector-word" // word zones, GECToR edits only
+	MergeFastEditsAllWord    = "all-word"    // word zones, all fast edits
 )
 
 // NewService wires the pipeline. baseModel is recorded on each logged event.
@@ -289,7 +298,7 @@ func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, e
 			// Merge-not-replace spike (GF_MERGE_FAST_EDITS): append fast
 			// edits the LLM did not contradict. Off by default — replace
 			// semantics above are the measured baseline.
-			all = s.mergeNonConflictingFastEdits(all, fast)
+			all = s.mergeNonConflictingFastEdits(req.Text, all, fast)
 		}
 	}
 
@@ -628,28 +637,43 @@ func (s *Service) repairOverEdits(original, corrected string) string {
 }
 
 // mergeNonConflictingFastEdits implements the merge-not-replace escalation
-// composition (GF_MERGE_FAST_EDITS spike): fast-path edits whose spans do
-// not CONFLICT with any LLM edit are appended to the LLM result. The LLM
-// stays authoritative wherever it edited. Conflict is closed-interval (a
-// touching span counts): a zero-width fast insertion at the boundary of an
-// LLM edit would otherwise double-apply the same insertion. In
-// MergeFastEditsGECToR mode only GECToR edits merge (the structural-recall
-// hypothesis); MergeFastEditsAll also merges Harper edits. Returns llm
-// unchanged in MergeFastEditsOff mode. The caller's finalize sorts the
-// combined set by span start, so append order is irrelevant.
-func (s *Service) mergeNonConflictingFastEdits(llm, fast []Suggestion) []Suggestion {
+// composition (GF_MERGE_FAST_EDITS spike): fast-path edits that do not
+// CONFLICT with any LLM edit are appended to the LLM result. The LLM stays
+// authoritative wherever it edited. Conflict granularity depends on mode:
+//   - gector/all: closed-interval SPAN overlap (a touching span counts) —
+//     a zero-width fast insertion at the boundary of an LLM edit would
+//     otherwise double-apply the same insertion.
+//   - gector-word/all-word: whitespace-delimited WORD zones (see
+//     wordZonesConflict) — the LLM owns every word it touched, and a
+//     zero-width insertion claims both flanking words.
+//
+// The gector* modes merge only GECToR edits (the structural-recall
+// hypothesis); the all* modes also merge Harper edits. Returns llm
+// unchanged in MergeFastEditsOff mode. text is the same text the spans
+// index into (the per-sentence request text on the sentence path). The
+// caller's finalize sorts the combined set by span start, so append order
+// is irrelevant.
+func (s *Service) mergeNonConflictingFastEdits(text string, llm, fast []Suggestion) []Suggestion {
 	if s.mergeFastEditsMode == MergeFastEditsOff || len(fast) == 0 {
 		return llm
 	}
+	gectorOnly := s.mergeFastEditsMode == MergeFastEditsGECToR ||
+		s.mergeFastEditsMode == MergeFastEditsGECToRWord
+	wordZones := s.mergeFastEditsMode == MergeFastEditsGECToRWord ||
+		s.mergeFastEditsMode == MergeFastEditsAllWord
 	out := llm
 	for _, f := range fast {
-		if s.mergeFastEditsMode == MergeFastEditsGECToR && f.Model != ModelGECToR {
+		if gectorOnly && f.Model != ModelGECToR {
 			continue
 		}
 		conflict := false
 		for _, l := range llm {
-			if spansConflict(l.Span, f.Span) {
-				conflict = true
+			if wordZones {
+				conflict = wordZonesConflict(text, l.Span, f.Span)
+			} else {
+				conflict = spansConflict(l.Span, f.Span)
+			}
+			if conflict {
 				break
 			}
 		}
@@ -664,6 +688,42 @@ func (s *Service) mergeNonConflictingFastEdits(llm, fast []Suggestion) []Suggest
 // conflict when they overlap OR touch (shared boundary). Stricter than
 // overlaps() on purpose — see mergeNonConflictingFastEdits.
 func spansConflict(a, b Span) bool { return a.Start <= b.End && b.Start <= a.End }
+
+// wordZonesConflict reports whether two edits collide at WORD granularity:
+// each span is widened to the whitespace-delimited word boundaries it
+// touches (a zero-width insertion first claims one byte on each side, so
+// an insertion between two words claims BOTH — the measured "listen to to
+// me" double-insertion class conflicts here even though the raw spans
+// don't touch). Invalid spans conflict unconditionally: an edit the rest
+// of the pipeline treats as suspect must never be merged in. The one-byte
+// widening can land mid-rune on multibyte text; expandToWordBoundaries
+// walks byte-wise over non-space runes, so the zone only ever gets WIDER —
+// a conservative failure mode (more conflicts, fewer merges).
+func wordZonesConflict(text string, a, b Span) bool {
+	if a.Validate(len(text)) != nil || b.Validate(len(text)) != nil {
+		return true
+	}
+	za := wordZone(text, a)
+	zb := wordZone(text, b)
+	return za.Start < zb.End && zb.Start < za.End
+}
+
+// wordZone widens a span to the word boundaries it touches; a zero-width
+// insertion claims one byte on each side first so it belongs to both
+// flanking words. Caller validates the span.
+func wordZone(text string, sp Span) Span {
+	start, end := sp.Start, sp.End
+	if start == end {
+		if start > 0 {
+			start--
+		}
+		if end < len(text) {
+			end++
+		}
+	}
+	ws, we := expandToWordBoundaries(text, start, end)
+	return Span{Start: ws, End: we}
+}
 
 // dominantModel returns the most-frequent Model in sugs. On a tie, ModelLLM
 // wins (the LLM is the authoritative source when it ran). Returns "" for

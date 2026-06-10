@@ -86,7 +86,11 @@ type Config struct {
 	// merge-not-replace SPIKE — fast edits that do not conflict with any
 	// LLM edit are appended. MEASURED AND REJECTED 2026-06-10: golden
 	// 125 -> 120 (gector) / 118 (all); see the verdict on
-	// correction.Service.mergeFastEditsMode. Keep "" (default).
+	// correction.Service.mergeFastEditsMode. "gector-word" / "all-word" =
+	// word-granularity conflict variant (the LLM owns every word it
+	// touched; insertions claim both flanking words) — fixes the
+	// double-insertion kill class, not the LLM-silent-word classes.
+	// Keep "" (default).
 	MergeFastEditsMode string
 	// FastHintsEnabled threads Harper's SPELLING candidates into the
 	// escalation LLM as arbitration hints. Default false. The LLM, fed the

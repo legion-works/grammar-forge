@@ -1280,3 +1280,104 @@ func TestFastHintsFlagOnNoSpellingEditsUsesPlainBuild(t *testing.T) {
 	require.Equal(t, "base-grammar-system", llm.gotPrompt.System,
 		"empty-hint rendering must be byte-identical to plain Build(req) System")
 }
+
+// ---- word-granularity merge (GF_MERGE_FAST_EDITS *-word spike) ----
+// Refinement of the rejected span-level merge: conflict is decided on
+// whitespace-delimited WORD zones, with a zero-width insertion claiming BOTH
+// flanking words — so the "same logical insertion at a different offset"
+// kill class ("listen to to me") now conflicts and the LLM wins.
+
+func TestWordZonesConflictInsertionsFlankSameWords(t *testing.T) {
+	text := "you listen me now"
+	// LLM inserts " to" after "listen" (offset 10); the fast path inserts
+	// "to " before "me" (offset 11). Different offsets, no span overlap —
+	// but both claim the words "listen"/"me", so they must conflict.
+	require.True(t, wordZonesConflict(text, Span{10, 10}, Span{11, 11}),
+		"insertions flanking the same words must conflict")
+	// An edit on "now" does not touch the "listen"/"me" zone.
+	require.False(t, wordZonesConflict(text, Span{10, 10}, Span{14, 17}),
+		"edits in unrelated words must not conflict")
+	// Two edits inside the same word always conflict.
+	require.True(t, wordZonesConflict(text, Span{4, 6}, Span{7, 9}),
+		"edits inside one word must conflict")
+	// Invalid spans are never mergeable (conservative: conflict).
+	require.True(t, wordZonesConflict(text, Span{4, 6}, Span{40, 50}),
+		"invalid spans must report conflict so they are never merged")
+}
+
+func TestCorrectMergeWordDropsDoubleInsertion(t *testing.T) {
+	// The measured kill class 1 (golden 42/76/77): the LLM and the fast
+	// path make the SAME logical insertion at DIFFERENT offsets. Span
+	// geometry let both through ("you listen to to me"); word zones must
+	// drop the fast one.
+	st := &fakeStore{}
+	fast := []Suggestion{
+		// GECToR: insert " to" AFTER "listen" (zero-width at 10).
+		{Span: Span{10, 10}, Replacement: " to", Model: ModelGECToR, Confidence: 0.3},
+	}
+	// LLM output inserts "to " BEFORE "me" — a different offset.
+	svc := mergeTestService(st, fast, "you listen to me", "gector-word")
+	got, err := svc.Correct(context.Background(), Request{Text: "you listen me"})
+	require.NoError(t, err)
+	require.Equal(t, "you listen to me", st.lastEvent.Suggestion,
+		"no double-applied insertion under word-zone conflict")
+	for _, s := range got.Suggestions {
+		require.Equal(t, ModelLLM, s.Model, "flanking fast insertion dropped")
+	}
+}
+
+func TestCorrectMergeWordAddsEditOnLLMSilentWord(t *testing.T) {
+	// Class 2 documentation: a fast edit on a word the LLM left alone DOES
+	// merge under word zones (this is the deliberate recall trade the spike
+	// measures — word geometry cannot tell "missed" from "preserved").
+	st := &fakeStore{}
+	fast := []Suggestion{
+		{Span: Span{2, 5}, Replacement: "had", Model: ModelGECToR, Confidence: 0.3},    // same word as LLM has->have
+		{Span: Span{12, 15}, Replacement: "cats", Model: ModelGECToR, Confidence: 0.3}, // LLM silent here
+	}
+	svc := mergeTestService(st, fast, "I have a big cat", "gector-word")
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a big cat"})
+	require.NoError(t, err)
+	var gectorEdits []Suggestion
+	for _, s := range got.Suggestions {
+		if s.Model == ModelGECToR {
+			gectorEdits = append(gectorEdits, s)
+		}
+	}
+	require.Len(t, gectorEdits, 1, "only the LLM-silent-word fast edit merges")
+	require.Equal(t, Span{12, 15}, gectorEdits[0].Span)
+	require.Equal(t, "I have a big cats", st.lastEvent.Suggestion)
+}
+
+func TestCorrectMergeAllWordIncludesHarper(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{name: string(ModelHarper), sugs: []Suggestion{
+		{Span: Span{12, 15}, Replacement: "hat", Model: ModelHarper, Category: CategorySpelling, Confidence: 0.3},
+	}}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: "I have a big cat"}, st, "m", fastPolicy())
+	svc.SetMergeFastEditsMode(MergeFastEditsAllWord)
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a big cat"})
+	require.NoError(t, err)
+	models := map[Model]bool{}
+	for _, s := range got.Suggestions {
+		models[s.Model] = true
+	}
+	require.True(t, models[ModelHarper], "all-word mode merges harper edits on LLM-silent words")
+}
+
+func TestCorrectMergeWordSameWordReplacementConflicts(t *testing.T) {
+	// A fast REPLACEMENT inside a word the LLM edited (even a different
+	// byte range of it) must be dropped — the LLM owns the whole word.
+	st := &fakeStore{}
+	fast := []Suggestion{
+		// "big" -> "bigger" via a fast edit on [9,12); the LLM edits the
+		// SAME word's first byte (b->B below). Word zones collide.
+		{Span: Span{9, 12}, Replacement: "bigger", Model: ModelGECToR, Confidence: 0.3},
+	}
+	svc := mergeTestService(st, fast, "I has a Big cat", "gector-word")
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a big cat"})
+	require.NoError(t, err)
+	for _, s := range got.Suggestions {
+		require.Equal(t, ModelLLM, s.Model, "same-word fast replacement dropped")
+	}
+}
