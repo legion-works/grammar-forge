@@ -62,10 +62,16 @@ type Service struct {
 	mergeFastEditsMode string
 	// fastHintsEnabled toggles GF_FAST_HINTS: when true, the escalation
 	// prompt is rendered with Harper's SPELLING candidates as arbitration
-	// hints. Default false (zero value). SPIKE — keep/revert is gated on
-	// the full cold golden eval. Hints are deterministic per sentence so
-	// the sentence-cache key (which hashes only Build(req).System) stays
-	// consistent across flag toggles. See SetFastHintsEnabled.
+	// hints. Default false (zero value). Hints are deterministic per
+	// sentence so the sentence-cache key (which hashes only
+	// Build(req).System) stays consistent across flag toggles.
+	//
+	// MEASURED AND REJECTED (2026-06-10 full cold golden eval): hints on
+	// dropped 125/125 -> 123/125 — the gibberish-token miss IS fixed, but
+	// the appended prompt block perturbed unrelated edits (contraction
+	// expansion, a masked lie/lay fix). Keep false; re-enabling gates on
+	// the full cold eval. See config.FastHintsEnabled and
+	// .opencode/specs/2026-06-10-fast-hint-spike.md.
 	fastHintsEnabled bool
 	// sentenceCache memoizes per-sentence suggestion sets. nil => legacy
 	// whole-text path; populated by SetSentenceCache to enable the sentence

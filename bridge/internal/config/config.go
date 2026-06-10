@@ -95,8 +95,15 @@ type Config struct {
 	// flags `sdasd`->`sad` (conf 0.95) but the LLM leaves the gibberish
 	// token verbatim. Span-geometry merging was measured and REJECTED
 	// (GF_MERGE_FAST_EDITS spike — clean-text FPs on code); this spike
-	// instead lets the LLM arbitrate. Keep/revert is gated on the full
-	// cold golden eval.
+	// instead lets the LLM arbitrate.
+	//
+	// MEASURED AND REJECTED (2026-06-10 full cold golden eval): 125/125 ->
+	// 123/125 with hints on. The hints DO fix the gibberish-token miss,
+	// but the appended block perturbs unrelated edits: a contraction
+	// expanded ("Who's" -> "Who is") and a lie/lay fix the baseline catches
+	// was masked. Keep false unless a narrower trigger is built;
+	// re-enabling gates on the full cold eval. See
+	// .opencode/specs/2026-06-10-fast-hint-spike.md.
 	FastHintsEnabled bool
 	// OverEditFilterEnabled wires the LLM over-edit repair chain
 	// (correction.DefaultOverEditRules) that deterministically reverts
