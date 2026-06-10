@@ -3,6 +3,7 @@ package restserver
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,4 +37,22 @@ func TestCORSHeaderOnNormalResponse(t *testing.T) {
 	require.Equal(t, "*", rr.Header().Get("Access-Control-Allow-Origin"))
 	require.Contains(t, rr.Body.String(), `"status":"ok"`,
 		"health body must be unchanged by CORS wrapping")
+}
+
+// Oversized POST bodies must be rejected at the HTTP layer (HTTP 400) so
+// they cannot stream into the JSON decoder / LLM prompt. A 5MB /correct
+// body is malformed or abusive; the only legitimate input is a long text
+// payload (~64KB of prose is ~10k words — far beyond any field a client
+// checks). Cap is enforced via http.MaxBytesReader so the decoder fails
+// with a read error on overflow, which decodeStrict maps to 400.
+func TestHandlerRejectsOversizedBody(t *testing.T) {
+	srv := New(Config{Addr: ":0"}, &fakeService{})
+	h := srv.Handler()
+	big := strings.Repeat("a", maxRequestBodyBytes+1)
+	body := `{"text":"` + big + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/correct", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "oversized body must be rejected, not streamed to the LLM")
 }

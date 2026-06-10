@@ -6,9 +6,16 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/grammarforge/bridge/internal/correction"
 )
+
+// maxRequestBodyBytes caps POST bodies. The largest legitimate payload is a
+// long /correct text (~64KB of prose is ~10k words — far beyond any field a
+// client checks); beyond that is malformed or abusive input that would
+// otherwise stream into the JSON decoder and the LLM prompt.
+const maxRequestBodyBytes = 256 << 10 // 256 KiB
 
 // CorrectionService is the slice of the correction core the REST layer needs.
 type CorrectionService interface {
@@ -45,7 +52,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /rephrase", s.handleRephrase)
 	mux.HandleFunc("POST /signal", s.handleSignal)
 	mux.HandleFunc("GET /stats", s.handleStats)
-	return withCORS(mux)
+	return withCORS(withBodyLimit(mux))
+}
+
+// withBodyLimit bounds every request body read. MaxBytesReader makes the
+// JSON decoder fail with a read error once the cap is exceeded, which the
+// handlers' decodeStrict path already maps to a 400.
+func withBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withCORS adds permissive CORS headers and answers preflight OPTIONS requests.
@@ -68,8 +87,19 @@ func withCORS(next http.Handler) http.Handler {
 	})
 }
 
-// Start blocks serving on cfg.Addr.
+// Start blocks serving on cfg.Addr. Timeouts: ReadHeaderTimeout defends
+// against slowloris; WriteTimeout must exceed the worst-case handler (a
+// /rephrase round-trip through a remote reasoning model — the llm clients
+// time out at 30s, so 90s leaves margin without ever hanging a conn forever).
 func (s *Server) Start() error {
 	s.log.Info("rest server listening", "addr", s.cfg.Addr)
-	return (&http.Server{Addr: s.cfg.Addr, Handler: s.Handler()}).ListenAndServe()
+	srv := &http.Server{
+		Addr:              s.cfg.Addr,
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      90 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
