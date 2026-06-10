@@ -1248,14 +1248,14 @@
     "cat": "caps",
     "input": "we flew to paris in france last april.",
     "golden": "We flew to Paris in France last April.",
-    "got": "We flew to Paris, France, last April.",
+    "got": "We flew to Paris in France last April.",
     "models": [
       "llm"
     ],
-    "score": 81,
-    "pass": false,
-    "similarity": 0.933,
-    "n_suggestions": 5
+    "score": 90,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 4
   },
   {
     "id": 92,
@@ -1618,14 +1618,12 @@
     "cat": "clean",
     "input": "Neither the manager nor the employees were aware of the change.",
     "golden": "Neither the manager nor the employees were aware of the change.",
-    "got": "Neither the manager nor the employees was aware of the change.",
-    "models": [
-      "llm"
-    ],
-    "score": 97,
-    "pass": false,
-    "similarity": 0.96,
-    "n_suggestions": 1
+    "got": "Neither the manager nor the employees were aware of the change.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
   },
   {
     "id": 119,

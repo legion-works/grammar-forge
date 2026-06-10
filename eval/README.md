@@ -58,20 +58,26 @@ cold. The protocol:
 > passed a 20-case probe but DROPPED the full cold eval 119→117 (new under-corrections
 > from over-conservatism). Only the full 125-case cold run decides.
 
-**Committed baseline (`results.json`): 123/125** with the default
-`gemma-4-E4B-it-qat-Q4_K_XL` chat path (verified identical across two cold runs).
-The 2 failures are deterministic and model-side (not harness bugs):
-- `91` (caps) mis-correction — the model rewrites "Paris in France" → "Paris, France,"
-  (an idiom-level over-edit beyond the minimal capitalization fix).
-- `118` (clean) false positive — "Neither the manager nor the employees were" → "was"
-  (proximity agreement is correct as written; the model "fixes" it).
+**Committed baseline (`results.json`): 125/125** (ERRANT span-level F0.5 1.000)
+with the default `gemma-4-E4B-it-qat-Q4_K_XL` chat path. The two former
+deterministic model-side failures are now closed by the **LLM over-edit repair
+chain** (`internal/correction/overedit.go`, `GF_OVEREDIT_FILTER`, default on),
+which deterministically reverts the offending output classes BEFORE the diff:
+- `91` (caps) — the model rewrote "Paris in France" → "Paris, France," (an
+  idiom-level over-edit beyond the minimal capitalization fix); the
+  proper-noun comma-restore rule reverts the restructure, keeping the caps.
+- `118` (clean) — the model "fixed" correct proximity agreement
+  ("Neither the manager nor the employees were" → "was"); the
+  proximity-agreement rule reverts the flip.
 
-A run deviating from this exact failure set indicates a pipeline change (or a
-non-cold run) — investigate before trusting the number. History: an earlier
-119/125 baseline (failures `40, 79, 96, 112, 113, 118`) shifted to this set when
-the user-dictionary feature switched Harper to its merged-dictionary path by
-default (`GF_HARPER_USER_DICT`), changing fast-path lints and therefore LLM
-escalation routing — a net +4 improvement with one new over-edit (`91`).
+Any failing case in a cold run now indicates a pipeline change (or a non-cold
+run) — investigate before trusting the number. History: 119/125 (failures
+`40, 79, 96, 112, 113, 118`) → 123/125 when the user-dictionary feature
+switched Harper to its merged-dictionary path by default
+(`GF_HARPER_USER_DICT`), changing fast-path lints and therefore LLM escalation
+routing (+4, one new over-edit `91`) → 125/125 with the over-edit repair
+chain. The raw model behaviour on 91/118 is unchanged — disabling
+`GF_OVEREDIT_FILTER` restores the 123/125 result.
 
 ## 2. JFLEG held-out (`jfleg_eval.py`) — generalization signal
 
