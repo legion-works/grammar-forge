@@ -95,9 +95,17 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 		// only on escalation. Safe for both model families (chat + GRMR-native
 		// both correct raw text).
 		llmText, err := s.llm.Complete(ctx, s.pb.Build(req))
-		if err != nil {
+		switch {
+		case err != nil:
 			s.log.Warn("llm escalation failed; using fast path", "err", err)
-		} else {
+		case suspiciouslyTruncated(req.Text, strings.TrimSpace(llmText)):
+			// Defense-in-depth behind the client-level finish_reason check:
+			// a backend that doesn't report truncation (or any failure mode
+			// returning a fraction of the input) must not reach the diff,
+			// which would convert the missing tail into mass deletions.
+			s.log.Warn("llm output suspiciously short; using fast path",
+				"original_bytes", len(req.Text), "llm_bytes", len(strings.TrimSpace(llmText)))
+		default:
 			// Diff the LLM output, then re-attach Harper's spelling/punctuation
 			// categories onto overlapping edits (the diff is otherwise all
 			// CategoryGrammar). Display-only; does not change applied text.
@@ -138,6 +146,13 @@ func (s *Service) appendStyleSuggestions(ctx context.Context, req Request, gramm
 	out, err := s.llm.Complete(ctx, p)
 	if err != nil {
 		s.log.Warn("style pass failed; grammar only", "err", err)
+		return grammar
+	}
+	if suspiciouslyTruncated(req.Text, strings.TrimSpace(out)) {
+		// Truncated style output would diff into style-category mass
+		// deletions. Style is best-effort — drop it, keep grammar.
+		s.log.Warn("style output suspiciously short; grammar only",
+			"original_bytes", len(req.Text), "llm_bytes", len(strings.TrimSpace(out)))
 		return grammar
 	}
 	styled := diffToSuggestionsCategory(req.Text, strings.TrimSpace(out), CategoryStyle)
@@ -192,7 +207,30 @@ func (s *Service) llmOnlySuggestions(ctx context.Context, req Request) ([]Sugges
 		return nil, fmt.Errorf("llm complete: %w", err)
 	}
 	corrected = strings.TrimSpace(corrected)
+	if suspiciouslyTruncated(req.Text, corrected) {
+		// No fast path to fall back to — surface the truncation as an error
+		// rather than diffing it into mass-deletion suggestions.
+		return nil, fmt.Errorf("llm output suspiciously short (%d bytes for %d-byte input); discarding",
+			len(corrected), len(req.Text))
+	}
 	return diffToSuggestions(req.Text, corrected), nil
+}
+
+// minOriginalLenForTruncationGuard is the input size below which the
+// suspiciously-short check is skipped: tiny inputs can legitimately halve
+// (e.g. deleting a repeated word in a 3-word fragment), and truncation only
+// occurs on inputs long enough to exhaust a token budget.
+const minOriginalLenForTruncationGuard = 200
+
+// suspiciouslyTruncated reports whether the LLM output is so much shorter
+// than the original that it is more plausibly a truncated/failed generation
+// than a real correction. Grammar corrections preserve nearly all content;
+// even aggressive edits rarely halve a non-trivial text. Defense-in-depth
+// behind the transport-level finish_reason/stop_reason checks (verified
+// data-loss bug 2026-06-10: a truncated completion diffed into a 3,591-byte
+// deletion suggestion).
+func suspiciouslyTruncated(original, corrected string) bool {
+	return len(original) >= minOriginalLenForTruncationGuard && len(corrected) < len(original)/2
 }
 
 // finalize logs the combined correction (best-effort) and tags every

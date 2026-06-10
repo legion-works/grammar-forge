@@ -143,6 +143,63 @@ func TestComplete_CompletionsOmitsChatTemplateKwargs(t *testing.T) {
 	require.False(t, present, "completions payload must NOT carry chat_template_kwargs")
 }
 
+// A finish_reason of "length" means the backend hit max_tokens and the
+// output is TRUNCATED. Returning the partial text would let the diff layer
+// convert the missing tail into mass-deletion suggestions (verified data-loss
+// bug, 2026-06-10), so Complete must surface an error instead.
+func TestCompleteErrorsOnTruncatedOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tmpl correction.PromptTemplate
+		resp string
+	}{
+		{
+			"chat", correction.TemplateChatInstruct,
+			`{"choices":[{"message":{"content":"partial"},"finish_reason":"length"}]}`,
+		},
+		{
+			"completions", correction.TemplateGRMRNative,
+			`{"choices":[{"text":"partial","finish_reason":"length"}]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.resp))
+			}))
+			defer srv.Close()
+			c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+			_, err := c.Complete(context.Background(), correction.Prompt{
+				User: "x", Template: tc.tmpl,
+			})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "truncated")
+		})
+	}
+}
+
+// finish_reason "stop" (and absent) must NOT error — only "length" is fatal.
+func TestCompleteAcceptsStopFinishReason(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	out, err := c.Complete(context.Background(), correction.Prompt{
+		User: "x", Template: correction.TemplateChatInstruct,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "ok", out)
+}
+
+// The budget must scale with input length so a long-but-legitimate correction
+// is not truncated by a tiny fixed cap (the old 512 cap truncated ~>200-word
+// inputs). The floor and a generous ceiling still bound runaway generation.
+func TestCompletionBudgetScalesAndCaps(t *testing.T) {
+	require.Equal(t, 64, completionBudget("one two"))
+	long := strings.Repeat("word ", 1000) // 1000 words -> 2500 raw
+	require.Equal(t, 2048, completionBudget(long))
+}
+
 func TestCompleteSendsSeedOnBothPaths(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -645,4 +646,53 @@ func TestCorrectPickyStyleBeforeGrammarLogsCorrectCombinedText(t *testing.T) {
 	// And the in-hand applyAll result must match the logged text.
 	require.Equal(t, "a cat run", applyAll("the cat runned", got.Suggestions),
 		"applying the returned suggestions to the original must yield the logged text")
+}
+
+// ---- Truncation guard (verified data-loss bug, 2026-06-10) ----
+// A truncated LLM response (backend hit max_tokens, or any failure mode that
+// returns a fraction of the input) must NEVER reach diffToSuggestions: the
+// diff converts the missing tail into mass-deletion suggestions that a
+// client's Apply All would actually apply. The service treats a suspiciously
+// short LLM output (less than half the original, on a non-trivial input) as
+// an LLM failure.
+
+func TestServiceEscalationDiscardsSuspiciouslyShortLLMOutput(t *testing.T) {
+	st := &fakeStore{}
+	long := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 10)
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{0, 3}, Replacement: "A", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	// Low confidence forces escalation; the LLM "responds" with a truncated
+	// fragment. The fast-path suggestion must be served, not the LLM diff.
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: "The quick brown fox."}, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: long})
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+	require.Equal(t, ModelGECToR, got.Suggestions[0].Model,
+		"truncated LLM output must be discarded; fast-path result served")
+}
+
+func TestServiceLLMOnlyErrorsOnSuspiciouslyShortOutput(t *testing.T) {
+	long := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 10)
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "The quick."}, &fakeStore{}, "m", fastPolicy())
+	_, err := svc.Correct(context.Background(), Request{Text: long})
+	require.Error(t, err, "LLM-only path must surface a truncated output as an error, not as mass deletions")
+}
+
+func TestCorrectPickyStyleDiscardsSuspiciouslyShortOutput(t *testing.T) {
+	st := &fakeStore{}
+	// TrimSpace so the grammar pass (which trims its output) sees the input
+	// as already-correct and emits NO grammar edits — otherwise a trailing-
+	// space grammar edit would swallow the style edits via the overlap rule
+	// and this test would pass without the truncation guard.
+	long := strings.TrimSpace(strings.Repeat("The quick brown fox jumps over the lazy dog. ", 10))
+	llm := &scriptedLLM{grammarOut: long, styleOut: "Short."}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: long, Picky: true})
+	require.NoError(t, err)
+	for _, s := range got.Suggestions {
+		require.NotEqual(t, CategoryStyle, s.Category,
+			"truncated style output must be discarded, not diffed into style deletions")
+	}
 }

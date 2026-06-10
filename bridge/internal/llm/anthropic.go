@@ -78,9 +78,16 @@ func (c *AnthropicClient) Complete(ctx context.Context, p correction.Prompt) (st
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		StopReason string `json:"stop_reason"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		return "", fmt.Errorf("decode anthropic response: %w", err)
+	}
+	// stop_reason "max_tokens" means the answer was TRUNCATED at the shared
+	// thinking+answer budget. Partial text is a data-loss hazard downstream
+	// (the diff turns the missing tail into deletions) — error out instead.
+	if parsed.StopReason == "max_tokens" {
+		return "", fmt.Errorf("anthropic output truncated at max_tokens (stop_reason=max_tokens)")
 	}
 	for _, b := range parsed.Content {
 		if b.Type == "text" && b.Text != "" {

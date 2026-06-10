@@ -41,6 +41,37 @@ func TestAnthropicComplete(t *testing.T) {
 	require.Equal(t, "rewritten", strings.TrimSpace(out))
 }
 
+// stop_reason "max_tokens" means the answer was TRUNCATED at the budget
+// (thinking + answer share it on reasoning models). Returning the partial
+// text would let the diff layer convert the missing tail into mass-deletion
+// suggestions, so Complete must surface an error instead.
+func TestAnthropicCompleteErrorsOnMaxTokensTruncation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"partial"}],"stop_reason":"max_tokens"}`))
+	}))
+	defer srv.Close()
+	c := NewAnthropic(Config{BaseURL: srv.URL, Model: "claude-x", APIKey: "k"})
+	_, err := c.Complete(context.Background(), correction.Prompt{
+		User: "x", Template: correction.TemplateChatInstruct,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "truncated")
+}
+
+// stop_reason "end_turn" (the normal completion) must NOT error.
+func TestAnthropicCompleteAcceptsEndTurnStopReason(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))
+	}))
+	defer srv.Close()
+	c := NewAnthropic(Config{BaseURL: srv.URL, Model: "claude-x", APIKey: "k"})
+	out, err := c.Complete(context.Background(), correction.Prompt{
+		User: "x", Template: correction.TemplateChatInstruct,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "ok", out)
+}
+
 func TestAnthropicCompleteIncludesSystem(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)

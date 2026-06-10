@@ -92,8 +92,9 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 
 	var parsed struct {
 		Choices []struct {
-			Text    string `json:"text"`
-			Message struct {
+			Text         string `json:"text"`
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -105,6 +106,14 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 		return "", fmt.Errorf("llm returned no choices")
 	}
 	ch := parsed.Choices[0]
+	// finish_reason "length" means the backend hit max_tokens and the output
+	// is TRUNCATED mid-text. Returning the partial text is a data-loss hazard:
+	// the correction diff converts the missing tail into mass-deletion
+	// suggestions (verified live 2026-06-10: a 6.5KB input produced a
+	// 3,591-byte deletion). Surface it as an error so callers fall back / fail.
+	if ch.FinishReason == "length" {
+		return "", fmt.Errorf("llm output truncated at max_tokens (finish_reason=length)")
+	}
 	if ch.Text != "" {
 		return strings.TrimSpace(ch.Text), nil
 	}
@@ -112,14 +121,19 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 }
 
 // completionBudget sizes max_tokens to the input: ~2.5 tokens/word, clamped.
+// Correction output is roughly input-sized, so the ceiling must scale with
+// realistic inputs: the old 512 cap truncated ~>200-word inputs (the
+// truncation then became mass-deletion suggestions downstream). 2048 still
+// bounds runaway generation; max_tokens is a cap, not a charge — greedy
+// correction stops at the corrected text's natural end.
 func completionBudget(user string) int {
 	words := len(strings.Fields(user))
 	n := int(float64(words) * 2.5)
 	if n < 64 {
 		n = 64
 	}
-	if n > 512 {
-		n = 512
+	if n > 2048 {
+		n = 2048
 	}
 	return n
 }
