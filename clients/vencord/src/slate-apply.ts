@@ -55,18 +55,55 @@ function describeNode(n: Node): string {
  * cannot be resolved (stale text) — callers re-check instead of applying.
  * Every decision point is traced through `log` for live debugging.
  */
-export async function applySlateFix(
-    el: HTMLElement,
+/** Widen a PURE INSERTION onto an adjacent code point. Slate ignores
+ *  COLLAPSED target ranges on insertReplacementText and inserts at its own
+ *  (possibly stale) model selection instead — verified live: an insertion
+ *  targeted at [15,15) landed at the stale selection [13,13). Replacing
+ *  "e" with "e." is byte-identical in effect and gives Slate a real range
+ *  to replace. Surrogate-pair safe. Prefers widening LEFT; at offset 0
+ *  widens RIGHT. The same widening the bridge's LT-compat layer applies to
+ *  /v2/check offsets. */
+export function widenInsertion(
+    before: string,
     span: CodeUnitSpan,
     replacement: string,
+): { span: CodeUnitSpan; replacement: string } {
+    if (span.start !== span.end || before.length === 0) return { span, replacement }
+    if (span.start > 0) {
+        let start = span.start - 1
+        const prev = before.charCodeAt(start)
+        // Low surrogate: include the full pair so the range stays on a
+        // code-point boundary.
+        if (prev >= 0xdc00 && prev <= 0xdfff && start > 0) start -= 1
+        return {
+            span: { start, end: span.end },
+            replacement: before.slice(start, span.end) + replacement,
+        }
+    }
+    let end = span.end + 1
+    const next = before.charCodeAt(span.end)
+    // High surrogate: include the full pair.
+    if (next >= 0xd800 && next <= 0xdbff && end < before.length) end += 1
+    return {
+        span: { start: span.start, end },
+        replacement: replacement + before.slice(span.end, end),
+    }
+}
+
+export async function applySlateFix(
+    el: HTMLElement,
+    rawSpan: CodeUnitSpan,
+    rawReplacement: string,
     log: ApplyTraceLogger = () => {},
 ): Promise<boolean> {
     const before = getText(el)
-    const expected = before.slice(0, span.start) + replacement + before.slice(span.end)
+    const expected = before.slice(0, rawSpan.start) + rawReplacement + before.slice(rawSpan.end)
+    const { span, replacement } = widenInsertion(before, rawSpan, rawReplacement)
     log('apply: start', {
         span: `[${span.start},${span.end})`,
         spanText: JSON.stringify(before.slice(span.start, span.end)),
         replacement: JSON.stringify(replacement),
+        widened: span.start !== rawSpan.start || span.end !== rawSpan.end,
         textLen: before.length,
     })
     const range = codeUnitSpanToRange(el, span)
