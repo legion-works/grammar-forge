@@ -46,6 +46,19 @@ const PASTE_GRACE_MS = 1500
 
 export type InputDecision = 'check' | 'skip' | 'grace'
 
+/** Compact, log-safe description of the current selection RELATIVE to a
+ *  composer element: flat code-unit offsets when resolvable (the same model
+ *  applyFix uses), else the raw container/offset pair. Debug-logging only. */
+function selectionDebugInfo(el: HTMLElement): unknown {
+    const sel = el.ownerDocument.getSelection()
+    if (!sel || sel.rangeCount === 0) return 'no-selection'
+    const range = sel.getRangeAt(0)
+    if (!el.contains(range.startContainer)) return 'outside-composer'
+    const start = domPointToFlatOffset(el, range.startContainer, range.startOffset)
+    const end = domPointToFlatOffset(el, range.endContainer, range.endOffset)
+    return { start, end, collapsed: range.collapsed }
+}
+
 /** Pure input-event policy: typing checks; pastes skip (default) or defer
  *  to a grace window (checkPastedText on). */
 export function inputGate(inputType: string, opts: { checkPastedText: boolean }): InputDecision {
@@ -426,6 +439,11 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     }
 
     const openPopoverFor = (el: HTMLElement, item: RenderableItem, anchorRect: DOMRect): void => {
+        debugLog('popover open', {
+            original: item.diffOriginal,
+            category: item.category,
+            activeBefore: document.activeElement?.tagName,
+        })
         // Single-popover invariant: dismiss any prior popover for this field
         // before opening a new one.
         closePopoverFor(el)
@@ -879,11 +897,54 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             const s = fields.get(el)
             if (!s) return
             const hit = hitTest(s.itemRects, e.clientX, e.clientY)
+            // Payload guarded explicitly: selectionDebugInfo walks the DOM,
+            // and debugLog's internal gate would not stop the EAGER argument
+            // evaluation. Zero work unless debug logging is enabled.
+            if (getConfig().debugLogging) {
+                debugLog('composer click', {
+                    x: e.clientX,
+                    y: e.clientY,
+                    items: s.items.length,
+                    hit: hit
+                        ? { original: hit.item.diffOriginal, category: hit.item.category }
+                        : null,
+                    selection: selectionDebugInfo(el),
+                })
+            }
             if (!hit) return
             openPopoverFor(el, hit.item, hit.rect)
         }
         el.addEventListener('click', onFieldClick)
         cleanups.push(() => el.removeEventListener('click', onFieldClick))
+
+        // Focus-flow tracing for the caret-jump investigation: log every
+        // focus hand-off involving the composer, with where focus went/came
+        // from and the live selection state (Slate restores a remembered
+        // selection on refocus — the suspected jump mechanism).
+        const describeNode = (n: EventTarget | null): string => {
+            if (!(n instanceof HTMLElement)) return String(n)
+            return `${n.tagName.toLowerCase()}.${String(n.className).slice(0, 50)}`
+        }
+        const onFieldFocusIn = (e: FocusEvent): void => {
+            if (!getConfig().debugLogging) return
+            debugLog('composer focusin', {
+                from: describeNode(e.relatedTarget),
+                selection: selectionDebugInfo(el),
+            })
+        }
+        const onFieldFocusOut = (e: FocusEvent): void => {
+            if (!getConfig().debugLogging) return
+            debugLog('composer focusout', {
+                to: describeNode(e.relatedTarget),
+                selection: selectionDebugInfo(el),
+            })
+        }
+        el.addEventListener('focusin', onFieldFocusIn)
+        el.addEventListener('focusout', onFieldFocusOut)
+        cleanups.push(() => {
+            el.removeEventListener('focusin', onFieldFocusIn)
+            el.removeEventListener('focusout', onFieldFocusOut)
+        })
 
         // Focus on the composer: this is the field the user is now
         // editing — update lastActiveField so the pill's active-composer
