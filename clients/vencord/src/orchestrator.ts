@@ -365,12 +365,21 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // Native `paste` fallback for rich editors (Discord/Lexical) that
         // apply the paste programmatically and fire NO input event with
         // inputType=insertFromPaste. Capture phase so we see it even if
-        // the editor stops propagation; we never preventDefault.
+        // the editor stops propagation; we never preventDefault. With
+        // checkPastedText OFF the paste must still CANCEL any pending
+        // debounced check — the editor's own post-paste input event may
+        // carry a generic inputType that the gate reads as typing, and
+        // without the cancel the pasted text would be checked (violating
+        // the typed-input-only invariant).
         const onFieldPaste = (): void => {
-            if (!getConfig().checkPastedText) return
             const s = fields.get(el)
             if (!s) return
-            armPasteGrace(el, s, attachment)
+            if (getConfig().checkPastedText) {
+                armPasteGrace(el, s, attachment)
+                return
+            }
+            attachment.cancelPending()
+            clearPasteGrace(s)
         }
         el.addEventListener('paste', onFieldPaste, { capture: true })
         cleanups.push(() => el.removeEventListener('paste', onFieldPaste, { capture: true }))
