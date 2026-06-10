@@ -29,6 +29,10 @@ type Service struct {
 	log                    *slog.Logger
 	rephraseFactory        RephraseClientFactory
 	rephraseDefaultBackend *RephraseBackend
+	// sentenceCache memoizes per-sentence suggestion sets. nil => legacy
+	// whole-text path; populated by SetSentenceCache to enable the sentence
+	// pipeline (segment + per-sentence cache lookup + span reassembly).
+	sentenceCache *sentenceCache
 }
 
 // NewService wires the pipeline. baseModel is recorded on each logged event.
@@ -54,6 +58,11 @@ func (s *Service) SetRephraseFactory(f RephraseClientFactory) { s.rephraseFactor
 // a request carries NO override. nil => fall back to the service's default llm.
 func (s *Service) SetRephraseDefaultBackend(b *RephraseBackend) { s.rephraseDefaultBackend = b }
 
+// SetSentenceCache enables the per-sentence pipeline with an LRU of `size`
+// sentence entries. Disabled (whole-text behaviour, unchanged) when never
+// called or size <= 0.
+func (s *Service) SetSentenceCache(size int) { s.sentenceCache = newSentenceCache(size) }
+
 // Correct runs the full pipeline and returns suggestions. It never mutates
 // the text. Fast corrector errors and LLM escalation errors are best-effort
 // and do not surface to the caller; we always return what we have.
@@ -70,16 +79,74 @@ func (s *Service) SetRephraseDefaultBackend(b *RephraseBackend) { s.rephraseDefa
 // Finalize (log + tag + score) runs exactly once on the COMBINED set, so
 // /signal can reference style suggestions and the logged Event.Suggestion
 // reflects the full rewrite.
+//
+// Sentence path (SetSentenceCache + len(segs) >= 2): split the input into
+// sentences, run the single-text pipeline per sentence, serve unchanged
+// sentences from the in-process LRU cache, then shift sentence-relative
+// spans to whole-text offsets and finalize ONCE on the combined set. The
+// truncation guard and the LLM-only error contract both move into
+// correctOnce so they apply per-sentence; the aggregate error contract
+// ("all N sentences failed" — only surfaces when every single one failed)
+// preserves the LLM-only mode's behaviour at the request boundary.
 func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) {
+	segs := SegmentSentences(req.Text)
+	if s.sentenceCache == nil || len(segs) < 2 {
+		all, err := s.correctOnce(ctx, req)
+		if err != nil {
+			return Correction{}, err
+		}
+		return s.finalize(ctx, req, all)
+	}
+
+	// Sentence path: check each sentence independently, serving unchanged
+	// sentences from the cache. Per-sentence errors are best-effort (logged,
+	// sentence skipped) UNLESS every sentence failed — then surface one error
+	// so the LLM-only mode keeps its error contract.
+	var all []Suggestion
+	failures := 0
+	var lastErr error
+	for _, seg := range segs {
+		sentence := req.Text[seg.Start:seg.End]
+		sreq := Request{Text: sentence, Source: req.Source, Picky: req.Picky}
+		key := sentenceCacheKey(s.baseModel, s.pb.Build(sreq).System, sentence, req.Picky)
+		sugs, hit := s.sentenceCache.get(key)
+		if !hit {
+			var err error
+			sugs, err = s.correctOnce(ctx, sreq)
+			if err != nil {
+				failures++
+				lastErr = err
+				s.log.Warn("sentence check failed; skipping sentence", "err", err)
+				continue
+			}
+			s.sentenceCache.add(key, sugs)
+		}
+		for i := range sugs {
+			sugs[i].Span.Start += seg.Start
+			sugs[i].Span.End += seg.Start
+		}
+		all = append(all, sugs...)
+	}
+	if failures == len(segs) && lastErr != nil {
+		return Correction{}, fmt.Errorf("all %d sentences failed: %w", failures, lastErr)
+	}
+	return s.finalize(ctx, req, all)
+}
+
+// correctOnce runs the full single-text pipeline (fast path, escalation with
+// the truncation guard, optional picky style pass) for one unit of text and
+// returns raw suggestions. It does NOT log or tag — the caller finalizes
+// exactly once per request (sentence path: once on the COMBINED set).
+func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, error) {
 	if len(s.fast) == 0 {
 		all, err := s.llmOnlySuggestions(ctx, req)
 		if err != nil {
-			return Correction{}, err
+			return nil, err
 		}
 		if req.Picky {
 			all = s.appendStyleSuggestions(ctx, req, all)
 		}
-		return s.finalize(ctx, req, all)
+		return all, nil
 	}
 	fast := s.runFast(ctx, req)
 	all := fast
@@ -117,7 +184,7 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 		all = s.appendStyleSuggestions(ctx, req, all)
 	}
 
-	return s.finalize(ctx, req, all)
+	return all, nil
 }
 
 // appendStyleSuggestions runs the best-effort style pass on top of the

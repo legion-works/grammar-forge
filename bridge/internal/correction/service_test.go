@@ -701,6 +701,72 @@ func TestCorrectPickyStyleDiscardsSuspiciouslyShortOutput(t *testing.T) {
 	}
 }
 
+type countingLLM struct {
+	calls int
+}
+
+func (c *countingLLM) Complete(_ context.Context, p Prompt) (string, error) {
+	c.calls++
+	// Echo the input back "corrected": fakePB puts the raw text in p.User.
+	return p.User, nil
+}
+
+func TestSentencePipelineCachesUnchangedSentences(t *testing.T) {
+	st := &fakeStore{}
+	llm := &countingLLM{}
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	svc.SetSentenceCache(64)
+	text := "This is the first sentence. This is the second sentence."
+	_, err := svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	firstCalls := llm.calls
+	require.Equal(t, 2, firstCalls, "cold: one LLM call per sentence")
+	_, err = svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	require.Equal(t, firstCalls, llm.calls, "warm: zero additional LLM calls")
+}
+
+func TestSentencePipelineOnlyChangedSentenceMisses(t *testing.T) {
+	st := &fakeStore{}
+	llm := &countingLLM{}
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	svc.SetSentenceCache(64)
+	_, err := svc.Correct(context.Background(), Request{Text: "Stable first sentence here. Old second sentence here."})
+	require.NoError(t, err)
+	before := llm.calls
+	_, err = svc.Correct(context.Background(), Request{Text: "Stable first sentence here. New second sentence here."})
+	require.NoError(t, err)
+	require.Equal(t, before+1, llm.calls, "editing one sentence must re-check ONLY that sentence")
+}
+
+func TestSentencePipelineShiftsSpansToTextOffsets(t *testing.T) {
+	st := &fakeStore{}
+	// LLM "fixes" only the second sentence: replaces "cats." with "a kitty."
+	// (the resulting character-level diff from sergi/go-diff spans a whole
+	// word, so the assertion below can verify the shifted span against the
+	// original text unambiguously — see deviation note in the plan report).
+	svc := NewService(fakePB{}, nil, llmFunc(func(_ context.Context, p Prompt) (string, error) {
+		return strings.ReplaceAll(p.User, "cats.", "a kitty."), nil
+	}), st, "m", fastPolicy())
+	svc.SetSentenceCache(64)
+	text := "The first sentence is fine. He has cats."
+	got, err := svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+	sp := got.Suggestions[0].Span
+	require.Equal(t, "cats", text[sp.Start:sp.End], "span must be shifted to WHOLE-TEXT offsets")
+}
+
+func TestSentencePipelineDisabledWithoutCache(t *testing.T) {
+	st := &fakeStore{}
+	llm := &countingLLM{}
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	// No SetSentenceCache -> legacy whole-text path: ONE LLM call.
+	_, err := svc.Correct(context.Background(), Request{Text: "One sentence. Two sentences."})
+	require.NoError(t, err)
+	require.Equal(t, 1, llm.calls)
+}
+
 func TestFinalizeTagsEachSuggestionWithItsOwnEditID(t *testing.T) {
 	st := &fakeStore{}
 	// Use a fast corrector with EXPLICIT spans (the LLM-diff path emits
