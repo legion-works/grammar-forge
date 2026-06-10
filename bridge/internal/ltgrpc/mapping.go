@@ -33,18 +33,34 @@ func suggestionToMatch(sentence string, s correction.Suggestion) *pb.Match {
 	}
 
 	offset, length, replacement := s.Span.Start, s.Span.End-s.Span.Start, s.Replacement
+	candidates := s.Replacements
+	if len(candidates) == 0 {
+		candidates = []string{s.Replacement}
+	}
+	widened := false
 	if length == 0 {
 		offset, length, replacement = widenInsertion(sentence, s.Span.Start, s.Replacement)
+		widened = true
+	}
+	reps := make([]*pb.SuggestedReplacement, 0, len(candidates))
+	for i, cand := range candidates {
+		r := cand
+		if widened {
+			if i == 0 {
+				r = replacement // already anchored by widenInsertion above
+			} else {
+				_, _, r = widenInsertion(sentence, s.Span.Start, cand)
+			}
+		}
+		reps = append(reps, &pb.SuggestedReplacement{Replacement: r, Confidence: float32(s.Confidence)})
 	}
 
 	return &pb.Match{
-		Offset: uint32(offset),
-		Length: uint32(length),
-		Id:     "GF_" + strings.ToUpper(string(s.Model)),
-		SubId:  s.RuleID,
-		SuggestedReplacements: []*pb.SuggestedReplacement{
-			{Replacement: replacement, Confidence: float32(s.Confidence)},
-		},
+		Offset:                uint32(offset),
+		Length:                uint32(length),
+		Id:                    "GF_" + strings.ToUpper(string(s.Model)),
+		SubId:                 s.RuleID,
+		SuggestedReplacements: reps,
 		// RuleDescription and MatchDescription are both populated: LT's GRPCRule
 		// validates the match description, and a non-empty rule description keeps
 		// the add-on/UI label sensible.

@@ -108,6 +108,21 @@ func TestSuggestionToMatch_InsertionRespectsUTF8Boundary(t *testing.T) {
 	require.Equal(t, "cafés", sentence[:off]+repl+sentence[off+length:])
 }
 
+// Regression: the bridge stores ALL viable replacement candidates on a
+// Suggestion (e.g. {typo -> correction, alternative}). The gRPC mapping
+// used to ship only the primary replacement — the LT client UI then had
+// nothing to show under "Alternatives". The mapping must carry every
+// candidate so the client can render the full alt-replacement list.
+func TestSuggestionToMatchCarriesAllReplacements(t *testing.T) {
+	m := suggestionToMatch("I has a cat", correction.Suggestion{
+		Span: correction.Span{Start: 2, End: 5}, Replacement: "have",
+		Replacements: []string{"have", "had"}, Model: correction.ModelLLM,
+	})
+	require.Len(t, m.SuggestedReplacements, 2)
+	require.Equal(t, "have", m.SuggestedReplacements[0].Replacement)
+	require.Equal(t, "had", m.SuggestedReplacements[1].Replacement)
+}
+
 // Every bridge-emitted LT match must carry premium=true so it surfaces
 // through LanguageTool's /v2/check JSON (the upstream LT browser add-on is
 // closed-source and gates on the premium flag). The Rule field on Match is
