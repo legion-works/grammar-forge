@@ -528,22 +528,39 @@ func score(original string, suggestions []Suggestion) int {
 	return sc
 }
 
-// dropAllowlisted removes suggestions whose span text is exactly one
-// allowlisted word (case-insensitive, no whitespace). A larger edit that
-// merely contains the word is kept — only single dictionary words are
-// suppressed. Suggestions with invalid spans (e.g. out of bounds) are
-// passed through unchanged; Span.Validate is the source of truth and the
-// rest of the pipeline is robust to it.
+// dropAllowlisted removes suggestions whose span text consists ENTIRELY of
+// allowlisted words (case-insensitive): a single dictionary word, or several
+// separated by whitespace — the LLM can merge two adjacent unknown words into
+// one edit (verified live), and after the user adds both words that merged
+// edit must not be re-emitted. An edit containing
+// ANY non-allowlisted token is kept (it is still a real correction).
+// Suggestions with invalid spans (e.g. out of bounds) are passed through
+// unchanged; Span.Validate is the source of truth and the rest of the
+// pipeline is robust to it.
 func (s *Service) dropAllowlisted(text string, sugs []Suggestion) []Suggestion {
 	out := make([]Suggestion, 0, len(sugs))
 	for _, sg := range sugs {
-		if sg.Span.Validate(len(text)) == nil {
-			word := text[sg.Span.Start:sg.Span.End]
-			if !strings.ContainsAny(word, " \t\n") && s.allowlist.Contains(word) {
-				continue
-			}
+		if sg.Span.Validate(len(text)) == nil &&
+			allTokensAllowlisted(text[sg.Span.Start:sg.Span.End], s.allowlist) {
+			continue
 		}
 		out = append(out, sg)
 	}
 	return out
+}
+
+// allTokensAllowlisted reports whether spanText splits (on whitespace) into
+// one or more tokens that are ALL in the allowlist. Empty span text (a pure
+// insertion) is never suppressed — there is no word to have allowlisted.
+func allTokensAllowlisted(spanText string, allowlist WordAllowlist) bool {
+	tokens := strings.Fields(spanText)
+	if len(tokens) == 0 {
+		return false
+	}
+	for _, token := range tokens {
+		if !allowlist.Contains(token) {
+			return false
+		}
+	}
+	return true
 }

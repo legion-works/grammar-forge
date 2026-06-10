@@ -821,13 +821,12 @@ func TestCorrectSuppressesAllowlistedSingleWordEdits(t *testing.T) {
 	require.Equal(t, "the", got.Suggestions[0].Replacement)
 }
 
-// A multi-word edit that merely contains an allowlisted word is kept — the
-// allowlist only suppresses single dictionary words. A larger edit that
-// happens to span the allowlisted word is still a real correction.
-// Fixture: "kuberntes podz" — bytes [0,14) = the whole string (a multi-word
-// span containing a space). The edit is "kuberntes podz" -> "Kubernetes pods";
-// it touches the allowlisted word "kubernetes" but is not a single-word
-// rewrite, so it survives.
+// A multi-word edit containing a NON-allowlisted token is kept — suppression
+// requires EVERY token in the span to be in the user dictionary. Fixture:
+// "kuberntes podz" — bytes [0,14) = the whole string. The tokens are the
+// misspelled "kuberntes" (not in the dictionary; only "kubernetes" is) and
+// "podz" (not in the dictionary), so the edit is a real correction and
+// survives.
 func TestCorrectAllowlistDoesNotDropMultiWordEdit(t *testing.T) {
 	st := &fakeStore{}
 	fc := fakeCorrector{name: string(ModelGECToR), sugs: []Suggestion{
@@ -838,4 +837,23 @@ func TestCorrectAllowlistDoesNotDropMultiWordEdit(t *testing.T) {
 	got, err := svc.Correct(context.Background(), Request{Text: "kuberntes podz"})
 	require.NoError(t, err)
 	require.Len(t, got.Suggestions, 1, "a multi-word edit containing the word is NOT dropped")
+}
+
+// A multi-word edit whose span tokens are ALL in the user dictionary is
+// dropped. The LLM can merge two adjacent unknown words into one edit
+// (verified live); after the user adds both words, that merged edit must not
+// be re-emitted — Harper stops flagging each word, and this guard stops the
+// LLM path from re-flagging the pair.
+func TestCorrectSuppressesAllowlistedMultiWordEdit(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{name: string(ModelGECToR), sugs: []Suggestion{
+		{Span: Span{0, 9}, Replacement: "Glory Six", Model: ModelGECToR, Confidence: 0.95},
+		{Span: Span{10, 13}, Replacement: "the", Model: ModelGECToR, Confidence: 0.95},
+	}}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	svc.SetWordAllowlist(fakeAllowlist{words: map[string]bool{"glorp": true, "zix": true}})
+	got, err := svc.Correct(context.Background(), Request{Text: "Glorp Zix teh"}) //nolint:misspell // intentional fixture
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1, "the all-allowlisted multi-word edit is dropped")
+	require.Equal(t, "the", got.Suggestions[0].Replacement)
 }
