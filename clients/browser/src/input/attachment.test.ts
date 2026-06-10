@@ -118,12 +118,17 @@ describe('createFieldAttachment', () => {
         expect(statusDestroy).toHaveBeenCalledTimes(1)
     })
 
-    it('a re-render setHandles swap does NOT run the prior highlightDestroy', () => {
-        // Regression guard: the highlight layer / native registry is updated
-        // IN PLACE on every render, so the prior render's highlightDestroy must
-        // NOT fire on a swap — doing so wiped the highlights the new render had
-        // just set ("highlights die on the first edit"). The transient pill +
-        // popover destroyers DO fire on the swap (they're recreated per render).
+    it('a re-render setHandles swap runs ONLY the prior popoverHide', () => {
+        // Regression guard, two layers:
+        //  - The highlight layer / native registry is updated IN PLACE on every
+        //    render, so the prior render's highlightDestroy must NOT fire on a
+        //    swap — doing so wiped the highlights the new render had just set
+        //    ("highlights die on the first edit").
+        //  - The status pill is ALSO updated in place (statusHandle.update,
+        //    perf 67a3192), so the prior statusDestroy must NOT fire either:
+        //    it points at the SAME kept handle, and running it killed the pill
+        //    on every second render ("pill dies when the final SSE frame
+        //    lands"). Only the popover is transient per render.
         const ta = document.createElement('textarea')
         document.body.appendChild(ta)
         const att = createFieldAttachment(
@@ -140,24 +145,26 @@ describe('createFieldAttachment', () => {
             popoverHide: popoverHide1,
             statusDestroy: statusDestroy1,
         })
-        // Second render (e.g. after an edit) swaps in fresh handles.
+        // Second render (e.g. after an edit, or the SSE final frame following
+        // its fast preview frame) swaps in fresh handles.
         att.setHandles({
             highlightDestroy: vi.fn<() => void>(),
             popoverHide: vi.fn<() => void>(),
             statusDestroy: vi.fn<() => void>(),
         })
-        // The prior highlight was NOT destroyed (persistent, updated in place)…
+        // The prior highlight and pill were NOT destroyed (persistent,
+        // updated in place)…
         expect(highlightDestroy1).not.toHaveBeenCalled()
-        // …but the prior transient pill + popover WERE torn down on the swap.
+        expect(statusDestroy1).not.toHaveBeenCalled()
+        // …but the prior transient popover WAS torn down on the swap.
         expect(popoverHide1).toHaveBeenCalledTimes(1)
-        expect(statusDestroy1).toHaveBeenCalledTimes(1)
         att.detach()
     })
 
-    it('detach still clears the highlight even after re-render swaps dropped it', () => {
-        // The highlightDestroy is carried forward across swaps so detach can
-        // still clear the persistent highlight, even when a later render didn't
-        // re-supply one.
+    it('detach still clears highlight and pill after swaps dropped them', () => {
+        // highlightDestroy AND statusDestroy are carried forward across swaps
+        // so detach can still clear the persistent highlight + pill, even when
+        // a later render didn't re-supply one.
         const ta = document.createElement('textarea')
         document.body.appendChild(ta)
         const att = createFieldAttachment(
@@ -167,12 +174,14 @@ describe('createFieldAttachment', () => {
             () => {},
         )
         const highlightDestroy = vi.fn<() => void>()
-        att.setHandles({ highlightDestroy })
-        // A later render supplies only a status handle (no highlightDestroy).
-        att.setHandles({ statusDestroy: vi.fn<() => void>() })
+        const statusDestroy = vi.fn<() => void>()
+        att.setHandles({ highlightDestroy, statusDestroy })
+        // A later render supplies only a popover handle (no highlight/status).
+        att.setHandles({ popoverHide: vi.fn<() => void>() })
         att.detach()
-        // The original highlight destroyer was carried forward and fired once.
+        // Both persistent destroyers were carried forward and fired once.
         expect(highlightDestroy).toHaveBeenCalledTimes(1)
+        expect(statusDestroy).toHaveBeenCalledTimes(1)
     })
 
     it('clearHandles() tears down everything (incl. highlight) without detaching', () => {

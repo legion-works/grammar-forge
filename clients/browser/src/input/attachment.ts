@@ -135,15 +135,30 @@ export function createFieldAttachment(
     el.addEventListener('input', onInput)
     el.addEventListener('blur', onBlur)
 
-    // Run the TRANSIENT destroy hooks (status pill + popover) of a handle set.
-    // These are re-created fresh on every render (renderStatusButton already
-    // removes the prior pill via destroyExisting; the popover is per-open), so
-    // tearing the old ones down on a swap is safe + idempotent.
+    // Run the TRANSIENT destroy hook (popover only) of a handle set. The
+    // popover is per-open, so tearing the old one down on a swap is safe +
+    // idempotent.
     const runTransientDestroyers = (h: FieldHandles): void => {
         try {
             h.popoverHide?.()
         } catch {
             // ignore
+        }
+    }
+
+    // Run the PERSISTENT destroy hooks (highlight + status pill). Both are
+    // UPDATED IN PLACE on each render — the highlight layer via reconcile /
+    // setFieldHighlights, the pill via statusHandle.update (perf 67a3192) —
+    // not destroyed+recreated. So these must run ONLY on detach / field-gone,
+    // never on a per-render swap. Running them on a swap was the "highlights
+    // die on the first edit" bug, and (same class) the "pill dies when the
+    // SSE final frame lands" bug: the prior render's destroyer pointed at the
+    // SAME kept layer/handle the new render had just updated.
+    const runPersistentDestroyers = (h: FieldHandles): void => {
+        try {
+            h.highlightDestroy?.()
+        } catch {
+            // page returning to unmonitored state; ignore
         }
         try {
             h.statusDestroy?.()
@@ -152,46 +167,34 @@ export function createFieldAttachment(
         }
     }
 
-    // Run the PERSISTENT highlight destroyer. The highlight layer (overlay
-    // reconciling pool) and the native CSS-Custom-Highlight registry entries
-    // are UPDATED IN PLACE on each render (reconcile / setFieldHighlights), not
-    // destroyed+recreated — so this must run ONLY on detach / field-gone, never
-    // on a per-render swap. Running it on a swap was the "highlights die on the
-    // first edit" bug: the new render set the ranges, then the prior render's
-    // highlightDestroy=clearField wiped them.
-    const runHighlightDestroyer = (h: FieldHandles): void => {
-        try {
-            h.highlightDestroy?.()
-        } catch {
-            // page returning to unmonitored state; ignore
-        }
-    }
-
     const setHandles = (next: FieldHandles): void => {
         if (detached) return
-        // Tear down only the PREVIOUS render's TRANSIENT overlay (pill +
-        // popover) before adopting the new handles — the swap stays atomic for
-        // those. The highlight is persistent (updated in place by the new
-        // render), so its destroyer is carried forward, NOT run here; running
-        // it would wipe the highlights the new render just set.
+        // Tear down only the PREVIOUS render's TRANSIENT overlay (the popover)
+        // before adopting the new handles — the swap stays atomic for it. The
+        // highlight AND the status pill are persistent (updated in place by
+        // the new render), so their destroyers are carried forward, NOT run
+        // here; running them would wipe the highlights / kill the pill the
+        // new render just updated.
         runTransientDestroyers(handles)
-        // Carry forward a highlightDestroy when the caller didn't supply a new
-        // one, so detach can still clear the persistent highlight. renderField
-        // always supplies one (pointing at the same persistent layer/field), so
-        // in practice this just replaces like-for-like.
+        // Carry forward highlightDestroy/statusDestroy when the caller didn't
+        // supply new ones, so detach can still clear the persistent highlight
+        // + pill. renderField always supplies both (pointing at the same
+        // persistent layer/handle), so in practice this just replaces
+        // like-for-like.
         handles = {
             ...next,
             highlightDestroy: next.highlightDestroy ?? handles.highlightDestroy,
+            statusDestroy: next.statusDestroy ?? handles.statusDestroy,
         }
     }
 
     const clearHandles = (): void => {
         if (detached) return
         // Field gone (left the DOM mid-check): clear EVERYTHING, including the
-        // persistent highlight, then drop the handles. Distinct from a re-
-        // render swap, which preserves the highlight.
+        // persistent highlight + pill, then drop the handles. Distinct from a
+        // re-render swap, which preserves them.
         runTransientDestroyers(handles)
-        runHighlightDestroyer(handles)
+        runPersistentDestroyers(handles)
         handles = {}
     }
 
@@ -201,11 +204,11 @@ export function createFieldAttachment(
         el.removeEventListener('input', onInput)
         el.removeEventListener('blur', onBlur)
         debouncedRun.cancel()
-        // Destroy whatever overlay handles are currently bound — transient
-        // (pill/popover) AND the persistent highlight. The popover may be
+        // Destroy whatever overlay handles are currently bound — the transient
+        // popover AND the persistent highlight + pill. The popover may be
         // mid-open; popoverHide() is idempotent.
         runTransientDestroyers(handles)
-        runHighlightDestroyer(handles)
+        runPersistentDestroyers(handles)
         // Decrement exactly once: the countReader is called BEFORE the
         // decrement so the caller can decide to no-op (e.g. if the runtime
         // was already torn down). We never decrement when the count is
