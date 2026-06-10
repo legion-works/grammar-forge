@@ -271,3 +271,58 @@ describe('mirror style cache (P1/H1)', () => {
         expect(second).not.toBe(first)
     })
 })
+
+describe('measurement privacy (field text must never enter page-visible DOM)', () => {
+    // The attack this guards against: the mirror-div technique used to copy
+    // the field's text into a measurable element. If that mirror is appended
+    // to the PAGE's DOM (document.body), any page script with a
+    // MutationObserver receives the added node in its records and can read
+    // the user's full field text from it — even after the mirror is removed
+    // (the record keeps a reference). Privacy invariant #1. The mirror must
+    // live inside a CLOSED shadow root, which observers on the page DOM
+    // cannot see into.
+    async function observeLeaks(run: () => void): Promise<string> {
+        const leaked: string[] = []
+        const obs = new MutationObserver((records) => {
+            for (const r of records) {
+                for (const n of r.addedNodes) {
+                    leaked.push((n as HTMLElement).textContent ?? '')
+                }
+            }
+        })
+        obs.observe(document.body, { childList: true, subtree: true })
+        run()
+        // Flush the observer's microtask delivery.
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        obs.disconnect()
+        return leaked.join('')
+    }
+
+    it('getSpanRectsBatch does not leak textarea text to page observers', async () => {
+        const ta = document.createElement('textarea')
+        ta.value = 'SECRET passphrase hunter2'
+        document.body.appendChild(ta)
+        const { getSpanRectsBatch } = await import('@/overlay/rect')
+        const leaked = await observeLeaks(() => {
+            getSpanRectsBatch(ta, [
+                { start: 0, end: 6 },
+                { start: 7, end: 17 },
+            ])
+        })
+        expect(leaked).not.toContain('SECRET')
+        expect(leaked).not.toContain('hunter2')
+        ta.remove()
+    })
+
+    it('getSpanRects (single-span path) does not leak input text to page observers', async () => {
+        const input = document.createElement('input')
+        input.value = 'SECRET token abcdef'
+        document.body.appendChild(input)
+        const { getSpanRects } = await import('@/overlay/rect')
+        const leaked = await observeLeaks(() => {
+            getSpanRects(input, 0, 6)
+        })
+        expect(leaked).not.toContain('SECRET')
+        input.remove()
+    })
+})

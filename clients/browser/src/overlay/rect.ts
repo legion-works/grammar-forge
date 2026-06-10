@@ -74,6 +74,38 @@ export function __mirrorStyleForTest(el: HTMLTextAreaElement | HTMLInputElement)
     return mirrorStyleFor(el)
 }
 
+// PRIVACY: the mirror div contains the user's FULL field text. It must never
+// be appended to the page-visible DOM — a page script with a MutationObserver
+// on body receives the added node in its records and can read the text from
+// the retained reference even after the mirror is removed (exfiltration of
+// everything typed in any monitored field; privacy invariant #1). Instead,
+// mirrors are appended into a CLOSED shadow root on a zero-size host: layout
+// still runs (shadow DOM renders normally, unlike a detached document), but
+// page observers only ever see the empty host element — `host.shadowRoot` is
+// null in closed mode and Element.textContent does not traverse shadow trees.
+// The host is module-level and lazily (re)created when missing or when the
+// document changed (vitest/jsdom recreates the DOM between test files).
+let measurementRoot: ShadowRoot | null = null
+
+function getMeasurementRoot(doc: Document): ShadowRoot {
+    if (
+        measurementRoot &&
+        measurementRoot.host.isConnected &&
+        measurementRoot.host.ownerDocument === doc
+    ) {
+        return measurementRoot
+    }
+    const host = doc.createElement('div')
+    // Zero-size, non-interactive anchor. The mirror inside positions itself
+    // absolutely at -9999px relative to this (positioned) host; all rect math
+    // uses marker-vs-mirror RELATIVE offsets, so host placement is irrelevant.
+    host.style.cssText =
+        'position:absolute;top:0;left:0;width:0;height:0;overflow:visible;pointer-events:none'
+    measurementRoot = host.attachShadow({ mode: 'closed' })
+    doc.body.appendChild(host)
+    return measurementRoot
+}
+
 /**
  * Resolve a flat code-unit offset within a contenteditable (or any element
  * containing text nodes) to the concrete Text node + the offset within it.
@@ -102,11 +134,13 @@ export function findTextNodeForOffset(
  * Build a hidden mirror <div> that copies the font / box / width of a text
  * input so we can measure text in pixels. The returned probe owns a
  * `marker` <span> positioned at `[cuStart, cuEnd]`; after appending the
- * probe to the document, the marker's getBoundingClientRect() reflects
- * the visual position of that range inside the input.
+ * probe, the marker's getBoundingClientRect() reflects the visual position
+ * of that range inside the input.
  *
- * The probe MUST be removed (via `remove()`) after measurement; leaving it
- * in the DOM causes visual glitches.
+ * PRIVACY: the probe contains the field's full text. Append it ONLY into
+ * the closed-shadow measurement root (see getMeasurementRoot), never into
+ * the page-visible DOM. The probe MUST be removed (via `remove()`) after
+ * measurement.
  */
 export function buildMirrorProbe(
     el: HTMLTextAreaElement | HTMLInputElement,
@@ -247,7 +281,8 @@ function getInputMirrorRectsBatch(
     after.textContent = text.substring(maxEnd)
     mirror.appendChild(after)
 
-    owner.body.appendChild(mirror)
+    // Closed-shadow measurement root, NOT owner.body — see getMeasurementRoot.
+    getMeasurementRoot(owner).appendChild(mirror)
     try {
         const elRect = el.getBoundingClientRect()
         const mirrorRect = mirror.getBoundingClientRect()
@@ -289,7 +324,8 @@ function getInputMirrorRects(
 
     const probe = buildMirrorProbe(el, cuStart, cuEnd)
     const owner = el.ownerDocument
-    owner.body.appendChild(probe.element)
+    // Closed-shadow measurement root, NOT owner.body — see getMeasurementRoot.
+    getMeasurementRoot(owner).appendChild(probe.element)
     try {
         const markerRect = probe.marker.getBoundingClientRect()
         const mirrorRect = probe.element.getBoundingClientRect()
