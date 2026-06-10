@@ -301,8 +301,9 @@ export function renderStatusButton(
             const btn = target?.closest<HTMLElement>('[data-action]')
             if (!btn) return
             // Disabled buttons (Undo when undoAvailable is false) never fire
-            // click in browsers/jsdom — no extra guard needed.
-            if (btn.disabled) return
+            // click in browsers/jsdom — guard defensively in case a browser
+            // dispatches click anyway.
+            if (btn instanceof HTMLButtonElement && btn.disabled) return
             event.preventDefault()
             event.stopPropagation()
             if (btn.dataset.action === 'apply-all') {

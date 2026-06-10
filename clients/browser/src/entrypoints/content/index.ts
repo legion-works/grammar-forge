@@ -14,6 +14,7 @@ import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { isUndoRedoKeydown } from '@/input/undo-redo'
 import { applyFix, getText } from '@/input/text'
+import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
 import { isSpanStillValid, runCheck, tallyByCategory, type RenderableItem } from '@/lib/pipeline'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
 import { createOverlayHost } from '@/overlay/shadow-host'
@@ -141,6 +142,13 @@ interface FieldState {
      * `spellcheck="false"`. Also pushed onto runtime.cleanups for teardown.
      */
     restoreSpellcheck: () => void
+    /**
+     * Last apply action's inverse edits (single undo slot; a new apply
+     * overwrites it, undo consumes it). null = nothing to undo. Lives on
+     * the field (not the runtime) so a settings-driven teardown doesn't
+     * lose it, and so different fields don't share an undo queue.
+     */
+    lastApplied: InverseEdit[] | null
 }
 
 interface ActiveSuggestion {
@@ -212,7 +220,11 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     // site is paused we instead show a small standalone "power" pill so the
     // user can re-enable in-page (disabledHost).
     let runtime: Runtime | null = null
-    let disabledHost: ReturnType<typeof createOverlayHost> | null = null
+    // Paused-mode minimal runtime — field discovery + focus tracking only, no
+    // checking, no bridge client. The off-pill anchors to the FOCUSED field
+    // exactly like the active pill; the cleanups array is the single teardown
+    // handle. null when paused mode isn't active.
+    let pausedCleanups: Array<() => void> | null = null
     // Status-pill drag offset — kept in start() scope (NOT on the runtime) so
     // it survives a settings-driven teardown: dragging the pill, then disabling
     // the site, must keep the re-enable pill at the same drag offset (the
@@ -319,47 +331,116 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         wireRuntime(ctx, r, () => currentSettings, togglePower, pillPosition)
     }
 
-    // Standalone collapsed "power" pill shown when the site is paused, so the
-    // user can re-enable in-page. It is NOT part of the checking runtime (which
-    // is torn down while paused) — there is no field to bind it to — so it is
-    // LOCKED to the viewport's bottom-right corner (zero drag offset, no
-    // onDragMove → drags don't persist). The full-viewport anchorRect + the
-    // field-clamp resolve to the viewport corner.
-    const mountDisabledPill = (): void => {
-        if (disabledHost) return
-        const host = (disabledHost = createOverlayHost())
-        renderStatusButton(host.root, {
-            count: 0,
-            anchorRect: new DOMRect(0, 0, window.innerWidth, window.innerHeight),
-            disabled: true,
-            corrections: [],
-            onFocusField: () => {},
-            onTogglePower: () => void togglePower(),
-            onRecheck: () => {},
-            onApplyAll: () => {},
-            onApplyOne: () => {},
-            // Locked to the corner: no drag offset, no onDragMove handler.
+    // Paused-site mode: a MINIMAL runtime — field discovery + focus tracking
+    // only (no checking, no bridge, no highlights). The off-pill anchors to
+    // the FOCUSED field exactly like the active pill (focus-only, shared drag
+    // offset); no focused field => no pill.
+    const mountPausedMode = (): void => {
+        if (pausedCleanups) return
+        const cleanups: Array<() => void> = (pausedCleanups = [])
+        const host = createOverlayHost()
+        cleanups.push(() => host.destroy())
+        const fields = new Set<HTMLElement>()
+        let pillHandle: StatusButtonHandle | null = null
+        let pillFor: HTMLElement | null = null
+        const hidePill = (): void => {
+            pillHandle?.destroy()
+            pillHandle = null
+            pillFor = null
+        }
+        const showPillFor = (el: HTMLElement): void => {
+            hidePill()
+            pillFor = el
+            pillHandle = renderStatusButton(host.root, {
+                count: 0,
+                anchorRect: el.getBoundingClientRect(),
+                disabled: true,
+                corrections: [],
+                onFocusField: () => el.focus(),
+                onTogglePower: () => void togglePower(),
+                onRecheck: () => {},
+                onApplyAll: () => {},
+                onApplyOne: () => {},
+                onUndo: () => {},
+                onRephrase: () => {},
+                undoAvailable: false,
+                dragOffset: pillPosition.dragOffset ?? undefined,
+                onDragMove: (offset) => {
+                    pillPosition.dragOffset = offset
+                },
+            })
+        }
+        const stopObserver = createFieldObserver({
+            root: document.body,
+            onFieldDiscovered: (el) => {
+                fields.add(el)
+                if (el.contains(document.activeElement)) showPillFor(el)
+            },
+            onFieldDetached: (el) => {
+                fields.delete(el)
+                if (pillFor === el) hidePill()
+            },
         })
+        cleanups.push(stopObserver)
+        const onFocusIn = (e: FocusEvent): void => {
+            const t = e.target
+            if (!(t instanceof HTMLElement)) return
+            for (const f of fields) {
+                if (f === t || f.contains(t)) {
+                    showPillFor(f)
+                    return
+                }
+            }
+        }
+        const onFocusOut = (): void => {
+            // Defer: focus may be moving INTO the pill (drag) or to a child.
+            setTimeout(() => {
+                if (pillFor && !pillFor.contains(document.activeElement)) hidePill()
+            }, 0)
+        }
+        document.addEventListener('focusin', onFocusIn)
+        document.addEventListener('focusout', onFocusOut)
+        cleanups.push(() => {
+            document.removeEventListener('focusin', onFocusIn)
+            document.removeEventListener('focusout', onFocusOut)
+        })
+        const reposition = (): void => {
+            if (pillFor && pillHandle) pillHandle.reposition(pillFor.getBoundingClientRect())
+        }
+        document.addEventListener('scroll', reposition, { capture: true, passive: true })
+        window.addEventListener('resize', reposition, { passive: true })
+        cleanups.push(() => {
+            document.removeEventListener('scroll', reposition, { capture: true })
+            window.removeEventListener('resize', reposition)
+        })
+        cleanups.push(hidePill)
     }
-    const unmountDisabledPill = (): void => {
-        disabledHost?.destroy()
-        disabledHost = null
+    const unmountPausedMode = (): void => {
+        if (!pausedCleanups) return
+        for (const c of pausedCleanups) {
+            try {
+                c()
+            } catch {
+                /* teardown is best-effort */
+            }
+        }
+        pausedCleanups = null
     }
 
     // Reconcile the page state to the current settings: globally off -> nothing;
-    // site paused -> re-enable pill only; otherwise -> full checking runtime.
+    // site paused -> paused-mode runtime only; otherwise -> full checking runtime.
     const reconcile = (s: Settings): void => {
         if (!extensionOn(s)) {
             teardownRuntime()
-            unmountDisabledPill()
+            unmountPausedMode()
             return
         }
         if (sitePaused(s)) {
             teardownRuntime()
-            mountDisabledPill()
+            mountPausedMode()
             return
         }
-        unmountDisabledPill()
+        unmountPausedMode()
         initRuntime(s)
     }
 
@@ -403,7 +484,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     // already ran) a no-op.
     ctx.onInvalidated(() => {
         teardownRuntime()
-        unmountDisabledPill()
+        unmountPausedMode()
     })
 }
 
@@ -710,6 +791,7 @@ function wireRuntime(
                 !(el instanceof HTMLInputElement),
             statusHandle: null,
             restoreSpellcheck: () => {},
+            lastApplied: null,
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -1106,6 +1188,18 @@ function wireRuntime(
         return { el, text, span, rect }
     }
 
+    // Panel Rephrase: the current selection when usable, else the WHOLE field.
+    function rephraseFor(el: HTMLElement): void {
+        const found = resolveSelection()
+        if (found && found.el === el) {
+            void openRephraseFor(el, found.text, found.span)
+            return
+        }
+        const text = getText(el)
+        if (!text.trim()) return
+        void openRephraseFor(el, text, { start: 0, end: text.length })
+    }
+
     // Rephrase the given selection: call the bridge (slow LLM path), show a
     // pending state, then a result card. Apply replaces the SELECTION span.
     async function openRephraseFor(
@@ -1270,6 +1364,14 @@ function wireRuntime(
                 const replacement =
                     item.replacements[replacementIndex] ?? item.replacements[0] ?? ''
                 applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+                // Record the inverse edit (single-level slot: a new apply
+                // overwrites the prior).
+                state.lastApplied = appendInverseEdit([], {
+                    start: item.cuStart,
+                    end: item.cuEnd,
+                    replacement,
+                    original: item.original,
+                })
                 flashAppliedOverlay(el, item)
                 void signalQueue.enqueue({
                     id: item.id,
@@ -1341,7 +1443,18 @@ function wireRuntime(
     // re-check — the caller batches that.
     function applyItemPrimary(el: HTMLElement, item: RenderableItem): boolean {
         if (!isSpanStillValid(getText(el), item)) return false
-        applyFix(el, { start: item.cuStart, end: item.cuEnd }, item.replacements[0] ?? '')
+        const replacement = item.replacements[0] ?? ''
+        applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+        // Record the inverse edit (single-level slot).
+        const st = runtime.fields.get(el)
+        if (st) {
+            st.lastApplied = appendInverseEdit([], {
+                start: item.cuStart,
+                end: item.cuEnd,
+                replacement,
+                original: item.original,
+            })
+        }
         void signalQueue.enqueue({
             id: item.id,
             action: 'accepted',
@@ -1375,10 +1488,21 @@ function wireRuntime(
         closePopoverFor(el)
         const ordered = [...st.items].sort((a, b) => b.cuStart - a.cuStart)
         const signaled = new Set<number>()
+        // Single-level Undo slot: build a fresh batch during the loop and
+        // commit it on success. (appendInverseEdit handles the higher-span
+        // shift for the desc order, so a final batch lands ready to undo.)
+        let batch: InverseEdit[] = []
         for (const item of ordered) {
             if (!ctx.isValid) return
             if (!isSpanStillValid(getText(el), item)) continue
-            applyFix(el, { start: item.cuStart, end: item.cuEnd }, item.replacements[0] ?? '')
+            const replacement = item.replacements[0] ?? ''
+            applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+            batch = appendInverseEdit(batch, {
+                start: item.cuStart,
+                end: item.cuEnd,
+                replacement,
+                original: item.original,
+            })
             if (typeof item.id === 'number' && item.id > 0 && !signaled.has(item.id)) {
                 signaled.add(item.id)
                 void signalQueue.enqueue({
@@ -1392,7 +1516,32 @@ function wireRuntime(
             // text and the next execCommand applies cleanly.
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
         }
+        if (batch.length > 0) st.lastApplied = batch
         if (!ctx.isValid) return
+        void rerunFor(el)(getText(el))
+    }
+
+    // Undo the field's last apply action: re-apply the recorded inverse edits
+    // highest-first, stale-guarded against the live text, then re-check. The
+    // accept signals already sent are NOT compensated (client-side restore
+    // only — mirrors the Ignore-Undo semantics).
+    async function undoFor(el: HTMLElement): Promise<void> {
+        const st = runtime.fields.get(el)
+        if (!st?.lastApplied?.length) return
+        const ops = planUndo(getText(el), st.lastApplied)
+        st.lastApplied = null
+        for (const op of ops) {
+            if (!ctx.isValid) return
+            applyFix(el, op.span, op.replacement)
+            // Same rAF-yield as applyAllFor: rich editors (Lexical, Discord)
+            // reconcile between edits; a synchronous loop would corrupt the
+            // next applyFix's offsets.
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        }
+        if (!ctx.isValid) return
+        // Refresh the pill so the Undo button flips back to disabled.
+        renderField(el, overlay.root, st)
+        updateFocusedCounts(runtime, el)
         void rerunFor(el)(getText(el))
     }
 
@@ -1428,6 +1577,9 @@ function wireRuntime(
             onRecheck: () => void rerunFor(el)(getText(el)),
             onApplyAll: () => void applyAllFor(el),
             onApplyOne: (i) => applyOneFor(el, i),
+            onUndo: () => void undoFor(el),
+            onRephrase: () => rephraseFor(el),
+            undoAvailable: (state.lastApplied?.length ?? 0) > 0,
             // Persisted (session) pill drag offset — a dragged spot survives
             // re-renders and the enabled↔disabled swap (state in start() scope),
             // and re-anchors to the field on scroll/resize (via reposition).
