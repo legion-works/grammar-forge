@@ -1,0 +1,21 @@
+{
+    "name": "grammarforge-vencord",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "node scripts/build.mjs",
+        "sync": "node scripts/build.mjs && node scripts/sync-to-vencord.mjs",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --noEmit",
+        "lint": "oxlint",
+        "fmt": "oxfmt -w ."
+    },
+    "devDependencies": {
+        "esbuild": "^0.25.0",
+        "jsdom": "^29.1.1",
+        "oxfmt": "0.53.0",
+        "oxlint": "1.68.0",
+        "typescript": "^5.7.0",
+        "vitest": "^4.1.5"
+    }
+}
