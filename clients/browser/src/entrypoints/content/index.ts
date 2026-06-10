@@ -15,6 +15,7 @@ import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { isUndoRedoKeydown } from '@/input/undo-redo'
 import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
+import { applySlateFix, isFrameworkRichEditor } from '@/input/rich-editor-apply'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
 import {
     buildRenderableItems,
@@ -587,6 +588,27 @@ function wireRuntime(
             clearTimeout(runtime.hoverTimer)
             runtime.hoverTimer = null
         }
+    }
+
+    // Route framework rich editors (Slate/Lexical) through the async
+    // synthetic-replacement apply (see input/rich-editor-apply.ts — verified
+    // live: the sync selection+execCommand path jams Slate's selection
+    // bookkeeping). textarea/input/plain contenteditables keep the sync
+    // applyFix path unchanged.
+    const applyEdit = async (
+        el: HTMLElement,
+        span: { start: number; end: number },
+        replacement: string,
+    ): Promise<void> => {
+        if (
+            !(el instanceof HTMLTextAreaElement) &&
+            !(el instanceof HTMLInputElement) &&
+            isFrameworkRichEditor(el)
+        ) {
+            await applySlateFix(el, span, replacement)
+            return
+        }
+        applyFix(el, span, replacement)
     }
     const clearChipAria = (el: HTMLElement): void => {
         // Don't clobber a page-owned aria-describedby — only clear it if WE
@@ -1324,8 +1346,9 @@ function wireRuntime(
                         debugWarn('rephrase', 'selection span went stale; not applying')
                         return
                     }
-                    applyFix(el, span, chosen)
-                    void rerunFor(el)(getText(el))
+                    void applyEdit(el, span, chosen).then(() => {
+                        void rerunFor(el)(getText(el))
+                    })
                 },
                 onClose: () => {},
             })
@@ -1465,33 +1488,39 @@ function wireRuntime(
                 }
                 const replacement =
                     item.replacements[replacementIndex] ?? item.replacements[0] ?? ''
-                applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
-                // Record the inverse edit (single-level slot: a new apply
-                // overwrites the prior).
-                state.lastApplied = appendInverseEdit([], {
-                    start: item.cuStart,
-                    end: item.cuEnd,
-                    replacement,
-                    original: item.original,
-                })
-                flashAppliedOverlay(el, item)
-                void signalQueue.enqueue({
-                    id: item.id,
-                    action: 'accepted',
-                    category: item.category,
-                    source: 'browser',
-                })
+                // Close the popover BEFORE the async apply: applySlateFix
+                // re-focuses the editor, and a still-open popover's
+                // outside-click/teardown must not fight that focus move.
                 closePopoverFor(el)
-                if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-                    el.focus()
-                    const end = item.cuStart + replacement.length
-                    try {
-                        el.setSelectionRange(item.cuStart, end)
-                    } catch {
-                        // some input types (number, email) throw on setSelectionRange
-                    }
-                }
-                void rerunFor(el)(getText(el))
+                void applyEdit(el, { start: item.cuStart, end: item.cuEnd }, replacement).then(
+                    () => {
+                        // Record the inverse edit (single-level slot: a new apply
+                        // overwrites the prior).
+                        state.lastApplied = appendInverseEdit([], {
+                            start: item.cuStart,
+                            end: item.cuEnd,
+                            replacement,
+                            original: item.original,
+                        })
+                        flashAppliedOverlay(el, item)
+                        void signalQueue.enqueue({
+                            id: item.id,
+                            action: 'accepted',
+                            category: item.category,
+                            source: 'browser',
+                        })
+                        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+                            el.focus()
+                            const end = item.cuStart + replacement.length
+                            try {
+                                el.setSelectionRange(item.cuStart, end)
+                            } catch {
+                                // some input types (number, email) throw on setSelectionRange
+                            }
+                        }
+                        void rerunFor(el)(getText(el))
+                    },
+                )
             },
             onIgnore: () => {
                 // Capture the item + its index BEFORE mutating state.items so
@@ -1542,11 +1571,13 @@ function wireRuntime(
 
     // Apply an item's PRIMARY replacement (stale-guarded) + emit the accepted
     // signal. Returns false (no-op) when the span has gone stale. Does not
-    // re-check — the caller batches that.
-    function applyItemPrimary(el: HTMLElement, item: RenderableItem): boolean {
+    // re-check — the caller batches that. Async: the Slate-aware apply
+    // yields a tick between selection and insert (see rich-editor-apply.ts —
+    // the sync applyFix corrupted Slate's selection state).
+    async function applyItemPrimary(el: HTMLElement, item: RenderableItem): Promise<boolean> {
         if (!isSpanStillValid(getText(el), item)) return false
         const replacement = item.replacements[0] ?? ''
-        applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+        await applyEdit(el, { start: item.cuStart, end: item.cuEnd }, replacement)
         // Record the inverse edit (single-level slot).
         const st = runtime.fields.get(el)
         if (st) {
@@ -1572,7 +1603,7 @@ function wireRuntime(
         const item = st?.items[index]
         if (!item) return
         closePopoverFor(el)
-        applyItemPrimary(el, item)
+        void applyItemPrimary(el, item)
         flashAppliedOverlay(el, item)
         void rerunFor(el)(getText(el))
     }
@@ -1641,7 +1672,7 @@ function wireRuntime(
             if (!ctx.isValid) return
             if (!isSpanStillValid(getText(el), item)) continue
             const replacement = item.replacements[0] ?? ''
-            applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+            await applyEdit(el, { start: item.cuStart, end: item.cuEnd }, replacement)
             batch = appendInverseEdit(batch, {
                 start: item.cuStart,
                 end: item.cuEnd,
@@ -1677,7 +1708,7 @@ function wireRuntime(
         st.lastApplied = null
         for (const op of ops) {
             if (!ctx.isValid) return
-            applyFix(el, op.span, op.replacement)
+            await applyEdit(el, op.span, op.replacement)
             // Same rAF-yield as applyAllFor: rich editors (Lexical, Discord)
             // reconcile between edits; a synchronous loop would corrupt the
             // next applyFix's offsets.
