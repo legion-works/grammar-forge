@@ -1,49 +1,79 @@
 // Slate-aware replacement for the browser client's synchronous applyFix on
 // Discord's composer.
 //
-// WHY (root-caused live in Vesktop, 2026-06-10): applyFix sets the DOM
-// selection and SYNCHRONOUSLY fires execCommand('insertText'). Two problems
-// in a Slate editor:
-//   1. At popover-Apply time the composer is NOT focused (the popover stole
-//      focus). Slate ignores DOM selection changes while its editor is
-//      unfocused, so its MODEL selection never moves to the target range.
-//   2. Even when focused, Slate learns about DOM selection changes from the
-//      async `selectionchange` task — a synchronous insertText beats it.
-// The text itself still lands (Slate handles the beforeinput via target
-// ranges), but Slate's internal selection state diverges from the DOM and
-// STAYS diverged: afterwards, clicking at the end of the text snaps the
-// caret back to the stale model position. The broken state survives plugin
-// disable and only resets on a composer remount.
+// WHY (root-caused live in Vesktop, 2026-06-10): any EXTERNAL mutation of the
+// DOM selection around Discord's Slate editor can jam Slate's internal
+// selection bookkeeping — its model selection diverges from the DOM and is
+// re-asserted over every subsequent click (caret "jumps back"; in the worst
+// case a stale full-text selection sticks). The first fix attempt
+// (focus + select + macrotask settle + execCommand insertText) reduced but
+// did not eliminate the desync: the latch can jam regardless of timing.
 //
-// FIX: focus the editor first, set the DOM selection, yield ONE macrotask so
-// Slate's selectionchange handler syncs the model, THEN insertText — which
-// Slate now applies against the correct model selection, keeping model and
-// DOM in lockstep.
-import { codeUnitSpanToRange, type CodeUnitSpan } from '@/input/text'
+// FIX v2: never touch the DOM selection. Speak the editor's native
+// autocorrect protocol instead — a synthetic `beforeinput` with
+// `inputType: "insertReplacementText"` and `getTargetRanges()` overridden to
+// the target StaticRange. This is exactly how OS spellcheck/autocorrect
+// integrates with contenteditable; slate-react consumes the target range and
+// applies the replacement through its own model (verified live in Vesktop:
+// the synthetic event replaces text and the caret stays sane).
+//
+// A defensive fallback to the legacy selection+execCommand path remains for
+// payloads the editor ignores (e.g. some editors drop empty-data
+// replacement events for pure deletions) — detected by comparing the text
+// before/after the dispatch.
+import { codeUnitSpanToRange, getText, type CodeUnitSpan } from '@/input/text'
 
-/** One macrotask: `selectionchange` is dispatched as a queued task, so a
- *  setTimeout(0) scheduled AFTER the selection mutation runs after Slate's
- *  handler has seen it. */
+/** One macrotask — lets the editor finish reconciling (and, on the fallback
+ *  path, lets its `selectionchange` handler observe our selection) before
+ *  callers re-read the text. */
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 /**
  * Apply `replacement` over `span` (flat code-unit offsets, the same model
- * getText uses) in a Slate-managed contenteditable. Async on purpose — the
- * macrotask yield between selection and insertText is the load-bearing part.
- * Returns false when the span cannot be resolved to a DOM range (stale text);
- * callers should re-check instead of applying.
+ * getText uses) in a rich-text contenteditable. Returns false when the span
+ * cannot be resolved to a DOM range (stale text); callers should re-check
+ * instead of applying.
  */
 export async function applySlateFix(
     el: HTMLElement,
     span: CodeUnitSpan,
     replacement: string,
 ): Promise<boolean> {
-    const sel = el.ownerDocument.getSelection()
-    if (!sel) return false
     const range = codeUnitSpanToRange(el, span)
     if (!range) return false
-    // Focus BEFORE selecting: Slate's onDOMSelectionChange ignores selection
-    // changes while the editor is unfocused (the popover-Apply case).
+    const before = getText(el)
+    const expected = before.slice(0, span.start) + replacement + before.slice(span.end)
+
+    const staticRange = new StaticRange({
+        startContainer: range.startContainer,
+        startOffset: range.startOffset,
+        endContainer: range.endContainer,
+        endOffset: range.endOffset,
+    })
+    const event = new InputEvent('beforeinput', {
+        inputType: 'insertReplacementText',
+        data: replacement,
+        bubbles: true,
+        cancelable: true,
+    })
+    // Synthetic InputEvents report no target ranges; the editor's beforeinput
+    // handler reads them via this method, so supply our range there.
+    Object.defineProperty(event, 'getTargetRanges', { value: () => [staticRange] })
+    el.dispatchEvent(event)
+    await settle()
+    if (getText(el) === expected) return true
+    if (getText(el) !== before) {
+        // The editor applied SOMETHING (normalisation, smart punctuation…).
+        // Treat as applied — every caller re-checks against live text anyway.
+        return true
+    }
+
+    // Editor ignored the synthetic replacement (seen with empty-data pure
+    // deletions in some editors). Legacy path: focus first (selection
+    // changes are ignored by Slate while unfocused), select, settle one
+    // macrotask so the editor syncs, then insertText.
+    const sel = el.ownerDocument.getSelection()
+    if (!sel) return false
     el.focus()
     sel.removeAllRanges()
     sel.addRange(range)
