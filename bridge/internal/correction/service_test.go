@@ -45,10 +45,14 @@ type fakeStore struct {
 	count      int64
 }
 
-func (f *fakeStore) LogCorrection(_ context.Context, ev Event) (int64, error) {
+func (f *fakeStore) LogCorrection(_ context.Context, ev Event) (int64, []int64, error) {
 	f.lastEvent = ev
 	f.count++
-	return 42, nil
+	editIDs := make([]int64, len(ev.Edits))
+	for i := range editIDs {
+		editIDs[i] = int64(101 + i)
+	}
+	return 42, editIDs, nil
 }
 
 func (f *fakeStore) LogSignal(_ context.Context, id int64, s Signal) error {
@@ -77,7 +81,7 @@ func TestServiceCorrectLogsAndTagsSuggestions(t *testing.T) {
 	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Source: SourceVencord})
 	require.NoError(t, err)
 	require.Len(t, got.Suggestions, 1)
-	require.Equal(t, int64(42), got.Suggestions[0].ID) // tagged with the logged id
+	require.Equal(t, int64(101), got.Suggestions[0].ID) // tagged with the edit id
 	require.Equal(t, "I has a cat", st.lastEvent.Original)
 	require.Equal(t, "I have a cat", st.lastEvent.Suggestion)
 	require.Equal(t, "grmr-test", st.lastEvent.BaseModel)
@@ -115,8 +119,8 @@ type failingStore struct {
 	fakeStore
 }
 
-func (f *failingStore) LogCorrection(context.Context, Event) (int64, error) {
-	return 0, errors.New("db down")
+func (f *failingStore) LogCorrection(context.Context, Event) (int64, []int64, error) {
+	return 0, nil, errors.New("db down")
 }
 
 func TestServiceCorrectBestEffortLog(t *testing.T) {
@@ -695,4 +699,26 @@ func TestCorrectPickyStyleDiscardsSuspiciouslyShortOutput(t *testing.T) {
 		require.NotEqual(t, CategoryStyle, s.Category,
 			"truncated style output must be discarded, not diffed into style deletions")
 	}
+}
+
+func TestFinalizeTagsEachSuggestionWithItsOwnEditID(t *testing.T) {
+	st := &fakeStore{}
+	// Use a fast corrector with EXPLICIT spans (the LLM-diff path emits
+	// char-level minimal edits, so word-level Original assertions would be
+	// brittle there). High confidence + fastPolicy (EscalateOnFastEdit off)
+	// means the LLM is never called.
+	fc := fakeCorrector{name: string(ModelGECToR), sugs: []Suggestion{
+		{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.95},
+		{Span: Span{6, 9}, Replacement: "the", Model: ModelGECToR, Confidence: 0.95},
+	}}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has teh cat", Source: SourceBrowser}) //nolint:misspell // intentional fixture
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 2)
+	require.Equal(t, int64(101), got.Suggestions[0].ID)
+	require.Equal(t, int64(102), got.Suggestions[1].ID, "each suggestion must carry its OWN edit id")
+	require.Len(t, st.lastEvent.Edits, 2)
+	require.Equal(t, "has", st.lastEvent.Edits[0].Original)
+	require.Equal(t, "have", st.lastEvent.Edits[0].Replacement)
+	require.Equal(t, "teh", st.lastEvent.Edits[1].Original) //nolint:misspell // intentional fixture
 }

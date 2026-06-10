@@ -254,19 +254,39 @@ func (s *Service) finalize(ctx context.Context, req Request, all []Suggestion) (
 	if len(all) == 0 {
 		return result, nil
 	}
-	id, err := s.store.LogCorrection(ctx, Event{
+	edits := make([]EditRecord, len(all))
+	for i, sg := range all {
+		original := ""
+		if sg.Span.Validate(len(req.Text)) == nil {
+			original = req.Text[sg.Span.Start:sg.Span.End]
+		}
+		edits[i] = EditRecord{
+			SpanStart:   sg.Span.Start,
+			SpanEnd:     sg.Span.End,
+			Original:    original,
+			Replacement: sg.Replacement,
+			Model:       sg.Model,
+			Category:    sg.Category,
+			RuleID:      sg.RuleID,
+			Confidence:  sg.Confidence,
+		}
+	}
+	_, editIDs, err := s.store.LogCorrection(ctx, Event{
 		Source:     req.Source,
 		Original:   req.Text,
 		Suggestion: applyAll(req.Text, all),
 		Model:      dominantModel(all),
 		BaseModel:  s.baseModel,
+		Edits:      edits,
 	})
 	if err != nil {
 		s.log.Error("log correction failed", "err", err)
 		return result, nil
 	}
 	for i := range result.Suggestions {
-		result.Suggestions[i].ID = id
+		if i < len(editIDs) {
+			result.Suggestions[i].ID = editIDs[i]
+		}
 	}
 	return result, nil
 }

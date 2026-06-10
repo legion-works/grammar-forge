@@ -22,7 +22,7 @@ func TestLogCorrectionAndCount(t *testing.T) {
 	ctx := context.Background()
 	require.Equal(t, int64(0), mustCount(t, s))
 
-	id, err := s.LogCorrection(ctx, correction.Event{
+	id, _, err := s.LogCorrection(ctx, correction.Event{
 		Source: correction.SourceVencord, Original: "I has a cat",
 		Suggestion: "I have a cat", Model: correction.ModelLLM, BaseModel: "grmr",
 	})
@@ -34,9 +34,12 @@ func TestLogCorrectionAndCount(t *testing.T) {
 func TestLogSignalUpdatesRow(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	id, err := s.LogCorrection(ctx, correction.Event{Original: "a", Suggestion: "b", Model: correction.ModelLLM})
+	_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+		Original: "a", Suggestion: "b", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{{Original: "a", Replacement: "b", Model: correction.ModelLLM}},
+	})
 	require.NoError(t, err)
-	require.NoError(t, s.LogSignal(ctx, id, correction.SignalAccepted))
+	require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
 	require.NoError(t, s.LogSignal(ctx, 99999, correction.SignalRejected)) // missing id: no error, no-op
 }
 
@@ -58,9 +61,12 @@ func TestPersonalizationExamplesGroupsAcceptedAndRejected(t *testing.T) {
 	// signal='accepted'. Insertion order is a/b first, then c/d, then e/f
 	// last. "Most recent first" means e/f first.
 	mkAccepted := func(orig, sug string) {
-		id, err := s.LogCorrection(ctx, correction.Event{Original: orig, Suggestion: sug, Model: correction.ModelLLM})
+		_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+			Original: orig, Suggestion: sug, Model: correction.ModelLLM,
+			Edits: []correction.EditRecord{{Original: orig, Replacement: sug, Model: correction.ModelLLM}},
+		})
 		require.NoError(t, err)
-		require.NoError(t, s.LogSignal(ctx, id, correction.SignalAccepted))
+		require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
 	}
 	mkAccepted("a", "b")
 	mkAccepted("c", "d")
@@ -68,9 +74,12 @@ func TestPersonalizationExamplesGroupsAcceptedAndRejected(t *testing.T) {
 
 	// Rejected pair "x"/"y" logged 3 times -> appears.
 	mkRejected := func(orig, sug string) {
-		id, err := s.LogCorrection(ctx, correction.Event{Original: orig, Suggestion: sug, Model: correction.ModelLLM})
+		_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+			Original: orig, Suggestion: sug, Model: correction.ModelLLM,
+			Edits: []correction.EditRecord{{Original: orig, Replacement: sug, Model: correction.ModelLLM}},
+		})
 		require.NoError(t, err)
-		require.NoError(t, s.LogSignal(ctx, id, correction.SignalRejected))
+		require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalRejected))
 	}
 	for i := 0; i < 3; i++ {
 		mkRejected("x", "y")
@@ -108,11 +117,17 @@ func TestPersonalizationExamplesIgnoresSignallessRows(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	// Log two corrections, only one gets a signal.
-	id1, err := s.LogCorrection(ctx, correction.Event{Original: "p", Suggestion: "q", Model: correction.ModelLLM})
+	_, id1, err := s.LogCorrection(ctx, correction.Event{
+		Original: "p", Suggestion: "q", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{{Original: "p", Replacement: "q", Model: correction.ModelLLM}},
+	})
 	require.NoError(t, err)
-	_, err = s.LogCorrection(ctx, correction.Event{Original: "r", Suggestion: "s", Model: correction.ModelLLM})
+	_, _, err = s.LogCorrection(ctx, correction.Event{
+		Original: "r", Suggestion: "s", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{{Original: "r", Replacement: "s", Model: correction.ModelLLM}},
+	})
 	require.NoError(t, err)
-	require.NoError(t, s.LogSignal(ctx, id1, correction.SignalAccepted))
+	require.NoError(t, s.LogSignal(ctx, id1[0], correction.SignalAccepted))
 
 	got, err := s.PersonalizationExamples(ctx)
 	require.NoError(t, err)
@@ -133,9 +148,12 @@ func TestPersonalizationExamplesRejectedOrderByRecency(t *testing.T) {
 
 	// Helper: log a rejected event.
 	reject := func(orig, sug string) {
-		id, err := s.LogCorrection(ctx, correction.Event{Original: orig, Suggestion: sug, Model: correction.ModelLLM})
+		_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+			Original: orig, Suggestion: sug, Model: correction.ModelLLM,
+			Edits: []correction.EditRecord{{Original: orig, Replacement: sug, Model: correction.ModelLLM}},
+		})
 		require.NoError(t, err)
-		require.NoError(t, s.LogSignal(ctx, id, correction.SignalRejected))
+		require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalRejected))
 	}
 
 	// OLD pair with HIGH count (5x) — under the old ORDER BY c DESC this
@@ -156,4 +174,54 @@ func TestPersonalizationExamplesRejectedOrderByRecency(t *testing.T) {
 		{Original: "old", Suggestion: "high-count", Count: 5},
 	}, got.Rejected,
 		"rejected pairs must be ordered by recency (most-recent first), not by count — the newer threshold-count pair must come BEFORE the older high-count pair")
+}
+
+func TestLogCorrectionInsertsEditsAndReturnsIDs(t *testing.T) {
+	s := newTestStore(t)
+	id, editIDs, err := s.LogCorrection(context.Background(), correction.Event{
+		Source: "browser", Original: "I has teh cat", Suggestion: "I have the cat", Model: "llm", //nolint:misspell // intentional fixture
+		Edits: []correction.EditRecord{
+			{SpanStart: 2, SpanEnd: 5, Original: "has", Replacement: "have", Model: "llm", Confidence: 0.9},
+			{SpanStart: 6, SpanEnd: 9, Original: "teh", Replacement: "the", Model: "harper", Category: "spelling"}, //nolint:misspell // intentional fixture
+		},
+	})
+	require.NoError(t, err)
+	require.Positive(t, id)
+	require.Len(t, editIDs, 2)
+	require.NotEqual(t, editIDs[0], editIDs[1])
+}
+
+func TestLogSignalAttributesToOneEdit(t *testing.T) {
+	s := newTestStore(t)
+	_, editIDs, err := s.LogCorrection(context.Background(), correction.Event{
+		Source: "browser", Original: "x", Suggestion: "y", Model: "llm",
+		Edits: []correction.EditRecord{
+			{Original: "colour", Replacement: "color", Model: "llm"},
+			{Original: "teh", Replacement: "the", Model: "llm"}, //nolint:misspell // intentional fixture
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, s.LogSignal(context.Background(), editIDs[0], correction.SignalAccepted))
+	data, err := s.PersonalizationExamples(context.Background())
+	require.NoError(t, err)
+	require.Len(t, data.Accepted, 1)
+	require.Equal(t, "colour", data.Accepted[0].Original)
+	require.Equal(t, "color", data.Accepted[0].Suggestion)
+}
+
+func TestPersonalizationNegativePoolCountsIgnored(t *testing.T) {
+	s := newTestStore(t)
+	for i := 0; i < 3; i++ {
+		_, editIDs, err := s.LogCorrection(context.Background(), correction.Event{
+			Source: "browser", Original: "x", Suggestion: "y", Model: "llm",
+			Edits: []correction.EditRecord{{Original: "grey", Replacement: "gray", Model: "llm"}},
+		})
+		require.NoError(t, err)
+		require.NoError(t, s.LogSignal(context.Background(), editIDs[0], correction.SignalIgnored))
+	}
+	data, err := s.PersonalizationExamples(context.Background())
+	require.NoError(t, err)
+	require.Len(t, data.Rejected, 1, "3x ignored of the same edit pair is a negative pattern")
+	require.Equal(t, "grey", data.Rejected[0].Original)
+	require.Equal(t, 3, data.Rejected[0].Count)
 }

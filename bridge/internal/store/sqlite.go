@@ -21,14 +21,27 @@ CREATE TABLE IF NOT EXISTS corrections (
     suggestion  TEXT NOT NULL,
     model       TEXT NOT NULL,
     rule_id     TEXT,
-    signal      TEXT,
-    signal_ts   INTEGER,
     context     TEXT,
     base_model  TEXT,
     adapter     TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_signal ON corrections(signal);
 CREATE INDEX IF NOT EXISTS idx_ts     ON corrections(ts);
+CREATE TABLE IF NOT EXISTS edits (
+    id            INTEGER PRIMARY KEY,
+    correction_id INTEGER NOT NULL,
+    span_start    INTEGER NOT NULL,
+    span_end      INTEGER NOT NULL,
+    original      TEXT NOT NULL,
+    replacement   TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    category      TEXT,
+    rule_id       TEXT,
+    confidence    REAL,
+    signal        TEXT,
+    signal_ts     INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_edits_correction ON edits(correction_id);
+CREATE INDEX IF NOT EXISTS idx_edits_signal ON edits(signal);
 `
 
 // SQLite is the correction.Store implementation.
@@ -51,9 +64,16 @@ func Open(path string) (*SQLite, error) {
 	return &SQLite{db: db}, nil
 }
 
-// LogCorrection inserts an event and returns its row id.
-func (s *SQLite) LogCorrection(ctx context.Context, ev correction.Event) (int64, error) {
-	res, err := s.db.ExecContext(
+// LogCorrection inserts the event row plus one edits row per Event.Edits
+// entry, atomically. Returns the correction id and the edit ids (parallel to
+// ev.Edits) — Suggestion.ID is the EDIT id, the unit /signal attributes to.
+func (s *SQLite) LogCorrection(ctx context.Context, ev correction.Event) (int64, []int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(
 		ctx,
 		`INSERT INTO corrections (ts, source, original, suggestion, model, rule_id, context, base_model, adapter)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -61,17 +81,42 @@ func (s *SQLite) LogCorrection(ctx context.Context, ev correction.Event) (int64,
 		string(ev.Model), ev.RuleID, ev.Context, ev.BaseModel, ev.Adapter,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("insert correction: %w", err)
+		return 0, nil, fmt.Errorf("insert correction: %w", err)
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, nil, fmt.Errorf("correction id: %w", err)
+	}
+	editIDs := make([]int64, 0, len(ev.Edits))
+	for _, e := range ev.Edits {
+		r, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO edits (correction_id, span_start, span_end, original, replacement, model, category, rule_id, confidence)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, e.SpanStart, e.SpanEnd, e.Original, e.Replacement,
+			string(e.Model), e.Category, e.RuleID, e.Confidence,
+		)
+		if err != nil {
+			return 0, nil, fmt.Errorf("insert edit: %w", err)
+		}
+		eid, err := r.LastInsertId()
+		if err != nil {
+			return 0, nil, fmt.Errorf("edit id: %w", err)
+		}
+		editIDs = append(editIDs, eid)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, nil, fmt.Errorf("commit: %w", err)
+	}
+	return id, editIDs, nil
 }
 
-// LogSignal records a user reaction. Unknown ids are a no-op (not an error).
-func (s *SQLite) LogSignal(ctx context.Context, correctionID int64, signal correction.Signal) error {
+// LogSignal records a user reaction on ONE edit. Unknown ids are a no-op.
+func (s *SQLite) LogSignal(ctx context.Context, editID int64, signal correction.Signal) error {
 	_, err := s.db.ExecContext(
 		ctx,
-		`UPDATE corrections SET signal = ?, signal_ts = ? WHERE id = ?`,
-		string(signal), time.Now().UnixMilli(), correctionID,
+		`UPDATE edits SET signal = ?, signal_ts = ? WHERE id = ?`,
+		string(signal), time.Now().UnixMilli(), editID,
 	)
 	if err != nil {
 		return fmt.Errorf("update signal: %w", err)
@@ -98,22 +143,25 @@ func (s *SQLite) CountCorrections(ctx context.Context) (int64, error) {
 // signal IS NULL (no user reaction) are ignored on both paths.
 func (s *SQLite) PersonalizationExamples(ctx context.Context) (correction.PersonalizationData, error) {
 	accepted, err := s.queryEditPairs(ctx,
-		`SELECT original, suggestion, COUNT(*) c
-		 FROM corrections
+		`SELECT original, replacement, COUNT(*) c
+		 FROM edits
 		 WHERE signal = 'accepted'
-		 GROUP BY original, suggestion
-		 ORDER BY MAX(ts) DESC, MAX(id) DESC
+		 GROUP BY original, replacement
+		 ORDER BY MAX(signal_ts) DESC, MAX(id) DESC
 		 LIMIT 20`)
 	if err != nil {
 		return correction.PersonalizationData{}, fmt.Errorf("accepted pairs: %w", err)
 	}
+	// 'rejected' OR 'ignored': the browser client only ever sends accepted /
+	// ignored (there is no Reject affordance), so a repeated ignore IS the
+	// negative pattern. >=3 keeps one-off dismissals out.
 	rejected, err := s.queryEditPairs(ctx,
-		`SELECT original, suggestion, COUNT(*) c
-		 FROM corrections
-		 WHERE signal = 'rejected'
-		 GROUP BY original, suggestion
+		`SELECT original, replacement, COUNT(*) c
+		 FROM edits
+		 WHERE signal IN ('rejected', 'ignored')
+		 GROUP BY original, replacement
 		 HAVING c >= 3
-		 ORDER BY MAX(ts) DESC, MAX(id) DESC
+		 ORDER BY MAX(signal_ts) DESC, MAX(id) DESC
 		 LIMIT 20`)
 	if err != nil {
 		return correction.PersonalizationData{}, fmt.Errorf("rejected pairs: %w", err)

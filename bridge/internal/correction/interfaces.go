@@ -81,9 +81,24 @@ type PersonalizationData struct {
 	Rejected []EditPair // signal='rejected', grouped, Count>=3, capped
 }
 
+// EditRecord is one edit within a logged correction event — the unit a user
+// signal attributes to. Original is the EXACT spanned source text.
+type EditRecord struct {
+	SpanStart   int
+	SpanEnd     int
+	Original    string
+	Replacement string
+	Model       Model
+	Category    string
+	RuleID      string
+	Confidence  float64
+}
+
 // Store persists correction events and user signals (SQLite in Plan 1B).
 type Store interface {
-	LogCorrection(ctx context.Context, ev Event) (id int64, err error)
+	// LogCorrection inserts the event plus one edits row per Event.Edits entry.
+	// Returns the correction row id and the edit row ids (parallel to Edits).
+	LogCorrection(ctx context.Context, ev Event) (id int64, editIDs []int64, err error)
 	LogSignal(ctx context.Context, correctionID int64, signal Signal) error
 	// CountCorrections returns the total number of logged corrections.
 	CountCorrections(ctx context.Context) (int64, error)
@@ -115,4 +130,7 @@ type Event struct {
 	Context    string
 	BaseModel  string // LLM model id, when Model == ModelLLM
 	Adapter    string // active LoRA adapter id, if any (Phase 3)
+	// Edits is the per-suggestion breakdown of this event. Each edit gets its
+	// own row + id so /signal attributes to ONE edit, not the whole rewrite.
+	Edits []EditRecord
 }
