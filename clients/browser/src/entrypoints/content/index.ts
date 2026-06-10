@@ -15,6 +15,8 @@ import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { isUndoRedoKeydown } from '@/input/undo-redo'
 import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
+import { isFrameworkRichEditor } from '@/input/rich-editor-apply'
+import { requestMainWorldApply } from '@/input/main-world-apply'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
 import {
     buildRenderableItems,
@@ -599,16 +601,24 @@ function wireRuntime(
         span: { start: number; end: number },
         replacement: string,
     ): Promise<void> => {
-        // KNOWN LIMITATION (verified live on discord.com web, 2026-06-10):
-        // the synthetic-replacement path (applySlateFix) does NOT work from
-        // a content script — the getTargetRanges override exists only on the
-        // ISOLATED-WORLD event wrapper, so the page's Slate sees the native
-        // (empty) target ranges and inserts every replacement at its model
-        // selection instead (garbled text on apply-all). Until the apply is
-        // dispatched from a MAIN-world agent script, framework editors take
-        // the legacy path here too (pre-hardening behavior: works, with the
-        // latent Slate selection-jam risk). applySlateFix stays correct for
-        // main-world consumers (the Vencord client).
+        // Framework rich editors (Slate/Lexical) need the synthetic-
+        // replacement apply, and it only works from the PAGE world: the
+        // getTargetRanges override is invisible across the isolated-world
+        // boundary (verified live on discord.com web — the page's Slate read
+        // empty target ranges and inserted every edit at its model
+        // selection, garbling apply-all). Route through the MAIN-world
+        // agent (entrypoints/apply-agent.content.ts); a false/timeout reply
+        // (agent unsupported — Firefox — or not yet injected) falls back to
+        // the legacy sync path, which works but carries the latent Slate
+        // selection-jam risk.
+        if (
+            !(el instanceof HTMLTextAreaElement) &&
+            !(el instanceof HTMLInputElement) &&
+            isFrameworkRichEditor(el)
+        ) {
+            if (await requestMainWorldApply(el, span, replacement)) return
+            debugWarn('apply', 'main-world apply unavailable; legacy fallback')
+        }
         applyFix(el, span, replacement)
     }
     const clearChipAria = (el: HTMLElement): void => {
