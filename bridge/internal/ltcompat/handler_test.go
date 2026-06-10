@@ -83,3 +83,28 @@ func TestLanguagesEndpoint(t *testing.T) {
 	require.NotEmpty(t, langs)
 	require.Equal(t, "en-US", langs[0]["longCode"])
 }
+
+func TestCheckHandlerWidensZeroLengthInsertions(t *testing.T) {
+	// Insertion: "He go home" -> "He goes home" is a zero-width span [5,5)
+	// inserting "es" after "go". LT clients reject/mis-render length 0, so
+	// the match must widen one rune left and fold the anchor into the
+	// replacement (same applied result).
+	text := "He go home"
+	svc := &fakeService{result: correction.Correction{
+		Original: text,
+		Suggestions: []correction.Suggestion{{
+			Span: correction.Span{Start: 5, End: 5}, Replacement: "es",
+			Replacements: []string{"es"}, Model: correction.ModelLLM,
+		}},
+	}}
+	h := NewHandler(svc, "v")
+	rec, body := postCheck(t, h, url.Values{"text": {text}, "language": {"en-US"}})
+	require.Equal(t, http.StatusOK, rec.Code)
+	matches := body["matches"].([]any)
+	require.Len(t, matches, 1)
+	m := matches[0].(map[string]any)
+	require.EqualValues(t, 4, m["offset"], "widened one unit left onto the anchor rune")
+	require.EqualValues(t, 1, m["length"], "zero-length insertion must be widened for LT clients")
+	reps := m["replacements"].([]any)
+	require.Equal(t, "oes", reps[0].(map[string]any)["value"], "anchor char folded into the replacement")
+}

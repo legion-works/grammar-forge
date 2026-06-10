@@ -135,16 +135,25 @@ func (h *Handler) handleCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // suggestionToLTMatch converts one bridge suggestion. Insertions (zero-width
-// byte spans) are widened to one UTF-16 unit on the left where possible so
-// LT clients (which reject length 0) render them — same trick as the gRPC
-// mapping's widenInsertion, in UTF-16 space.
+// byte spans) are widened onto one adjacent rune in BYTE space — anchor char
+// folded into every replacement candidate, identical applied result — then
+// converted to UTF-16. LT clients reject/mis-render length-0 matches (the
+// same constraint the gRPC mapping's widenInsertion handles for GRPCRule).
 func suggestionToLTMatch(text string, s correction.Suggestion) ltMatch {
-	offset := byteToUTF16Offset(text, s.Span.Start)
-	length := byteToUTF16Offset(text, s.Span.End) - offset
+	byteStart, byteEnd := s.Span.Start, s.Span.End
 	candidates := s.Replacements
 	if len(candidates) == 0 {
 		candidates = []string{s.Replacement}
 	}
+	if byteStart == byteEnd {
+		anchored := make([]string, len(candidates))
+		for i, c := range candidates {
+			byteStart, byteEnd, anchored[i] = widenInsertionBytes(text, s.Span.Start, c)
+		}
+		candidates = anchored
+	}
+	offset := byteToUTF16Offset(text, byteStart)
+	length := byteToUTF16Offset(text, byteEnd) - offset
 	reps := make([]ltReplacement, 0, len(candidates))
 	for _, c := range candidates {
 		reps = append(reps, ltReplacement{Value: c})
@@ -158,7 +167,7 @@ func suggestionToLTMatch(text string, s correction.Suggestion) ltMatch {
 		Offset:       offset,
 		Length:       length,
 		Replacements: reps,
-		Context:      contextWindow(text, s.Span.Start, s.Span.End),
+		Context:      contextWindow(text, byteStart, byteEnd),
 		Rule: ltRule{
 			ID:          "GF_" + strings.ToUpper(string(s.Model)),
 			Description: message,
@@ -193,6 +202,27 @@ func contextWindow(text string, byteStart, byteEnd int) ltContext {
 		Offset: byteToUTF16Offset(snippet, byteStart-from),
 		Length: byteToUTF16Offset(snippet, byteEnd-from) - byteToUTF16Offset(snippet, byteStart-from),
 	}
+}
+
+// widenInsertionBytes converts a zero-length insertion of repl at byte `at`
+// into an equivalent non-zero byte span: anchor on the rune to the LEFT
+// (folded into the replacement), or on the first rune at text start.
+// Applying (start, end, replacement) yields exactly the same string as
+// inserting repl at `at`. Mirrors ltgrpc's widenInsertion.
+func widenInsertionBytes(text string, at int, repl string) (start, end int, replacement string) {
+	if at > 0 && at <= len(text) {
+		s := at - 1
+		for s > 0 && !utf8.RuneStart(text[s]) {
+			s--
+		}
+		return s, at, text[s:at] + repl
+	}
+	if at == 0 && len(text) > 0 {
+		_, size := utf8.DecodeRuneInString(text)
+		return 0, size, repl + text[:size]
+	}
+	// Empty text: nothing to anchor on (unreachable for real corrections).
+	return at, at, repl
 }
 
 func issueTypeFor(category string) string {
