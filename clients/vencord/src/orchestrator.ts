@@ -229,45 +229,57 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             }
             // Refresh the pill (count → 0) if mounted + visible. Skipped
             // while a panel is open — the next open rebuilds fresh.
+            const zeroPillUpdated = !!(pillHandle && pillHandle.isMounted() && !panelOpen)
             if (pillHandle && pillHandle.isMounted() && !panelOpen) {
                 pillHandle.update(buildPillOptions(el, st))
             }
+            debugLog('render', { items: 0, pillUpdated: zeroPillUpdated, panelOpen })
             notify()
             return
         }
         // Highlight/hit-test the WORD range (hlStart/hlEnd), not the raw edit
         // span — a zero-width insertion (e.g. "sw"->"saw") has no rect.
         const spans = st.items.map((it) => ({ start: it.hlStart, end: it.hlEnd }))
-        let allRects: DOMRect[][]
+        let allRects: DOMRect[][] | null = null
         try {
-            allRects = getSpanRectsBatch(el, spans)
+            const measured = getSpanRectsBatch(el, spans)
+            if (measured.length > 0) allRects = measured
         } catch {
-            // Measurement failed (detached node / odd layout) — leave
-            // stale rects + highlights in place; the next remeasure or
-            // re-render will fix it.
-            return
+            // Measurement failed (detached node / odd layout) — leave the
+            // stale rects + highlights in place; the next remeasure fixes
+            // them. The pill/badge update below still runs: count data must
+            // never depend on rect measurability (a skipped update here left
+            // the pill one state behind).
         }
-        if (allRects.length === 0) return
-        st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
-        if (!st.highlightLayer) st.highlightLayer = createHighlightLayer(overlay.root)
-        const specs: HighlightSpec[] = []
-        for (let i = 0; i < st.items.length; i++) {
-            const item = st.items[i]!
-            for (const rect of allRects[i] ?? []) {
-                specs.push({ rect, category: item.category, itemIndex: i })
+        if (allRects) {
+            st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects![i] ?? [] }))
+            if (!st.highlightLayer) st.highlightLayer = createHighlightLayer(overlay.root)
+            const specs: HighlightSpec[] = []
+            for (let i = 0; i < st.items.length; i++) {
+                const item = st.items[i]!
+                for (const rect of allRects[i] ?? []) {
+                    specs.push({ rect, category: item.category, itemIndex: i })
+                }
             }
+            st.highlightLayer.reconcile(specs)
+            st.highlightLayer.setState({
+                focused: document.activeElement === el,
+                hoverItemIndex: null,
+            })
         }
-        st.highlightLayer.reconcile(specs)
-        st.highlightLayer.setState({
-            focused: document.activeElement === el,
-            hoverItemIndex: null,
-        })
         // Refresh the pill if mounted + visible. Skipped while a panel is
         // open — the pill's update() closes the panel by design (acceptable;
         // the next open rebuilds with fresh data).
+        const pillUpdated = !!(pillHandle && pillHandle.isMounted() && !panelOpen)
         if (pillHandle && pillHandle.isMounted() && !panelOpen) {
             pillHandle.update(buildPillOptions(el, st))
         }
+        debugLog('render', {
+            items: st.items.length,
+            rectsMeasured: allRects != null,
+            pillUpdated,
+            panelOpen,
+        })
         notify()
     }
 
