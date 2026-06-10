@@ -263,3 +263,16 @@ func TestLoad_SkipLLMForSpellingOnlyOverride(t *testing.T) {
 	})
 	require.True(t, cfg.SkipLLMForSpellingOnly)
 }
+
+func TestOverEditFilterDefaultsTrueAndCanBeDisabled(t *testing.T) {
+	empty := func(string) (string, bool) { return "", false }
+	require.True(t, Load(empty).OverEditFilterEnabled, "default must be enabled")
+
+	off := func(k string) (string, bool) {
+		if k == "GF_OVEREDIT_FILTER" {
+			return "false", true
+		}
+		return "", false
+	}
+	require.False(t, Load(off).OverEditFilterEnabled)
+}

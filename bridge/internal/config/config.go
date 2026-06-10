@@ -80,6 +80,14 @@ type Config struct {
 	// opt in with GF_SKIP_LLM_FOR_SPELLING_ONLY=true.
 	SkipLLMForSpellingOnly bool
 
+	// OverEditFilterEnabled wires the LLM over-edit repair chain
+	// (correction.DefaultOverEditRules) that deterministically reverts
+	// measured LLM over-edit classes — nor/or proximity-agreement flips and
+	// proper-noun comma restructures (golden cases 118/91) — on the LLM
+	// output before diffing. Default true; opt out with
+	// GF_OVEREDIT_FILTER=false for byte-identical pre-filter behaviour.
+	OverEditFilterEnabled bool
+
 	// Phase-2 P4 prompt-cache personalisation. On by default. The cache is
 	// TTL-bounded (no background goroutine) and the snapshot is read
 	// synchronously by the prompt builder. Set GF_PERSONALIZATION_ENABLED=false
@@ -186,6 +194,7 @@ func Load(getenv Getenv) Config {
 		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),
 		EscalateOnFastEdit:     getBool("GF_ESCALATE_ON_FAST_EDIT", true),
 		SkipLLMForSpellingOnly: getBool("GF_SKIP_LLM_FOR_SPELLING_ONLY", false),
+		OverEditFilterEnabled:  getBool("GF_OVEREDIT_FILTER", true),
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),
 		PersonalizationTTL:     getDuration("GF_PERSONALIZATION_TTL", 5*time.Minute),

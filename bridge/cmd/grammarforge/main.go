@@ -111,6 +111,13 @@ func main() {
 	if dict != nil {
 		svc.SetWordAllowlist(dict)
 	}
+	// LLM over-edit repair: deterministic text-level reverts of measured
+	// over-edit classes (see internal/correction/overedit.go), applied to
+	// LLM grammar output before diffing. Default on; GF_OVEREDIT_FILTER=false
+	// restores legacy behaviour.
+	if cfg.OverEditFilterEnabled {
+		svc.SetOverEditRules(correction.DefaultOverEditRules())
+	}
 
 	// Inject the rephrase provider factory (this is where internal/llm is
 	// allowed — the correction core stays transport-free). The api_key is
