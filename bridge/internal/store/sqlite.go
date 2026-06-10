@@ -51,7 +51,11 @@ type SQLite struct {
 
 // Open opens (or creates) the database at path and ensures the schema exists.
 func Open(path string) (*SQLite, error) {
-	db, err := sql.Open("sqlite", path)
+	// WAL + busy_timeout: concurrent /correct logging and /signal updates on
+	// the default rollback journal produce "database is locked" under real
+	// typing load. WAL allows a reader/writer mix; busy_timeout makes a
+	// briefly-blocked writer wait instead of erroring.
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}

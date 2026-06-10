@@ -176,6 +176,16 @@ func TestPersonalizationExamplesRejectedOrderByRecency(t *testing.T) {
 		"rejected pairs must be ordered by recency (most-recent first), not by count — the newer threshold-count pair must come BEFORE the older high-count pair")
 }
 
+func TestOpenEnablesWALAndBusyTimeout(t *testing.T) {
+	s := newTestStore(t)
+	var mode string
+	require.NoError(t, s.db.QueryRow(`PRAGMA journal_mode`).Scan(&mode))
+	require.Equal(t, "wal", mode)
+	var timeout int
+	require.NoError(t, s.db.QueryRow(`PRAGMA busy_timeout`).Scan(&timeout))
+	require.Equal(t, 5000, timeout)
+}
+
 func TestLogCorrectionInsertsEditsAndReturnsIDs(t *testing.T) {
 	s := newTestStore(t)
 	id, editIDs, err := s.LogCorrection(context.Background(), correction.Event{
