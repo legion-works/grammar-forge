@@ -29,6 +29,11 @@ type Service struct {
 	log                    *slog.Logger
 	rephraseFactory        RephraseClientFactory
 	rephraseDefaultBackend *RephraseBackend
+	// allowlist is the user-dictionary allowlist consulted at finalize time
+	// to drop LLM re-flags of words the user has added (the LLM was not
+	// given the dictionary, so a confident-wrong fast edit could otherwise
+	// be re-emitted on escalation). Optional; nil = no filtering.
+	allowlist WordAllowlist
 	// sentenceCache memoizes per-sentence suggestion sets. nil => legacy
 	// whole-text path; populated by SetSentenceCache to enable the sentence
 	// pipeline (segment + per-sentence cache lookup + span reassembly).
@@ -62,6 +67,11 @@ func (s *Service) SetRephraseDefaultBackend(b *RephraseBackend) { s.rephraseDefa
 // sentence entries. Disabled (whole-text behaviour, unchanged) when never
 // called or size <= 0.
 func (s *Service) SetSentenceCache(size int) { s.sentenceCache = newSentenceCache(size) }
+
+// SetWordAllowlist injects the user-dictionary allowlist consulted at
+// finalize time to drop LLM re-flags of words the user has added. Optional;
+// nil (zero value) = no filtering.
+func (s *Service) SetWordAllowlist(a WordAllowlist) { s.allowlist = a }
 
 // Correct runs the full pipeline and returns suggestions. It never mutates
 // the text. Fast corrector errors and LLM escalation errors are best-effort
@@ -303,6 +313,14 @@ func suspiciouslyTruncated(original, corrected string) bool {
 // finalize logs the combined correction (best-effort) and tags every
 // returned suggestion with the logged id.
 func (s *Service) finalize(ctx context.Context, req Request, all []Suggestion) (Correction, error) {
+	// Drop single-word edits whose span text is in the user-dictionary
+	// allowlist. The allowlist guards against the LLM re-flagging a word
+	// the user has explicitly added (the LLM was not given the dictionary
+	// on escalation). A larger edit that merely contains the word is
+	// kept — only single dictionary words are suppressed.
+	if s.allowlist != nil && len(all) > 0 {
+		all = s.dropAllowlisted(req.Text, all)
+	}
 	// applyAll (used for the logged Event.Suggestion) and clients both
 	// assume suggestions are ordered by ascending Span.Start so that
 	// last-to-first application keeps earlier byte offsets valid. The
@@ -503,4 +521,24 @@ func score(original string, suggestions []Suggestion) int {
 		sc = 0
 	}
 	return sc
+}
+
+// dropAllowlisted removes suggestions whose span text is exactly one
+// allowlisted word (case-insensitive, no whitespace). A larger edit that
+// merely contains the word is kept — only single dictionary words are
+// suppressed. Suggestions with invalid spans (e.g. out of bounds) are
+// passed through unchanged; Span.Validate is the source of truth and the
+// rest of the pipeline is robust to it.
+func (s *Service) dropAllowlisted(text string, sugs []Suggestion) []Suggestion {
+	out := make([]Suggestion, 0, len(sugs))
+	for _, sg := range sugs {
+		if sg.Span.Validate(len(text)) == nil {
+			word := text[sg.Span.Start:sg.Span.End]
+			if !strings.ContainsAny(word, " \t\n") && s.allowlist.Contains(word) {
+				continue
+			}
+		}
+		out = append(out, sg)
+	}
+	return out
 }

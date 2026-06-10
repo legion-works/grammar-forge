@@ -94,6 +94,13 @@ type EditRecord struct {
 	Confidence  float64
 }
 
+// WordAllowlist reports whether a word is in the user dictionary. Injected
+// by main (the dictionary store implements it) so the correction core stays
+// free of file/transport concerns. Membership is case-insensitive.
+type WordAllowlist interface {
+	Contains(word string) bool
+}
+
 // Store persists correction events and user signals (SQLite in Plan 1B).
 type Store interface {
 	// LogCorrection inserts the event plus one edits row per Event.Edits entry.

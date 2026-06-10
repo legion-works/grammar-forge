@@ -788,3 +788,50 @@ func TestFinalizeTagsEachSuggestionWithItsOwnEditID(t *testing.T) {
 	require.Equal(t, "have", st.lastEvent.Edits[0].Replacement)
 	require.Equal(t, "teh", st.lastEvent.Edits[1].Original) //nolint:misspell // intentional fixture
 }
+
+// fakeAllowlist is a set-backed WordAllowlist for tests. Membership is
+// case-insensitive: the test fixture stores the lowercased form so the
+// service's lowercase lookup hits.
+type fakeAllowlist struct{ words map[string]bool }
+
+func (f fakeAllowlist) Contains(w string) bool { return f.words[strings.ToLower(w)] }
+
+// A single-word edit whose span text is in the user dictionary must be
+// dropped. The allowlist guards against an LLM re-flagging a word the user
+// has explicitly added (the LLM did not see the dictionary, so a
+// confident-wrong fast edit could otherwise be re-emitted on escalation).
+// Fixture: input string is two words; bytes [0,10) cover the allowlisted
+// word and bytes [11,14) cover a misspelled 3-letter word whose fix is
+// "the". Only the fix for the misspelled word survives.
+func TestCorrectSuppressesAllowlistedSingleWordEdits(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{name: string(ModelGECToR), sugs: []Suggestion{
+		{Span: Span{0, 10}, Replacement: "Kubernetes", Model: ModelGECToR, Confidence: 0.95},
+		{Span: Span{11, 14}, Replacement: "the", Model: ModelGECToR, Confidence: 0.95},
+	}}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	svc.SetWordAllowlist(fakeAllowlist{words: map[string]bool{"kubernetes": true}})
+	got, err := svc.Correct(context.Background(), Request{Text: "kubernetes teh"}) //nolint:misspell // intentional fixture
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1, "the allowlisted word's edit is dropped")
+	require.Equal(t, "the", got.Suggestions[0].Replacement)
+}
+
+// A multi-word edit that merely contains an allowlisted word is kept — the
+// allowlist only suppresses single dictionary words. A larger edit that
+// happens to span the allowlisted word is still a real correction.
+// Fixture: "kuberntes podz" — bytes [0,14) = the whole string (a multi-word
+// span containing a space). The edit is "kuberntes podz" -> "Kubernetes pods";
+// it touches the allowlisted word "kubernetes" but is not a single-word
+// rewrite, so it survives.
+func TestCorrectAllowlistDoesNotDropMultiWordEdit(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{name: string(ModelGECToR), sugs: []Suggestion{
+		{Span: Span{0, 14}, Replacement: "Kubernetes pods", Model: ModelGECToR, Confidence: 0.95},
+	}}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	svc.SetWordAllowlist(fakeAllowlist{words: map[string]bool{"kubernetes": true}})
+	got, err := svc.Correct(context.Background(), Request{Text: "kuberntes podz"})
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1, "a multi-word edit containing the word is NOT dropped")
+}
