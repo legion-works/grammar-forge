@@ -44,3 +44,26 @@ func TestSegmentSentencesEmptyAndWhitespace(t *testing.T) {
 	require.Empty(t, SegmentSentences(""))
 	require.Empty(t, SegmentSentences("   \n  "))
 }
+
+func TestSegmentSentencesCodeLikeInputStaysWhole(t *testing.T) {
+	// Punkt happily splits code at '?' / '.' (e.g. "arr.length"), and a code
+	// FRAGMENT sent to the LLM alone gets "corrected" differently than the
+	// whole line (live regression: "arr[0] : null;" -> "arr[0]: null"). Code-
+	// like input must bypass segmentation (single whole-text segment =
+	// pre-sentence-pipeline behaviour).
+	for _, text := range []string{
+		"i++; return arr.length > 0 ? arr[0] : null;",
+		"const x = items.filter((i) => i.ok); doIt(x);",
+		"if (a == b && c != d) { return; }",
+	} {
+		segs := SegmentSentences(text)
+		require.Len(t, segs, 1, "code-like input must not be segmented: %q", text)
+	}
+}
+
+func TestSegmentSentencesProseWithOneSemicolonStillSplits(t *testing.T) {
+	// A single semicolon is normal prose punctuation and must NOT trigger the
+	// code bypass.
+	text := "I like tea; it calms me. She prefers coffee in the morning."
+	require.Len(t, SegmentSentences(text), 2)
+}

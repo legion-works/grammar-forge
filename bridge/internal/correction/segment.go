@@ -35,15 +35,44 @@ func getTokenizer() *sentences.DefaultSentenceTokenizer {
 	return tokenizer
 }
 
+// codeIndicators are substrings that essentially never appear in English
+// prose but are routine in code. Any hit (or 2+ semicolons, below) bypasses
+// segmentation: punkt happily splits code at '?' / '.' ("arr.length"), and a
+// code FRAGMENT sent to the LLM alone gets "corrected" differently than the
+// whole line would (verified live: "arr[0] : null;" alone -> "arr[0]: null";
+// the full line is left untouched). Whole-text = pre-pipeline behaviour.
+var codeIndicators = []string{
+	"();", "=>", "&&", "||", "++", "--", "==", "!=",
+	"[]", "{}", "</", "/>", "::", "${", "$(",
+}
+
+// looksLikeCode reports whether text is plausibly source code rather than
+// prose. Deliberately conservative: a false positive only means the text is
+// checked whole (the legacy path), never a wrong correction.
+func looksLikeCode(text string) bool {
+	for _, ind := range codeIndicators {
+		if strings.Contains(text, ind) {
+			return true
+		}
+	}
+	// One semicolon is prose ("I like tea; it calms me."); two or more in a
+	// single check unit reads like statements.
+	return strings.Count(text, ";") >= 2
+}
+
 // SegmentSentences splits text into sentence byte ranges using the punkt
 // tokenizer (abbreviation-aware; "Dr." / "U.S." do not split). Offsets are
 // recovered by locating each sentence in order — punkt sentences are
 // contiguous substrings of the input. Degrades to a single whole-text
-// segment when the tokenizer is unavailable or a sentence cannot be
-// relocated (never returns wrong offsets). Whitespace-only input -> empty.
+// segment when the input looks like code (see looksLikeCode), when the
+// tokenizer is unavailable, or when a sentence cannot be relocated (never
+// returns wrong offsets). Whitespace-only input -> empty.
 func SegmentSentences(text string) []SentenceSegment {
 	if strings.TrimSpace(text) == "" {
 		return nil
+	}
+	if looksLikeCode(text) {
+		return []SentenceSegment{{Start: 0, End: len(text)}}
 	}
 	tok := getTokenizer()
 	if tok == nil {
