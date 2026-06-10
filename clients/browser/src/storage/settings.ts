@@ -95,7 +95,14 @@ export const settingsItem = storage.defineItem<Settings>('local:settings', {
  * the feature that depends on it.
  */
 export async function getSettings(): Promise<Settings> {
-    return { ...DEFAULT_SETTINGS, ...(await settingsItem.getValue()) }
+    const stored = (await settingsItem.getValue()) ?? {}
+    // Drop stored `undefined` values: a spread would let them CLOBBER the
+    // default (e.g. a bad patch permanently disabling a feature) — the merge
+    // exists precisely so missing/undefined fields fall back to defaults.
+    const defined = Object.fromEntries(
+        Object.entries(stored).filter(([, v]) => v !== undefined),
+    )
+    return { ...DEFAULT_SETTINGS, ...defined } as Settings
 }
 
 /**

@@ -49,6 +49,15 @@ describe('getSettings', () => {
     it('returns the default settings when nothing has been persisted', async () => {
         expect(await getSettings()).toEqual(DEFAULT_SETTINGS)
     })
+
+    it('ignores stored undefined values (defaults win)', async () => {
+        // A stored `undefined` must NOT clobber the default — the merge
+        // exists precisely so missing/undefined fields fall back to
+        // defaults. A bad patch must not permanently disable a feature.
+        await setSettings({ realtimeDelayMs: undefined as unknown as number })
+        const s = await getSettings()
+        expect(s.realtimeDelayMs).toBe(DEFAULT_SETTINGS.realtimeDelayMs)
+    })
 })
 
 describe('setSettings', () => {
