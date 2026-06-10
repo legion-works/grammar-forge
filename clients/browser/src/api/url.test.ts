@@ -24,4 +24,12 @@ describe('isLocalBridgeUrl', () => {
     ])('isLocalBridgeUrl(%s) === %s', (url, want) => {
         expect(isLocalBridgeUrl(url as string)).toBe(want)
     })
+
+    it('rejects non-http(s) schemes even with local hosts', () => {
+        expect(isLocalBridgeUrl('javascript:alert(1)')).toBe(false)
+        expect(isLocalBridgeUrl('file:///etc/passwd')).toBe(false)
+        expect(isLocalBridgeUrl('ftp://127.0.0.1/x')).toBe(false)
+        expect(isLocalBridgeUrl('data:text/html,x')).toBe(false)
+        expect(isLocalBridgeUrl('ws://127.0.0.1:8000')).toBe(false)
+    })
 })

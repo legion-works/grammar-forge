@@ -5,6 +5,10 @@ export function isLocalBridgeUrl(raw: string): boolean {
     } catch {
         return false
     }
+    // Scheme allowlist: the bridge is an HTTP API. A non-http(s) URL here is
+    // misconfiguration at best (fetch would fail anyway) — reject it early so
+    // no other code path ever treats e.g. javascript:/file: as "local".
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
     let h = u.hostname
     if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1)
     if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true
