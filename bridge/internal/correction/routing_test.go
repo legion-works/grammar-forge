@@ -225,3 +225,39 @@ func TestPropagateFastCategoriesDoesNotOverrideSpecific(t *testing.T) {
 	fast := []Suggestion{{Span: Span{0, 3}, Category: CategorySpelling}}
 	require.Equal(t, CategoryStyle, propagateFastCategories(llm, fast)[0].Category)
 }
+
+func TestShouldEscalate_SkipsAllSpellingFastEditsWhenFlagged(t *testing.T) {
+	// Spelling lints come from Harper's dictionary engine (incl. the user
+	// dictionary the LLM cannot see); with the skip flag, an ALL-spelling
+	// fast result is served directly instead of burning an LLM round-trip.
+	spelling := []Suggestion{
+		{Span: Span{Start: 0, End: 5}, Replacement: "X", Model: ModelHarper, Confidence: 0.95, Category: CategorySpelling},
+		{Span: Span{Start: 6, End: 9}, Replacement: "Y", Model: ModelHarper, Confidence: 0.95, Category: CategorySpelling},
+	}
+	mixed := []Suggestion{
+		{Span: Span{Start: 0, End: 5}, Replacement: "X", Model: ModelHarper, Confidence: 0.95, Category: CategorySpelling},
+		{Span: Span{Start: 6, End: 9}, Replacement: "Y", Model: ModelGECToR, Confidence: 0.95, Category: CategoryGrammar},
+	}
+	pol := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true, SkipLLMForSpellingOnly: true}
+	if pol.ShouldEscalate("a short line with typos", spelling) {
+		t.Error("all-spelling fast edits with the skip flag must NOT escalate")
+	}
+	if !pol.ShouldEscalate("a short line with typos", mixed) {
+		t.Error("mixed-category fast edits must still escalate")
+	}
+	off := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true}
+	if !off.ShouldEscalate("a short line with typos", spelling) {
+		t.Error("without the skip flag all-spelling fast edits must escalate (current default)")
+	}
+}
+
+func TestShouldEscalate_SkipSpellingStillHonorsConfidenceFloor(t *testing.T) {
+	// The exemption only bypasses the EscalateOnFastEdit trigger — a
+	// low-confidence spelling edit still falls through to the confidence
+	// floor and escalates.
+	low := []Suggestion{{Span: Span{Start: 0, End: 5}, Replacement: "X", Model: ModelGECToR, Confidence: 0.3, Category: CategorySpelling}}
+	pol := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true, SkipLLMForSpellingOnly: true}
+	if !pol.ShouldEscalate("a short line", low) {
+		t.Error("a low-confidence spelling-only edit must still escalate")
+	}
+}

@@ -248,3 +248,18 @@ func TestLoad_SentenceCacheSizeZeroDisables(t *testing.T) {
 	require.Equal(t, 0, cfg.SentenceCacheSize,
 		"GF_SENTENCE_CACHE_SIZE=0 must disable the sentence pipeline, not keep the 2048 default")
 }
+
+func TestLoad_SkipLLMForSpellingOnlyDefaultFalse(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.False(t, cfg.SkipLLMForSpellingOnly)
+}
+
+func TestLoad_SkipLLMForSpellingOnlyOverride(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_SKIP_LLM_FOR_SPELLING_ONLY" {
+			return "true", true
+		}
+		return "", false
+	})
+	require.True(t, cfg.SkipLLMForSpellingOnly)
+}

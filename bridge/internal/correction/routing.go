@@ -30,6 +30,16 @@ type EscalationPolicy struct {
 	// false positives. Off by default in code; wired to default ON in config
 	// (see config.GF_ESCALATE_ON_FAST_EDIT) — opt-out, not opt-in.
 	EscalateOnFastEdit bool
+	// SkipLLMForSpellingOnly exempts ALL-spelling fast-path results from the
+	// EscalateOnFastEdit trigger: when every fast suggestion is a spelling
+	// edit, the fast path is served directly (subject to the confidence floor
+	// below) instead of consulting the LLM. Spelling lints come from Harper's
+	// dictionary engine — incl. the user dictionary, which the LLM cannot see
+	// — and a typo-while-typing answer in ~10-40ms beats a ~300-800ms LLM
+	// round-trip. Mixed-category or structural fast edits still escalate.
+	// Default OFF (config GF_SKIP_LLM_FOR_SPELLING_ONLY); quality-gated on
+	// the full cold golden eval before being relied on.
+	SkipLLMForSpellingOnly bool
 }
 
 // ShouldEscalate returns true if the input is long, the fast path found nothing
@@ -52,8 +62,12 @@ func (p EscalationPolicy) ShouldEscalate(text string, fast []Suggestion) bool {
 	if p.EscalateOnFastEdit {
 		// Fast path emitted edits; let the LLM arbitrate from the original
 		// (see Service.Correct). Covers confident-but-wrong Harper lints
-		// that the confidence floor would otherwise serve as-is.
-		return true
+		// that the confidence floor would otherwise serve as-is. Exception
+		// (opt-in): an ALL-spelling fast result is served directly — it
+		// falls through to the confidence floor below instead.
+		if !p.SkipLLMForSpellingOnly || !allSpellingSuggestions(fast) {
+			return true
+		}
 	}
 	gectorScores := make([]float64, 0, len(fast))
 	allScores := make([]float64, 0, len(fast))
@@ -170,6 +184,21 @@ func categoryPriority(c string) int {
 	default: // CategoryUnknown / anything else
 		return 0
 	}
+}
+
+// allSpellingSuggestions reports whether every fast-path suggestion is a
+// spelling edit (the SkipLLMForSpellingOnly exemption). False for an empty
+// slice — the empty-fast-path branch decides that case.
+func allSpellingSuggestions(fast []Suggestion) bool {
+	if len(fast) == 0 {
+		return false
+	}
+	for _, s := range fast {
+		if s.Category != CategorySpelling {
+			return false
+		}
+	}
+	return true
 }
 
 // isNonTrivialInput reports whether text has at least minWords whitespace-

@@ -74,6 +74,11 @@ type Config struct {
 	// GF_ESCALATE_ON_FAST_EDIT=false to restore the historical confidence-floor
 	// behaviour.
 	EscalateOnFastEdit bool
+	// SkipLLMForSpellingOnly serves ALL-spelling fast-path results directly
+	// instead of escalating to the LLM (see
+	// correction.EscalationPolicy.SkipLLMForSpellingOnly). Defaults false;
+	// opt in with GF_SKIP_LLM_FOR_SPELLING_ONLY=true.
+	SkipLLMForSpellingOnly bool
 
 	// Phase-2 P4 prompt-cache personalisation. On by default. The cache is
 	// TTL-bounded (no background goroutine) and the snapshot is read
@@ -180,6 +185,7 @@ func Load(getenv Getenv) Config {
 		EscalateMaxSentenceLen: getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
 		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),
 		EscalateOnFastEdit:     getBool("GF_ESCALATE_ON_FAST_EDIT", true),
+		SkipLLMForSpellingOnly: getBool("GF_SKIP_LLM_FOR_SPELLING_ONLY", false),
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),
 		PersonalizationTTL:     getDuration("GF_PERSONALIZATION_TTL", 5*time.Minute),
