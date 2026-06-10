@@ -1423,6 +1423,10 @@ function wireRuntime(
             diffIsDeletion: item.diffIsDeletion,
             replacements: item.replacements,
             original: item.original,
+            onAddToDictionary:
+                item.category === 'spelling' && !/\s/.test(item.original)
+                    ? (word: string) => void addWordToDictionary(el, item, word)
+                    : undefined,
             onApply: (replacementIndex: number) => {
                 const live = getText(el)
                 if (!isSpanStillValid(live, item)) {
@@ -1543,6 +1547,41 @@ function wireRuntime(
         applyItemPrimary(el, item)
         flashAppliedOverlay(el, item)
         void rerunFor(el)(getText(el))
+    }
+
+    // Add a flagged word to the user dictionary: persist on the bridge, log a
+    // rejected signal for the edit (the personalization negative pool's first
+    // real sender), re-check (the suggestion disappears server-side), and
+    // offer Undo. Bridge-unreachable failures surface via debugWarn only.
+    async function addWordToDictionary(
+        el: HTMLElement,
+        item: RenderableItem,
+        word: string,
+    ): Promise<void> {
+        if (!word) return
+        try {
+            await runtime.client.dictionaryAdd(word)
+        } catch (e) {
+            debugWarn('dictionary', 'add failed', e)
+            return
+        }
+        void signalQueue.enqueue({
+            id: item.id,
+            action: 'rejected',
+            category: item.category,
+            source: 'browser',
+        })
+        void rerunFor(el)(getText(el))
+        showToast(overlay.root, {
+            message: `Added "${word}" to dictionary`,
+            actionLabel: 'Undo',
+            onAction: () => {
+                void runtime.client
+                    .dictionaryRemove(word)
+                    .then(() => rerunFor(el)(getText(el)))
+                    .catch((e) => debugWarn('dictionary', 'undo remove failed', e))
+            },
+        })
     }
 
     // Pill panel: apply ALL corrections. Apply them ONE AT A TIME (the same
