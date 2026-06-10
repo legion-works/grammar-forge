@@ -60,6 +60,13 @@ type Service struct {
 	// merge is built; re-enabling gates on the full cold eval. See
 	// .opencode/specs/2026-06-10-merge-not-replace-spike.md.
 	mergeFastEditsMode string
+	// fastHintsEnabled toggles GF_FAST_HINTS: when true, the escalation
+	// prompt is rendered with Harper's SPELLING candidates as arbitration
+	// hints. Default false (zero value). SPIKE — keep/revert is gated on
+	// the full cold golden eval. Hints are deterministic per sentence so
+	// the sentence-cache key (which hashes only Build(req).System) stays
+	// consistent across flag toggles. See SetFastHintsEnabled.
+	fastHintsEnabled bool
 	// sentenceCache memoizes per-sentence suggestion sets. nil => legacy
 	// whole-text path; populated by SetSentenceCache to enable the sentence
 	// pipeline (segment + per-sentence cache lookup + span reassembly).
@@ -114,6 +121,46 @@ func (s *Service) SetOverEditRules(rules []OverEditRule) { s.overEditRules = rul
 // SetMergeFastEditsMode selects the escalation result composition (see the
 // MergeFastEdits* constants). Optional; zero value = legacy replace semantics.
 func (s *Service) SetMergeFastEditsMode(mode string) { s.mergeFastEditsMode = mode }
+
+// SetFastHintsEnabled toggles the GF_FAST_HINTS spike: when true and the LLM
+// is escalated to, Harper's SPELLING candidates are appended to the chat
+// system prompt as arbitration hints. Default false (zero value) so the
+// existing eval baseline is unchanged. SPIKE — keep/revert is gated on the
+// full cold golden eval. Hints are deterministic per sentence (depend only
+// on the fast-path output of the original text), so the sentence-cache key
+// (which hashes only Build(req).System, not the rendered-with-hints prompt)
+// stays consistent and a flag toggle does not invalidate the cache. The
+// empty/all-invalid hints branch is byte-identical to Build(req).
+func (s *Service) SetFastHintsEnabled(on bool) { s.fastHintsEnabled = on }
+
+// spellingHints filters fast-path suggestions down to the CategorySpelling
+// entries that the LLM should see as arbitration hints. Other categories
+// (grammar, punctuation, style) are not a candidate-fix list and would
+// confuse the arbitration prompt. Order is preserved (callers may have
+// ordered by confidence DESC); the prompt builder caps the rendered count.
+func spellingHints(fast []Suggestion) []Suggestion {
+	var out []Suggestion
+	for _, sg := range fast {
+		if sg.Category == CategorySpelling {
+			out = append(out, sg)
+		}
+	}
+	return out
+}
+
+// escalationPrompt selects the prompt handed to the LLM in the escalation
+// branch. Default: Build(req) (the legacy baseline, byte-identical to
+// pre-spike behaviour). GF_FAST_HINTS spike: BuildWithSpellingHints with
+// the SPELLING-category fast edits as arbitration hints. The empty/GRMR-
+// native branch in the prompt builder keeps the output byte-identical to
+// Build(req), so toggling the flag on a no-spelling / GRMR-native input
+// does not change the prompt or the sentence-cache key.
+func (s *Service) escalationPrompt(req Request, fast []Suggestion) Prompt {
+	if s.fastHintsEnabled {
+		return s.pb.BuildWithSpellingHints(req, spellingHints(fast))
+	}
+	return s.pb.Build(req)
+}
 
 // Correct runs the full pipeline and returns suggestions. It never mutates
 // the text. Fast corrector errors and LLM escalation errors are best-effort
@@ -213,7 +260,7 @@ func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, e
 		// output against the ORIGINAL, so fast-path suggestions are advisory
 		// only on escalation. Safe for both model families (chat + GRMR-native
 		// both correct raw text).
-		llmText, err := s.llm.Complete(ctx, s.pb.Build(req))
+		llmText, err := s.llm.Complete(ctx, s.escalationPrompt(req, fast))
 		switch {
 		case err != nil:
 			s.log.Warn("llm escalation failed; using fast path", "err", err)

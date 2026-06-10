@@ -123,6 +123,13 @@ func main() {
 	if cfg.MergeFastEditsMode != "" {
 		svc.SetMergeFastEditsMode(cfg.MergeFastEditsMode)
 	}
+	// Fast-hint prompt-injection spike (GF_FAST_HINTS, default off): when
+	// on, Harper's SPELLING candidates are appended to the escalation
+	// prompt as arbitration hints. SPIKE — keep/revert is gated on the
+	// full cold golden eval. The default is unconditional (SetFastHintsEnabled
+	// with false is a no-op), so wiring the env flag here is the single
+	// switch.
+	svc.SetFastHintsEnabled(cfg.FastHintsEnabled)
 
 	// Inject the rephrase provider factory (this is where internal/llm is
 	// allowed — the correction core stays transport-free). The api_key is

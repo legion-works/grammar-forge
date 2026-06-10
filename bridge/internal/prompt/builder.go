@@ -3,6 +3,7 @@
 package prompt
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -159,6 +160,89 @@ func (b *Builder) Build(req correction.Request) correction.Prompt {
 		Stop:     []string{"<|corrected_end|>", "<|text_start|>"},
 		Template: correction.TemplateGRMRNative,
 	}
+}
+
+// maxSpellingHints caps how many Harper SPELLING candidates are appended to
+// the escalation prompt. Bounds the prompt size on a noisy input — the LLM
+// is asked to ARBITRATE the hints, not to follow them blindly, so a small
+// sample is enough for the gating decision.
+const maxSpellingHints = 8
+
+// spellingHintsBlock is the connective sentence appended to the chat system
+// prompt when fast-hint injection is on. Hint payload is the user's text
+// (flagged token + candidate) so it must be safe to splice into an LLM
+// instruction — see BuildWithSpellingHints for the rendering.
+const spellingHintsBlock = " A separate spell-checker flagged possible misspellings with " +
+	"candidate fixes: %s. These hints MAY BE WRONG. Fix a flagged token only when it " +
+	"is a genuine misspelling in context; ignore the hint when the token is intentional " +
+	"(a name, technical term, code, or identifier). Never apply a hint inside code."
+
+// BuildWithSpellingHints renders the grammar prompt with fast-path spelling
+// candidates appended to the system prompt as arbitration hints. On
+// GRMR-native (no system slot) and on empty/all-invalid hints it MUST
+// return Build(req) byte-identical. Used by the service in the LLM
+// escalation branch when correction.Service.SetFastHintsEnabled is true.
+//
+// SECURITY: the flagged token AND the candidate are untrusted user-derived
+// text. Both are rendered through strconv.Quote (Go-escaped quoted string
+// literal) so an embedded quote, newline, or control char cannot break out
+// of the connective sentence and inject a new prompt line. This is the
+// same defence as the Tone/Style injection fix at builder.go:170-185 and
+// the P4 fix in internal/personalization/cache.go. Untrusted freeform
+// values from user text MUST be quoted, never concatenated raw.
+func (b *Builder) BuildWithSpellingHints(req correction.Request, hints []correction.Suggestion) correction.Prompt {
+	base := b.Build(req)
+	if !b.chat {
+		// GRMR-native has no system slot; the hints would have nowhere to
+		// go. The LLM is correction-tuned and the merge is load-bearing,
+		// but the system prompt cannot carry extra text. Return the base
+		// build byte-identical so the GRMR eval baseline is preserved.
+		return base
+	}
+	rendered := renderSpellingHints(req.Text, hints)
+	if rendered == "" {
+		// No usable hints (empty slice, or every entry skipped by the
+		// span/replacement guard). Stay byte-identical to Build(req) so
+		// the LLM still gets a deterministic prompt and the sentence-
+		// cache key (which hashes only Build(req).System) stays valid.
+		return base
+	}
+	out := base
+	out.System = base.System + fmt.Sprintf(spellingHintsBlock, rendered)
+	return out
+}
+
+// renderSpellingHints formats the hint payload ("x" -> "y", "a" -> "b") for
+// the first maxSpellingHints usable hints, or returns "" when none survive.
+// Usable means: a valid non-zero-width span AND a non-empty replacement. All
+// of these are untrusted user-derived text — both the flagged token and the
+// candidate are passed through strconv.Quote so a stray quote, newline, or
+// control char cannot break out of the connective sentence.
+func renderSpellingHints(text string, hints []correction.Suggestion) string {
+	if len(hints) == 0 {
+		return ""
+	}
+	var pairs []string
+	for _, h := range hints {
+		if len(pairs) >= maxSpellingHints {
+			break
+		}
+		if h.Replacement == "" {
+			continue
+		}
+		if h.Span.End <= h.Span.Start {
+			continue
+		}
+		if h.Span.Validate(len(text)) != nil {
+			continue
+		}
+		flagged := text[h.Span.Start:h.Span.End]
+		pairs = append(pairs, strconv.Quote(flagged)+" -> "+strconv.Quote(h.Replacement))
+	}
+	if len(pairs) == 0 {
+		return ""
+	}
+	return strings.Join(pairs, ", ")
 }
 
 // BuildRephrase renders a rephrase request into a Prompt. Chat models receive

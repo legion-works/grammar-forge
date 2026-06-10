@@ -47,6 +47,12 @@ type PromptBuilder interface {
 	// chat_instruct this returns a style/clarity-focused system prompt
 	// distinct from the minimal-edit grammar prompt and the rephrase prompt.
 	BuildStyle(req Request) Prompt
+	// BuildWithSpellingHints renders the grammar prompt with fast-path
+	// spelling candidates appended to the system prompt as arbitration
+	// hints. On GRMR-native (no system slot) and on empty hints it MUST
+	// return Build(req) byte-identical. See prompt.Builder for the
+	// contract.
+	BuildWithSpellingHints(req Request, hints []Suggestion) Prompt
 }
 
 // Prompt is a backend-agnostic prompt; the LLMClient renders it to the wire.

@@ -88,6 +88,16 @@ type Config struct {
 	// 125 -> 120 (gector) / 118 (all); see the verdict on
 	// correction.Service.mergeFastEditsMode. Keep "" (default).
 	MergeFastEditsMode string
+	// FastHintsEnabled threads Harper's SPELLING candidates into the
+	// escalation LLM as arbitration hints. Default false. The LLM, fed the
+	// ORIGINAL text, can fix the flagged token in text space (and ignore
+	// the hint on code/names/identifiers). Measured live miss: Harper
+	// flags `sdasd`->`sad` (conf 0.95) but the LLM leaves the gibberish
+	// token verbatim. Span-geometry merging was measured and REJECTED
+	// (GF_MERGE_FAST_EDITS spike — clean-text FPs on code); this spike
+	// instead lets the LLM arbitrate. Keep/revert is gated on the full
+	// cold golden eval.
+	FastHintsEnabled bool
 	// OverEditFilterEnabled wires the LLM over-edit repair chain
 	// (correction.DefaultOverEditRules) that deterministically reverts
 	// measured LLM over-edit classes — nor/or proximity-agreement flips and
@@ -204,6 +214,7 @@ func Load(getenv Getenv) Config {
 		SkipLLMForSpellingOnly: getBool("GF_SKIP_LLM_FOR_SPELLING_ONLY", false),
 		MergeFastEditsMode:     get("GF_MERGE_FAST_EDITS", ""),
 		OverEditFilterEnabled:  getBool("GF_OVEREDIT_FILTER", true),
+		FastHintsEnabled:       getBool("GF_FAST_HINTS", false),
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),
 		PersonalizationTTL:     getDuration("GF_PERSONALIZATION_TTL", 5*time.Minute),

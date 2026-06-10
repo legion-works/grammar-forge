@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -36,6 +37,14 @@ func (fakePB) BuildRephrase(req RephraseRequest) Prompt {
 // override the method on their own fakePB instance.
 func (fakePB) BuildStyle(_ Request) Prompt {
 	return Prompt{User: "", Template: TemplateGRMRNative}
+}
+
+// BuildWithSpellingHints is a no-op for fakePB: fakePB is the GRMR-native
+// fake, and GRMR-native takes no system prompt. The real prompt.Builder
+// returns Build(req) unchanged on GRMR-native. Tests that need the
+// chat-style hint-injection behaviour use spikePB below.
+func (fakePB) BuildWithSpellingHints(req Request, _ []Suggestion) Prompt {
+	return Prompt{User: req.Text, Template: TemplateGRMRNative}
 }
 
 type fakeStore struct {
@@ -342,6 +351,72 @@ func (pickyPB) BuildRephrase(req RephraseRequest) Prompt {
 
 func (pickyPB) BuildStyle(req Request) Prompt {
 	return Prompt{User: req.Text, System: "style", Template: TemplateChatInstruct}
+}
+
+// BuildWithSpellingHints for the picky fake: chat-style. The fake renders a
+// minimal hint block (just the flagged token and candidate, quoted) so
+// service tests can assert the LLM was handed the right hints. The full
+// arbitration text + edge cases (cap, security) are exercised separately in
+// prompt.Builder's own tests.
+func (pickyPB) BuildWithSpellingHints(req Request, hints []Suggestion) Prompt {
+	base := pickyPB{}.Build(req)
+	if len(hints) == 0 {
+		return base
+	}
+	var b strings.Builder
+	b.WriteString(base.System)
+	b.WriteString(" |hints|")
+	for _, h := range hints {
+		b.WriteByte(' ')
+		b.WriteString(strconv.Quote(h.Replacement))
+	}
+	base.System = b.String()
+	return base
+}
+
+// spikePB is a chat-style PromptBuilder for the GF_FAST_HINTS tests. It
+// records every call to BuildWithSpellingHints and renders BOTH the flagged
+// token and the candidate (quoted) into the chat system prompt, mirroring
+// what the real prompt.Builder does. Tests assert (a) the LLM saw the
+// flagged token, and (b) the call counter matches the expected wiring (flag
+// off => 0 calls; flag on with no spelling edits => 1 call but byte-
+// identical output to Build).
+type spikePB struct {
+	plainSystem string
+	hintsCalls  int
+	lastHints   []Suggestion
+}
+
+func (p *spikePB) Build(req Request) Prompt {
+	return Prompt{User: req.Text, System: p.plainSystem, Template: TemplateChatInstruct}
+}
+
+func (p *spikePB) BuildRephrase(req RephraseRequest) Prompt {
+	return Prompt{User: req.Text, System: "rephrase", Template: TemplateChatInstruct}
+}
+
+func (p *spikePB) BuildStyle(req Request) Prompt {
+	return Prompt{User: req.Text, System: "style", Template: TemplateChatInstruct}
+}
+
+func (p *spikePB) BuildWithSpellingHints(req Request, hints []Suggestion) Prompt {
+	p.hintsCalls++
+	p.lastHints = hints
+	if len(hints) == 0 {
+		return p.Build(req)
+	}
+	var b strings.Builder
+	b.WriteString(p.plainSystem)
+	b.WriteString(" |hints|")
+	for _, h := range hints {
+		if h.Span.Validate(len(req.Text)) == nil && h.Span.End > h.Span.Start {
+			b.WriteByte(' ')
+			b.WriteString(strconv.Quote(req.Text[h.Span.Start:h.Span.End]))
+			b.WriteString(" -> ")
+			b.WriteString(strconv.Quote(h.Replacement))
+		}
+	}
+	return Prompt{User: req.Text, System: b.String(), Template: TemplateChatInstruct}
 }
 
 // scriptedLLM returns grammarOut on grammar-shaped calls (System contains
@@ -1113,4 +1188,95 @@ func TestCorrectStagedNilCallbackBehavesLikeCorrect(t *testing.T) {
 	got, err := svc.CorrectStaged(context.Background(), Request{Text: "I has a cat"}, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, got.Suggestions)
+}
+
+// ---- GF_FAST_HINTS spike (Harper spelling candidates -> LLM system prompt) ----
+//
+// When the LLM is called, the escalation branch MUST pass Harper's SPELLING
+// candidates to the LLM as arbitration hints. Default OFF; opt in with
+// GF_FAST_HINTS=true. Hints are deterministic per sentence (depends only on
+// the fast-path output of the original text) so the sentence-cache key
+// (which hashes only Build(req).System, not the rendered-with-hints prompt)
+// stays consistent and a hot reload does not invalidate the cache.
+
+// (a) flag ON + low-confidence Harper spelling edit forces escalation -> the
+// LLM receives a system prompt containing the flagged token. Use a chat-style
+// spikePB that records and renders hints so we can assert on capturingLLM.
+func TestFastHintsFlagOnThreadsSpellingEditsToLLM(t *testing.T) {
+	st := &fakeStore{}
+	// Harper spelling edit on "sdasd" with conf 0.3 (below 0.7 floor) ->
+	// escalates. With the flag ON, the LLM should see "sdasd" as a hint.
+	fc := fakeCorrector{
+		name: string(ModelHarper),
+		sugs: []Suggestion{
+			{Span: Span{0, 5}, Replacement: "sad", Model: ModelHarper, Category: CategorySpelling, Confidence: 0.3},
+		},
+	}
+	pb := &spikePB{plainSystem: "base-grammar-system"}
+	llm := &capturingLLM{out: "I went to the store"}
+	svc := NewService(pb, []Corrector{fc}, llm, st, "m", fastPolicy())
+	svc.SetFastHintsEnabled(true)
+	_, err := svc.Correct(context.Background(), Request{Text: "sdasd went to the store"})
+	require.NoError(t, err)
+	require.Equal(t, 1, pb.hintsCalls,
+		"BuildWithSpellingHints must be called exactly once on escalation when flag is ON")
+	// The LLM's System prompt must contain the flagged token (proving the
+	// hint reached the escalation prompt).
+	require.Contains(t, llm.gotPrompt.System, "sdasd",
+		"escalation prompt must contain the flagged token (the hint)")
+	// And the candidate.
+	require.Contains(t, llm.gotPrompt.System, "sad",
+		"escalation prompt must contain the candidate")
+	// Sanity: the call received the spelling hint, not a different suggestion.
+	require.Len(t, pb.lastHints, 1)
+	require.Equal(t, "sad", pb.lastHints[0].Replacement)
+}
+
+// (b) flag OFF (default) -> BuildWithSpellingHints is NEVER called. The LLM
+// receives Build(req).System byte-identical to the legacy baseline.
+func TestFastHintsFlagOffNeverCallsBuildWithSpellingHints(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelHarper),
+		sugs: []Suggestion{
+			{Span: Span{0, 5}, Replacement: "sad", Model: ModelHarper, Category: CategorySpelling, Confidence: 0.3},
+		},
+	}
+	pb := &spikePB{plainSystem: "base-grammar-system"}
+	llm := &capturingLLM{out: "I went to the store"}
+	svc := NewService(pb, []Corrector{fc}, llm, st, "m", fastPolicy())
+	// No SetFastHintsEnabled call -> default false.
+	_, err := svc.Correct(context.Background(), Request{Text: "sdasd went to the store"})
+	require.NoError(t, err)
+	require.Equal(t, 0, pb.hintsCalls,
+		"BuildWithSpellingHints must NOT be called when flag is OFF (default)")
+	require.Equal(t, "base-grammar-system", llm.gotPrompt.System,
+		"LLM must receive the plain Build(req) system prompt byte-identical to the legacy baseline")
+}
+
+// (c) flag ON but the fast path produced zero SPELLING-category edits ->
+// BuildWithSpellingHints is still called, but with an empty hints slice, and
+// the rendered prompt is byte-identical to plain Build(req) (no hint block
+// appended).
+func TestFastHintsFlagOnNoSpellingEditsUsesPlainBuild(t *testing.T) {
+	st := &fakeStore{}
+	// A non-spelling fast edit (GECToR grammar, low conf -> escalates, but
+	// no CategorySpelling entries so the hint set is empty).
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{
+			{Span: Span{0, 4}, Replacement: "X", Model: ModelGECToR, Category: CategoryGrammar, Confidence: 0.3},
+		},
+	}
+	pb := &spikePB{plainSystem: "base-grammar-system"}
+	llm := &capturingLLM{out: "I have a cat"}
+	svc := NewService(pb, []Corrector{fc}, llm, st, "m", fastPolicy())
+	svc.SetFastHintsEnabled(true)
+	_, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.Equal(t, 1, pb.hintsCalls,
+		"BuildWithSpellingHints must be called when flag is ON, even with no spelling edits (so the LLM still gets the deterministic prompt)")
+	require.Empty(t, pb.lastHints, "spelling-only filter must drop non-spelling fast edits")
+	require.Equal(t, "base-grammar-system", llm.gotPrompt.System,
+		"empty-hint rendering must be byte-identical to plain Build(req) System")
 }

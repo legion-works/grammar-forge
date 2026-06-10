@@ -289,3 +289,31 @@ func TestMergeFastEditsDefaultsOffAndReadsEnv(t *testing.T) {
 	}
 	require.Equal(t, "gector", Load(gector).MergeFastEditsMode)
 }
+
+// GF_FAST_HINTS (default off) threads Harper's SPELLING candidates into the
+// escalation LLM as arbitration hints. Keep/revert is gated on the full cold
+// golden eval — see the spike plan in
+// .opencode/plans/2026-06-10-spike-fast-hint-prompt-injection.md. Default
+// must be false so the existing eval baseline is unchanged until the
+// operator opts in.
+func TestFastHintsDefaultsOffAndReadsEnv(t *testing.T) {
+	empty := func(string) (string, bool) { return "", false }
+	require.False(t, Load(empty).FastHintsEnabled, "default must be off")
+
+	on := func(k string) (string, bool) {
+		if k == "GF_FAST_HINTS" {
+			return "true", true
+		}
+		return "", false
+	}
+	require.True(t, Load(on).FastHintsEnabled)
+
+	off := func(k string) (string, bool) {
+		if k == "GF_FAST_HINTS" {
+			return "false", true
+		}
+		return "", false
+	}
+	require.False(t, Load(off).FastHintsEnabled,
+		"GF_FAST_HINTS=false must explicitly disable, not fall through to the default")
+}
