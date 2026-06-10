@@ -406,4 +406,17 @@ describe('renderStatusButton', () => {
         const pill = root.querySelector('.gf-pill') as HTMLElement
         expect(pill.style.transform).toMatch(/translate/)
     })
+
+    it('renders the power and recheck icons without using innerHTML on buttons', () => {
+        // Structural assertion: icons are real <svg> children. (The innerHTML
+        // ban is enforced by review/lint convention; this test pins the DOM
+        // shape so the refactor can't silently drop the icons.)
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions({ count: 1 }))
+        const power = root.querySelector('.gf-pill__power svg')
+        const recheck = root.querySelector('.gf-pill__recheck svg')
+        expect(power).not.toBeNull()
+        expect(recheck).not.toBeNull()
+        handle.destroy()
+    })
 })

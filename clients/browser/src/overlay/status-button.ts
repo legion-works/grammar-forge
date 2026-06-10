@@ -93,6 +93,15 @@ const REFRESH_SVG =
     `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
     `<path d="M20 11 A8 8 0 1 0 18.4 16"/><path d="M20 4 L20 11 L13 11"/></svg>`
 
+// Parse a TRUSTED, hardcoded SVG constant into a real element. DOMParser with
+// image/svg+xml never executes scripts, and going through it (instead of
+// innerHTML on the live element) keeps the "no innerHTML" rule greppable and
+// makes any future interpolation of these constants an obvious code smell.
+function svgFromConstant(doc: Document, svgText: string): SVGElement {
+    const parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml')
+    return doc.importNode(parsed.documentElement, true) as unknown as SVGElement
+}
+
 /**
  * Render the per-field status pill (+ its hover panel) in the supplied shadow
  * root. Replaces any prior pill. The returned handle's destroy() removes the
@@ -124,7 +133,7 @@ export function renderStatusButton(
         current.disabled ? 'Enable grammar checking on this site' : 'Disable on this site',
     )
     power.title = power.getAttribute('aria-label') ?? ''
-    power.innerHTML = POWER_SVG
+    power.appendChild(svgFromConstant(doc, POWER_SVG))
     bindButton(power, () => current.onTogglePower())
     pill.appendChild(power)
 
@@ -145,7 +154,7 @@ export function renderStatusButton(
         recheck.className = 'gf-pill__recheck'
         recheck.setAttribute('aria-label', 'Recheck now')
         recheck.title = 'Recheck now'
-        recheck.innerHTML = REFRESH_SVG
+        recheck.appendChild(svgFromConstant(doc, REFRESH_SVG))
         bindButton(recheck, () => current.onRecheck())
         pill.appendChild(recheck)
     }
