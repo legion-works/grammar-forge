@@ -492,4 +492,96 @@ describe('renderStatusButton', () => {
         const pill = root.querySelector('.gf-pill') as HTMLElement
         expect(pill.style.transform).toMatch(/translate/)
     })
+
+    it('openPanel() mounts the same panel the hover would show', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        expect(root.querySelector('.gf-pill-panel')).toBeNull()
+        handle.openPanel()
+        expect(root.querySelector('.gf-pill-panel')).not.toBeNull()
+    })
+
+    it('openPanel() is a no-op when the panel is already open (no duplicate mount)', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        handle.openPanel()
+        const first = root.querySelector('.gf-pill-panel')
+        handle.openPanel()
+        const second = root.querySelector('.gf-pill-panel')
+        expect(second).toBe(first)
+        expect(root.querySelectorAll('.gf-pill-panel')).toHaveLength(1)
+    })
+
+    it('closePanel() removes an open panel and is idempotent', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        handle.openPanel()
+        expect(root.querySelector('.gf-pill-panel')).not.toBeNull()
+        handle.closePanel()
+        expect(root.querySelector('.gf-pill-panel')).toBeNull()
+        // Idempotent: closing when already closed is a no-op (does not throw).
+        expect(() => handle.closePanel()).not.toThrow()
+        expect(root.querySelector('.gf-pill-panel')).toBeNull()
+    })
+
+    it('openPanel() can be called again after closePanel()', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        handle.openPanel()
+        handle.closePanel()
+        handle.openPanel()
+        expect(root.querySelector('.gf-pill-panel')).not.toBeNull()
+    })
+
+    it('openPanel() after destroy() does not throw and mounts nothing', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        handle.destroy()
+        expect(() => handle.openPanel()).not.toThrow()
+        expect(root.querySelector('.gf-pill-panel')).toBeNull()
+    })
+
+    it('openPanel() is a no-op while the pill is hidden via setVisible(false)', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        handle.setVisible(false)
+        handle.openPanel()
+        expect(root.querySelector('.gf-pill-panel')).toBeNull()
+    })
+
+    it('omits the rephrase action button when onRephrase is not provided', () => {
+        const root = mkRoot()
+        const opts: StatusButtonOptions = {
+            ...mkOptions({ count: 0, corrections: [] }),
+            onRephrase: undefined,
+        }
+        renderStatusButton(root, opts)
+        const panel = openPanel(root)
+        expect(panel.querySelector('[data-action="rephrase"]')).toBeNull()
+    })
+
+    it('renders the rephrase action button when onRephrase is supplied', () => {
+        const root = mkRoot()
+        const onRephrase = vi.fn<() => void>()
+        renderStatusButton(root, mkOptions({ onRephrase }))
+        const panel = openPanel(root)
+        expect(panel.querySelector('[data-action="rephrase"]')).not.toBeNull()
+    })
+
+    it('update() adding then dropping onRephrase shows/hides the button on next panel open', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(
+            root,
+            mkOptions({ count: 0, corrections: [], onRephrase: vi.fn<() => void>() }),
+        )
+        openPanel(root)
+        expect(root.querySelector('.gf-pill-panel [data-action="rephrase"]')).not.toBeNull()
+        // Close the panel, drop onRephrase, reopen — the button should be gone.
+        handle.update({
+            ...mkOptions({ count: 0, corrections: [] }),
+            onRephrase: undefined,
+        })
+        handle.openPanel()
+        expect(root.querySelector('.gf-pill-panel [data-action="rephrase"]')).toBeNull()
+    })
 })

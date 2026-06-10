@@ -49,8 +49,11 @@ export interface StatusButtonOptions {
     onApplyOne: (index: number) => void
     /** "Undo last apply" in the panel action row. */
     onUndo: () => void
-    /** "Rephrase" in the panel action row (selection, else whole field). */
-    onRephrase: () => void
+    /** "Rephrase" in the panel action row (selection, else whole field).
+     *  Optional: omit when the host has no rephrase action (the button is
+     *  then hidden in the panel). Reads freshly on every panel build, so
+     *  update() can add/drop the callback between checks. */
+    onRephrase?: () => void
     /** Enables the panel's Undo button (the field has an undoable apply). */
     undoAvailable: boolean
     /** Drag OFFSET from the field's default bottom-right anchor (dx,dy). When
@@ -81,6 +84,13 @@ export interface StatusButtonHandle {
      *  is `display:none` so it neither paints nor intercepts pointer events,
      *  but its hover panel / drag state survive). */
     setVisible: (visible: boolean) => void
+    /** Programmatic open of the same hover panel (same code path, same anchor).
+     *  No-op when the panel is already open, when the pill is hidden via
+     *  setVisible(false), or after destroy(). */
+    openPanel: () => void
+    /** Programmatic close. Idempotent: safe to call when the panel is closed
+     *  (and after destroy()). */
+    closePanel: () => void
     /** Refresh the pill's count badge, category stripe bar, and hover-panel
      *  corrections IN PLACE (no teardown) when a new check resolves. Preserves
      *  the pill element, its drag offset + live drag, the hover-panel lifecycle,
@@ -290,6 +300,12 @@ export function renderStatusButton(
     }
     const showPanel = (): void => {
         if (panel) return
+        // Programmatic openPanel after destroy() / while the pill is hidden
+        // (setVisible(false)) must be a no-op. The pill node carries the
+        // gf-pill--hidden class; display:none already blocks hover from
+        // reaching it, but openPanel can be called directly.
+        if (!pill.isConnected) return
+        if (pill.classList.contains('gf-pill--hidden')) return
         panel = buildPanel(doc, current)
         root.appendChild(panel)
         positionPanel(panel, pill.getBoundingClientRect(), view)
@@ -331,7 +347,10 @@ export function renderStatusButton(
             }
             if (btn.dataset.action === 'rephrase') {
                 hidePanel()
-                current.onRephrase()
+                // Defensive: the button is only rendered when onRephrase is
+                // supplied, but guard against stale panels whose options
+                // changed between build and click.
+                current.onRephrase?.()
                 return
             }
             if (btn.dataset.action === 'power') {
@@ -358,6 +377,13 @@ export function renderStatusButton(
         setVisible: (visible: boolean) => {
             pill.classList.toggle('gf-pill--hidden', !visible)
         },
+        // openPanel / closePanel are the SAME code path as the hover panel
+        // (showPanel / hidePanel). External callers (e.g. the Vencord client)
+        // can drive the panel without dispatching synthetic mouse events;
+        // showPanel's own guards (already-open, isConnected, hidden) keep
+        // both paths identical.
+        openPanel: showPanel,
+        closePanel: hidePanel,
         update: (next: StatusButtonOptions) => {
             current = next
             pill.classList.toggle('gf-pill--disabled', current.disabled)
@@ -545,7 +571,7 @@ function buildActionRow(doc: Document, options: StatusButtonOptions): HTMLElemen
     if (options.count > 0) add('apply-all', null, 'Apply all')
     add('undo', UNDO_SVG, 'Undo', { disabled: !options.undoAvailable })
     add('recheck', REFRESH_SVG, 'Recheck')
-    add('rephrase', REPHRASE_SVG, 'Rephrase')
+    if (options.onRephrase) add('rephrase', REPHRASE_SVG, 'Rephrase')
     add('power', POWER_SVG, 'Disable on this site')
     return row
 }
