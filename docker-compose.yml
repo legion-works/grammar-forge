@@ -25,6 +25,7 @@ services:
       GF_LLM_FORMAT: "chat_instruct"
       GF_GECTOR_MODEL_DIR: "/models/gector"
       GF_DB_PATH: "/data/corrections.db"
+      GF_HARPER_USER_DICT: "/data/user-dict.txt"  # user dictionary (Add to dictionary); gitignored data volume
       # GF_LLM_API_KEY: set via an .env file or secret if your backend needs it (never commit)
     ports:
       - "127.0.0.1:8000:8000"  # REST (/correct, /rephrase, /signal, /health, /stats, /v2/check)
