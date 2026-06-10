@@ -134,6 +134,11 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
         event.stopPropagation()
     })
 
+    // Declared before the listeners below close over it: they can fire as
+    // soon as the panel is in the DOM, and a `const` further down would be a
+    // temporal-dead-zone trap for future refactors.
+    let handle: PopoverHandle
+
     // Escape closes the popover (keyboard parity with the click-outside path).
     function onKeydown(event: KeyboardEvent): void {
         if (event.key === 'Escape') {
@@ -180,7 +185,7 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
         doc.addEventListener('mousedown', onOutsideMouseDown, true)
     }, OUTSIDE_CLICK_DELAY_MS)
 
-    const handle: PopoverHandle = {
+    handle = {
         hide: () => {
             view.clearTimeout(outsideTimer)
             if (outsideListenerInstalled) {

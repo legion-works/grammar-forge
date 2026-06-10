@@ -181,14 +181,14 @@ describe('BridgeClient.rephrase', () => {
         const originalFetch = globalThis.fetch
         let abortedAt: number | null = null
         const start = Date.now()
-        globalThis.fetch = vi.fn((_url, init) => {
+        globalThis.fetch = vi.fn<typeof fetch>((_url, init) => {
             return new Promise((_resolve, reject) => {
                 ;(init as RequestInit).signal?.addEventListener('abort', () => {
                     abortedAt = Date.now() - start
                     reject(new DOMException('aborted', 'AbortError'))
                 })
             })
-        }) as unknown as typeof fetch
+        })
         const client = new BridgeClient('http://localhost:8000', false)
         const p = client.rephrase({ text: 'x', source: 'browser' }).catch(() => 'aborted')
         await vi.advanceTimersByTimeAsync(8001)
