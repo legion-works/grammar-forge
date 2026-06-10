@@ -84,8 +84,9 @@ type Config struct {
 	// (correction.MergeFastEdits*): "" (default) = legacy replace semantics
 	// (the LLM diff is the whole escalation result); "gector" / "all" =
 	// merge-not-replace SPIKE — fast edits that do not conflict with any
-	// LLM edit are appended, trading precision for recall. Experimental;
-	// gate any non-default value on the full cold golden eval + CoNLL.
+	// LLM edit are appended. MEASURED AND REJECTED 2026-06-10: golden
+	// 125 -> 120 (gector) / 118 (all); see the verdict on
+	// correction.Service.mergeFastEditsMode. Keep "" (default).
 	MergeFastEditsMode string
 	// OverEditFilterEnabled wires the LLM over-edit repair chain
 	// (correction.DefaultOverEditRules) that deterministically reverts

@@ -49,6 +49,16 @@ type Service struct {
 	// only. MergeFastEditsGECToR / MergeFastEditsAll = merge-not-replace:
 	// fast edits that do not conflict with any LLM edit are appended (the
 	// LLM stays authoritative on conflicts), trading precision for recall.
+	//
+	// MEASURED AND REJECTED (2026-06-10 full cold golden eval): gector mode
+	// dropped 125/125 -> 120/125, all mode -> 118/125 (incl. clean-text FPs
+	// on code). Two unfixable-by-span-geometry classes: (1) the fast path
+	// inserts the same logical token at a DIFFERENT offset than the LLM's
+	// equivalent insertion ("listen to to me", "had had already"), and
+	// (2) confident-wrong fast edits on spans the LLM correctly left alone
+	// ("mice ran"->"running"). Keep "" unless a semantic-equivalence-aware
+	// merge is built; re-enabling gates on the full cold eval. See
+	// .opencode/specs/2026-06-10-merge-not-replace-spike.md.
 	mergeFastEditsMode string
 	// sentenceCache memoizes per-sentence suggestion sets. nil => legacy
 	// whole-text path; populated by SetSentenceCache to enable the sentence
