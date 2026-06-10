@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/grammarforge/bridge/internal/correction"
+	"github.com/grammarforge/bridge/internal/ltcompat"
 )
 
 // maxRequestBodyBytes caps POST bodies. The largest legitimate payload is a
@@ -52,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /rephrase", s.handleRephrase)
 	mux.HandleFunc("POST /signal", s.handleSignal)
 	mux.HandleFunc("GET /stats", s.handleStats)
+	mux.Handle("/v2/", ltcompat.NewHandler(s.svc, "grammarforge"))
 	return withCORS(withBodyLimit(mux))
 }
 

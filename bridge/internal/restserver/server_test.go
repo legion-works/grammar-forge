@@ -56,3 +56,16 @@ func TestHandlerRejectsOversizedBody(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code, "oversized body must be rejected, not streamed to the LLM")
 }
+
+// The LT-compat sub-handler must be reachable on the same REST mux as the
+// bridge-native endpoints (so the LT protocol front door works without a
+// separate LanguageTool container). /v2/languages is the cheap smoke test;
+// the real /v2/check mapping lives in the ltcompat package's tests.
+func TestHandlerMountsLTCompatRoutes(t *testing.T) {
+	srv := New(Config{Addr: ":0"}, &fakeService{})
+	h := srv.Handler()
+	req := httptest.NewRequest(http.MethodGet, "/v2/languages", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
