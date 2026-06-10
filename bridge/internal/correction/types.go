@@ -10,9 +10,10 @@ type Source string
 
 // Source values for known clients.
 const (
-	SourceBrowser  Source = "browser"
-	SourceVencord  Source = "vencord"
-	SourceOpenCode Source = "opencode"
+	SourceBrowser      Source = "browser"
+	SourceVencord      Source = "vencord"
+	SourceOpenCode     Source = "opencode"
+	SourceLanguageTool Source = "languagetool" // gRPC RemoteRule path
 )
 
 // Model identifies which engine produced a suggestion.

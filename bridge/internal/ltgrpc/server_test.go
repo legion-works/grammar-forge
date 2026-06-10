@@ -20,6 +20,19 @@ func (f fakeSvc) Correct(_ context.Context, req correction.Request) (correction.
 	return correction.Correction{Original: req.Text, Suggestions: f.perSentence}, nil
 }
 
+// capturingSvc records every request the gRPC server forwards to the
+// correction core. The gRPC path is the LanguageTool RemoteRule contract —
+// every request must be tagged with SourceLanguageTool so logged events
+// carry the gRPC provenance in the signal log and the personalisation pool.
+type capturingSvc struct {
+	gotRequests []correction.Request
+}
+
+func (c *capturingSvc) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
+	c.gotRequests = append(c.gotRequests, req)
+	return correction.Correction{Original: req.Text}, nil
+}
+
 // errSvc returns suggestions for the first sentence, none for the second,
 // and an error for the third. Used to prove the server preserves strict 1:1
 // alignment in MatchResponse even when the per-sentence backend results
@@ -67,6 +80,29 @@ func TestMatchAlignsResponseToSentences(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp.GetSentenceMatches(), 2) // 1:1 with request sentences
 	require.Len(t, resp.GetSentenceMatches()[0].GetMatches(), 1)
+}
+
+// The gRPC RemoteRule path is the LanguageTool front door: every request
+// the bridge logs from this entry point must carry SourceLanguageTool so
+// downstream consumers (the /stats source breakdown, the personalisation
+// pool) can attribute gRPC traffic separately from REST /correct traffic.
+func TestMatchTagsRequestsWithLanguageToolSource(t *testing.T) {
+	svc := &capturingSvc{}
+	client := dial(t, svc)
+	_, err := client.Match(context.Background(), &pb.MatchRequest{
+		Sentences: []string{"first", "second"},
+	})
+	require.NoError(t, err)
+	require.Len(t, svc.gotRequests, 2, "one captured request per input sentence")
+	for i, r := range svc.gotRequests {
+		require.Equal(t, correction.SourceLanguageTool, r.Source,
+			"gRPC Match must tag every forwarded Request with SourceLanguageTool (index %d)", i)
+	}
+	// Strong text check: BOTH sentences were captured, in order, with
+	// their original text preserved (proves the Source is set in ADDITION
+	// to the existing text-passthrough behaviour).
+	require.Equal(t, "first", svc.gotRequests[0].Text)  //nolint:misspell // test fixture
+	require.Equal(t, "second", svc.gotRequests[1].Text) //nolint:misspell // test fixture
 }
 
 func TestMatchStrictOneToOneAlignmentWithMixedResults(t *testing.T) {

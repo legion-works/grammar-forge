@@ -26,7 +26,10 @@ func NewServer(svc CorrectionService) *Server { return &Server{svc: svc} }
 func (s *Server) Match(ctx context.Context, req *pb.MatchRequest) (*pb.MatchResponse, error) {
 	resp := &pb.MatchResponse{}
 	for _, sentence := range req.GetSentences() {
-		c, err := s.svc.Correct(ctx, correction.Request{Text: sentence})
+		c, err := s.svc.Correct(ctx, correction.Request{
+			Text:   sentence,
+			Source: correction.SourceLanguageTool,
+		})
 		if err != nil {
 			resp.SentenceMatches = append(resp.SentenceMatches, &pb.MatchList{}) // empty, keep alignment
 			continue
