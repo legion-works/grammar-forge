@@ -26,6 +26,48 @@ python3 eval/run_eval.py http://127.0.0.1:8000 path/to/cases.jsonl
 / invalid-span breakdowns. `errant_score.py` is the canonical span-level metric (F0.5,
 precision-weighted) over `results.json`.
 
+### Determinism: the COLD-RESTART protocol (required for comparable runs)
+
+Golden-set results depend on the llama.cpp **prompt-cache state**: a warm server reuses
+KV-cache prefixes from earlier requests, which can shift sampling and flip borderline
+cases. Runs are only comparable to the committed baseline (and to each other) when taken
+cold. The protocol:
+
+1. **Neutralize prompt personalization.** The bridge injects accepted/rejected few-shot
+   examples from the signal log into the system prompt (SPEC §5.5), so accumulated
+   signals change eval output. Either run against a fresh `corrections.db`, set
+   `GF_PERSONALIZATION_ENABLED=false` on the bridge, or clear stale signals
+   (`UPDATE edits SET signal=NULL, signal_ts=NULL`) — then **restart the bridge** so its
+   TTL-cached personalization snapshot is dropped.
+2. **Cold-restart the LLM backend** and wait for warmup (~25 s for the default
+   llama.cpp container):
+   ```bash
+   docker compose restart llamacpp && sleep 25
+   ```
+3. **Run the full set** — never gate on a subset:
+   ```bash
+   python3 eval/run_eval.py http://127.0.0.1:8000
+   ```
+
+> **Never gate a prompt change on a probe subset.** A measured system-prompt candidate
+> passed a 20-case probe but DROPPED the full cold eval 119→117 (new under-corrections
+> from over-conservatism). Only the full 125-case cold run decides.
+
+**Committed baseline (`results.json`): 123/125** with the default
+`gemma-4-E4B-it-qat-Q4_K_XL` chat path (verified identical across two cold runs).
+The 2 failures are deterministic and model-side (not harness bugs):
+- `91` (caps) mis-correction — the model rewrites "Paris in France" → "Paris, France,"
+  (an idiom-level over-edit beyond the minimal capitalization fix).
+- `118` (clean) false positive — "Neither the manager nor the employees were" → "was"
+  (proximity agreement is correct as written; the model "fixes" it).
+
+A run deviating from this exact failure set indicates a pipeline change (or a
+non-cold run) — investigate before trusting the number. History: an earlier
+119/125 baseline (failures `40, 79, 96, 112, 113, 118`) shifted to this set when
+the user-dictionary feature switched Harper to its merged-dictionary path by
+default (`GF_HARPER_USER_DICT`), changing fast-path lints and therefore LLM
+escalation routing — a net +4 improvement with one new over-edit (`91`).
+
 ## 2. JFLEG held-out (`jfleg_eval.py`) — generalization signal
 
 [JFLEG](https://github.com/keisks/jfleg) (Napoles et al. 2017) is an independent fluency

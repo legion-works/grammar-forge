@@ -1,0 +1,1714 @@
+[
+  {
+    "id": 1,
+    "cat": "sva",
+    "input": "She go to school every day.",
+    "golden": "She goes to school every day.",
+    "got": "She goes to school every day.",
+    "models": [
+      "llm"
+    ],
+    "score": 97,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 2,
+    "cat": "sva",
+    "input": "The dogs runs across the yard.",
+    "golden": "The dogs run across the yard.",
+    "got": "The dogs run across the yard.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 3,
+    "cat": "sva",
+    "input": "He don't know the answer.",
+    "golden": "He doesn't know the answer.",
+    "got": "He doesn't know the answer.",
+    "models": [
+      "llm"
+    ],
+    "score": 97,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 4,
+    "cat": "sva",
+    "input": "My friends is coming over tonight.",
+    "golden": "My friends are coming over tonight.",
+    "got": "My friends are coming over tonight.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 5,
+    "cat": "sva",
+    "input": "There is many reasons to be happy.",
+    "golden": "There are many reasons to be happy.",
+    "got": "There are many reasons to be happy.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 6,
+    "cat": "tense",
+    "input": "I seen it yesterday.",
+    "golden": "I saw it yesterday.",
+    "got": "I saw it yesterday.",
+    "models": [
+      "llm"
+    ],
+    "score": 88,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 7,
+    "cat": "tense",
+    "input": "She buyed some apples at the market.",
+    "golden": "She bought some apples at the market.",
+    "got": "She bought some apples at the market.",
+    "models": [
+      "llm"
+    ],
+    "score": 88,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 8,
+    "cat": "tense",
+    "input": "They have went home already.",
+    "golden": "They have gone home already.",
+    "got": "They have gone home already.",
+    "models": [
+      "llm"
+    ],
+    "score": 86,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 9,
+    "cat": "tense",
+    "input": "He has ate his lunch.",
+    "golden": "He has eaten his lunch.",
+    "got": "He has eaten his lunch.",
+    "models": [
+      "llm"
+    ],
+    "score": 96,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 10,
+    "cat": "tense",
+    "input": "We was watching a movie.",
+    "golden": "We were watching a movie.",
+    "got": "We were watching a movie.",
+    "models": [
+      "llm"
+    ],
+    "score": 90,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 11,
+    "cat": "tense",
+    "input": "Yesterday I go to the gym.",
+    "golden": "Yesterday I went to the gym.",
+    "got": "Yesterday I went to the gym.",
+    "models": [
+      "llm"
+    ],
+    "score": 89,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 12,
+    "cat": "article",
+    "input": "I have a apple in my bag.",
+    "golden": "I have an apple in my bag.",
+    "got": "I have an apple in my bag.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 13,
+    "cat": "article",
+    "input": "She is a honest woman.",
+    "golden": "She is an honest woman.",
+    "got": "She is an honest woman.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 14,
+    "cat": "article",
+    "input": "He opened a umbrella.",
+    "golden": "He opened an umbrella.",
+    "got": "He opened an umbrella.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 15,
+    "cat": "article",
+    "input": "We saw a elephant at the zoo.",
+    "golden": "We saw an elephant at the zoo.",
+    "got": "We saw an elephant at the zoo.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 16,
+    "cat": "plural",
+    "input": "I have three cat.",
+    "golden": "I have three cats.",
+    "got": "I have three cats.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 17,
+    "cat": "plural",
+    "input": "There are many childs in the park.",
+    "golden": "There are many children in the park.",
+    "got": "There are many children in the park.",
+    "models": [
+      "llm"
+    ],
+    "score": 95,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 18,
+    "cat": "plural",
+    "input": "Two mouses ran across the floor.",
+    "golden": "Two mice ran across the floor.",
+    "got": "Two mice ran across the floor.",
+    "models": [
+      "llm"
+    ],
+    "score": 88,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 19,
+    "cat": "plural",
+    "input": "She has five tooths missing.",
+    "golden": "She has five teeth missing.",
+    "got": "She has five teeth missing.",
+    "models": [
+      "llm"
+    ],
+    "score": 92,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 20,
+    "cat": "homophone",
+    "input": "Their going to the park later.",
+    "golden": "They're going to the park later.",
+    "got": "They're going to the park later.",
+    "models": [
+      "llm"
+    ],
+    "score": 91,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 21,
+    "cat": "homophone",
+    "input": "Your welcome to join us.",
+    "golden": "You're welcome to join us.",
+    "got": "You're welcome to join us.",
+    "models": [
+      "llm"
+    ],
+    "score": 92,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 22,
+    "cat": "homophone",
+    "input": "Its a beautiful day outside.",
+    "golden": "It's a beautiful day outside.",
+    "got": "It's a beautiful day outside.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 23,
+    "cat": "homophone",
+    "input": "I can't find there house.",
+    "golden": "I can't find their house.",
+    "got": "I can't find their house.",
+    "models": [
+      "llm"
+    ],
+    "score": 97,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 24,
+    "cat": "homophone",
+    "input": "The dog wagged it's tail.",
+    "golden": "The dog wagged its tail.",
+    "got": "The dog wagged its tail.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 25,
+    "cat": "homophone",
+    "input": "I think your right about that.",
+    "golden": "I think you're right about that.",
+    "got": "I think you're right about that.",
+    "models": [
+      "llm"
+    ],
+    "score": 94,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 26,
+    "cat": "homophone",
+    "input": "We went to the store to by milk.",
+    "golden": "We went to the store to buy milk.",
+    "got": "We went to the store to buy milk.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 27,
+    "cat": "spelling",
+    "input": "I recieved your letter.",
+    "golden": "I received your letter.",
+    "got": "I received your letter.",
+    "models": [
+      "llm"
+    ],
+    "score": 96,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 28,
+    "cat": "spelling",
+    "input": "This is definately the best option.",
+    "golden": "This is definitely the best option.",
+    "got": "This is definitely the best option.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 29,
+    "cat": "spelling",
+    "input": "She is very intelligant.",
+    "golden": "She is very intelligent.",
+    "got": "She is very intelligent.",
+    "models": [
+      "llm"
+    ],
+    "score": 96,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 30,
+    "cat": "spelling",
+    "input": "The resturant was crowded.",
+    "golden": "The restaurant was crowded.",
+    "got": "The restaurant was crowded.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 31,
+    "cat": "spelling",
+    "input": "It was a seperate issue entirely.",
+    "golden": "It was a separate issue entirely.",
+    "got": "It was a separate issue entirely.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 32,
+    "cat": "spelling",
+    "input": "He has good knowlege of the subject.",
+    "golden": "He has good knowledge of the subject.",
+    "got": "He has good knowledge of the subject.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 33,
+    "cat": "caps",
+    "input": "i went to london last summer.",
+    "golden": "I went to London last summer.",
+    "got": "I went to London last summer.",
+    "models": [
+      "llm"
+    ],
+    "score": 94,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 34,
+    "cat": "caps",
+    "input": "my friend sarah lives in paris.",
+    "golden": "My friend Sarah lives in Paris.",
+    "got": "My friend Sarah lives in Paris.",
+    "models": [
+      "llm"
+    ],
+    "score": 91,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 3
+  },
+  {
+    "id": 35,
+    "cat": "caps",
+    "input": "we visited the eiffel tower.",
+    "golden": "We visited the Eiffel Tower.",
+    "got": "We visited the Eiffel Tower.",
+    "models": [
+      "llm"
+    ],
+    "score": 90,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 3
+  },
+  {
+    "id": 36,
+    "cat": "punct",
+    "input": "Lets go to the beach.",
+    "golden": "Let's go to the beach.",
+    "got": "Let's go to the beach.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 37,
+    "cat": "punct",
+    "input": "Im really excited about this.",
+    "golden": "I'm really excited about this.",
+    "got": "I'm really excited about this.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 38,
+    "cat": "punct",
+    "input": "Whats the plan for tomorrow?",
+    "golden": "What's the plan for tomorrow?",
+    "got": "What's the plan for tomorrow?",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 39,
+    "cat": "punct",
+    "input": "I cant believe it worked.",
+    "golden": "I can't believe it worked.",
+    "got": "I can't believe it worked.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 40,
+    "cat": "prep",
+    "input": "I am very good in mathematics.",
+    "golden": "I am very good at mathematics.",
+    "got": "I am very good at mathematics.",
+    "models": [
+      "llm"
+    ],
+    "score": 94,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 41,
+    "cat": "prep",
+    "input": "She got married with her partner.",
+    "golden": "She got married to her partner.",
+    "got": "She got married to her partner.",
+    "models": [
+      "llm"
+    ],
+    "score": 92,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 42,
+    "cat": "prep",
+    "input": "Please listen me carefully.",
+    "golden": "Please listen to me carefully.",
+    "got": "Please listen to me carefully.",
+    "models": [
+      "llm"
+    ],
+    "score": 95,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 43,
+    "cat": "prep",
+    "input": "We arrived to the airport on time.",
+    "golden": "We arrived at the airport on time.",
+    "got": "We arrived at the airport on time.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 44,
+    "cat": "pronoun",
+    "input": "Me and him went to the game.",
+    "golden": "He and I went to the game.",
+    "got": "He and I went to the game.",
+    "models": [
+      "llm"
+    ],
+    "score": 90,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 45,
+    "cat": "pronoun",
+    "input": "Her and I are good friends.",
+    "golden": "She and I are good friends.",
+    "got": "She and I are good friends.",
+    "models": [
+      "llm"
+    ],
+    "score": 90,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 46,
+    "cat": "pronoun",
+    "input": "Give the book to he.",
+    "golden": "Give the book to him.",
+    "got": "Give the book to him.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 47,
+    "cat": "negation",
+    "input": "I don't need no help.",
+    "golden": "I don't need any help.",
+    "got": "I don't need any help.",
+    "models": [
+      "llm"
+    ],
+    "score": 89,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 48,
+    "cat": "negation",
+    "input": "She didn't see nothing unusual.",
+    "golden": "She didn't see anything unusual.",
+    "got": "She didn't see anything unusual.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 49,
+    "cat": "confusable",
+    "input": "I have less books than you.",
+    "golden": "I have fewer books than you.",
+    "got": "I have fewer books than you.",
+    "models": [
+      "llm"
+    ],
+    "score": 84,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 50,
+    "cat": "confusable",
+    "input": "I would of helped if I could.",
+    "golden": "I would have helped if I could.",
+    "got": "I would have helped if I could.",
+    "models": [
+      "llm"
+    ],
+    "score": 90,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 51,
+    "cat": "confusable",
+    "input": "Their are several problems here.",
+    "golden": "There are several problems here.",
+    "got": "There are several problems here.",
+    "models": [
+      "llm"
+    ],
+    "score": 97,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 52,
+    "cat": "confusable",
+    "input": "The medicine had a strong affect.",
+    "golden": "The medicine had a strong effect.",
+    "got": "The medicine had a strong effect.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 53,
+    "cat": "confusable",
+    "input": "This is more better than before.",
+    "golden": "This is better than before.",
+    "got": "This is better than before.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 54,
+    "cat": "wordorder",
+    "input": "Always she is late for work.",
+    "golden": "She is always late for work.",
+    "got": "She is always late for work.",
+    "models": [
+      "llm"
+    ],
+    "score": 58,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 55,
+    "cat": "multi",
+    "input": "she dont no the anser.",
+    "golden": "She doesn't know the answer.",
+    "got": "She doesn't know the answer.",
+    "models": [
+      "llm"
+    ],
+    "score": 78,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 5
+  },
+  {
+    "id": 56,
+    "cat": "multi",
+    "input": "their is alot of reasons why i beleive this.",
+    "golden": "There are a lot of reasons why I believe this.",
+    "got": "There are a lot of reasons why I believe this.",
+    "models": [
+      "llm"
+    ],
+    "score": 80,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 6
+  },
+  {
+    "id": 57,
+    "cat": "multi",
+    "input": "He go to the libary every weeks.",
+    "golden": "He goes to the library every week.",
+    "got": "He goes to the library every week.",
+    "models": [
+      "llm"
+    ],
+    "score": 94,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 3
+  },
+  {
+    "id": 58,
+    "cat": "multi",
+    "input": "we was hoping youd come to the party.",
+    "golden": "We were hoping you'd come to the party.",
+    "got": "We were hoping you'd come to the party.",
+    "models": [
+      "llm"
+    ],
+    "score": 90,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 3
+  },
+  {
+    "id": 59,
+    "cat": "unicode",
+    "input": "I has a café near my house.",
+    "golden": "I have a café near my house.",
+    "got": "I have a café near my house.",
+    "models": [
+      "llm"
+    ],
+    "score": 95,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 60,
+    "cat": "unicode",
+    "input": "The naïve plan dont work.",
+    "golden": "The naïve plan doesn't work.",
+    "got": "The naïve plan doesn't work.",
+    "models": [
+      "llm"
+    ],
+    "score": 91,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 61,
+    "cat": "clean",
+    "input": "The quick brown fox jumps over the lazy dog.",
+    "golden": "The quick brown fox jumps over the lazy dog.",
+    "got": "The quick brown fox jumps over the lazy dog.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 62,
+    "cat": "clean",
+    "input": "She sells seashells by the seashore.",
+    "golden": "She sells seashells by the seashore.",
+    "got": "She sells seashells by the seashore.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 63,
+    "cat": "clean",
+    "input": "He went to the store and bought some milk.",
+    "golden": "He went to the store and bought some milk.",
+    "got": "He went to the store and bought some milk.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 64,
+    "cat": "clean",
+    "input": "Artificial intelligence is transforming the world.",
+    "golden": "Artificial intelligence is transforming the world.",
+    "got": "Artificial intelligence is transforming the world.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 65,
+    "cat": "clean",
+    "input": "I have three cats, and they are all black.",
+    "golden": "I have three cats, and they are all black.",
+    "got": "I have three cats, and they are all black.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 66,
+    "cat": "clean",
+    "input": "The function returns null when the list is empty.",
+    "golden": "The function returns null when the list is empty.",
+    "got": "The function returns null when the list is empty.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 67,
+    "cat": "clean",
+    "input": "We paid 5 euros for the café au lait.",
+    "golden": "We paid 5 euros for the café au lait.",
+    "got": "We paid 5 euros for the café au lait.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 68,
+    "cat": "clean",
+    "input": "Please review the document before the meeting.",
+    "golden": "Please review the document before the meeting.",
+    "got": "Please review the document before the meeting.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 69,
+    "cat": "sva",
+    "input": "The list of items are on the desk.",
+    "golden": "The list of items is on the desk.",
+    "got": "The list of items is on the desk.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 70,
+    "cat": "sva",
+    "input": "Neither of the answers were correct.",
+    "golden": "Neither of the answers was correct.",
+    "got": "Neither of the answers was correct.",
+    "models": [
+      "llm"
+    ],
+    "score": 94,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 71,
+    "cat": "sva",
+    "input": "Everybody have their own opinion.",
+    "golden": "Everybody has their own opinion.",
+    "got": "Everybody has their own opinion.",
+    "models": [
+      "llm"
+    ],
+    "score": 96,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 72,
+    "cat": "sva",
+    "input": "There is many reasons to be careful.",
+    "golden": "There are many reasons to be careful.",
+    "got": "There are many reasons to be careful.",
+    "models": [
+      "llm"
+    ],
+    "score": 94,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 73,
+    "cat": "tense",
+    "input": "Yesterday she walk to the market and buy bread.",
+    "golden": "Yesterday she walked to the market and bought bread.",
+    "got": "Yesterday she walked to the market and bought bread.",
+    "models": [
+      "llm"
+    ],
+    "score": 91,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 74,
+    "cat": "tense",
+    "input": "I have saw that movie last week.",
+    "golden": "I saw that movie last week.",
+    "got": "I saw that movie last week.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 75,
+    "cat": "tense",
+    "input": "He has went home already.",
+    "golden": "He has gone home already.",
+    "got": "He has gone home already.",
+    "models": [
+      "llm"
+    ],
+    "score": 85,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 76,
+    "cat": "tense",
+    "input": "By the time we arrived, the show already started.",
+    "golden": "By the time we arrived, the show had already started.",
+    "got": "By the time we arrived, the show had already started.",
+    "models": [
+      "llm"
+    ],
+    "score": 96,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 77,
+    "cat": "article",
+    "input": "She is best student in the class.",
+    "golden": "She is the best student in the class.",
+    "got": "She is the best student in the class.",
+    "models": [
+      "llm"
+    ],
+    "score": 95,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 78,
+    "cat": "article",
+    "input": "He bought a umbrella and an European map.",
+    "golden": "He bought an umbrella and a European map.",
+    "got": "He bought an umbrella and a European map.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 79,
+    "cat": "article",
+    "input": "I need an hour to finish a honest review.",
+    "golden": "I need an hour to finish an honest review.",
+    "got": "I need an hour to finish an honest review.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 80,
+    "cat": "plural",
+    "input": "She has two childs and three sheeps.",
+    "golden": "She has two children and three sheep.",
+    "got": "She has two children and three sheep.",
+    "models": [
+      "llm"
+    ],
+    "score": 94,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 81,
+    "cat": "plural",
+    "input": "The criterias for the analysis were unclear.",
+    "golden": "The criteria for the analysis were unclear.",
+    "got": "The criteria for the analysis were unclear.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 82,
+    "cat": "plural",
+    "input": "Both womans carried their own luggages.",
+    "golden": "Both women carried their own luggage.",
+    "got": "Both women carried their own luggage.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 83,
+    "cat": "homophone",
+    "input": "Their going to bring they're books over there.",
+    "golden": "They're going to bring their books over there.",
+    "got": "They're going to bring their books over there.",
+    "models": [
+      "llm"
+    ],
+    "score": 88,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 84,
+    "cat": "homophone",
+    "input": "Its been raining, so the dog wagged it's tail inside.",
+    "golden": "It's been raining, so the dog wagged its tail inside.",
+    "got": "It's been raining, so the dog wagged its tail inside.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 85,
+    "cat": "homophone",
+    "input": "You're car is parked where your supposed to be.",
+    "golden": "Your car is parked where you're supposed to be.",
+    "got": "Your car is parked where you're supposed to be.",
+    "models": [
+      "llm"
+    ],
+    "score": 92,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 86,
+    "cat": "homophone",
+    "input": "The affect of the new policy will effect everyone.",
+    "golden": "The effect of the new policy will affect everyone.",
+    "got": "The effect of the new policy will affect everyone.",
+    "models": [
+      "llm"
+    ],
+    "score": 97,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 87,
+    "cat": "homophone",
+    "input": "We should of left then, but we waited to long.",
+    "golden": "We should have left then, but we waited too long.",
+    "got": "We should have left then, but we waited too long.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 88,
+    "cat": "spelling",
+    "input": "The goverment anounced a new enviroment policy.",
+    "golden": "The government announced a new environment policy.",
+    "got": "The government announced a new environment policy.",
+    "models": [
+      "llm"
+    ],
+    "score": 97,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 3
+  },
+  {
+    "id": 89,
+    "cat": "spelling",
+    "input": "I definately recieved the seperate package yesterday.",
+    "golden": "I definitely received the separate package yesterday.",
+    "got": "I definitely received the separate package yesterday.",
+    "models": [
+      "llm"
+    ],
+    "score": 95,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 4
+  },
+  {
+    "id": 90,
+    "cat": "spelling",
+    "input": "Occured twice, this embarassing mispelling.",
+    "golden": "Occurred twice, this embarrassing misspelling.",
+    "got": "Occurred twice, this embarrassing misspelling.",
+    "models": [
+      "llm"
+    ],
+    "score": 97,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 3
+  },
+  {
+    "id": 91,
+    "cat": "caps",
+    "input": "we flew to paris in france last april.",
+    "golden": "We flew to Paris in France last April.",
+    "got": "We flew to Paris, France, last April.",
+    "models": [
+      "llm"
+    ],
+    "score": 81,
+    "pass": false,
+    "similarity": 0.933,
+    "n_suggestions": 5
+  },
+  {
+    "id": 92,
+    "cat": "caps",
+    "input": "my friend john speaks english and spanish.",
+    "golden": "My friend John speaks English and Spanish.",
+    "got": "My friend John speaks English and Spanish.",
+    "models": [
+      "llm"
+    ],
+    "score": 91,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 4
+  },
+  {
+    "id": 93,
+    "cat": "punct",
+    "input": "However we still have time.",
+    "golden": "However, we still have time.",
+    "got": "However, we still have time.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 94,
+    "cat": "punct",
+    "input": "Lets eat grandma before the food gets cold.",
+    "golden": "Let's eat grandma before the food gets cold.",
+    "got": "Let's eat grandma before the food gets cold.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 95,
+    "cat": "punct",
+    "input": "I bought apples oranges and pears.",
+    "golden": "I bought apples, oranges, and pears.",
+    "got": "I bought apples, oranges, and pears.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 96,
+    "cat": "prep",
+    "input": "She is married with a doctor and good in cooking.",
+    "golden": "She is married to a doctor and good at cooking.",
+    "got": "She is married to a doctor and good at cooking.",
+    "models": [
+      "llm"
+    ],
+    "score": 90,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 97,
+    "cat": "prep",
+    "input": "He arrived to the airport in time for the flight.",
+    "golden": "He arrived at the airport in time for the flight.",
+    "got": "He arrived at the airport in time for the flight.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 98,
+    "cat": "prep",
+    "input": "I am interested on learning more about it.",
+    "golden": "I am interested in learning more about it.",
+    "got": "I am interested in learning more about it.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 99,
+    "cat": "pronoun",
+    "input": "Me and him went to the store together.",
+    "golden": "He and I went to the store together.",
+    "got": "He and I went to the store together.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 100,
+    "cat": "pronoun",
+    "input": "The gift was for she and I.",
+    "golden": "The gift was for her and me.",
+    "got": "The gift was for her and me.",
+    "models": [
+      "llm"
+    ],
+    "score": 91,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 3
+  },
+  {
+    "id": 101,
+    "cat": "pronoun",
+    "input": "Each student must bring their own pencil, but he should label it.",
+    "golden": "Each student must bring their own pencil, but they should label it.",
+    "got": "Each student must bring their own pencil, but they should label it.",
+    "models": [
+      "llm"
+    ],
+    "score": 99,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 102,
+    "cat": "negation",
+    "input": "I don't need no help from nobody.",
+    "golden": "I don't need any help from anybody.",
+    "got": "I don't need any help from anybody.",
+    "models": [
+      "llm"
+    ],
+    "score": 86,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 103,
+    "cat": "negation",
+    "input": "She can't hardly wait for the results.",
+    "golden": "She can hardly wait for the results.",
+    "got": "She can hardly wait for the results.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 104,
+    "cat": "confusable",
+    "input": "There were less people then expected at the event.",
+    "golden": "There were fewer people than expected at the event.",
+    "got": "There were fewer people than expected at the event.",
+    "models": [
+      "llm"
+    ],
+    "score": 90,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 105,
+    "cat": "confusable",
+    "input": "The principle reason was to ensure good morals.",
+    "golden": "The principal reason was to ensure good morals.",
+    "got": "The principal reason was to ensure good morals.",
+    "models": [
+      "llm"
+    ],
+    "score": 98,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 106,
+    "cat": "confusable",
+    "input": "He could of done it if he was more discrete about it.",
+    "golden": "He could have done it if he was more discreet about it.",
+    "got": "He could have done it if he was more discreet about it.",
+    "models": [
+      "llm"
+    ],
+    "score": 93,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 3
+  },
+  {
+    "id": 107,
+    "cat": "confusable",
+    "input": "Whose coming to accept the complement on they're behalf?",
+    "golden": "Who's coming to accept the compliment on their behalf?",
+    "got": "Who's coming to accept the compliment on their behalf?",
+    "models": [
+      "llm"
+    ],
+    "score": 92,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 4
+  },
+  {
+    "id": 108,
+    "cat": "wordorder",
+    "input": "Always he is late to the morning meeting.",
+    "golden": "He is always late to the morning meeting.",
+    "got": "He is always late to the morning meeting.",
+    "models": [
+      "llm"
+    ],
+    "score": 74,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 1
+  },
+  {
+    "id": 109,
+    "cat": "wordorder",
+    "input": "She asked me where was the station.",
+    "golden": "She asked me where the station was.",
+    "got": "She asked me where the station was.",
+    "models": [
+      "llm"
+    ],
+    "score": 89,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 2
+  },
+  {
+    "id": 110,
+    "cat": "multi",
+    "input": "she dont has no idea were the keys is.",
+    "golden": "She doesn't have any idea where the keys are.",
+    "got": "She doesn't have any idea where the keys are.",
+    "models": [
+      "llm"
+    ],
+    "score": 60,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 4
+  },
+  {
+    "id": 111,
+    "cat": "multi",
+    "input": "Him and me was very exciting to seen the results yesterday.",
+    "golden": "He and I were very excited to see the results yesterday.",
+    "got": "He and I were very excited to see the results yesterday.",
+    "models": [
+      "llm"
+    ],
+    "score": 83,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 4
+  },
+  {
+    "id": 112,
+    "cat": "multi",
+    "input": "the childrens books was laying on they're desks.",
+    "golden": "The children's books were lying on their desks.",
+    "got": "The children's books were lying on their desks.",
+    "models": [
+      "llm"
+    ],
+    "score": 85,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 5
+  },
+  {
+    "id": 113,
+    "cat": "multi",
+    "input": "Their is alot of reasons why this dont work good.",
+    "golden": "There are a lot of reasons why this doesn't work well.",
+    "got": "There are a lot of reasons why this doesn't work well.",
+    "models": [
+      "llm"
+    ],
+    "score": 75,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 4
+  },
+  {
+    "id": 114,
+    "cat": "clean",
+    "input": "The café's piñata was a naïve résumé of clichés.",
+    "golden": "The café's piñata was a naïve résumé of clichés.",
+    "got": "The café's piñata was a naïve résumé of clichés.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 115,
+    "cat": "clean",
+    "input": "She ordered a jalapeño on her crème brûlée by mistake.",
+    "golden": "She ordered a jalapeño on her crème brûlée by mistake.",
+    "got": "She ordered a jalapeño on her crème brûlée by mistake.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 116,
+    "cat": "clean",
+    "input": "The committee reviewed the proposal and approved it unanimously.",
+    "golden": "The committee reviewed the proposal and approved it unanimously.",
+    "got": "The committee reviewed the proposal and approved it unanimously.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 117,
+    "cat": "clean",
+    "input": "Although it was raining, they decided to go for a walk.",
+    "golden": "Although it was raining, they decided to go for a walk.",
+    "got": "Although it was raining, they decided to go for a walk.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 118,
+    "cat": "clean",
+    "input": "Neither the manager nor the employees were aware of the change.",
+    "golden": "Neither the manager nor the employees were aware of the change.",
+    "got": "Neither the manager nor the employees was aware of the change.",
+    "models": [
+      "llm"
+    ],
+    "score": 97,
+    "pass": false,
+    "similarity": 0.96,
+    "n_suggestions": 1
+  },
+  {
+    "id": 119,
+    "cat": "clean",
+    "input": "He runs faster than anyone else on the team.",
+    "golden": "He runs faster than anyone else on the team.",
+    "got": "He runs faster than anyone else on the team.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 120,
+    "cat": "clean",
+    "input": "Whom did you speak with about the budget?",
+    "golden": "Whom did you speak with about the budget?",
+    "got": "Whom did you speak with about the budget?",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 121,
+    "cat": "clean",
+    "input": "The data suggest that the hypothesis is correct.",
+    "golden": "The data suggest that the hypothesis is correct.",
+    "got": "The data suggest that the hypothesis is correct.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 122,
+    "cat": "clean",
+    "input": "She is taller than he is, but he is stronger.",
+    "golden": "She is taller than he is, but he is stronger.",
+    "got": "She is taller than he is, but he is stronger.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 123,
+    "cat": "clean",
+    "input": "i++; return arr.length > 0 ? arr[0] : null;",
+    "golden": "i++; return arr.length > 0 ? arr[0] : null;",
+    "got": "i++; return arr.length > 0 ? arr[0] : null;",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 124,
+    "cat": "clean",
+    "input": "The API returns a 404 when the resource doesn't exist.",
+    "golden": "The API returns a 404 when the resource doesn't exist.",
+    "got": "The API returns a 404 when the resource doesn't exist.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  },
+  {
+    "id": 125,
+    "cat": "clean",
+    "input": "Less water was used this year than last year.",
+    "golden": "Less water was used this year than last year.",
+    "got": "Less water was used this year than last year.",
+    "models": [],
+    "score": 100,
+    "pass": true,
+    "similarity": 1.0,
+    "n_suggestions": 0
+  }
+]

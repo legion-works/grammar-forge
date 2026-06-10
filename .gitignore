@@ -72,9 +72,11 @@ yarn-error.log*
 # --- Docker ---
 docker-compose.override.yml
 
-# --- Eval harness: golden cases are test data (override *.jsonl); results are output ---
+# --- Eval harness: golden cases are test data (override *.jsonl). ---
+# eval/results.json IS committed: it is the golden-set baseline (derived from
+# the committed golden.jsonl + model output — no user text), refreshed via the
+# cold-restart protocol in eval/README.md.
 !eval/golden.jsonl
-eval/results.json
 
 # --- Editor / OS ---
 .DS_Store
