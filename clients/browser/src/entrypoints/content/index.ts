@@ -15,7 +15,6 @@ import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { isUndoRedoKeydown } from '@/input/undo-redo'
 import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
-import { applySlateFix, isFrameworkRichEditor } from '@/input/rich-editor-apply'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
 import {
     buildRenderableItems,
@@ -600,14 +599,16 @@ function wireRuntime(
         span: { start: number; end: number },
         replacement: string,
     ): Promise<void> => {
-        if (
-            !(el instanceof HTMLTextAreaElement) &&
-            !(el instanceof HTMLInputElement) &&
-            isFrameworkRichEditor(el)
-        ) {
-            await applySlateFix(el, span, replacement)
-            return
-        }
+        // KNOWN LIMITATION (verified live on discord.com web, 2026-06-10):
+        // the synthetic-replacement path (applySlateFix) does NOT work from
+        // a content script — the getTargetRanges override exists only on the
+        // ISOLATED-WORLD event wrapper, so the page's Slate sees the native
+        // (empty) target ranges and inserts every replacement at its model
+        // selection instead (garbled text on apply-all). Until the apply is
+        // dispatched from a MAIN-world agent script, framework editors take
+        // the legacy path here too (pre-hardening behavior: works, with the
+        // latent Slate selection-jam risk). applySlateFix stays correct for
+        // main-world consumers (the Vencord client).
         applyFix(el, span, replacement)
     }
     const clearChipAria = (el: HTMLElement): void => {
