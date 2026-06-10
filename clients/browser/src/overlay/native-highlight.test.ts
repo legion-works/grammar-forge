@@ -290,4 +290,19 @@ describe('getNativeHighlighter (with stub)', () => {
             ),
         ).toBe(strong)
     })
+
+    it('injects styles even when the page pre-inserts a decoy element with our id', () => {
+        // Hostile page squats our STYLE_ID with a non-style element. The
+        // injection must still run — match on our data marker, not the id.
+        const decoy = document.createElement('div')
+        decoy.id = 'gf-native-highlights'
+        document.head.appendChild(decoy)
+        const h = getNativeHighlighter()
+        const el = makeContentEditable('the cat sat')
+        h.setFieldHighlights(el, [{ cuStart: 4, cuEnd: 7, category: 'spelling' }])
+        const styles = document.head.querySelectorAll('style[data-gf-owned="1"]')
+        expect(styles).toHaveLength(1)
+        decoy.remove()
+        styles.forEach((s) => s.remove())
+    })
 })

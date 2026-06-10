@@ -71,9 +71,13 @@ function registry(): Map<string, Highlight> | null {
 }
 
 function ensureStyleInjected(doc: Document): void {
-    if (doc.getElementById(STYLE_ID)) return
+    // Match on OUR data marker, not a bare id — a page that pre-inserts an
+    // element with the same id would otherwise suppress the injection and
+    // leave every native highlight unstyled.
+    if (doc.head.querySelector('style[data-gf-owned="1"]')) return
     const style = doc.createElement('style')
     style.id = STYLE_ID
+    style.dataset.gfOwned = '1'
     style.textContent = buildStyleSheet()
     doc.head.appendChild(style)
 }
@@ -237,7 +241,7 @@ function makeHighlighter(doc: Document): NativeHighlighter {
                     }
                 }
             }
-            doc.getElementById(STYLE_ID)?.remove()
+            doc.head.querySelector('style[data-gf-owned="1"]')?.remove()
         },
     }
 }
