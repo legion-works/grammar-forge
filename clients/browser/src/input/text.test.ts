@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { applyFix, getText } from '@/input/text'
+import { applyFix, codeUnitSpanToRange, domPointToFlatOffset, getText } from '@/input/text'
 
 const mkTextarea = (value = ''): HTMLTextAreaElement => {
     const t = document.createElement('textarea')
@@ -44,6 +44,129 @@ describe('getText', () => {
     it('returns "" for an empty contenteditable', () => {
         const d = mkCE('')
         expect(getText(d)).toBe('')
+    })
+})
+
+describe('getText — line-aware contenteditable model (virtual newlines)', () => {
+    it('separates block-per-line divs with \\n (the joined-lines bug)', () => {
+        const d = mkCE('<div>Glorp Zix</div><div>Vrak</div>')
+        expect(getText(d)).toBe('Glorp Zix\nVrak')
+    })
+
+    it('maps <br> to \\n', () => {
+        const d = mkCE('a<br>b')
+        expect(getText(d)).toBe('a\nb')
+    })
+
+    it('represents an empty middle line (<div><br></div>) as a blank line', () => {
+        const d = mkCE('<div>a</div><div><br></div><div>b</div>')
+        expect(getText(d)).toBe('a\n\nb')
+    })
+
+    it('inline children inside blocks do not add separators', () => {
+        const d = mkCE('<p><span>a</span><b>b</b></p><p>c</p>')
+        expect(getText(d)).toBe('ab\nc')
+    })
+
+    it('a single block has no trailing newline', () => {
+        const d = mkCE('<div>a</div>')
+        expect(getText(d)).toBe('a')
+    })
+
+    it('a bare text node is unchanged', () => {
+        const d = mkCE('plain')
+        expect(getText(d)).toBe('plain')
+    })
+})
+
+describe('codeUnitSpanToRange — flat offsets across virtual newlines', () => {
+    /** <div>Glorp Zix</div><div>Vrak</div> → flat "Glorp Zix\nVrak";
+     *  node1 = "Glorp Zix" (flat 0..9), virtual \n at 9, node2 = "Vrak" (10..14). */
+    const mkTwoLines = (): { d: HTMLDivElement; node1: Text; node2: Text } => {
+        const d = mkCE('<div>Glorp Zix</div><div>Vrak</div>')
+        const divs = d.querySelectorAll('div')
+        return {
+            d,
+            node1: divs[0]!.firstChild as Text,
+            node2: divs[1]!.firstChild as Text,
+        }
+    }
+
+    it('a span fully on line 2 lands in line-2\u2019s text node with shifted offsets', () => {
+        const { d, node2 } = mkTwoLines()
+        // flat {10,14} is exactly "Vrak"
+        const r = codeUnitSpanToRange(d, { start: 10, end: 14 })
+        expect(r).not.toBeNull()
+        expect(r!.startContainer).toBe(node2)
+        expect(r!.startOffset).toBe(0)
+        expect(r!.endContainer).toBe(node2)
+        expect(r!.endOffset).toBe(4)
+        expect(r!.toString()).toBe('Vrak')
+    })
+
+    it('a span ending at end-of-line-1 stays inside line 1\u2019s text node', () => {
+        const { d, node1 } = mkTwoLines()
+        const r = codeUnitSpanToRange(d, { start: 0, end: 9 })
+        expect(r).not.toBeNull()
+        expect(r!.endContainer).toBe(node1)
+        expect(r!.endOffset).toBe(9)
+        expect(r!.toString()).toBe('Glorp Zix')
+    })
+
+    it('a span crossing the virtual newline yields a cross-block Range', () => {
+        const { d, node1, node2 } = mkTwoLines()
+        // flat {6,12} = "Zix\nVr"
+        const r = codeUnitSpanToRange(d, { start: 6, end: 12 })
+        expect(r).not.toBeNull()
+        expect(r!.startContainer).toBe(node1)
+        expect(r!.startOffset).toBe(6)
+        expect(r!.endContainer).toBe(node2)
+        expect(r!.endOffset).toBe(2)
+    })
+
+    it('a span covering only the virtual newline brackets the line boundary', () => {
+        const { d, node1, node2 } = mkTwoLines()
+        const r = codeUnitSpanToRange(d, { start: 9, end: 10 })
+        expect(r).not.toBeNull()
+        expect(r!.startContainer).toBe(node1)
+        expect(r!.startOffset).toBe(9)
+        expect(r!.endContainer).toBe(node2)
+        expect(r!.endOffset).toBe(0)
+    })
+
+    it('returns null when the span exceeds the flat length', () => {
+        const { d } = mkTwoLines()
+        expect(codeUnitSpanToRange(d, { start: 0, end: 99 })).toBeNull()
+        expect(codeUnitSpanToRange(d, { start: 99, end: 100 })).toBeNull()
+    })
+})
+
+describe('domPointToFlatOffset (selection endpoint → flat offset)', () => {
+    it('maps text-node points through the virtual newline shift', () => {
+        const d = mkCE('<div>Glorp Zix</div><div>Vrak</div>')
+        const divs = d.querySelectorAll('div')
+        const node1 = divs[0]!.firstChild as Text
+        const node2 = divs[1]!.firstChild as Text
+        expect(domPointToFlatOffset(d, node1, 5)).toBe(5)
+        expect(domPointToFlatOffset(d, node2, 0)).toBe(10)
+        expect(domPointToFlatOffset(d, node2, 4)).toBe(14)
+    })
+
+    it('maps element-boundary points to the next content / total length', () => {
+        const d = mkCE('<div>Glorp Zix</div><div>Vrak</div>')
+        // boundary before the second div → start of "Vrak" in the flat model
+        expect(domPointToFlatOffset(d, d, 1)).toBe(10)
+        // end of the host element → the flat length
+        expect(domPointToFlatOffset(d, d, 2)).toBe(14)
+    })
+
+    it('returns null for a node outside the element', () => {
+        const d = mkCE('<div>a</div>')
+        const stray = document.createElement('div')
+        stray.textContent = 'x'
+        document.body.appendChild(stray)
+        expect(domPointToFlatOffset(d, stray.firstChild as Text, 0)).toBeNull()
+        stray.remove()
     })
 })
 

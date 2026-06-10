@@ -4,13 +4,17 @@
 //   1. textarea / input  -> mirror-div technique: clone the element's font/
 //      padding/border/width into a hidden div, splice a marker span over the
 //      text range, and read the marker's getBoundingClientRect().
-//   2. contenteditable  -> build a Range over the code-unit offsets (via a
-//      TextNode TreeWalker) and return Range.getClientRects().
+//   2. contenteditable  -> build a Range over the code-unit offsets via the
+//      SHARED flat-text mapping (input/text.ts codeUnitSpansToRanges — the
+//      line-aware model with virtual newlines at <br>/block boundaries) and
+//      return Range.getClientRects().
 //
 // jsdom limitation: jsdom does not lay out pages, so neither strategy yields
 // meaningful pixel coordinates. The mirror-div path is exercised by inspecting
 // the styles it COPIES onto the hidden div (the math is independent of layout);
 // the contenteditable path is exercised with a Range.getClientRects spy.
+
+import { codeUnitSpansToRanges } from '@/input/text'
 
 export interface MirrorProbe {
     element: HTMLDivElement
@@ -104,30 +108,6 @@ function getMeasurementRoot(doc: Document): ShadowRoot {
     measurementRoot = host.attachShadow({ mode: 'closed' })
     doc.body.appendChild(host)
     return measurementRoot
-}
-
-/**
- * Resolve a flat code-unit offset within a contenteditable (or any element
- * containing text nodes) to the concrete Text node + the offset within it.
- * Returns null if the offset is past the end of the concatenated text.
- */
-export function findTextNodeForOffset(
-    root: Element,
-    codeUnitOffset: number,
-): { node: Text; offset: number } | null {
-    if (codeUnitOffset < 0) return null
-    const walker = root.ownerDocument!.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-    let consumed = 0
-    let node = walker.nextNode() as Text | null
-    while (node) {
-        const len = node.length
-        if (codeUnitOffset <= consumed + len) {
-            return { node, offset: codeUnitOffset - consumed }
-        }
-        consumed += len
-        node = walker.nextNode() as Text | null
-    }
-    return null
 }
 
 /**
@@ -346,80 +326,27 @@ function getRangeRects(el: HTMLElement, cuStart: number, cuEnd: number): DOMRect
 }
 
 /**
- * Batch contenteditable rect resolution. Resolves every span's (start, end)
- * in a SINGLE TreeWalker pass (vs. the naive 2K walks of the per-span path)
- * and reuses one Range object across all spans.
+ * Batch contenteditable rect resolution: map every span to a DOM Range via
+ * the SHARED flat-text model (input/text.ts — one segment walk for the whole
+ * batch, virtual newlines included so offsets agree with getText/applyFix),
+ * then read each Range's client rects.
  *
- * Semantics match the per-span `getRangeRects` path exactly: for each
- * offset, the first text node where `consumed + len >= codeUnitOffset`
- * wins, with the node-local offset = `codeUnitOffset - consumed` (see
- * `findTextNodeForOffset`). A Map keyed by the numeric offset dedups
- * the walk when a span's end equals the next span's start.
+ * jsdom does not implement Range.getClientRects (no layout engine); the
+ * per-range feature check makes every span yield a clean [] in tests.
  */
 function getRangeRectsBatch(el: HTMLElement, spans: readonly CodeUnitSpan[]): DOMRect[][] {
     if (spans.length === 0) return []
-    const owner = el.ownerDocument
-
-    // Collect every needed offset and dedup via a Map<offset, {node, offset}>.
-    // We iterate the sorted unique offsets during the walk, and the Map lets
-    // each span pick up the same (node, offset) pair for a shared boundary.
-    const needed: number[] = []
-    const seen = new Set<number>()
-    for (const s of spans) {
-        if (!seen.has(s.start)) {
-            seen.add(s.start)
-            needed.push(s.start)
+    const ranges = codeUnitSpansToRanges(el, spans)
+    return ranges.map((range) => {
+        if (!range) return []
+        try {
+            return typeof range.getClientRects === 'function'
+                ? Array.from(range.getClientRects())
+                : []
+        } catch {
+            return []
+        } finally {
+            range.detach?.()
         }
-        if (!seen.has(s.end)) {
-            seen.add(s.end)
-            needed.push(s.end)
-        }
-    }
-    needed.sort((a, b) => a - b)
-
-    const positions = new Map<number, { node: Text; offset: number }>()
-    {
-        const walker = owner.createTreeWalker(el, NodeFilter.SHOW_TEXT)
-        let consumed = 0
-        let node = walker.nextNode() as Text | null
-        let i = 0
-        while (node && i < needed.length) {
-            const len = node.length
-            // Walk through every needed offset that falls in [consumed, consumed+len].
-            // The first node satisfying `codeUnitOffset <= consumed + len` wins,
-            // matching findTextNodeForOffset's boundary semantics.
-            while (i < needed.length && needed[i]! <= consumed + len) {
-                positions.set(needed[i]!, { node, offset: needed[i]! - consumed })
-                i++
-            }
-            consumed += len
-            node = walker.nextNode() as Text | null
-        }
-    }
-
-    // jsdom does not implement Range.getClientRects (no layout engine);
-    // detect once so every span yields a clean [] in test environments.
-    const range = owner.createRange()
-    const hasGetClientRects = typeof range.getClientRects === 'function'
-    const out: DOMRect[][] = []
-    try {
-        for (const s of spans) {
-            const a = positions.get(s.start)
-            const b = positions.get(s.end)
-            if (!a || !b) {
-                out.push([])
-                continue
-            }
-            try {
-                range.setStart(a.node, a.offset)
-                range.setEnd(b.node, b.offset)
-                out.push(hasGetClientRects ? Array.from(range.getClientRects()) : [])
-            } catch {
-                out.push([])
-            }
-        }
-        return out
-    } finally {
-        range.detach?.()
-    }
+    })
 }

@@ -14,7 +14,7 @@ import { isEditableElement } from '@/input/detector'
 import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { isUndoRedoKeydown } from '@/input/undo-redo'
-import { applyFix, getText } from '@/input/text'
+import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
 import { isSpanStillValid, runCheck, tallyByCategory, type RenderableItem } from '@/lib/pipeline'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
@@ -64,15 +64,16 @@ export default defineContentScript({
     },
 })
 
-/** Map a DOM Selection range to a [start,end) code-unit span on el's flattened
- *  text (the same model applyFix/getText use). Robust to text- or element-node
- *  endpoints via Range.toString() length. */
+/** Map a DOM Selection range to a [start,end) code-unit span on el's flat
+ *  text (the same line-aware model applyFix/getText use). Endpoints resolve
+ *  via domPointToFlatOffset — NOT Range.toString(), which (like textContent)
+ *  omits the virtual newlines at block boundaries and would disagree with
+ *  the flat model on any multi-line selection. Unresolvable endpoints yield
+ *  a collapsed {0,0} span, which every caller discards as empty. */
 function selectionToCodeUnitSpan(el: HTMLElement, range: Range): { start: number; end: number } {
-    const pre = el.ownerDocument.createRange()
-    pre.selectNodeContents(el)
-    pre.setEnd(range.startContainer, range.startOffset)
-    const start = pre.toString().length
-    const end = start + range.toString().length
+    const start = domPointToFlatOffset(el, range.startContainer, range.startOffset)
+    const end = domPointToFlatOffset(el, range.endContainer, range.endOffset)
+    if (start == null || end == null || end < start) return { start: 0, end: 0 }
     return { start, end }
 }
 
@@ -1243,9 +1244,12 @@ function wireRuntime(
         if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
         const range = sel.getRangeAt(0)
         if (!el.contains(range.commonAncestorContainer)) return null
-        const text = range.toString()
-        if (!text.trim()) return null
         const span = selectionToCodeUnitSpan(el, range)
+        // Slice the FLAT model (not range.toString(), which omits the virtual
+        // newlines) so the rephrase stale-guard `live.slice(...) === text`
+        // compares like with like on multi-line selections.
+        const text = getText(el).slice(span.start, span.end)
+        if (!text.trim()) return null
         const r = range.getBoundingClientRect()
         const rect = r.width || r.height ? r : el.getBoundingClientRect()
         return { el, text, span, rect }

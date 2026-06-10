@@ -1,53 +1,11 @@
 // @vitest-environment jsdom
-// Unit tests for the offset→node mapping used by getSpanRects in
-// contenteditable elements. jsdom cannot lay out the page, so we exercise
-// the TreeWalker math against a fake getClientRects() injected on Range.
+// Unit tests for the span→rect mapping used by getSpanRects. The
+// contenteditable offset→node math now lives in input/text.ts
+// (codeUnitSpanToRange — the shared line-aware flat model) and is tested
+// there; here we exercise the rect plumbing against a fake getClientRects()
+// injected on Range, plus the mirror-div path for inputs/textareas.
 import { describe, expect, it, vi } from 'vitest'
-import { findTextNodeForOffset, __mirrorStyleForTest } from '@/overlay/rect'
-
-describe('findTextNodeForOffset (contenteditable offset→node)', () => {
-    it('returns the first text node when the start offset is 0', () => {
-        const a = document.createTextNode('hello ')
-        const b = document.createTextNode('world')
-        const el = document.createElement('div')
-        el.append(a, b)
-        const got = findTextNodeForOffset(el, 0)
-        expect(got).not.toBeNull()
-        expect(got!.node).toBe(a)
-        expect(got!.offset).toBe(0)
-    })
-
-    it('returns the correct node + in-node offset when spanning nodes', () => {
-        const a = document.createTextNode('hello ') // length 6
-        const b = document.createTextNode('world') // length 5
-        const el = document.createElement('div')
-        el.append(a, b)
-        // offset 8 lands 2 chars into 'world' (after 'wo')
-        const got = findTextNodeForOffset(el, 8)
-        expect(got).not.toBeNull()
-        expect(got!.node).toBe(b)
-        expect(got!.offset).toBe(2)
-    })
-
-    it('returns null when offset exceeds the concatenated text length', () => {
-        const a = document.createTextNode('abc')
-        const el = document.createElement('div')
-        el.append(a)
-        expect(findTextNodeForOffset(el, 99)).toBeNull()
-    })
-
-    it('skips empty text nodes when computing the running offset', () => {
-        const a = document.createTextNode('')
-        const b = document.createTextNode('hi')
-        const el = document.createElement('div')
-        el.append(a, b)
-        // offset 1 lands on the first char of 'hi' (empty node contributes 0)
-        const got = findTextNodeForOffset(el, 1)
-        expect(got).not.toBeNull()
-        expect(got!.node).toBe(b)
-        expect(got!.offset).toBe(1)
-    })
-})
+import { __mirrorStyleForTest } from '@/overlay/rect'
 
 describe('getSpanRects (contenteditable path, fake layout)', () => {
     it('returns an empty array when offsets cannot be resolved', async () => {
@@ -214,12 +172,13 @@ describe('getSpanRectsBatch (mirror-div layout-thrash killer)', () => {
         ta.remove()
     })
 
-    it('still works for the contenteditable path (one-pass Range over each span)', async () => {
+    it('still works for the contenteditable path (one Range per span)', async () => {
         const el = document.createElement('div')
         el.append(document.createTextNode('hello world'))
         // spy on createRange to confirm the contenteditable branch is hit.
-        // The batch reuses ONE Range across spans (mutated via setStart/setEnd)
-        // instead of building one per span, so createRange is called once.
+        // The shared flat-model mapping (input/text.ts codeUnitSpansToRanges)
+        // builds ONE Range per span — each is returned to the caller, so a
+        // single mutated Range can no longer be reused across spans.
         const createRangeSpy = vi.spyOn(el.ownerDocument, 'createRange')
         // jsdom has no getClientRects; inject a fake
         const fakeRange = {
@@ -239,7 +198,7 @@ describe('getSpanRectsBatch (mirror-div layout-thrash killer)', () => {
             { start: 0, end: 5 },
             { start: 6, end: 11 },
         ])
-        expect(createRangeSpy).toHaveBeenCalledTimes(1)
+        expect(createRangeSpy).toHaveBeenCalledTimes(2)
         expect(fakeRange.setStart as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(2)
         expect(fakeRange.setEnd as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(2)
         expect(out).toHaveLength(2)
