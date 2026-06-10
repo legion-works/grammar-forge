@@ -46,6 +46,11 @@ export interface RenderableItem {
     model: BridgeSuggestion['model']
     /** Bridge rule id (kept for signal context). */
     ruleId?: string
+    /** True for fast-path preview frames (no id, Apply disabled until the
+     *  final frame replaces the item). Set per-frame by the caller, never
+     *  inferred from a missing id (a failed log also yields id-less FINAL
+     *  items, which must stay fully actionable for apply-without-signal). */
+    preview?: boolean
 }
 
 export interface RunCheckDeps {
@@ -66,20 +71,25 @@ export interface RunCheckResult {
     dropped: number
 }
 
+/** Options for buildRenderableItems. */
+export interface BuildItemsOptions {
+    /** Mark every produced item as a fast-path preview (see RenderableItem.preview). */
+    preview?: boolean
+}
+
 /**
- * Run the check pipeline for a single text snapshot. Pure(ish) — no DOM, no
- * network unless the injected `correct` makes one. The caller (the content
- * orchestrator) decides when to call this; we just transform and return.
- *
- * Drops any suggestion whose byte span cannot be verified against the original
- * text (mid-codepoint, out of range, round-trip mismatch). A console.warn is
- * emitted for each drop — silently swallowing a broken span would hide a real
- * bridge bug.
+ * Transform one /correct-shaped response into renderable items. Pure and
+ * synchronous — the SSE staged path calls this once per frame; runCheck
+ * wraps it for the single-shot path.
  */
-export async function runCheck(text: string, deps: RunCheckDeps): Promise<RunCheckResult> {
+export function buildRenderableItems(
+    text: string,
+    res: CorrectResponse,
+    deps: Omit<RunCheckDeps, 'correct'> = {},
+    opts: BuildItemsOptions = {},
+): RunCheckResult {
     const verify = deps.verify ?? verifyByteSpan
     const derive = deps.derive ?? ((s: BridgeSuggestion) => deriveCategory(s))
-    const res = await deps.correct(text)
 
     const items: RenderableItem[] = []
     let dropped = 0
@@ -114,9 +124,25 @@ export async function runCheck(text: string, deps: RunCheckDeps): Promise<RunChe
             byteSpan: { start: s.span.start, end: s.span.end },
             model: s.model,
             ruleId: s.ruleId,
+            preview: opts.preview || undefined,
         })
     }
     return { items, dropped }
+}
+
+/**
+ * Run the check pipeline for a single text snapshot. Pure(ish) — no DOM, no
+ * network unless the injected `correct` makes one. The caller (the content
+ * orchestrator) decides when to call this; we just transform and return.
+ *
+ * Drops any suggestion whose byte span cannot be verified against the original
+ * text (mid-codepoint, out of range, round-trip mismatch). A console.warn is
+ * emitted for each drop — silently swallowing a broken span would hide a real
+ * bridge bug.
+ */
+export async function runCheck(text: string, deps: RunCheckDeps): Promise<RunCheckResult> {
+    const res = await deps.correct(text)
+    return buildRenderableItems(text, res, deps)
 }
 
 /** Aggregate renderable items by category (used by the status pill summary). */

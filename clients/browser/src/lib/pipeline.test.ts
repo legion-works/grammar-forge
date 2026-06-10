@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { BridgeSuggestion, Category, CorrectResponse } from '@/api/types'
-import { isSpanStillValid, runCheck, tallyByCategory } from '@/lib/pipeline'
+import { buildRenderableItems, isSpanStillValid, runCheck, tallyByCategory } from '@/lib/pipeline'
 
 function suggestion(over: Partial<BridgeSuggestion>): BridgeSuggestion {
     return {
@@ -175,6 +175,38 @@ describe('tallyByCategory', () => {
 
     it('returns {} for an empty item list', () => {
         expect(tallyByCategory([])).toEqual({})
+    })
+})
+
+describe('buildRenderableItems', () => {
+    const res = {
+        original: 'I has a cat',
+        suggestions: [
+            {
+                span: { start: 2, end: 5 },
+                replacement: 'have',
+                model: 'gector' as const,
+            },
+        ],
+        score: 90,
+    }
+
+    it('marks items preview when asked', () => {
+        const { items } = buildRenderableItems('I has a cat', res, {}, { preview: true })
+        expect(items).toHaveLength(1)
+        expect(items[0]?.preview).toBe(true)
+        expect(items[0]?.id).toBeUndefined()
+    })
+
+    it('defaults to non-preview', () => {
+        const { items } = buildRenderableItems('I has a cat', res, {})
+        expect(items[0]?.preview).toBeUndefined()
+    })
+
+    it('runCheck still works through the async path', async () => {
+        const { items } = await runCheck('I has a cat', { correct: async () => res })
+        expect(items).toHaveLength(1)
+        expect(items[0]?.preview).toBeUndefined()
     })
 })
 
