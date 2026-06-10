@@ -1,7 +1,7 @@
 // Shared settings form consumed by both the full options page and the popup's
 // settings tab. Holds all stateful logic and JSX for Bridge / Behaviour /
-// Hotkey / Blocked sites / Personal dictionary sections.
-import { useCallback, useEffect, useState } from 'react'
+// Hotkey / Blocked sites / Dictionary sections.
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BridgeClient } from '@/api/client'
 import { getSettings, setSettings, type Settings } from '@/storage/settings'
 
@@ -81,26 +81,55 @@ export function SettingsForm() {
         [patch, settings],
     )
 
-    const onAddDict = useCallback(async (): Promise<void> => {
-        if (!settings) return
-        const word = draftDict.trim().toLowerCase()
-        if (!word) return
-        if (settings.personalDictionary.includes(word)) {
-            setDraftDict('')
-            return
+    const [dictWords, setDictWords] = useState<string[]>([])
+    const [dictError, setDictError] = useState<string | null>(null)
+    // Recreate the client ONLY when the URL or remote opt-in flips — every
+    // other settings mutation (rephraseTone, autocorrect, ...) must not churn
+    // the client. oxlint-react-hooks can't track optional-chaining deps, so
+    // the explicit disable is intentional.
+    const dictClient = useMemo(
+        () =>
+            settings ? new BridgeClient(settings.bridgeBaseUrl, settings.allowRemoteBridge) : null,
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
+        [settings?.bridgeBaseUrl, settings?.allowRemoteBridge],
+    )
+    const loadDict = useCallback(async (): Promise<void> => {
+        if (!dictClient) return
+        try {
+            const res = await dictClient.dictionaryList()
+            setDictWords(res.words)
+            setDictError(null)
+        } catch {
+            setDictError('Could not reach the bridge')
         }
-        await patch({ personalDictionary: [...settings.personalDictionary, word] })
-        setDraftDict('')
-    }, [patch, settings, draftDict])
+    }, [dictClient])
+    useEffect(() => {
+        void loadDict()
+    }, [loadDict])
+
+    const onAddDict = useCallback(async (): Promise<void> => {
+        const word = draftDict.trim()
+        if (!word || !dictClient) return
+        try {
+            await dictClient.dictionaryAdd(word)
+            setDraftDict('')
+            await loadDict()
+        } catch {
+            setDictError('Could not add the word')
+        }
+    }, [dictClient, draftDict, loadDict])
 
     const onRemoveDict = useCallback(
         async (word: string): Promise<void> => {
-            if (!settings) return
-            await patch({
-                personalDictionary: settings.personalDictionary.filter((w) => w !== word),
-            })
+            if (!dictClient) return
+            try {
+                await dictClient.dictionaryRemove(word)
+                await loadDict()
+            } catch {
+                setDictError('Could not remove the word')
+            }
         },
-        [patch, settings],
+        [dictClient, loadDict],
     )
 
     if (!settings) {
@@ -432,13 +461,25 @@ export function SettingsForm() {
             </section>
 
             <section className="gf-options__section">
-                <h2>Personal dictionary</h2>
+                <h2>Dictionary</h2>
                 <p className="gf-options__lead" style={{ margin: '0 0 6px' }}>
-                    Local only. Words you add here are skipped by the spelling category on this
-                    device.
+                    Words you add are stored on your bridge and skipped everywhere GrammarForge
+                    checks (every client on this bridge).
                 </p>
+                {dictError && (
+                    <p className="gf-options__warning">
+                        {dictError}{' '}
+                        <button
+                            className="gf-options__btn"
+                            type="button"
+                            onClick={() => void loadDict()}
+                        >
+                            Retry
+                        </button>
+                    </p>
+                )}
                 <ul className="gf-options__list">
-                    {settings.personalDictionary.map((word) => (
+                    {dictWords.map((word) => (
                         <li key={word} className="gf-options__chip">
                             <span>{word}</span>
                             <button
@@ -456,7 +497,7 @@ export function SettingsForm() {
                         type="text"
                         value={draftDict}
                         onChange={(e) => setDraftDict(e.currentTarget.value)}
-                        placeholder="word or phrase"
+                        placeholder="word"
                         onKeyDown={(e) => {
                             if (e.key === 'Enter') void onAddDict()
                         }}

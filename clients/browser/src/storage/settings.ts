@@ -2,8 +2,10 @@ import { storage } from '#imports'
 
 /**
  * Persistent settings for the browser extension. Lives in `browser.storage.local`
- * ONLY — the bridge host, personal dictionary, and block list must never leave
- * the device (spec §9, privacy invariant #1).
+ * ONLY — the bridge host and block list must never leave the device
+ * (spec §9, privacy invariant #1). The user dictionary is now stored on the
+ * bridge itself (shared across every client on this bridge), not in this
+ * storage area.
  */
 export interface Settings {
     bridgeBaseUrl: string
@@ -25,7 +27,6 @@ export interface Settings {
     autocorrect: boolean
     acceptHotkey: string
     onDemandHotkey: string
-    personalDictionary: string[]
     /**
      * When true, set `spellcheck="false"` on every monitored field so the
      * browser's native red squiggles don't double up with GrammarForge
@@ -68,7 +69,6 @@ export const DEFAULT_SETTINGS: Settings = {
     autocorrect: false,
     acceptHotkey: 'Alt+Period',
     onDemandHotkey: 'Ctrl+Shift+Period',
-    personalDictionary: [],
     suppressNativeSpellcheck: false,
     debugLogging: false,
     rephraseTone: '',
@@ -79,7 +79,7 @@ export const DEFAULT_SETTINGS: Settings = {
 /**
  * The `local:` area scopes to `browser.storage.local`. We deliberately do NOT
  * expose a `sync:` variant — the spec's privacy invariant forbids pushing the
- * bridge host or personal dictionary through Chrome sync.
+ * bridge host through Chrome sync.
  */
 export const settingsItem = storage.defineItem<Settings>('local:settings', {
     fallback: DEFAULT_SETTINGS,

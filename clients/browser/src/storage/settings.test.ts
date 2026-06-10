@@ -12,10 +12,10 @@ afterEach(async () => {
 })
 
 describe('settingsItem', () => {
-    it('uses local storage (never sync) — privacy: bridge host + dictionary stay on-device', () => {
+    it('uses local storage (never sync) — privacy: bridge host stays on-device', () => {
         // The store key MUST be `local:settings`. A `sync:` key would push the
-        // bridge URL + personal dictionary through Chrome sync, which the
-        // spec's privacy invariant forbids.
+        // bridge URL through Chrome sync, which the spec's privacy invariant
+        // forbids.
         expect(settingsItem.key).toBe('local:settings')
     })
 })
@@ -35,7 +35,6 @@ describe('DEFAULT_SETTINGS', () => {
             autocorrect: false,
             acceptHotkey: 'Alt+Period',
             onDemandHotkey: 'Ctrl+Shift+Period',
-            personalDictionary: [],
             suppressNativeSpellcheck: false,
             debugLogging: false,
             rephraseTone: '',
@@ -83,10 +82,10 @@ describe('setSettings', () => {
     })
 
     it('leaves untouched fields alone when patching an empty object', async () => {
-        await setSettings({ personalDictionary: ['lol', 'btw'] })
+        await setSettings({ blockedSites: ['lol.com', 'btw.com'] })
         await setSettings({})
         const s = await getSettings()
-        expect(s.personalDictionary).toEqual(['lol', 'btw'])
+        expect(s.blockedSites).toEqual(['lol.com', 'btw.com'])
     })
 })
 
