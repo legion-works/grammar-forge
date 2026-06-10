@@ -153,9 +153,14 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     // Debug logger gated on the plugin's debugLogging setting (read live).
     // localStorage does NOT exist in the Discord renderer, so the browser
     // client's gfDebug toggle is unusable here — the setting is the switch.
-    // oxlint-disable-next-line no-console
+    // Millisecond timestamps (relative to orchestrator start) make event
+    // ORDER and latency visible — essential for the async-apply traces.
+    const t0 = performance.now()
     const debugLog = (...args: unknown[]): void => {
-        if (getConfig().debugLogging) console.log('[GrammarForge]', ...args)
+        if (!getConfig().debugLogging) return
+        const t = (performance.now() - t0).toFixed(1)
+        // oxlint-disable-next-line no-console
+        console.log(`[GrammarForge +${t}ms]`, ...args)
     }
     // Client rebuilds when bridgeUrl/allowRemoteBridge change (settings are
     // live). All other config flags (realtimeDelayMs, checkPastedText,
@@ -308,6 +313,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             el,
             { start: item.cuStart, end: item.cuEnd },
             replacement,
+            debugLog,
         )
         if (!applied) {
             void rerunFor(el)(getText(el))
@@ -403,6 +409,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 el,
                 { start: item.cuStart, end: item.cuEnd },
                 replacement,
+                debugLog,
             )
             if (!applied) continue
             batch = appendInverseEdit(batch, {
@@ -442,7 +449,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         st.lastApplied = null
         for (const op of ops) {
             if (!el.isConnected) return
-            await applySlateFix(el, op.span, op.replacement)
+            await applySlateFix(el, op.span, op.replacement, debugLog)
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
         }
         debugLog('undo', { ops: ops.length })
@@ -497,30 +504,33 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 // re-focuses the composer, and a still-open popover's
                 // outside-click/teardown must not fight that focus move.
                 closePopoverFor(el)
-                void applySlateFix(el, { start: item.cuStart, end: item.cuEnd }, replacement).then(
-                    (applied) => {
-                        if (!applied) {
-                            void rerunFor(el)(getText(el))
-                            return
-                        }
-                        const st = fields.get(el)
-                        if (st) {
-                            st.lastApplied = appendInverseEdit([], {
-                                start: item.cuStart,
-                                end: item.cuEnd,
-                                replacement,
-                                original: item.original,
-                            })
-                        }
-                        signalQueue.enqueue({
-                            id: item.id,
-                            action: 'accepted',
-                            category: item.category,
-                            source: 'vencord',
-                        })
+                void applySlateFix(
+                    el,
+                    { start: item.cuStart, end: item.cuEnd },
+                    replacement,
+                    debugLog,
+                ).then((applied) => {
+                    if (!applied) {
                         void rerunFor(el)(getText(el))
-                    },
-                )
+                        return
+                    }
+                    const st = fields.get(el)
+                    if (st) {
+                        st.lastApplied = appendInverseEdit([], {
+                            start: item.cuStart,
+                            end: item.cuEnd,
+                            replacement,
+                            original: item.original,
+                        })
+                    }
+                    signalQueue.enqueue({
+                        id: item.id,
+                        action: 'accepted',
+                        category: item.category,
+                        source: 'vencord',
+                    })
+                    void rerunFor(el)(getText(el))
+                })
             },
             onIgnore: () => {
                 const st = fields.get(el)
@@ -610,7 +620,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                         debugLog('rephrase stale span; not applying')
                         return
                     }
-                    void applySlateFix(el, span, chosen).then(() => {
+                    void applySlateFix(el, span, chosen, debugLog).then(() => {
                         void rerunFor(el)(getText(el))
                     })
                 },
@@ -833,6 +843,28 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         window.removeEventListener('resize', scheduleRemeasureAll)
     })
 
+    // Selection tracer: logs every document selectionchange whose selection
+    // touches a tracked composer, with flat offsets + the active element.
+    // This is the instrument that shows WHO moves the caret and WHEN
+    // (user click vs Slate re-assertion after an apply). Dedupes identical
+    // consecutive states to keep the log readable.
+    let lastSelectionTrace = ''
+    const onSelectionChange = (): void => {
+        if (!getConfig().debugLogging) return
+        const active = document.activeElement
+        for (const el of trackedFields) {
+            const info = selectionDebugInfo(el)
+            if (info === 'no-selection' || info === 'outside-composer') continue
+            const line = `${info} active=${active instanceof HTMLElement ? active.tagName : 'none'}`
+            if (line === lastSelectionTrace) return
+            lastSelectionTrace = line
+            debugLog('selectionchange', line)
+            return
+        }
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    cleanups.push(() => document.removeEventListener('selectionchange', onSelectionChange))
+
     const armPasteGrace = (el: HTMLElement, st: FieldState, attachment: FieldAttachment): void => {
         attachment.cancelPending()
         clearPasteGrace(st)
@@ -954,6 +986,44 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             if (!(n instanceof HTMLElement)) return String(n)
             return `${n.tagName.toLowerCase()}.${String(n.className).slice(0, 50)}`
         }
+        // Input-event tracer: shows EVERY beforeinput/input on the composer
+        // with inputType, isTrusted (distinguishes our synthetic apply event
+        // from real typing / Slate-internal events), data, and target ranges
+        // resolved to flat offsets. The caret-jam investigation needs to see
+        // exactly what reaches the editor and in what order.
+        const traceInputEvent = (label: string) => (e: Event) => {
+            if (!getConfig().debugLogging) return
+            const ie = e as InputEvent
+            let targetRanges = 'n/a'
+            try {
+                const ranges = ie.getTargetRanges?.() ?? []
+                targetRanges = ranges
+                    .map((r) => {
+                        const s = domPointToFlatOffset(el, r.startContainer, r.startOffset)
+                        const en = domPointToFlatOffset(el, r.endContainer, r.endOffset)
+                        return `[${String(s)},${String(en)})`
+                    })
+                    .join(',')
+            } catch {
+                targetRanges = 'threw'
+            }
+            debugLog(label, {
+                inputType: ie.inputType ?? '',
+                trusted: e.isTrusted,
+                data: typeof ie.data === 'string' ? JSON.stringify(ie.data.slice(0, 30)) : null,
+                targetRanges,
+                selection: selectionDebugInfo(el),
+            })
+        }
+        const traceBeforeInput = traceInputEvent('ev beforeinput')
+        const traceInput = traceInputEvent('ev input')
+        el.addEventListener('beforeinput', traceBeforeInput, { capture: true })
+        el.addEventListener('input', traceInput, { capture: true })
+        cleanups.push(() => {
+            el.removeEventListener('beforeinput', traceBeforeInput, { capture: true })
+            el.removeEventListener('input', traceInput, { capture: true })
+        })
+
         const onFieldFocusIn = (e: FocusEvent): void => {
             if (!getConfig().debugLogging) return
             debugLog('composer focusin', {
