@@ -158,7 +158,7 @@ type tokenSubstitution struct {
 	origIndex, corrIndex int
 }
 
-// tokenSubstitutions extracts positionally paired substitutions from an LCS
+// tokenSubstitutions extracts positionally paired substitutions from a token
 // alignment: a gap between consecutive matches that skips the SAME number of
 // tokens on each side pairs them index-wise (so a verb flip next to another
 // 1:1 edit — e.g. an adjacent spelling fix — is still found). Unbalanced gaps
