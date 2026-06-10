@@ -8,7 +8,8 @@
 import { createFieldObserver } from '@/input/observer'
 import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
-import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
+import { domPointToFlatOffset, getText } from '@/input/text'
+import { applySlateFix } from './slate-apply'
 import {
     buildRenderableItems,
     isSpanStillValid,
@@ -292,8 +293,10 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
 
     // Apply an item's PRIMARY replacement, stale-guarded. Records the
     // inverse edit on the field's undo slot and emits the accepted signal.
-    // Returns false (no-op) when the span has gone stale.
-    const applyItem = (el: HTMLElement, item: RenderableItem): boolean => {
+    // Returns false (no-op) when the span has gone stale. Async: the Slate-
+    // aware apply yields a tick between selection and insert (see
+    // slate-apply.ts — the sync applyFix corrupted Slate's selection state).
+    const applyItem = async (el: HTMLElement, item: RenderableItem): Promise<boolean> => {
         const st = fields.get(el)
         if (!st) return false
         if (!isSpanStillValid(getText(el), item)) {
@@ -301,7 +304,15 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             return false
         }
         const replacement = item.replacements[0] ?? ''
-        applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+        const applied = await applySlateFix(
+            el,
+            { start: item.cuStart, end: item.cuEnd },
+            replacement,
+        )
+        if (!applied) {
+            void rerunFor(el)(getText(el))
+            return false
+        }
         // Record the inverse edit (single-level slot: a new apply overwrites
         // the prior).
         st.lastApplied = appendInverseEdit([], {
@@ -326,7 +337,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         const item = st?.items[index]
         if (!item) return
         closePopoverFor(el)
-        applyItem(el, item)
+        void applyItem(el, item)
     }
 
     // Add the flagged word(s) to the user dictionary: persist on the bridge,
@@ -388,7 +399,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             if (!el.isConnected) return
             if (!isSpanStillValid(getText(el), item)) continue
             const replacement = item.replacements[0] ?? ''
-            applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+            const applied = await applySlateFix(
+                el,
+                { start: item.cuStart, end: item.cuEnd },
+                replacement,
+            )
+            if (!applied) continue
             batch = appendInverseEdit(batch, {
                 start: item.cuStart,
                 end: item.cuEnd,
@@ -426,7 +442,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         st.lastApplied = null
         for (const op of ops) {
             if (!el.isConnected) return
-            applyFix(el, op.span, op.replacement)
+            await applySlateFix(el, op.span, op.replacement)
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
         }
         debugLog('undo', { ops: ops.length })
@@ -477,24 +493,34 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 }
                 const replacement =
                     item.replacements[replacementIndex] ?? item.replacements[0] ?? ''
-                applyFix(el, { start: item.cuStart, end: item.cuEnd }, replacement)
-                const st = fields.get(el)
-                if (st) {
-                    st.lastApplied = appendInverseEdit([], {
-                        start: item.cuStart,
-                        end: item.cuEnd,
-                        replacement,
-                        original: item.original,
-                    })
-                }
-                signalQueue.enqueue({
-                    id: item.id,
-                    action: 'accepted',
-                    category: item.category,
-                    source: 'vencord',
-                })
+                // Close the popover BEFORE the async apply: applySlateFix
+                // re-focuses the composer, and a still-open popover's
+                // outside-click/teardown must not fight that focus move.
                 closePopoverFor(el)
-                void rerunFor(el)(getText(el))
+                void applySlateFix(el, { start: item.cuStart, end: item.cuEnd }, replacement).then(
+                    (applied) => {
+                        if (!applied) {
+                            void rerunFor(el)(getText(el))
+                            return
+                        }
+                        const st = fields.get(el)
+                        if (st) {
+                            st.lastApplied = appendInverseEdit([], {
+                                start: item.cuStart,
+                                end: item.cuEnd,
+                                replacement,
+                                original: item.original,
+                            })
+                        }
+                        signalQueue.enqueue({
+                            id: item.id,
+                            action: 'accepted',
+                            category: item.category,
+                            source: 'vencord',
+                        })
+                        void rerunFor(el)(getText(el))
+                    },
+                )
             },
             onIgnore: () => {
                 const st = fields.get(el)
@@ -584,8 +610,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                         debugLog('rephrase stale span; not applying')
                         return
                     }
-                    applyFix(el, span, chosen)
-                    void rerunFor(el)(getText(el))
+                    void applySlateFix(el, span, chosen).then(() => {
+                        void rerunFor(el)(getText(el))
+                    })
                 },
                 onClose: () => {},
             })
@@ -1061,7 +1088,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         e.preventDefault()
         e.stopPropagation()
         const first = st.items[0]
-        if (first) applyItem(field, first)
+        if (first) void applyItem(field, first)
     }
     document.addEventListener('keydown', onKeydown, { capture: true })
     cleanups.push(() => document.removeEventListener('keydown', onKeydown, { capture: true }))
