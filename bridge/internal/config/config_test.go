@@ -152,9 +152,10 @@ func TestLoad_HarperDisabledRulesEmptyStringIsNil(t *testing.T) {
 	require.Nil(t, cfg.HarperDisabledRules)
 }
 
-func TestLoad_HarperUserDictDefaultEmpty(t *testing.T) {
+func TestLoad_HarperUserDictDefault(t *testing.T) {
 	cfg := Load(func(string) (string, bool) { return "", false })
-	require.Equal(t, "", cfg.HarperUserDictPath)
+	require.Equal(t, "/data/user-dict.txt", cfg.HarperUserDictPath,
+		"HarperUserDictPath should default to /data/user-dict.txt so the bridge always has a user-dictionary file to watch")
 }
 
 func TestLoad_HarperUserDictOverride(t *testing.T) {

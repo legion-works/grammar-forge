@@ -15,6 +15,7 @@ import (
 
 	"github.com/grammarforge/bridge/internal/config"
 	"github.com/grammarforge/bridge/internal/correction"
+	"github.com/grammarforge/bridge/internal/dictionary"
 	"github.com/grammarforge/bridge/internal/llm"
 	"github.com/grammarforge/bridge/internal/ltgrpc"
 	ltpb "github.com/grammarforge/bridge/internal/ltgrpc/pb"
@@ -51,6 +52,20 @@ func main() {
 		slog.Warn("retention prune failed", "err", err)
 	}
 
+	// User dictionary: must be open AND the file must exist on disk before
+	// the fast path is built (harper_create_merged_dict reads the path at
+	// construction time). Best-effort: a missing or unwriteable file
+	// disables the feature (the restserver/dictionary routes 503, the LLM
+	// re-flag suppression is a no-op) rather than failing startup.
+	dict, err := dictionary.Open(cfg.HarperUserDictPath)
+	if err != nil {
+		slog.Warn("user dictionary unavailable", "err", err)
+		dict = nil
+	} else if err := dict.EnsureFile(); err != nil {
+		slog.Warn("user dictionary file not creatable; disabling", "err", err)
+		dict = nil
+	}
+
 	fast, cleanup := buildFastPath(cfg)
 	defer cleanup()
 
@@ -83,6 +98,11 @@ func main() {
 	)
 	if cfg.SentenceCacheSize > 0 {
 		svc.SetSentenceCache(cfg.SentenceCacheSize)
+	}
+	// LLM re-flag suppression: the *dictionary.Store satisfies
+	// correction.WordAllowlist (Contains) directly — no adapter needed.
+	if dict != nil {
+		svc.SetWordAllowlist(dict)
 	}
 
 	// Inject the rephrase provider factory (this is where internal/llm is
@@ -124,7 +144,11 @@ func main() {
 		}
 	}()
 
-	if err := restserver.New(restserver.Config{Addr: cfg.RESTAddr}, svc).Start(); err != nil {
+	rest := restserver.New(restserver.Config{Addr: cfg.RESTAddr}, svc)
+	if dict != nil {
+		rest.SetDictionary(dict)
+	}
+	if err := rest.Start(); err != nil {
 		slog.Error("rest server failed", "err", err)
 		os.Exit(1)
 	}
