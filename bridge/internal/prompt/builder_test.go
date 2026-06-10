@@ -179,3 +179,55 @@ func TestBuildStyleGRMRNativeIsNoop(t *testing.T) {
 	require.Equal(t, correction.TemplateGRMRNative, p.Template)
 	require.Empty(t, p.User, "GRMR-native style pass must return empty User as the skip signal")
 }
+
+type fakeVocabulary struct{ words []string }
+
+func (f fakeVocabulary) Words() []string { return f.words }
+
+// The committed eval baseline runs with an EMPTY dictionary; nil/empty
+// vocabulary must leave every prompt byte-identical to the vocab-less build.
+func TestVocabularyEmptyIsByteIdentical(t *testing.T) {
+	plain := New("chat_instruct").Build(correction.Request{Text: "x"})
+	withEmpty := New("chat_instruct")
+	withEmpty.SetVocabularySource(fakeVocabulary{})
+	require.Equal(t, plain.System, withEmpty.Build(correction.Request{Text: "x"}).System)
+	plainStyle := New("chat_instruct").BuildStyle(correction.Request{Text: "x"})
+	require.Equal(t, plainStyle.System, withEmpty.BuildStyle(correction.Request{Text: "x"}).System)
+}
+
+func TestVocabularyInjectsQuotedWords(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Glorp", "Zix"}})
+	p := b.Build(correction.Request{Text: "x"})
+	require.Contains(t, p.System, `"Glorp"`)
+	require.Contains(t, p.System, `"Zix"`)
+	require.Contains(t, p.System, "personal dictionary")
+	// The picky style pass must respect the vocabulary too.
+	ps := b.BuildStyle(correction.Request{Text: "x"})
+	require.Contains(t, ps.System, `"Glorp"`)
+	// Rephrase deliberately does NOT carry it (a wholesale rewrite may
+	// legitimately drop any word).
+	pr := b.BuildRephrase(correction.RephraseRequest{Text: "x"})
+	require.NotContains(t, pr.System, "Glorp")
+}
+
+func TestVocabularyNoOpOnGRMRNative(t *testing.T) {
+	b := New("grmr_native")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Glorp"}})
+	p := b.Build(correction.Request{Text: "x"})
+	require.Empty(t, p.System)
+	require.NotContains(t, p.User, "Glorp")
+}
+
+func TestVocabularyCapsWordCount(t *testing.T) {
+	words := make([]string, maxVocabularyWords+5)
+	for i := range words {
+		words[i] = "w" + strconv.Itoa(i)
+	}
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: words})
+	sys := b.Build(correction.Request{Text: "x"}).System
+	require.Contains(t, sys, `"w0"`)
+	require.Contains(t, sys, `"w`+strconv.Itoa(maxVocabularyWords-1)+`"`)
+	require.NotContains(t, sys, `"w`+strconv.Itoa(maxVocabularyWords)+`"`)
+}

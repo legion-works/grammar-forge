@@ -82,6 +82,12 @@ func main() {
 	} else {
 		pb = prompt.New(cfg.LLMFormat)
 	}
+	// Protected vocabulary: the chat prompts list the user-dictionary words so
+	// the LLM stops "correcting" them (the allowlist below only filters output
+	// post-hoc). Empty dictionary => byte-identical prompts.
+	if dict != nil {
+		pb.SetVocabularySource(dict)
+	}
 
 	svc := correction.NewService(
 		pb,
@@ -90,10 +96,11 @@ func main() {
 		st,
 		cfg.LLMModel,
 		correction.EscalationPolicy{
-			MinConfidence:         cfg.EscalateMinConfidence,
-			MaxSentenceLen:        cfg.EscalateMaxSentenceLen,
-			MinWordsForEscalation: cfg.EscalateMinWords,
-			EscalateOnFastEdit:    cfg.EscalateOnFastEdit,
+			MinConfidence:          cfg.EscalateMinConfidence,
+			MaxSentenceLen:         cfg.EscalateMaxSentenceLen,
+			MinWordsForEscalation:  cfg.EscalateMinWords,
+			EscalateOnFastEdit:     cfg.EscalateOnFastEdit,
+			SkipLLMForSpellingOnly: cfg.SkipLLMForSpellingOnly,
 		},
 	)
 	if cfg.SentenceCacheSize > 0 {

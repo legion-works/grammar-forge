@@ -19,6 +19,24 @@ type Personalizer interface {
 	Snapshot() personalization.Block
 }
 
+// VocabularySource supplies the user-dictionary words injected into the chat
+// system prompt as protected vocabulary (the dictionary store implements it).
+// nil or an empty word list leaves the prompt BYTE-IDENTICAL to the
+// vocabulary-less build — the committed eval baseline runs with an empty
+// dictionary and must not shift. Post-hoc suppression (the correction
+// service's WordAllowlist) only FILTERS LLM output; this is what stops the
+// vocabulary-blind LLM from mangling dictionary words in the first place
+// (verified live: a two-word dictionary name kept being rewritten into an
+// unrelated phrase).
+type VocabularySource interface {
+	Words() []string
+}
+
+// maxVocabularyWords caps how many dictionary words are injected, bounding
+// the prompt size (and the per-sentence cache key churn) for a pathologically
+// large dictionary. The earliest entries win (file order — oldest first).
+const maxVocabularyWords = 200
+
 // systemPrompt is the instruction used for generic instruct models (chat_instruct).
 // It is deliberately strict about MINIMAL edits: capable instruct models (e.g.
 // Gemma) otherwise rephrase/restyle clean text, which is a false positive in a
@@ -64,6 +82,37 @@ const styleSystemPrompt = "You are a writing style assistant. Suggest STYLE and 
 type Builder struct {
 	chat         bool // true => chat_instruct, false => grmr_native
 	personalizer Personalizer
+	vocabulary   VocabularySource
+}
+
+// SetVocabularySource injects the user dictionary whose words the chat
+// prompts protect from "correction". Optional; nil (or an empty dictionary)
+// keeps every prompt byte-identical. GRMR-native takes no system prompt, so
+// the source is a no-op on that path.
+func (b *Builder) SetVocabularySource(v VocabularySource) { b.vocabulary = v }
+
+// vocabularyBlock renders the protected-words sentence appended to the chat
+// system prompts, or "" when there is no vocabulary. Words are rendered via
+// strconv.Quote — the dictionary is user-controlled text, and quoting keeps
+// an embedded quote/control char from breaking out of the sentence (the same
+// defence as the tone/style fields and the personalisation block).
+func (b *Builder) vocabularyBlock() string {
+	if b.vocabulary == nil {
+		return ""
+	}
+	words := b.vocabulary.Words()
+	if len(words) == 0 {
+		return ""
+	}
+	if len(words) > maxVocabularyWords {
+		words = words[:maxVocabularyWords]
+	}
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = strconv.Quote(w)
+	}
+	return " The user's personal dictionary contains these words; they are correct as " +
+		"written — never change, respell, or remove them: " + strings.Join(quoted, ", ") + "."
 }
 
 // New returns a Builder for the given format ("chat_instruct" or "grmr_native").
@@ -93,7 +142,7 @@ func NewWithPersonalizer(format string, p Personalizer) *Builder {
 // system prompt so the LLM sees the few-shot examples.
 func (b *Builder) Build(req correction.Request) correction.Prompt {
 	if b.chat {
-		sys := systemPrompt
+		sys := systemPrompt + b.vocabularyBlock()
 		if b.personalizer != nil {
 			if block := b.personalizer.Snapshot(); !block.Empty() {
 				sys += block.String()
@@ -157,8 +206,12 @@ func (b *Builder) BuildRephrase(req correction.RephraseRequest) correction.Promp
 // service checks to short-circuit the LLM call entirely.
 func (b *Builder) BuildStyle(req correction.Request) correction.Prompt {
 	if b.chat {
+		// The style pass must respect the protected vocabulary too — a
+		// word-choice rewrite mangling a dictionary word is the same bug as
+		// the grammar pass doing it. (Rephrase deliberately does NOT get the
+		// block: a wholesale rewrite may legitimately drop any word.)
 		return correction.Prompt{
-			System:   styleSystemPrompt,
+			System:   styleSystemPrompt + b.vocabularyBlock(),
 			User:     req.Text,
 			Template: correction.TemplateChatInstruct,
 		}
