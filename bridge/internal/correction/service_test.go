@@ -1049,3 +1049,68 @@ func TestCorrectMergeDropsTouchingInsertion(t *testing.T) {
 		require.Equal(t, ModelLLM, s.Model, "touching fast insertion dropped")
 	}
 }
+
+// ---- staged correction (SSE fast-path preview) ----
+
+func TestCorrectStagedEmitsFastPreviewThenFinal(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: "I have a cat"}, st, "m", fastPolicy())
+	var fastFrames []Correction
+	got, err := svc.CorrectStaged(context.Background(), Request{Text: "I has a cat"}, func(c Correction) {
+		fastFrames = append(fastFrames, c)
+		require.Equal(t, int64(0), st.count, "fast preview must be emitted BEFORE any logging")
+	})
+	require.NoError(t, err)
+	require.Len(t, fastFrames, 1, "onFast called exactly once")
+	require.NotEmpty(t, fastFrames[0].Suggestions)
+	for _, s := range fastFrames[0].Suggestions {
+		require.Zero(t, s.ID, "fast preview suggestions are unlogged -> no IDs")
+		require.Equal(t, ModelGECToR, s.Model)
+	}
+	require.NotEmpty(t, got.Suggestions, "final result comes from the normal pipeline")
+	require.Equal(t, int64(1), st.count, "final is logged exactly once")
+}
+
+func TestCorrectStagedEmptyFastStillCalled(t *testing.T) {
+	st := &fakeStore{}
+	// LLM-only mode (no fast correctors): preview is empty but still emitted.
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "all good"}, st, "m", fastPolicy())
+	called := 0
+	_, err := svc.CorrectStaged(context.Background(), Request{Text: "all good"}, func(c Correction) {
+		called++
+		require.Empty(t, c.Suggestions)
+		require.Equal(t, 100, c.Score)
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, called, "empty preview still emitted so the client can clear state")
+}
+
+func TestCorrectStagedDropsAllowlistedFastEdits(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelHarper),
+		sugs: []Suggestion{{
+			Span: Span{0, 5}, Replacement: "Glory",
+			Model: ModelHarper, Category: CategorySpelling, Confidence: 0.95,
+		}},
+	}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: "Glorp likes tea"}, st, "m", fastPolicy())
+	svc.SetWordAllowlist(fakeAllowlist{words: map[string]bool{"glorp": true}})
+	var fast Correction
+	_, err := svc.CorrectStaged(context.Background(), Request{Text: "Glorp likes tea"},
+		func(c Correction) { fast = c })
+	require.NoError(t, err)
+	require.Empty(t, fast.Suggestions, "dictionary words must not flash preview underlines")
+}
+
+func TestCorrectStagedNilCallbackBehavesLikeCorrect(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "I have a cat"}, st, "m", fastPolicy())
+	got, err := svc.CorrectStaged(context.Background(), Request{Text: "I has a cat"}, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, got.Suggestions)
+}

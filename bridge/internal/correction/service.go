@@ -446,6 +446,28 @@ func (s *Service) runFast(ctx context.Context, req Request) []Suggestion {
 	return mergeSuggestions(raw)
 }
 
+// CorrectStaged runs the staged pipeline for streaming transports (SSE):
+// it computes a fast-path-only PREVIEW (no logging, no edit IDs), hands it
+// to onFast, then runs the full Correct pipeline UNCHANGED and returns its
+// result. onFast is invoked at most once, synchronously, before any LLM
+// work; an empty preview still invokes it so clients can clear stale
+// state. A nil onFast degrades to plain Correct. The preview applies the
+// user-dictionary allowlist (dictionary words must not flash underlines)
+// but is NOT logged — /signal cannot reference preview suggestions (IDs
+// are zero; clients treat the frame as display-only). Cost: the fast
+// correctors run twice per staged request (~10-40ms), the deliberate
+// trade that keeps the eval-gated Correct pipeline untouched.
+func (s *Service) CorrectStaged(ctx context.Context, req Request, onFast func(Correction)) (Correction, error) {
+	if onFast != nil {
+		fast := s.runFast(ctx, req)
+		if s.allowlist != nil && len(fast) > 0 {
+			fast = s.dropAllowlisted(req.Text, fast)
+		}
+		onFast(Correction{Original: req.Text, Suggestions: fast, Score: score(req.Text, fast)})
+	}
+	return s.Correct(ctx, req)
+}
+
 // Signal records a user reaction to a logged correction.
 func (s *Service) Signal(ctx context.Context, correctionID int64, signal Signal) error {
 	switch signal {
