@@ -6,6 +6,10 @@ import type {
     RephraseResponse,
 } from '@/api/types'
 
+// Rephrase round-trips a (possibly remote, possibly reasoning) LLM; the
+// bridge's own backend timeout is 30s, so mirror it client-side.
+const REPHRASE_TIMEOUT_MS = 30_000
+
 export interface SignalEvent {
     id?: number
     action: 'accepted' | 'rejected' | 'ignored'
@@ -28,10 +32,10 @@ export class BridgeClient {
         }
     }
 
-    private async post<T>(path: string, body: unknown): Promise<T> {
+    private async post<T>(path: string, body: unknown, timeoutMs = this.timeoutMs): Promise<T> {
         this.guard()
         const ctrl = new AbortController()
-        const t = setTimeout(() => ctrl.abort(), this.timeoutMs)
+        const t = setTimeout(() => ctrl.abort(), timeoutMs)
         try {
             const r = await fetch(`${this.baseUrl}${path}`, {
                 method: 'POST',
@@ -125,6 +129,6 @@ export class BridgeClient {
                 api_key: req.override.apiKey,
             }
         }
-        return this.post<RephraseResponse>('/rephrase', body)
+        return this.post<RephraseResponse>('/rephrase', body, REPHRASE_TIMEOUT_MS)
     }
 }

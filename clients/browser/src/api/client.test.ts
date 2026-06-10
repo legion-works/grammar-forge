@@ -175,4 +175,27 @@ describe('BridgeClient.rephrase', () => {
         const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string)
         expect(body.override).toBeUndefined()
     })
+
+    it('rephrase aborts at 30s, not the default 8s', async () => {
+        vi.useFakeTimers()
+        const originalFetch = globalThis.fetch
+        let abortedAt: number | null = null
+        const start = Date.now()
+        globalThis.fetch = vi.fn((_url, init) => {
+            return new Promise((_resolve, reject) => {
+                ;(init as RequestInit).signal?.addEventListener('abort', () => {
+                    abortedAt = Date.now() - start
+                    reject(new DOMException('aborted', 'AbortError'))
+                })
+            })
+        }) as unknown as typeof fetch
+        const client = new BridgeClient('http://localhost:8000', false)
+        const p = client.rephrase({ text: 'x', source: 'browser' }).catch(() => 'aborted')
+        await vi.advanceTimersByTimeAsync(8001)
+        expect(abortedAt).toBeNull() // must NOT abort at the correct-path 8s
+        await vi.advanceTimersByTimeAsync(22000)
+        expect(await p).toBe('aborted')
+        vi.useRealTimers()
+        globalThis.fetch = originalFetch
+    })
 })
