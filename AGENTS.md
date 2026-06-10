@@ -16,7 +16,9 @@ authoritative, but **still v0.1 draft**; confirm details before treating them as
   gRPC, SQLite edit-level signal log) and the WXT browser extension (`clients/browser/`)
   are implemented, tested, and deployed for live testing. The Vencord client
   (`clients/vencord/`) is live-tested and working in Vesktop (underlines, popover
-  apply, ctrl+. hotkey, paste-skip, signals).
+  apply + dictionary, ctrl+. hotkey, paste-skip, signals, chat-bar button with
+  hover pill + corrections panel, apply-all/undo/rephrase/pause; text edits go
+  through the Slate-safe `slate-apply.ts` — never mutate the DOM selection).
   OpenCode client and Phase-3 learning loop not started. Polyglot repo — each service
   brings its own toolchain (below).
 
