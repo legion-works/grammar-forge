@@ -39,6 +39,11 @@ cold. The protocol:
    `GF_PERSONALIZATION_ENABLED=false` on the bridge, or clear stale signals
    (`UPDATE edits SET signal=NULL, signal_ts=NULL`) — then **restart the bridge** so its
    TTL-cached personalization snapshot is dropped.
+1. **Empty the user dictionary.** Dictionary words are injected into the system prompt
+   as protected vocabulary, so a populated dictionary shifts prompts (and sentence-cache
+   keys) away from the baseline. Back up and truncate the file at
+   `GF_HARPER_USER_DICT` (default `/data/user-dict.txt`); restore it after the run.
+   An EMPTY dictionary produces prompts byte-identical to the no-dictionary build.
 2. **Cold-restart the LLM backend** and wait for warmup (~25 s for the default
    llama.cpp container):
    ```bash

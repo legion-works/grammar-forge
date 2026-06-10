@@ -33,12 +33,16 @@ type EscalationPolicy struct {
 	// SkipLLMForSpellingOnly exempts ALL-spelling fast-path results from the
 	// EscalateOnFastEdit trigger: when every fast suggestion is a spelling
 	// edit, the fast path is served directly (subject to the confidence floor
-	// below) instead of consulting the LLM. Spelling lints come from Harper's
-	// dictionary engine — incl. the user dictionary, which the LLM cannot see
-	// — and a typo-while-typing answer in ~10-40ms beats a ~300-800ms LLM
-	// round-trip. Mixed-category or structural fast edits still escalate.
-	// Default OFF (config GF_SKIP_LLM_FOR_SPELLING_ONLY); quality-gated on
-	// the full cold golden eval before being relied on.
+	// below) instead of consulting the LLM (~10-40ms vs ~300-800ms).
+	//
+	// MEASURED AND REJECTED (2026-06-10 full cold golden eval): enabling this
+	// dropped the set 123/125 -> 116/125. Harper categorises irregular-form
+	// errors as spelling but its dictionary engine suggests edit-distance
+	// neighbours, not morphology — buyed->bayed (not bought), childs->child's
+	// (not children), tooths->tooth's (not teeth) — confident-wrong fixes the
+	// LLM previously overrode. Keep OFF (config
+	// GF_SKIP_LLM_FOR_SPELLING_ONLY) unless the fast path learns morphology;
+	// any re-enable must re-pass the full cold eval.
 	SkipLLMForSpellingOnly bool
 }
 
