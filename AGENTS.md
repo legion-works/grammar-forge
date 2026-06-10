@@ -111,6 +111,13 @@ The **Bridge runs two listeners**, which is easy to miss:
 - **Phase order matters.** Phase-1 personalisation is a prompt-level accept/reject cache,
   **not training**. We log `base_model`/`adapter` now to *architect* for the Phase-3 QLoRA
   loop, but don't build it before ~500 accepted corrections.
+- **LLM over-edit repair chain (`internal/correction/overedit.go`).** The bridge
+  deterministically reverts measured LLM over-edit classes (nor/or
+  proximity-agreement flips, proper-noun comma restructures) on the LLM output
+  TEXT before diffing — text-level on purpose: the diff fuses wanted+unwanted
+  edits into single suggestions, so suggestion-level filtering is lossy.
+  `GF_OVEREDIT_FILTER` (default true). New rules: add to
+  `DefaultOverEditRules`, gate on the FULL cold golden eval.
 
 ## Ports (host→container differ — don't guess)
 
