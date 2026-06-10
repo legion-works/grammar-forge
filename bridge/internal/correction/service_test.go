@@ -897,3 +897,55 @@ func TestCorrectAllowlistExpansionKeepsNonDictionaryTokens(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got.Suggestions, 1, "a punctuation edit glued to a dictionary word is kept")
 }
+
+// ---- over-edit repair integration ----
+
+func TestCorrectLLMOnlyAppliesOverEditRules(t *testing.T) {
+	// LLM-only path: the LLM flips correct proximity agreement; with the
+	// default over-edit rules set, the flip is repaired BEFORE the diff, so
+	// no suggestion is emitted at all.
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil,
+		fakeLLM{out: "Neither the manager nor the employees was aware of the change."},
+		st, "m", fastPolicy())
+	svc.SetOverEditRules(DefaultOverEditRules())
+	got, err := svc.Correct(context.Background(),
+		Request{Text: "Neither the manager nor the employees were aware of the change."})
+	require.NoError(t, err)
+	require.Empty(t, got.Suggestions, "over-edit reverted; nothing left to suggest")
+	require.Equal(t, int64(0), st.count, "no suggestions -> nothing logged")
+}
+
+func TestCorrectEscalationAppliesOverEditRules(t *testing.T) {
+	// Escalation path: a low-confidence fast edit forces escalation; the LLM
+	// output contains a wanted capitalization fused with an unwanted comma
+	// restructure (golden case 91's shape). The repaired diff keeps the caps
+	// and drops the restructure.
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{0, 2}, Replacement: "We", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	svc := NewService(fakePB{}, []Corrector{fc},
+		fakeLLM{out: "We flew to Paris, France, last April."},
+		st, "m", fastPolicy())
+	svc.SetOverEditRules(DefaultOverEditRules())
+	got, err := svc.Correct(context.Background(),
+		Request{Text: "we flew to paris in france last april."})
+	require.NoError(t, err)
+	require.Equal(t, "We flew to Paris in France last April.", st.lastEvent.Suggestion,
+		"caps kept, comma restructure reverted")
+	require.NotEmpty(t, got.Suggestions)
+}
+
+func TestCorrectWithoutOverEditRulesIsUnchanged(t *testing.T) {
+	// No rules set (legacy behaviour): the over-edited output is served as-is.
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil,
+		fakeLLM{out: "Neither the manager nor the employees was aware of the change."},
+		st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(),
+		Request{Text: "Neither the manager nor the employees were aware of the change."})
+	require.NoError(t, err)
+	require.NotEmpty(t, got.Suggestions, "nil rules must keep byte-identical legacy behaviour")
+}

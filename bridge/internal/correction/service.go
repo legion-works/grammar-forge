@@ -36,6 +36,13 @@ type Service struct {
 	// given the dictionary, so a confident-wrong fast edit could otherwise
 	// be re-emitted on escalation). Optional; nil = no filtering.
 	allowlist WordAllowlist
+	// overEditRules is the LLM over-edit repair chain (see overedit.go).
+	// Applied to the LLM's grammar output BEFORE diffToSuggestions on both
+	// LLM paths — text-level repair is load-bearing because the diff can
+	// fuse wanted and unwanted edits into one suggestion. nil = no repair
+	// (byte-identical legacy behaviour). NOT applied to the style pass or
+	// rephrase (intentional rewrites).
+	overEditRules []OverEditRule
 	// sentenceCache memoizes per-sentence suggestion sets. nil => legacy
 	// whole-text path; populated by SetSentenceCache to enable the sentence
 	// pipeline (segment + per-sentence cache lookup + span reassembly).
@@ -74,6 +81,10 @@ func (s *Service) SetSentenceCache(size int) { s.sentenceCache = newSentenceCach
 // finalize time to drop LLM re-flags of words the user has added. Optional;
 // nil (zero value) = no filtering.
 func (s *Service) SetWordAllowlist(a WordAllowlist) { s.allowlist = a }
+
+// SetOverEditRules injects the LLM over-edit repair chain applied to LLM
+// grammar output before diffing (see overedit.go). Optional; nil = no repair.
+func (s *Service) SetOverEditRules(rules []OverEditRule) { s.overEditRules = rules }
 
 // Correct runs the full pipeline and returns suggestions. It never mutates
 // the text. Fast corrector errors and LLM escalation errors are best-effort
@@ -188,7 +199,11 @@ func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, e
 			// Diff the LLM output, then re-attach Harper's spelling/punctuation
 			// categories onto overlapping edits (the diff is otherwise all
 			// CategoryGrammar). Display-only; does not change applied text.
-			all = propagateFastCategories(diffToSuggestions(req.Text, strings.TrimSpace(llmText)), fast)
+			// The over-edit repair chain runs FIRST (text-level, see
+			// overedit.go) so a fused wanted+unwanted edit is fixed before
+			// the diff splits it into suggestions.
+			repaired := s.repairOverEdits(req.Text, strings.TrimSpace(llmText))
+			all = propagateFastCategories(diffToSuggestions(req.Text, repaired), fast)
 		}
 	}
 
@@ -292,6 +307,7 @@ func (s *Service) llmOnlySuggestions(ctx context.Context, req Request) ([]Sugges
 		return nil, fmt.Errorf("llm output suspiciously short (%d bytes for %d-byte input); discarding",
 			len(corrected), len(req.Text))
 	}
+	corrected = s.repairOverEdits(req.Text, corrected)
 	return diffToSuggestions(req.Text, corrected), nil
 }
 
@@ -491,6 +507,16 @@ func applyAll(text string, sugs []Suggestion) string {
 		out = sugs[i].Apply(out)
 	}
 	return out
+}
+
+// repairOverEdits runs the over-edit rule chain over the LLM output. Pure
+// string repair: each rule reverts its over-edit class toward the original
+// or returns the text unchanged.
+func (s *Service) repairOverEdits(original, corrected string) string {
+	for _, rule := range s.overEditRules {
+		corrected = rule(original, corrected)
+	}
+	return corrected
 }
 
 // dominantModel returns the most-frequent Model in sugs. On a tie, ModelLLM
