@@ -36,6 +36,9 @@ export interface PopoverOptions {
     onIgnore: () => void
     /** Spelling-only callback; the button is hidden for other categories. */
     onAddToDictionary?: (word: string) => void
+    /** Fast-path preview: render Apply disabled with a "Checking…" label.
+     *  The final frame re-renders the popover with preview unset. */
+    preview?: boolean
 }
 
 export interface PopoverHandle {
@@ -251,8 +254,8 @@ function renderInnerHTML(label: string, badge: string, opts: PopoverOptions): st
         ${opts.message ? `<div class="gf-panel__message">${escapeText(opts.message)}</div>` : ''}
         <div class="gf-panel__diff">${diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion)}</div>
         <div class="gf-panel__actions">
-            <button class="gf-panel__btn gf-panel__btn--primary" data-action="apply" type="button">
-                Apply
+            <button class="gf-panel__btn gf-panel__btn--primary" data-action="apply" type="button"${opts.preview ? ' disabled' : ''}>
+                ${opts.preview ? 'Checking…' : 'Apply'}
             </button>
             ${
                 hasExtras
@@ -280,6 +283,10 @@ function bindActions(panel: HTMLElement, opts: PopoverOptions, dismiss: () => vo
         event.stopPropagation()
         const action = btn.dataset.action
         if (action === 'apply') {
+            // Defense in depth behind the disabled attribute: a preview frame
+            // is display-only; the final frame re-renders the popover with
+            // preview unset, at which point Apply becomes live.
+            if (opts.preview) return
             dismiss()
             opts.onApply(0)
             return

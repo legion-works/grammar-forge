@@ -6,7 +6,7 @@
 // automatically on script invalidation.
 //
 // All non-trivial logic lives in the lower layers; this file is wiring. The
-// pipeline (runCheck + verifyByteSpan + deriveCategory + isSpanStillValid)
+// pipeline (buildRenderableItems + verifyByteSpan + deriveCategory + isSpanStillValid)
 // keeps the per-text transform pure and testable in @/lib/pipeline.
 
 import { createFieldObserver } from '@/input/observer'
@@ -16,7 +16,12 @@ import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { isUndoRedoKeydown } from '@/input/undo-redo'
 import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
-import { isSpanStillValid, runCheck, tallyByCategory, type RenderableItem } from '@/lib/pipeline'
+import {
+    buildRenderableItems,
+    isSpanStillValid,
+    tallyByCategory,
+    type RenderableItem,
+} from '@/lib/pipeline'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
@@ -54,7 +59,7 @@ import {
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
 import { debugLog, debugWarn, setDebugLoggingEnabled } from '@/lib/debug-log'
 import type { ContentScriptContext } from 'wxt/utils/content-script-context'
-import type { Category } from '@/api/types'
+import type { Category, CorrectResponse } from '@/api/types'
 
 export default defineContentScript({
     matches: ['<all_urls>'],
@@ -647,24 +652,35 @@ function wireRuntime(
             // setHandles(new) — which destroys the previous set. Clearing here
             // instead would blink the highlights off for the whole round-trip.
             const seq = ++state.checkSeq
-            try {
-                const s = getSettings()
-                const { items } = await runCheck(text, {
-                    correct: (t) =>
-                        runtime.client.correct({ text: t, picky: s.picky, source: 'browser' }),
-                })
+            const s = getSettings()
+            // Render one frame (fast preview or final). Stale frames are
+            // dropped by the same seq guard as before; the fast frame and
+            // final frame of one check share a seq, so the final always
+            // supersedes its own preview but never a NEWER check's frames.
+            const renderStage = (res: CorrectResponse, preview: boolean): void => {
                 if (!ctx.isValid) return
-                // Drop a stale result: a newer check superseded this one while
-                // its request was in flight (e.g. apply → direct re-check +
-                // debounced re-check race). Only the latest check renders.
                 if (seq !== state.checkSeq) return
+                const { items } = buildRenderableItems(text, res, {}, { preview })
                 state.items = items
                 renderField(el, overlay.root, state)
                 updateFocusedCounts(runtime, el)
+            }
+            try {
+                const final = await runtime.client.correctStream(
+                    { text, picky: s.picky, source: 'browser' },
+                    (fast) => renderStage(fast, true),
+                )
+                renderStage(final, false)
             } catch (e) {
-                // The bridge is unreachable or rejected the URL. Surface nothing
-                // intrusive — the popover/pill stays in its prior state. A
-                // warning is the only signal; the popup status mirrors this.
+                // The bridge is unreachable, rejected the URL, or the stream
+                // errored after the preview. Clear any preview underlines so
+                // no un-actionable highlights linger, then surface nothing
+                // intrusive (matches the previous behaviour).
+                if (ctx.isValid && seq === state.checkSeq && state.items.some((i) => i.preview)) {
+                    state.items = []
+                    renderField(el, overlay.root, state)
+                    updateFocusedCounts(runtime, el)
+                }
                 debugWarn('check', 'correct() failed', e)
             }
         }
@@ -1438,6 +1454,7 @@ function wireRuntime(
                 item.category === 'spelling' && item.diffOriginal.trim().length > 0
                     ? (word: string) => void addWordToDictionary(el, item, word)
                     : undefined,
+            preview: item.preview,
             onApply: (replacementIndex: number) => {
                 const live = getText(el)
                 if (!isSpanStillValid(live, item)) {

@@ -175,6 +175,20 @@ describe('showPopover', () => {
         const popoverAttr = hasPopoverApi ? panel.getAttribute('popover') : null
         expect(popoverAttr).toBe('manual')
     })
+
+    it('preview frame: Apply is disabled, labelled "Checking…", and onApply is not invoked', () => {
+        const opts = mkOptions({ preview: true })
+        showPopover(root, opts)
+        const apply = root.querySelector<HTMLButtonElement>('[data-action="apply"]')
+        expect(apply).not.toBeNull()
+        expect(apply?.disabled).toBe(true)
+        expect(apply?.textContent?.trim()).toBe('Checking…')
+        // Clicking a disabled button is a no-op in real browsers, but
+        // dispatchEvent('click') still fires the listener — the guard
+        // inside bindActions is the actual safety net.
+        apply?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(opts.onApply).not.toHaveBeenCalled()
+    })
 })
 
 describe('showPopover outside-click dismiss', () => {
