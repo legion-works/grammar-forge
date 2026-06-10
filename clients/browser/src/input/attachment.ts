@@ -1,8 +1,9 @@
-// Per-field lifecycle owner (original to GrammarForge). Encapsulates the listeners (input/blur) + the
-// per-field debouncer + the (separately-rendered) overlay handle hooks for a
-// single editable element. Returned `detach()` is idempotent and releases
-// EVERYTHING bound to this field, so a chatty SPA removing+re-inserting
-// editors doesn't leak listeners or skew the popup field count.
+// Per-field lifecycle owner (original to GrammarForge). Encapsulates the listeners
+// (input/beforeinput/blur) + the per-field debouncer + the
+// (separately-rendered) overlay handle hooks for a single editable element.
+// Returned `detach()` is idempotent and releases EVERYTHING bound to this
+// field, so a chatty SPA removing+re-inserting editors doesn't leak listeners
+// or skew the popup field count.
 //
 // Key invariants:
 //   - listeners are added on attach and removed on detach
@@ -14,6 +15,12 @@
 //   - detach() destroys any overlay handles that were registered via
 //     setHandles() so the DOM is cleaned up even if the content script
 //     hasn't yet been able to re-render
+//   - `beforeinput` is observed at capture phase (not bubble) so editors
+//     that stop propagation in the bubble phase — common in framework
+//     rich-text editors (Slate / Lexical) — still reach the gate. Those
+//     editors fire `beforeinput` with proper inputType but typically NO
+//     native `input` event, so this listener is the ONLY one that sees
+//     their edits.
 
 import { createDebouncer } from '@/input/debounce'
 import { getText } from '@/input/text'
@@ -40,16 +47,22 @@ export interface FieldAttachmentOptions {
     /** Synchronous blur callback (e.g. flush pending signals). */
     onBlur: () => void
     /**
-     * Optional gate consulted on EVERY `input` event before a debounced check
-     * is scheduled. Receives the event's `inputType` ('' when unavailable) and
-     * returns whether to schedule the check. This is the SINGLE place the input
+     * Optional gate consulted on EVERY edit-driving event (`input` AND
+     * `beforeinput`, capture phase) before a debounced check is scheduled.
+     * Receives the event's `inputType` ('' when unavailable) and returns
+     * whether to schedule the check. This is the SINGLE place the input
      * policy lives — the orchestrator implements realtime-mode / paste-skip /
      * paste-grace here (and may perform side effects such as arming a grace
-     * timer). When omitted, every input event schedules a check (legacy
-     * behaviour). NOTE: this is now the only `input` listener on the field —
-     * the orchestrator no longer installs a separate capture-phase gate, so
-     * this gate is authoritative (previously a duplicate listener scheduled a
+     * timer). When omitted, every event schedules a check (legacy behaviour).
+     * NOTE: this is now the only edit-event listener on the field — the
+     * orchestrator no longer installs a separate capture-phase gate, so this
+     * gate is authoritative (previously a duplicate listener scheduled a
      * check regardless of the gate, silently breaking paste-skip / ondemand).
+     * Slate / Lexical editors fire `beforeinput` only (no native `input`);
+     * the gate is therefore consulted on those editors' edits via this path.
+     * Editors that fire BOTH events for one edit consult the gate twice
+     * (idempotent side effects — re-arming realtime / re-arming a paste
+     * grace are safe) and the result coalesces in the shared debouncer.
      */
     onInputEvent?: (inputType: string) => boolean
 }
@@ -104,7 +117,9 @@ export function createFieldAttachment(
     let detached = false
     let handles: FieldHandles = {}
 
-    const onInput = (e: Event): void => {
+    // Shared by the `input` and `beforeinput` listeners — same gate + same
+    // debouncer. Returns true when a debounced check was scheduled.
+    const handleEditEvent = (e: Event): void => {
         if (detached) return
         if (options.onInputEvent) {
             // The orchestrator's gate decides (realtime-mode / paste-skip /
@@ -116,6 +131,16 @@ export function createFieldAttachment(
         }
         debouncedRun()
     }
+    const onInput = (e: Event): void => handleEditEvent(e)
+    // Slate / Lexical editors fire `beforeinput` (with proper inputType, and
+    // the event still propagates) but NO native `input` event — verified live
+    // 2026-06-10: typing on discord.com's Slate composer produced beforeinput
+    // only, leaving the browser attachment's input-driven checking dead. The
+    // capture phase lets us observe before the editor swallows propagation on
+    // some sites. Editors that DO fire both events for one edit coalesce in
+    // the shared debouncer; the gate is consulted twice per edit, but its
+    // side effects (realtime-arm, paste-grace arm) are idempotent.
+    const onBeforeInput = (e: Event): void => handleEditEvent(e)
     const onBlur = (): void => {
         if (detached) return
         options.onBlur()
@@ -133,6 +158,7 @@ export function createFieldAttachment(
     }
 
     el.addEventListener('input', onInput)
+    el.addEventListener('beforeinput', onBeforeInput, { capture: true })
     el.addEventListener('blur', onBlur)
 
     // Run the TRANSIENT destroy hook (popover only) of a handle set. The
@@ -202,6 +228,7 @@ export function createFieldAttachment(
         if (detached) return
         detached = true
         el.removeEventListener('input', onInput)
+        el.removeEventListener('beforeinput', onBeforeInput, { capture: true })
         el.removeEventListener('blur', onBlur)
         debouncedRun.cancel()
         // Destroy whatever overlay handles are currently bound — the transient

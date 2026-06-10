@@ -318,6 +318,104 @@ describe('createFieldAttachment', () => {
         att.detach()
     })
 
+    it('a beforeinput-only field (no native input event) schedules a debounced check', () => {
+        // Slate / Lexical editors fire `beforeinput` only — verified live
+        // 2026-06-10 on discord.com. The attachment must consult the gate +
+        // schedule the debounced check from this event alone, otherwise the
+        // browser's input-driven path is dead on those editors.
+        const ta = document.createElement('textarea')
+        ta.value = 'a'
+        document.body.appendChild(ta)
+        const opts = mkOptions()
+        const att = createFieldAttachment(
+            ta,
+            opts,
+            () => 0,
+            () => {},
+        )
+
+        ta.value = 'ab'
+        ta.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText' }))
+        expect(opts.onRunCheck).not.toHaveBeenCalled()
+        vi.advanceTimersByTime(250)
+        expect(opts.onRunCheck).toHaveBeenCalledTimes(1)
+        const call = (opts.onRunCheck as ReturnType<typeof vi.fn>).mock.calls[0] as
+            | [HTMLElement, string]
+            | undefined
+        expect(call?.[1]).toBe('ab')
+        att.detach()
+    })
+
+    it('a beforeinput+input pair for one edit coalesces into one debounced run', () => {
+        // Editors that fire BOTH events for a single edit (e.g. plain
+        // contenteditables that also fire input) must not double-schedule
+        // — the shared debouncer coalesces. The gate is consulted on each
+        // event; its side effects are idempotent re-arms.
+        const ta = document.createElement('textarea')
+        ta.value = 'a'
+        document.body.appendChild(ta)
+        const gate = vi.fn<(t: string) => boolean>(() => true)
+        const opts = mkOptions({ onInputEvent: gate })
+        const att = createFieldAttachment(
+            ta,
+            opts,
+            () => 0,
+            () => {},
+        )
+
+        ta.value = 'ab'
+        ta.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText' }))
+        ta.dispatchEvent(new InputEvent('input', { inputType: 'insertText' }))
+        vi.advanceTimersByTime(250)
+        // Both events reached the gate, but the debouncer coalesces.
+        expect(gate).toHaveBeenCalledTimes(2)
+        expect(gate.mock.calls.map((c) => c[0])).toEqual(['insertText', 'insertText'])
+        expect(opts.onRunCheck).toHaveBeenCalledTimes(1)
+        att.detach()
+    })
+
+    it('the onInputEvent gate can veto a beforeinput event', () => {
+        // A paste-grace (or paused) gate returning false must suppress the
+        // debounced check on the beforeinput path exactly as it does on
+        // the input path. Same code path; same gate.
+        const ta = document.createElement('textarea')
+        document.body.appendChild(ta)
+        const gate = vi.fn<(t: string) => boolean>(() => false)
+        const opts = mkOptions({ onInputEvent: gate })
+        const att = createFieldAttachment(
+            ta,
+            opts,
+            () => 0,
+            () => {},
+        )
+        ta.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertFromPaste' }))
+        vi.advanceTimersByTime(500)
+        expect(gate).toHaveBeenCalledWith('insertFromPaste')
+        expect(opts.onRunCheck).not.toHaveBeenCalled()
+        att.detach()
+    })
+
+    it('detach() releases the beforeinput listener (no further events fire)', () => {
+        // Regression guard: the beforeinput listener must be removed on
+        // detach just like input/blur — otherwise a leaked capture-phase
+        // listener keeps firing on detached fields.
+        const ta = document.createElement('textarea')
+        document.body.appendChild(ta)
+        const opts = mkOptions()
+        const att = createFieldAttachment(
+            ta,
+            opts,
+            () => 0,
+            () => {},
+        )
+        att.detach()
+
+        ta.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText' }))
+        vi.advanceTimersByTime(500)
+        expect(opts.onRunCheck).not.toHaveBeenCalled()
+        expect(att.isDetached()).toBe(true)
+    })
+
     it('cancelPending() drops a scheduled debounced check', () => {
         const ta = document.createElement('textarea')
         ta.value = 'a'
