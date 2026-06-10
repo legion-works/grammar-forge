@@ -9,6 +9,7 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -136,7 +137,14 @@ func renderBlock(data correction.PersonalizationData) Block {
 	}
 	text := string(b)
 	if len(text) > 2000 {
-		text = text[:2000]
+		// Truncate on the last COMPLETE example line within the cap: a
+		// mid-rune cut yields invalid UTF-8 and a mid-line cut leaves a
+		// dangling half-instruction in the system prompt.
+		cut := strings.LastIndexByte(text[:2000], '\n')
+		if cut < 0 {
+			return Block{}
+		}
+		text = text[:cut+1]
 	}
 	return Block{text: text}
 }

@@ -3,10 +3,12 @@ package personalization
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/grammarforge/bridge/internal/correction"
 	"github.com/stretchr/testify/require"
@@ -360,4 +362,28 @@ func countExampleLines(s string) int {
 		}
 	}
 	return n
+}
+
+// Regression: the 2000-byte prompt cap was historically applied as a
+// raw byte slice (`text[:2000]`), which silently split a multibyte UTF-8
+// rune and fed the LLM invalid UTF-8. Even when a single example was
+// short, the cut could land MID-LINE, leaving a dangling half-instruction
+// (e.g. `Correct "abc" to "def` with no closing quote/period). The
+// truncation must land on a complete example line AND keep the byte
+// sequence valid UTF-8.
+func TestRenderBlockTruncatesOnLineBoundaryNotMidRune(t *testing.T) {
+	// Build pairs long enough to exceed the 2000-byte cap, full of multi-byte
+	// runes so a naive byte slice would cut mid-codepoint.
+	long := strings.Repeat("café naïve résumé ", 60) // ~3 bytes/char accents
+	data := correction.PersonalizationData{
+		Accepted: []correction.EditPair{
+			{Original: long, Suggestion: long, Count: 1},
+			{Original: long, Suggestion: long, Count: 1},
+		},
+	}
+	b := renderBlock(data)
+	require.NotEmpty(t, b.String())
+	require.LessOrEqual(t, len(b.String()), 2000)
+	require.True(t, utf8.ValidString(b.String()), "truncation must not cut mid-rune")
+	require.True(t, strings.HasSuffix(b.String(), "\n"), "truncation must end on a complete example line")
 }
