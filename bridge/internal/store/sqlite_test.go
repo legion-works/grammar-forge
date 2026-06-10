@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/grammarforge/bridge/internal/correction"
 	"github.com/stretchr/testify/require"
@@ -184,6 +185,35 @@ func TestOpenEnablesWALAndBusyTimeout(t *testing.T) {
 	var timeout int
 	require.NoError(t, s.db.QueryRow(`PRAGMA busy_timeout`).Scan(&timeout))
 	require.Equal(t, 5000, timeout)
+}
+
+func TestPruneOlderThanKeepsSignaledRows(t *testing.T) {
+	s := newTestStore(t)
+	// Old row WITH a signal (must survive — it is training data).
+	_, keepIDs, err := s.LogCorrection(context.Background(), correction.Event{
+		Source: "browser", Original: "keep", Suggestion: "kept", Model: "llm",
+		Edits: []correction.EditRecord{{Original: "keep", Replacement: "kept", Model: "llm"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, s.LogSignal(context.Background(), keepIDs[0], correction.SignalAccepted))
+	// Old row WITHOUT a signal (must be pruned).
+	_, _, err = s.LogCorrection(context.Background(), correction.Event{
+		Source: "browser", Original: "drop", Suggestion: "dropped", Model: "llm",
+		Edits: []correction.EditRecord{{Original: "drop", Replacement: "dropped", Model: "llm"}},
+	})
+	require.NoError(t, err)
+	// Backdate both corrections 100 days.
+	cut := time.Now().AddDate(0, 0, -100).UnixMilli()
+	_, err = s.db.Exec(`UPDATE corrections SET ts = ?`, cut)
+	require.NoError(t, err)
+
+	require.NoError(t, s.PruneOlderThan(90))
+	n, err := s.CountCorrections(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n)
+	var edits int
+	require.NoError(t, s.db.QueryRow(`SELECT COUNT(*) FROM edits`).Scan(&edits))
+	require.Equal(t, 1, edits, "orphaned edits of pruned corrections must go too")
 }
 
 func TestLogCorrectionInsertsEditsAndReturnsIDs(t *testing.T) {

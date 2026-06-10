@@ -81,6 +81,10 @@ type Config struct {
 	// to the default rather than zero or panicking.
 	PersonalizationEnabled bool
 	PersonalizationTTL     time.Duration
+
+	// RetentionDays prunes unsignaled correction rows older than this many
+	// days at startup (0 = keep forever). Default 90.
+	RetentionDays int
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -169,6 +173,8 @@ func Load(getenv Getenv) Config {
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),
 		PersonalizationTTL:     getDuration("GF_PERSONALIZATION_TTL", 5*time.Minute),
+
+		RetentionDays: getInt("GF_RETENTION_DAYS", 90),
 	}
 }
 

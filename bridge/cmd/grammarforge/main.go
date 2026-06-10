@@ -47,6 +47,10 @@ func main() {
 	}
 	defer func() { _ = st.Close() }()
 
+	if err := st.PruneOlderThan(cfg.RetentionDays); err != nil {
+		slog.Warn("retention prune failed", "err", err)
+	}
+
 	fast, cleanup := buildFastPath(cfg)
 	defer cleanup()
 

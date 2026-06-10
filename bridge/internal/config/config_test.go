@@ -193,3 +193,30 @@ func TestLoadRephraseBackend(t *testing.T) {
 	require.Equal(t, "claude-x", c2.RephraseModel)
 	require.Equal(t, "secret", c2.RephraseAPIKey)
 }
+
+func TestLoad_RetentionDaysDefaults90(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, 90, cfg.RetentionDays,
+		"RetentionDays should default to 90 days when GF_RETENTION_DAYS is unset")
+}
+
+func TestLoad_RetentionDaysOverride(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_RETENTION_DAYS" {
+			return "30", true
+		}
+		return "", false
+	})
+	require.Equal(t, 30, cfg.RetentionDays)
+}
+
+func TestLoad_RetentionDaysZeroDisablesPruning(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_RETENTION_DAYS" {
+			return "0", true
+		}
+		return "", false
+	})
+	require.Equal(t, 0, cfg.RetentionDays,
+		"GF_RETENTION_DAYS=0 must disable pruning, not keep the 90-day default")
+}

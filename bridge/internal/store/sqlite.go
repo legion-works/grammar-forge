@@ -193,5 +193,32 @@ func (s *SQLite) queryEditPairs(ctx context.Context, query string) ([]correction
 	return out, nil
 }
 
+// PruneOlderThan deletes correction events older than `days` whose edits
+// carry NO user signal (signaled edits are the learning-loop training set
+// and are kept indefinitely). Orphaned edits are removed with their parent.
+// days <= 0 disables pruning. The corrections DB is the most sensitive file
+// in the system — it holds everything the user typed — so unbounded growth
+// is a privacy liability, not just a disk one.
+func (s *SQLite) PruneOlderThan(days int) error {
+	if days <= 0 {
+		return nil
+	}
+	cutoff := time.Now().AddDate(0, 0, -days).UnixMilli()
+	if _, err := s.db.Exec(
+		`DELETE FROM corrections
+		 WHERE ts < ?
+		   AND id NOT IN (SELECT DISTINCT correction_id FROM edits WHERE signal IS NOT NULL)`,
+		cutoff,
+	); err != nil {
+		return fmt.Errorf("prune corrections: %w", err)
+	}
+	if _, err := s.db.Exec(
+		`DELETE FROM edits WHERE correction_id NOT IN (SELECT id FROM corrections)`,
+	); err != nil {
+		return fmt.Errorf("prune orphaned edits: %w", err)
+	}
+	return nil
+}
+
 // Close closes the database.
 func (s *SQLite) Close() error { return s.db.Close() }
