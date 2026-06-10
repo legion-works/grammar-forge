@@ -220,3 +220,30 @@ func TestLoad_RetentionDaysZeroDisablesPruning(t *testing.T) {
 	require.Equal(t, 0, cfg.RetentionDays,
 		"GF_RETENTION_DAYS=0 must disable pruning, not keep the 90-day default")
 }
+
+func TestLoad_SentenceCacheSizeDefaults2048(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, 2048, cfg.SentenceCacheSize,
+		"SentenceCacheSize should default to 2048 entries when GF_SENTENCE_CACHE_SIZE is unset")
+}
+
+func TestLoad_SentenceCacheSizeOverride(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_SENTENCE_CACHE_SIZE" {
+			return "512", true
+		}
+		return "", false
+	})
+	require.Equal(t, 512, cfg.SentenceCacheSize)
+}
+
+func TestLoad_SentenceCacheSizeZeroDisables(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_SENTENCE_CACHE_SIZE" {
+			return "0", true
+		}
+		return "", false
+	})
+	require.Equal(t, 0, cfg.SentenceCacheSize,
+		"GF_SENTENCE_CACHE_SIZE=0 must disable the sentence pipeline, not keep the 2048 default")
+}

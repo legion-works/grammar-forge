@@ -59,6 +59,11 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 			// message.content empty for a single-shot grammar correction. This
 			// field disables thinking; backends/models without it ignore it.
 			"chat_template_kwargs": map[string]any{"enable_thinking": false},
+			// llama.cpp KV prefix reuse: the system prompt (large, stable,
+			// shared by every sentence-level request) is cached server-side
+			// so TTFT drops to ~the user-sentence tokens. Non-llama.cpp
+			// OpenAI-compatible backends ignore unknown fields.
+			"cache_prompt": true,
 		}
 	} else {
 		endpoint = "/completions"

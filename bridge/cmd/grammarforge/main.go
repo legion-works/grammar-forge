@@ -81,6 +81,9 @@ func main() {
 			EscalateOnFastEdit:    cfg.EscalateOnFastEdit,
 		},
 	)
+	if cfg.SentenceCacheSize > 0 {
+		svc.SetSentenceCache(cfg.SentenceCacheSize)
+	}
 
 	// Inject the rephrase provider factory (this is where internal/llm is
 	// allowed — the correction core stays transport-free). The api_key is

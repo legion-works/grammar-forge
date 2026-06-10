@@ -85,6 +85,13 @@ type Config struct {
 	// RetentionDays prunes unsignaled correction rows older than this many
 	// days at startup (0 = keep forever). Default 90.
 	RetentionDays int
+
+	// SentenceCacheSize enables the per-sentence pipeline with an LRU of
+	// this many sentence entries (0 disables; default 2048). With a non-zero
+	// size the service segments multi-sentence input, checks each sentence
+	// independently, and serves unchanged sentences from the cache, collapsing
+	// steady-state typing latency to ~one sentence's cost.
+	SentenceCacheSize int
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -175,6 +182,8 @@ func Load(getenv Getenv) Config {
 		PersonalizationTTL:     getDuration("GF_PERSONALIZATION_TTL", 5*time.Minute),
 
 		RetentionDays: getInt("GF_RETENTION_DAYS", 90),
+
+		SentenceCacheSize: getInt("GF_SENTENCE_CACHE_SIZE", 2048),
 	}
 }
 

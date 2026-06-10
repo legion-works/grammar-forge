@@ -227,3 +227,18 @@ func TestCompleteSendsSeedOnBothPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestCompleteChatSendsCachePrompt(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	_, err := c.Complete(context.Background(), correction.Prompt{
+		System: "sys", User: "txt", Template: correction.TemplateChatInstruct,
+	})
+	require.NoError(t, err)
+	require.Equal(t, true, gotBody["cache_prompt"], "chat payload must request llama.cpp prompt-prefix caching")
+}
