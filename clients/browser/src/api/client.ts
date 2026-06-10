@@ -1,4 +1,5 @@
 import { isLocalBridgeUrl } from '@/api/url'
+import { parseSSEStream } from '@/api/sse'
 import type {
     CorrectRequest,
     CorrectResponse,
@@ -10,6 +11,10 @@ import type {
 // bridge's own backend timeout is 30s, so mirror it client-side.
 const REPHRASE_TIMEOUT_MS = 30_000
 
+/** Distinguishes an in-band bridge `error` event (real pipeline failure —
+ *  propagate) from transport/parse failures (fall back to /correct). */
+class BridgeStreamError extends Error {}
+
 export interface SignalEvent {
     id?: number
     action: 'accepted' | 'rejected' | 'ignored'
@@ -19,6 +24,9 @@ export interface SignalEvent {
 
 export class BridgeClient {
     private readonly inFlightCorrect = new Map<string, Promise<CorrectResponse>>()
+    /** Remembered after the first failed probe so old bridges (no
+     *  /correct/stream route) pay exactly one extra request per page. */
+    private streamUnsupported = false
 
     constructor(
         private baseUrl: string,
@@ -101,6 +109,79 @@ export class BridgeClient {
         })
         this.inFlightCorrect.set(key, p)
         return p
+    }
+
+    /**
+     * Streaming variant of correct(): POST /correct/stream (SSE). onFast is
+     * invoked with the fast-path preview frame (suggestions without ids —
+     * preview-only, never signalable); the returned promise resolves with
+     * the final frame, which is exactly the /correct response shape.
+     * Transport/format failures (missing route, wrong content type, parse
+     * errors) fall back to plain correct() and are remembered for the
+     * session. An in-band `error` event is a REAL pipeline failure and
+     * rejects without marking the stream unsupported.
+     */
+    async correctStream(
+        req: CorrectRequest,
+        onFast: (res: CorrectResponse) => void,
+    ): Promise<CorrectResponse> {
+        if (this.streamUnsupported) return this.correct(req)
+        this.guard()
+        const ctrl = new AbortController()
+        const t = setTimeout(() => ctrl.abort(), this.timeoutMs)
+        try {
+            let r: Response
+            try {
+                r = await fetch(`${this.baseUrl}/correct/stream`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify(req),
+                    signal: ctrl.signal,
+                })
+            } catch (e) {
+                // Network-level failure: correct() would fail identically —
+                // do not mark unsupported, just surface it.
+                throw e instanceof Error ? e : new Error(String(e))
+            }
+            if (!r.ok || !r.headers.get('content-type')?.includes('text/event-stream') || !r.body) {
+                this.streamUnsupported = true
+                return await this.correct(req)
+            }
+            let final: CorrectResponse | undefined
+            try {
+                for await (const ev of parseSSEStream(r.body)) {
+                    if (ev.event === 'fast') {
+                        try {
+                            onFast(JSON.parse(ev.data) as CorrectResponse)
+                        } catch {
+                            // A malformed fast frame only costs the preview.
+                        }
+                    } else if (ev.event === 'final') {
+                        final = JSON.parse(ev.data) as CorrectResponse
+                    } else if (ev.event === 'error') {
+                        let message = 'bridge stream error'
+                        try {
+                            message = (JSON.parse(ev.data) as { error?: string }).error ?? message
+                        } catch {
+                            // keep the generic message
+                        }
+                        throw new BridgeStreamError(message)
+                    }
+                }
+            } catch (e) {
+                if (e instanceof BridgeStreamError) throw new Error(e.message)
+                // Malformed stream: fall back and remember.
+                this.streamUnsupported = true
+                return await this.correct(req)
+            }
+            if (!final) {
+                this.streamUnsupported = true
+                return await this.correct(req)
+            }
+            return final
+        } finally {
+            clearTimeout(t)
+        }
     }
 
     // The bridge POST /signal takes a single { id, signal } per call (strict

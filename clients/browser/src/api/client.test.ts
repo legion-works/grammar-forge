@@ -240,3 +240,102 @@ describe('BridgeClient.dictionary', () => {
         expect((fetchMock.mock.calls[0]![1] as RequestInit).method).toBe('DELETE')
     })
 })
+
+const FINAL = {
+    original: 'I has a cat',
+    suggestions: [
+        { id: 7, span: { start: 2, end: 5 }, replacement: 'have', model: 'llm' as const },
+    ],
+    score: 95,
+}
+const FAST = {
+    original: 'I has a cat',
+    suggestions: [{ span: { start: 2, end: 5 }, replacement: 'have', model: 'gector' as const }],
+    score: 90,
+    stage: 'fast',
+}
+
+function sseResponse(body: string): Response {
+    return new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+    })
+}
+
+describe('BridgeClient.correctStream', () => {
+    it('delivers the fast frame then resolves with final', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi
+                .fn<typeof fetch>()
+                .mockResolvedValue(
+                    sseResponse(
+                        `event: fast\ndata: ${JSON.stringify(FAST)}\n\nevent: final\ndata: ${JSON.stringify(FINAL)}\n\n`,
+                    ),
+                ),
+        )
+        const client = new BridgeClient('http://localhost:8000', false)
+        const fastFrames: unknown[] = []
+        const final = await client.correctStream({ text: 'I has a cat', source: 'browser' }, (f) =>
+            fastFrames.push(f),
+        )
+        expect(fastFrames).toHaveLength(1)
+        expect(final).toEqual(FINAL)
+    })
+
+    it('falls back to /correct on 404 and remembers', async () => {
+        const fetchMock = vi
+            .fn<typeof fetch>()
+            // first stream attempt: 404
+            .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+            // fallback /correct
+            .mockResolvedValueOnce(new Response(JSON.stringify(FINAL), { status: 200 }))
+            // second call goes straight to /correct (remembered)
+            .mockResolvedValueOnce(new Response(JSON.stringify(FINAL), { status: 200 }))
+        vi.stubGlobal('fetch', fetchMock)
+        const client = new BridgeClient('http://localhost:8000', false)
+        const onFast = vi.fn<() => void>()
+        await client.correctStream({ text: 'a b c', source: 'browser' }, onFast)
+        await client.correctStream({ text: 'd e f', source: 'browser' }, onFast)
+        expect(onFast).not.toHaveBeenCalled()
+        const urls = fetchMock.mock.calls.map((c) => String(c[0]))
+        expect(urls[0]).toContain('/correct/stream')
+        expect(urls[1]).toContain('/correct')
+        expect(urls[1]).not.toContain('/stream')
+        expect(urls[2]).toContain('/correct')
+        expect(urls[2]).not.toContain('/stream')
+    })
+
+    it('falls back when the response is not an event stream', async () => {
+        const fetchMock = vi
+            .fn<typeof fetch>()
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify(FINAL), {
+                    status: 200,
+                    headers: { 'content-type': 'application/json' },
+                }),
+            )
+            .mockResolvedValueOnce(new Response(JSON.stringify(FINAL), { status: 200 }))
+        vi.stubGlobal('fetch', fetchMock)
+        const client = new BridgeClient('http://localhost:8000', false)
+        const final = await client.correctStream({ text: 'a b c', source: 'browser' }, () => {})
+        expect(final).toEqual(FINAL)
+    })
+
+    it('throws on an in-band bridge error event without falling back', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi
+                .fn<typeof fetch>()
+                .mockResolvedValue(
+                    sseResponse(
+                        `event: fast\ndata: ${JSON.stringify(FAST)}\n\nevent: error\ndata: {"error":"correction backend unavailable"}\n\n`,
+                    ),
+                ),
+        )
+        const client = new BridgeClient('http://localhost:8000', false)
+        await expect(
+            client.correctStream({ text: 'a b c', source: 'browser' }, () => {}),
+        ).rejects.toThrow(/unavailable/)
+    })
+})
