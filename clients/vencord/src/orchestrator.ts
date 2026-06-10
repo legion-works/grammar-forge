@@ -340,6 +340,24 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         }
         fields.set(el, st)
         trackedFields.add(el)
+
+        // Discord's Slate editor intercepts `beforeinput` and applies the
+        // edit through its own model — the browser never fires a native
+        // `input` event on the composer (verified live 2026-06-10: typing
+        // produced beforeinput only). The attachment's input listener is
+        // therefore dead on Discord; drive the SAME gate + debouncer from a
+        // capture-phase beforeinput listener. The text is read at debounce
+        // FIRE time (500ms later), well after Slate has reconciled the DOM.
+        // On editors that DO emit input events both paths coalesce in the
+        // attachment's debouncer — no double-checking.
+        const onFieldBeforeInput = (e: Event): void => {
+            const inputType = (e as InputEvent).inputType ?? ''
+            if (onInputEvent(inputType)) attachment.debouncedRun()
+        }
+        el.addEventListener('beforeinput', onFieldBeforeInput, { capture: true })
+        cleanups.push(() =>
+            el.removeEventListener('beforeinput', onFieldBeforeInput, { capture: true }),
+        )
         // Release this field's paste-grace timer on global teardown. The
         // fields map is iterated separately in stop() (detaching each
         // field) — without this mirror, a pending grace could fire a
