@@ -417,6 +417,13 @@ describe('renderStatusButton', () => {
         const recheck = root.querySelector('.gf-pill__recheck svg')
         expect(power).not.toBeNull()
         expect(recheck).not.toBeNull()
+        // NAMESPACE is the load-bearing detail: DOMParser('image/svg+xml') is
+        // a strict XML parser — without xmlns on the constant, the elements
+        // land in NO namespace and the browser renders nothing (live bug:
+        // invisible pill icons). querySelector('svg') matches by local name
+        // regardless, so the structural check alone cannot catch it.
+        expect(power!.namespaceURI).toBe('http://www.w3.org/2000/svg')
+        expect(recheck!.namespaceURI).toBe('http://www.w3.org/2000/svg')
         handle.destroy()
     })
 })

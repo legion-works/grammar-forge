@@ -83,13 +83,19 @@ export interface StatusButtonHandle {
     update: (options: StatusButtonOptions) => void
 }
 
+// NOTE: the xmlns attribute is REQUIRED. svgFromConstant parses these with
+// DOMParser('image/svg+xml') — a strict XML parser that does NOT auto-
+// namespace <svg> the way the HTML parser (innerHTML) did. Without xmlns the
+// elements land in no namespace and the browser renders nothing.
 const POWER_SVG =
-    `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" ` +
+    `fill="none" stroke="currentColor" ` +
     `stroke-width="2.4" stroke-linecap="round" aria-hidden="true">` +
     `<path d="M12 4 L12 12" /><path d="M7.5 6.5 A7 7 0 1 0 16.5 6.5" /></svg>`
 
 const REFRESH_SVG =
-    `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" ` +
+    `fill="none" stroke="currentColor" ` +
     `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
     `<path d="M20 11 A8 8 0 1 0 18.4 16"/><path d="M20 4 L20 11 L13 11"/></svg>`
 
@@ -97,9 +103,18 @@ const REFRESH_SVG =
 // image/svg+xml never executes scripts, and going through it (instead of
 // innerHTML on the live element) keeps the "no innerHTML" rule greppable and
 // makes any future interpolation of these constants an obvious code smell.
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
 function svgFromConstant(doc: Document, svgText: string): SVGElement {
     const parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml')
-    return doc.importNode(parsed.documentElement, true) as unknown as SVGElement
+    const el = parsed.documentElement
+    // Guard the namespace: a constant missing xmlns parses "successfully"
+    // into no-namespace elements that silently render as NOTHING (live bug:
+    // invisible pill icons). Fail loudly at the source instead.
+    if (el.namespaceURI !== SVG_NS) {
+        throw new Error('svgFromConstant: constant must carry xmlns="http://www.w3.org/2000/svg"')
+    }
+    return doc.importNode(el, true) as unknown as SVGElement
 }
 
 /**
