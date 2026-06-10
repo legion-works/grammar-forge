@@ -1428,7 +1428,7 @@ function wireRuntime(
             replacements: item.replacements,
             original: item.original,
             onAddToDictionary:
-                item.category === 'spelling' && !/\s/.test(item.original)
+                item.category === 'spelling' && item.original.trim().length > 0
                     ? (word: string) => void addWordToDictionary(el, item, word)
                     : undefined,
             onApply: (replacementIndex: number) => {
@@ -1553,18 +1553,23 @@ function wireRuntime(
         void rerunFor(el)(getText(el))
     }
 
-    // Add a flagged word to the user dictionary: persist on the bridge, log a
-    // rejected signal for the edit (the personalization negative pool's first
-    // real sender), re-check (the suggestion disappears server-side), and
-    // offer Undo. Bridge-unreachable failures surface via debugWarn only.
+    // Add the flagged word(s) to the user dictionary: persist on the bridge,
+    // log a rejected signal for the edit (the personalization negative pool's
+    // first real sender), re-check (the suggestion disappears server-side —
+    // the bridge suppresses any edit whose span tokens are ALL allowlisted),
+    // and offer Undo. The LLM can merge two adjacent unknown words into ONE
+    // edit, so a multi-token original is split and each token added (the
+    // dictionary stores single words). Bridge-unreachable failures surface
+    // via debugWarn only.
     async function addWordToDictionary(
         el: HTMLElement,
         item: RenderableItem,
         word: string,
     ): Promise<void> {
-        if (!word) return
+        const tokens = [...new Set(word.split(/\s+/).filter((t) => t.length > 0))]
+        if (tokens.length === 0) return
         try {
-            await runtime.client.dictionaryAdd(word)
+            await Promise.all(tokens.map((t) => runtime.client.dictionaryAdd(t)))
         } catch (e) {
             debugWarn('dictionary', 'add failed', e)
             return
@@ -1576,12 +1581,15 @@ function wireRuntime(
             source: 'browser',
         })
         void rerunFor(el)(getText(el))
+        const label =
+            tokens.length === 1
+                ? `Added "${tokens[0]}" to dictionary`
+                : `Added ${tokens.length} words to dictionary`
         showToast(overlay.root, {
-            message: `Added "${word}" to dictionary`,
+            message: label,
             actionLabel: 'Undo',
             onAction: () => {
-                void runtime.client
-                    .dictionaryRemove(word)
+                void Promise.all(tokens.map((t) => runtime.client.dictionaryRemove(t)))
                     .then(() => rerunFor(el)(getText(el)))
                     .catch((e) => debugWarn('dictionary', 'undo remove failed', e))
             },
