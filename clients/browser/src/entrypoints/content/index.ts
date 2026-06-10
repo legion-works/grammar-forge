@@ -344,7 +344,17 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     const initRuntime = (s: Settings): void => {
         if (runtime) return
         const r = (runtime = makeRuntime(s))
-        wireRuntime(ctx, r, () => currentSettings, togglePower, pillPosition)
+        // On (re-)enable, check the field the user was last editing right away
+        // instead of waiting for the next keystroke. lastFocusedField is
+        // tracked across BOTH modes (and while fully disabled), so it holds the
+        // field in play when the user flips the extension/site back on — via
+        // the popup toggle (field still focused) OR the pill Power button
+        // (focus landed on <body> after the button was destroyed). null on
+        // first page load (no focusin yet) => no initial check, behaviour
+        // unchanged. The wired runtime fires the one-shot once the observer
+        // re-attaches that exact field.
+        const initialCheckField = lastFocusedField?.isConnected ? lastFocusedField : null
+        wireRuntime(ctx, r, () => currentSettings, togglePower, pillPosition, initialCheckField)
     }
 
     // Paused-site mode: a MINIMAL runtime — field discovery + focus tracking
@@ -546,8 +556,14 @@ function wireRuntime(
     getSettings: () => Settings,
     togglePower: () => void,
     pillPosition: PillPosition,
+    initialCheckField: HTMLElement | null,
 ): void {
     const { overlay, signalQueue } = runtime
+
+    // One-shot: the field to check immediately on (re-)enable (see initRuntime).
+    // Consumed the first time `attach` re-discovers that exact field, so a
+    // later attach of a different field doesn't trigger a spurious check.
+    let pendingInitialCheck = initialCheckField
 
     // ---- Hover-tooltip lifecycle (shared across fields; one tooltip at a
     // time). The tooltip itself holds no listeners/timers — the grace-delay
@@ -1054,6 +1070,15 @@ function wireRuntime(
         const ro = new ResizeObserver(() => scheduleRemeasureAll())
         ro.observe(el)
         runtime.cleanups.push(() => ro.disconnect())
+
+        // (Re-)enable initial check: if this newly-attached field is the one
+        // the user was last editing when the extension/site was turned back
+        // on, check it now rather than waiting for the next edit. One-shot —
+        // cleared on first match so subsequent attaches don't re-fire.
+        if (pendingInitialCheck && el === pendingInitialCheck) {
+            pendingInitialCheck = null
+            void rerunFor(el)(getText(el))
+        }
     }
 
     const detach = (el: HTMLElement): void => {
