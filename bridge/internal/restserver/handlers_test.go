@@ -305,3 +305,59 @@ func TestCorrectCategoryAndReplacementsJSON(t *testing.T) {
 	require.NotContains(t, body, `"category":""`,
 		"omitempty must not serialise an empty-string category at all")
 }
+
+// fakeDict is a stub DictionaryStore for the /dictionary route tests. It
+// records the last add/remove for assertions; the in-memory words slice is
+// the GET response body.
+type fakeDict struct {
+	words []string
+	added string
+	del   string
+}
+
+func (f *fakeDict) Words() []string       { return f.words }
+func (f *fakeDict) Add(w string) error    { f.added = w; f.words = append(f.words, w); return nil }
+func (f *fakeDict) Remove(w string) error { f.del = w; return nil }
+
+// The three /dictionary routes:
+//
+//	GET    /dictionary        — list current words as {"words": [...]}.
+//	POST   /dictionary        — body {"word":"x"} append a word; 204 on
+//	                            success, 400 on missing/empty word.
+//	DELETE /dictionary/{word} — remove a word; 204 on success. The path
+//	                            value is URL-decoded by net/http.
+func TestDictionaryRoutes(t *testing.T) {
+	fd := &fakeDict{words: []string{"alpha", "beta"}}
+	srv := New(Config{}, &fakeService{})
+	srv.SetDictionary(fd)
+	h := srv.Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dictionary", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"words":["alpha","beta"]}`, rec.Body.String())
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/dictionary", strings.NewReader(`{"word":"gamma"}`)))
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Equal(t, "gamma", fd.added)
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/dictionary", strings.NewReader(`{"word":""}`)))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/dictionary/al%20pha", nil))
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Equal(t, "al pha", fd.del, "DELETE path value must be URL-decoded by net/http")
+}
+
+// When the dictionary store is not injected (no SetDictionary call, e.g. an
+// old binary on a host that hasn't been reconfigured), the route must 503
+// cleanly rather than dereferencing nil.
+func TestDictionaryRoutes503WhenUnset(t *testing.T) {
+	srv := New(Config{}, &fakeService{})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dictionary", nil))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}

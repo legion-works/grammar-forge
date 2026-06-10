@@ -33,15 +33,29 @@ type Config struct {
 
 // Server owns the HTTP routing for the bridge's REST API.
 type Server struct {
-	cfg Config
-	svc CorrectionService
-	log *slog.Logger
+	cfg  Config
+	svc  CorrectionService
+	log  *slog.Logger
+	dict DictionaryStore
+}
+
+// DictionaryStore is the slice of the user dictionary the REST layer needs.
+// The concrete implementation lives in internal/dictionary; main wires it
+// in. nil => routes 503 cleanly.
+type DictionaryStore interface {
+	Words() []string
+	Add(word string) error
+	Remove(word string) error
 }
 
 // New constructs a Server bound to a correction service.
 func New(cfg Config, svc CorrectionService) *Server {
 	return &Server{cfg: cfg, svc: svc, log: slog.Default()}
 }
+
+// SetDictionary injects the user-dictionary store that backs
+// GET/POST/DELETE /dictionary. Optional; when unset the routes 503.
+func (s *Server) SetDictionary(d DictionaryStore) { s.dict = d }
 
 // Handler returns the router with all routes registered explicitly, wrapped in
 // CORS middleware so browser clients (the extension's content-script fetch, an
@@ -53,6 +67,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /rephrase", s.handleRephrase)
 	mux.HandleFunc("POST /signal", s.handleSignal)
 	mux.HandleFunc("GET /stats", s.handleStats)
+	mux.HandleFunc("GET /dictionary", s.handleDictionaryList)
+	mux.HandleFunc("POST /dictionary", s.handleDictionaryAdd)
+	mux.HandleFunc("DELETE /dictionary/{word}", s.handleDictionaryRemove)
 	mux.Handle("/v2/", ltcompat.NewHandler(s.svc, "grammarforge"))
 	return withCORS(withBodyLimit(mux))
 }

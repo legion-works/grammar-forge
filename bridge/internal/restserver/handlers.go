@@ -65,6 +65,18 @@ type healthResponse struct {
 	Premium bool   `json:"premium"`
 }
 
+// dictionaryListResponse is the GET /dictionary payload. The words slice is
+// always non-nil so the field serialises as `[]` rather than `null`.
+type dictionaryListResponse struct {
+	Words []string `json:"words"`
+}
+
+// dictionaryAddRequest is the POST /dictionary body. Word is required;
+// empty-word requests are rejected with 400 before the store is touched.
+type dictionaryAddRequest struct {
+	Word string `json:"word"`
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{Status: "ok", Premium: true})
 }
@@ -106,6 +118,62 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"corrections": n})
+}
+
+// handleDictionaryList returns the current user-dictionary word list.
+// 503 if the store is not injected (SetDictionary never called).
+func (s *Server) handleDictionaryList(w http.ResponseWriter, _ *http.Request) {
+	if s.dict == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "dictionary unavailable"})
+		return
+	}
+	words := s.dict.Words()
+	if words == nil {
+		words = []string{}
+	}
+	writeJSON(w, http.StatusOK, dictionaryListResponse{Words: words})
+}
+
+// handleDictionaryAdd appends a word to the user dictionary. 400 on a
+// missing/empty word OR a store-side validation error (e.g. the store
+// rejects multi-word input). 204 on success. 503 if the store is not set.
+func (s *Server) handleDictionaryAdd(w http.ResponseWriter, r *http.Request) {
+	if s.dict == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "dictionary unavailable"})
+		return
+	}
+	var req dictionaryAddRequest
+	if err := decodeStrict(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if req.Word == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "word is required"})
+		return
+	}
+	if err := s.dict.Add(req.Word); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDictionaryRemove removes a word from the user dictionary. The path
+// value is URL-decoded by net/http, so a request to
+// /dictionary/al%20pha targets the word "al pha". 204 on success
+// (including idempotent removes of unknown words). 503 if the store is
+// not set.
+func (s *Server) handleDictionaryRemove(w http.ResponseWriter, r *http.Request) {
+	if s.dict == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "dictionary unavailable"})
+		return
+	}
+	word := r.PathValue("word")
+	if err := s.dict.Remove(word); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleRephrase decodes a rephrase request, delegates to the service, and
