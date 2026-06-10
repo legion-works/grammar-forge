@@ -11,10 +11,7 @@ export function isDiscordComposer(el: HTMLElement): boolean {
     let node: HTMLElement | null = el
     while (node) {
         const cls = node.className
-        if (
-            typeof cls === 'string' &&
-            COMPOSER_WRAPPER_STEMS.some((stem) => cls.includes(stem))
-        ) {
+        if (typeof cls === 'string' && COMPOSER_WRAPPER_STEMS.some((stem) => cls.includes(stem))) {
             return true
         }
         node = node.parentElement

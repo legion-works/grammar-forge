@@ -1,18 +1,27 @@
 {
-    "compilerOptions": {
-        "target": "ES2022",
-        "module": "ESNext",
-        "moduleResolution": "bundler",
-        "strict": true,
-        "noUncheckedIndexedAccess": true,
-        "skipLibCheck": true,
-        "noEmit": true,
-        "lib": ["ES2022", "DOM", "DOM.Iterable"],
-        "baseUrl": ".",
-        "paths": {
-            "@/*": ["../browser/src/*"],
-            "@vencord/*": ["./types/vencord/*"]
-        }
-    },
-    "include": ["src/**/*", "types/**/*", "../browser/src/api/**/*", "../browser/src/lib/**/*", "../browser/src/signal/**/*", "../browser/src/hotkeys/**/*", "../browser/src/input/**/*", "../browser/src/overlay/**/*"],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../browser/src/*"],
+      "@vencord/*": ["./types/vencord/*"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "types/**/*",
+    "../browser/src/api/**/*",
+    "../browser/src/lib/**/*",
+    "../browser/src/signal/**/*",
+    "../browser/src/hotkeys/**/*",
+    "../browser/src/input/**/*",
+    "../browser/src/overlay/**/*"
+  ]
 }

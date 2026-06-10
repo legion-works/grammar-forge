@@ -26,9 +26,7 @@ describe('isDiscordComposer', () => {
         expect(isDiscordComposer(t)).toBe(false)
     })
     it('rejects non-editable textboxes', () => {
-        const t = el(
-            '<div class="channelTextArea_abc"><div data-test role="textbox"></div></div>',
-        )
+        const t = el('<div class="channelTextArea_abc"><div data-test role="textbox"></div></div>')
         expect(isDiscordComposer(t)).toBe(false)
     })
 })
