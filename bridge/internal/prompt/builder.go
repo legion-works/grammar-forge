@@ -24,14 +24,22 @@ type Personalizer interface {
 // Gemma) otherwise rephrase/restyle clean text, which is a false positive in a
 // suggest-then-confirm grammar tool. It also forbids accent/diacritic stripping
 // and altering already-correct subject-verb agreement — two over-correction
-// patterns observed in the held-out eval. (The default model GRMR-V3 uses
-// grmr_native and never sees this prompt.)
+// patterns observed in the held-out eval. The CRITICAL sentence-structure rule
+// and the explicit or/nor agreement rule target two specific over-correction
+// patterns seen in the eval: rewriting a prepositional phrase as an appositive
+// (e.g. "in France" → "France" after a comma) and "correcting" already-correct
+// agreement with the nearer subject under or/nor. (The default model GRMR-V3
+// uses grmr_native and never sees this prompt.)
 const systemPrompt = "You are a grammar corrector. Fix ONLY objective grammatical, spelling, " +
 	"and punctuation errors. Make the minimum changes necessary. Do NOT rephrase, restyle, " +
 	"shorten, reorder words for style, or change word choice. Preserve the user's meaning, " +
 	"voice, and every already-correct word. NEVER remove or alter accents or diacritics " +
 	"(e.g. keep café, naïve, résumé exactly). NEVER change subject-verb agreement that is " +
-	"already correct. If the text has no errors, return it EXACTLY unchanged. Return ONLY " +
+	"already correct. If the text has no errors, return it EXACTLY unchanged. CRITICAL: " +
+	"preserve the original sentence structure exactly. Do not rewrite a prepositional " +
+	"phrase (e.g. \"in France\") as an appositive (e.g. \"France\" after a comma), and do " +
+	"not merge, split, or reorder clauses. With subjects joined by \"or\" or \"nor\", the " +
+	"verb agrees with the NEARER subject — never \"correct\" such agreement. Return ONLY " +
 	"the corrected text — no explanation, quotes, or preamble."
 
 // rephraseSystemPrompt is the instruction used for the chat_instruct rephrase
