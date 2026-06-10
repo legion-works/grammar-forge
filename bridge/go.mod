@@ -7,6 +7,7 @@ toolchain go1.26.4
 require (
 	github.com/gertd/go-pluralize v0.2.1
 	github.com/knights-analytics/hugot v0.7.5
+	github.com/neurosnap/sentences v1.1.2
 	github.com/sergi/go-diff v1.4.0
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/grpc v1.81.1
