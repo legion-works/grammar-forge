@@ -25,14 +25,14 @@ Self-hosted grammar checking in Discord's message composer, backed by a
 | Bridge URL          | `http://localhost:8000` | localhost/127.0.0.1 work out of the box (Vencord CSP allow-list). LAN/HTTPS hosts additionally need "Allow remote bridge" AND a Vencord CSP override + Discord restart. |
 | Allow remote bridge | off                     | Privacy guard — your message drafts are sent to the bridge URL.                                                                                                         |
 | Idle delay          | 500 ms                  | Debounce before checking.                                                                                                                                               |
-| Accept hotkey       | `alt+g`                 | Applies the first suggestion. Tab is deliberately not used (Discord autocomplete).                                                                                      |
+| Accept hotkey       | `ctrl+.`                | Applies the first suggestion. Tab is deliberately not used (Discord autocomplete).                                                                                      |
 | Check pasted text   | off                     | When off, pasted text is never checked (typed input only).                                                                                                              |
 
 ## Smoke checklist (manual, bridge running on localhost:8000)
 
 1. Type `I has a apple` → wait ~1 s → underlines appear.
 2. Click an underline → popover with word-diff; **Apply** fixes in place.
-3. Press `alt+g` with an error present → first suggestion applies.
+3. Press `ctrl+.` with an error present → first suggestion applies.
 4. **Ignore once** → underline disappears, text unchanged.
 5. Paste an error-laden paragraph (Check pasted text off) → no underlines until you type.
 6. Discord search box stays underline-free (composer gate).

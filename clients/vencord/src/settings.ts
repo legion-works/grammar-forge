@@ -25,7 +25,7 @@ export function resolveConfig(raw: Record<string, unknown>): GrammarForgeConfig 
         acceptHotkey:
             typeof raw.acceptHotkey === 'string' && raw.acceptHotkey.trim() !== ''
                 ? raw.acceptHotkey.trim().toLowerCase()
-                : 'alt+g',
+                : 'ctrl+.',
         checkPastedText: raw.checkPastedText === true,
         allowRemoteBridge: raw.allowRemoteBridge === true,
     }

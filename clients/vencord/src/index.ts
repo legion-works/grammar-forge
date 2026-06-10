@@ -26,8 +26,8 @@ const settings = definePluginSettings({
     },
     acceptHotkey: {
         type: OptionType.STRING,
-        description: 'Hotkey that applies the first suggestion (e.g. alt+g)',
-        default: 'alt+g',
+        description: 'Hotkey that applies the first suggestion (e.g. ctrl+.)',
+        default: 'ctrl+.',
     },
     checkPastedText: {
         type: OptionType.BOOLEAN,
