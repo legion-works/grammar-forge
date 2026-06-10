@@ -11,11 +11,13 @@ authoritative, but **still v0.1 draft**; confirm details before treating them as
 
 ## Current state
 
-- **Phases 1–2 + browser client shipped.** The Go bridge (`bridge/`: fast path, LLM
-  escalation, sentence cache, REST + native `/v2/check` + gRPC, SQLite edit-level signal
-  log) and the WXT browser extension (`clients/browser/`) are implemented, tested, and
-  deployed for live testing. Vencord/OpenCode clients and the Phase-3 learning loop are
-  not started. Polyglot repo — each service brings its own toolchain (below).
+- **Phases 1–2 + browser client shipped; Vencord client built.** The Go bridge
+  (`bridge/`: fast path, LLM escalation, sentence cache, REST + native `/v2/check` +
+  gRPC, SQLite edit-level signal log) and the WXT browser extension (`clients/browser/`)
+  are implemented, tested, and deployed for live testing. The Vencord client
+  (`clients/vencord/`) is built and gate-clean but not yet live-tested in Discord.
+  OpenCode client and Phase-3 learning loop not started. Polyglot repo — each service
+  brings its own toolchain (below).
 
 ## Where things live
 

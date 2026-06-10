@@ -94,6 +94,9 @@ E2E OK: GrammarForge match present via LanguageTool
 
 ```
 bridge/                # Go: gRPC RemoteRule + REST + Harper/GECToR (CGo)
+clients/
+  vencord/              # Vencord userplugin (built, not yet live-tested)
+  browser/              # WXT browser extension (tested, deployed)
 config/                # LanguageTool server.properties + remote-rules.json
 docker-compose.yml     # LanguageTool + bridge + llama.cpp (Gemma-4-E4B QAT GGUF)
 models/llm/            # slow-path GGUF (gitignored)
