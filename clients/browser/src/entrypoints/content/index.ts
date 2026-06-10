@@ -1426,9 +1426,16 @@ function wireRuntime(
             diffCorrected: item.diffCorrected,
             diffIsDeletion: item.diffIsDeletion,
             replacements: item.replacements,
-            original: item.original,
+            // The popover's `original` feeds ONLY the Add-to-dictionary action.
+            // Pass the WORD-RANGE text (diffOriginal — what the popover shows
+            // struck through), NOT item.original: the minimal edit span trims
+            // the diff's common prefix/suffix, so e.g. a "Glorpx Mubs" ->
+            // "Got my dibs" rewrite (shared "G" prefix, "s" suffix) has span
+            // text "lorpx Mub" — adding THAT to the dictionary stored mangled
+            // fragments (verified live).
+            original: item.diffOriginal,
             onAddToDictionary:
-                item.category === 'spelling' && item.original.trim().length > 0
+                item.category === 'spelling' && item.diffOriginal.trim().length > 0
                     ? (word: string) => void addWordToDictionary(el, item, word)
                     : undefined,
             onApply: (replacementIndex: number) => {
