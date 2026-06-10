@@ -28,6 +28,29 @@ Self-hosted grammar checking in Discord's message composer, backed by a
 | Accept hotkey       | `ctrl+.`                | Applies the first suggestion. Tab is deliberately not used (Discord autocomplete).                                                                                      |
 | Check pasted text   | off                     | When off, pasted text is never checked (typed input only).                                                                                                              |
 
+## Chat-bar button
+
+A GrammarForge icon sits in the message-composer toolbar (same slot as
+Vencord's Translate button). It shows a live count badge whenever the
+active composer has suggestions. Hover over the button to surface the
+status pill anchored to the chat-bar (300 ms leave-grace, so dragging
+into the pill keeps it open). Click the button to toggle the
+corrections panel:
+
+- **Apply all** — accept every suggestion in the active composer.
+- **Apply one** — accept a single suggestion from the list.
+- **Recheck** — re-run the bridge on the current text.
+- **Undo** — reverts the last apply (per-field; single slot).
+- **Rephrase** — rephrase the current text selection; if there is no
+  selection, rephrase the whole field.
+- **Power button (on the pill)** — pause / resume checking. While
+  paused, the chat-bar icon is dimmed and the tooltip reads
+  "GrammarForge — paused".
+
+The underline popover gains **Add to dictionary** for spelling
+suggestions; adding a word suppresses future suggestions for it and
+shows an Undo toast that re-enables them.
+
 ## Smoke checklist (manual, bridge running on localhost:8000)
 
 1. Type `I has a apple` → wait ~1 s → underlines appear.
@@ -40,6 +63,13 @@ Self-hosted grammar checking in Discord's message composer, backed by a
 8. Disable plugin in settings → overlays vanish; re-enable → works without restart.
 9. `curl localhost:8000/stats` → accepted/ignored counts move after Apply/Ignore.
 10. Stop the bridge → typing logs no console errors (silent idle); restart bridge → next edit checks.
+11. Hover the chat-bar button → status pill appears anchored to it.
+12. Click the chat-bar button → corrections panel opens with the active composer's items.
+13. **Apply all** on a multi-error message → every underlined token is fixed; the badge clears.
+14. After applying, **Undo** on the panel → text restored to the pre-apply state; Undo button disables.
+15. Select a sentence and click **Rephrase** on the panel → pending card → result card → Apply rewrites the selection; with no selection, the Rephrase card covers the whole field.
+16. On a spelling suggestion, popover's **Add to dictionary** adds the word, suppresses future suggestions, and the toast's **Undo** re-enables them.
+17. Click the pill's power button → icon dims, tooltip says "paused", no new checks fire; click again → re-checks the active composer immediately.
 
 ## Development
 

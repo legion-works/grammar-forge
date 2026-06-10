@@ -4,7 +4,8 @@
 // in the grammar-forge repo.
 import definePlugin, { OptionType } from '@utils/types'
 import { definePluginSettings } from '@api/Settings'
-import { startOrchestrator, type Orchestrator } from './orchestrator'
+import { startOrchestrator, type OrchestratorApi } from './orchestrator'
+import { makeChatBarButton } from './chatbar'
 import { resolveConfig } from './settings'
 
 const settings = definePluginSettings({
@@ -41,13 +42,19 @@ const settings = definePluginSettings({
     },
 })
 
-let orchestrator: Orchestrator | null = null
+let orchestrator: OrchestratorApi | null = null
 
 export default definePlugin({
     name: 'GrammarForge',
     description: 'Self-hosted grammar checking for the message composer (GrammarForge bridge)',
     authors: [{ name: 'GrammarForge', id: 0n }],
     settings,
+    // The chat-bar slot needs a stable reference to the orchestrator at
+    // RENDER time, but start() runs later (after plugin definition).
+    // Module-level `api` indirection lets the chat-bar read the live ref
+    // per event; before start() it returns null and the button renders
+    // a zero-count idle state.
+    chatBarButton: makeChatBarButton(() => orchestrator),
     start() {
         orchestrator = startOrchestrator(() => resolveConfig(settings.store))
     },
