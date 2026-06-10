@@ -4,9 +4,27 @@
 // in the grammar-forge repo.
 import definePlugin, { OptionType } from '@utils/types'
 import { definePluginSettings } from '@api/Settings'
+import { ChatBarButtonMap } from '@api/ChatButtons'
 import { startOrchestrator, type OrchestratorApi } from './orchestrator'
 import { makeChatBarButton } from './chatbar'
 import { resolveConfig } from './settings'
+
+/** Move this plugin's chat-bar button to the FRONT of the Vencord button
+ *  group (before Translate etc.). The map renders in insertion order and
+ *  core registers our entry AFTER start() returns (PluginManager calls
+ *  p.start() first, addChatBarButton a few lines later), so the reorder is
+ *  deferred a tick. Re-inserting the other entries preserves their relative
+ *  order. */
+function moveChatBarButtonFirst(pluginName: string): void {
+    setTimeout(() => {
+        const own = ChatBarButtonMap.get(pluginName)
+        if (!own) return
+        const others = Array.from(ChatBarButtonMap.entries()).filter(([id]) => id !== pluginName)
+        ChatBarButtonMap.clear()
+        ChatBarButtonMap.set(pluginName, own)
+        for (const [id, data] of others) ChatBarButtonMap.set(id, data)
+    }, 0)
+}
 
 const settings = definePluginSettings({
     bridgeUrl: {
@@ -57,6 +75,7 @@ export default definePlugin({
     chatBarButton: makeChatBarButton(() => orchestrator),
     start() {
         orchestrator = startOrchestrator(() => resolveConfig(settings.store))
+        moveChatBarButtonFirst('GrammarForge')
     },
     stop() {
         orchestrator?.stop()

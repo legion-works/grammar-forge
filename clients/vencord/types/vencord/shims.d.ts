@@ -54,6 +54,10 @@ declare module '@api/ChatButtons' {
         buttonProps?: Record<string, unknown>
         children?: unknown
     }) => unknown
+    /** Registration map (id → {render, icon}); renders in insertion order.
+     *  Exported by Vencord (api/ChatButtons.tsx) — used here to move our
+     *  button ahead of later-registered ones. */
+    export const ChatBarButtonMap: Map<string, { render: unknown; icon: unknown }>
 }
 
 declare module '@webpack/common' {

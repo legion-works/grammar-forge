@@ -625,26 +625,78 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         }
     }
 
+    // The pill positions itself INSIDE its anchor rect (clamped to the
+    // bottom-right — browser semantics where the anchor is the whole text
+    // field). Anchoring to the chat-bar BUTTON's own rect would therefore
+    // place the pill ON the button, under the pointer: the wrapper's
+    // mouseleave fires, the pill hides, the pointer re-enters — flicker —
+    // and the pill covers the button. Hand the pill a synthetic anchor
+    // ABOVE the button instead: right-aligned, with a gap, so button and
+    // pointer stay clear (verified live 2026-06-10).
+    const PILL_ANCHOR_WIDTH = 360
+    const PILL_ANCHOR_HEIGHT = 64
+    const PILL_ANCHOR_GAP = 8
+    const pillAnchorAbove = (buttonRect: DOMRect): DOMRect =>
+        new DOMRect(
+            buttonRect.right - PILL_ANCHOR_WIDTH,
+            buttonRect.top - PILL_ANCHOR_HEIGHT - PILL_ANCHOR_GAP,
+            PILL_ANCHOR_WIDTH,
+            PILL_ANCHOR_HEIGHT,
+        )
+
+    // Grace timer for hidePill so moving the pointer from the chat-bar
+    // button ONTO the pill (to click its actions) doesn't hide it mid-way.
+    // The pill node re-binds on every fresh mount (renderStatusButton
+    // replaces the element).
+    let pillHideTimer: ReturnType<typeof setTimeout> | null = null
+    const cancelPillHide = (): void => {
+        if (pillHideTimer != null) {
+            clearTimeout(pillHideTimer)
+            pillHideTimer = null
+        }
+    }
+    const PILL_HIDE_GRACE_MS = 250
+
+    // The browser pill idles at opacity 0.1 (styles.ts — it sits over the
+    // user's text field and must not occlude). In the Vencord placement it
+    // hovers over chrome, not text: force full opacity inline (inline style
+    // beats the stylesheet rule; the hover transition still applies).
+    const bindPillNode = (): void => {
+        const node = overlay.root.querySelector<HTMLElement>('.gf-pill')
+        if (!node || node.dataset.gfVencordBound === '1') return
+        node.dataset.gfVencordBound = '1'
+        node.style.opacity = '1'
+        node.addEventListener('mouseenter', cancelPillHide)
+        node.addEventListener('mouseleave', () => hidePill())
+    }
+
     const showPill = (anchorRect: DOMRect): void => {
         const el = activeComposer()
         if (!el) return
         const st = fields.get(el)
         if (!st) return
-        pillAnchor = anchorRect
+        cancelPillHide()
+        pillAnchor = pillAnchorAbove(anchorRect)
         // Update in place when the pill is already mounted (e.g. a resize
         // reposition); only build fresh on first mount.
         if (pillHandle && pillHandle.isMounted()) {
             pillHandle.update(buildPillOptions(el, st))
             pillHandle.setVisible(true)
+            bindPillNode()
             return
         }
         pillHandle = renderStatusButton(overlay.root, buildPillOptions(el, st))
         panelOpen = false
+        bindPillNode()
     }
 
     const hidePill = (): void => {
         if (panelOpen) return
-        pillHandle?.setVisible(false)
+        cancelPillHide()
+        pillHideTimer = setTimeout(() => {
+            pillHideTimer = null
+            if (!panelOpen) pillHandle?.setVisible(false)
+        }, PILL_HIDE_GRACE_MS)
     }
 
     const togglePanel = (anchorRect: DOMRect): void => {
@@ -974,6 +1026,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             cleanups.length = 0
             // Tear down the pill BEFORE the overlay so its destroy runs in
             // a live root.
+            cancelPillHide()
             pillHandle?.destroy()
             pillHandle = null
             pillAnchor = null
