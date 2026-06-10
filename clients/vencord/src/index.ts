@@ -34,6 +34,11 @@ const settings = definePluginSettings({
         description: 'Also check pasted text (after a grace period)',
         default: false,
     },
+    debugLogging: {
+        type: OptionType.BOOLEAN,
+        description: 'Verbose console logging ([GrammarForge] prefix) for debugging',
+        default: false,
+    },
 })
 
 let orchestrator: Orchestrator | null = null

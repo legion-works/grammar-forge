@@ -70,6 +70,13 @@ function hitTest(
 }
 
 export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestrator {
+    // Debug logger gated on the plugin's debugLogging setting (read live).
+    // localStorage does NOT exist in the Discord renderer, so the browser
+    // client's gfDebug toggle is unusable here — the setting is the switch.
+    // oxlint-disable-next-line no-console
+    const debugLog = (...args: unknown[]): void => {
+        if (getConfig().debugLogging) console.log('[GrammarForge]', ...args)
+    }
     // Client rebuilds when bridgeUrl/allowRemoteBridge change (settings are
     // live). All other config flags (realtimeDelayMs, checkPastedText,
     // acceptHotkey) are read live by reference.
@@ -147,13 +154,16 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 return
             }
             const seq = ++st.checkSeq
+            debugLog('check start', { seq, textLen: text.length })
             try {
                 const res = await refreshClient().correct({ text, source: 'vencord' })
                 if (seq !== st.checkSeq) return
                 st.items = buildRenderableItems(text, res).items
+                debugLog('check done', { seq, items: st.items.length })
                 renderField(el, st)
-            } catch {
+            } catch (e) {
                 // Bridge unreachable: silent idle, no intrusive toast in v1.
+                debugLog('check failed', e)
             }
         }
 
@@ -419,7 +429,10 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     const stopObserver = createFieldObserver({
         root: document.body,
         onFieldDiscovered: (el) => {
-            if (isDiscordComposer(el)) attach(el)
+            if (isDiscordComposer(el)) {
+                debugLog('composer attached', el.className)
+                attach(el)
+            }
         },
         onFieldDetached: (el) => detach(el),
     })
@@ -434,14 +447,33 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         if (!field) return
         const st = fields.get(field)
         if (!st || st.items.length === 0) return
-        if (
-            !shouldAcceptHotkey(e, {
+        // Only log chorded keys (a modifier held) so plain typing stays quiet.
+        if (e.ctrlKey || e.altKey || e.metaKey) {
+            debugLog('keydown', {
+                key: e.key,
+                code: e.code,
+                ctrl: e.ctrlKey,
+                alt: e.altKey,
+                shift: e.shiftKey,
+                meta: e.metaKey,
+                configured: getConfig().acceptHotkey,
+                items: st.items.length,
+            })
+        }
+        let matched = false
+        try {
+            matched = shouldAcceptHotkey(e, {
                 hotkey: getConfig().acceptHotkey,
                 hasActiveSuggestion: true,
             })
-        ) {
+        } catch (err) {
+            // parseHotkey throws on a malformed configured string; a broken
+            // setting must not turn every keystroke into an uncaught error.
+            debugLog('hotkey parse failed', getConfig().acceptHotkey, err)
             return
         }
+        if (!matched) return
+        debugLog('hotkey matched — applying first suggestion')
         e.preventDefault()
         e.stopPropagation()
         const first = st.items[0]

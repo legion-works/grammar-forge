@@ -6,6 +6,7 @@ export interface GrammarForgeConfig {
     acceptHotkey: string
     checkPastedText: boolean
     allowRemoteBridge: boolean
+    debugLogging: boolean
 }
 
 const MIN_REALTIME_DELAY_MS = 150
@@ -28,5 +29,6 @@ export function resolveConfig(raw: Record<string, unknown>): GrammarForgeConfig 
                 : 'ctrl+.',
         checkPastedText: raw.checkPastedText === true,
         allowRemoteBridge: raw.allowRemoteBridge === true,
+        debugLogging: raw.debugLogging === true,
     }
 }
