@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Service orchestrates the correction pipeline:
@@ -528,25 +530,54 @@ func score(original string, suggestions []Suggestion) int {
 	return sc
 }
 
-// dropAllowlisted removes suggestions whose span text consists ENTIRELY of
+// dropAllowlisted removes suggestions whose edit falls ENTIRELY within
 // allowlisted words (case-insensitive): a single dictionary word, or several
 // separated by whitespace — the LLM can merge two adjacent unknown words into
 // one edit (verified live), and after the user adds both words that merged
-// edit must not be re-emitted. An edit containing
-// ANY non-allowlisted token is kept (it is still a real correction).
-// Suggestions with invalid spans (e.g. out of bounds) are passed through
-// unchanged; Span.Validate is the source of truth and the rest of the
-// pipeline is robust to it.
+// edit must not be re-emitted. The diff TRIMS the edit's common prefix/suffix,
+// so the raw span often covers word FRAGMENTS (verified live: a rewrite of
+// two dictionary words sharing a leading/trailing letter); the span is first
+// expanded to the surrounding whitespace word boundaries so the fragments
+// resolve to the real words. An edit whose expanded text contains ANY
+// non-allowlisted token (including punctuation glued to a dictionary word) is
+// kept — it is still a real correction. Zero-width spans (pure insertions)
+// are never suppressed. Suggestions with invalid spans (e.g. out of bounds)
+// are passed through unchanged; Span.Validate is the source of truth and the
+// rest of the pipeline is robust to it.
 func (s *Service) dropAllowlisted(text string, sugs []Suggestion) []Suggestion {
 	out := make([]Suggestion, 0, len(sugs))
 	for _, sg := range sugs {
-		if sg.Span.Validate(len(text)) == nil &&
-			allTokensAllowlisted(text[sg.Span.Start:sg.Span.End], s.allowlist) {
-			continue
+		if sg.Span.Validate(len(text)) == nil && sg.Span.End > sg.Span.Start {
+			wordStart, wordEnd := expandToWordBoundaries(text, sg.Span.Start, sg.Span.End)
+			if allTokensAllowlisted(text[wordStart:wordEnd], s.allowlist) {
+				continue
+			}
 		}
 		out = append(out, sg)
 	}
 	return out
+}
+
+// expandToWordBoundaries widens a byte span to the surrounding whitespace-
+// delimited word boundaries: start walks back to the rune after the previous
+// whitespace (or 0), end walks forward to the rune before the next whitespace
+// (or len(text)). UTF-8-safe (rune-wise decoding in both directions).
+func expandToWordBoundaries(text string, start, end int) (int, int) {
+	for start > 0 {
+		r, size := utf8.DecodeLastRuneInString(text[:start])
+		if unicode.IsSpace(r) {
+			break
+		}
+		start -= size
+	}
+	for end < len(text) {
+		r, size := utf8.DecodeRuneInString(text[end:])
+		if unicode.IsSpace(r) {
+			break
+		}
+		end += size
+	}
+	return start, end
 }
 
 // allTokensAllowlisted reports whether spanText splits (on whitespace) into

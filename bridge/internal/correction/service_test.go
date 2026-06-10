@@ -857,3 +857,43 @@ func TestCorrectSuppressesAllowlistedMultiWordEdit(t *testing.T) {
 	require.Len(t, got.Suggestions, 1, "the all-allowlisted multi-word edit is dropped")
 	require.Equal(t, "the", got.Suggestions[0].Replacement)
 }
+
+// The diff TRIMS the edit's common prefix/suffix, so an LLM rewrite of two
+// dictionary words sharing a leading/trailing letter has a span covering only
+// word FRAGMENTS (verified live: span tokens like "lorp Zi" while the
+// dictionary holds the full words). Suppression must expand the span to the
+// surrounding whitespace word boundaries BEFORE tokenizing, so the fragments
+// resolve to the real words and the edit is dropped.
+func TestCorrectSuppressesTrimmedSpanInsideAllowlistedWords(t *testing.T) {
+	st := &fakeStore{}
+	// Span {1,8} over the fixture text is "lorp Zi" — the trimmed fragment of
+	// the two dictionary words (shared first/last letters with the rewrite).
+	fc := fakeCorrector{name: string(ModelGECToR), sugs: []Suggestion{
+		{Span: Span{1, 8}, Replacement: "lory Si", Model: ModelGECToR, Confidence: 0.95},
+		{Span: Span{10, 13}, Replacement: "the", Model: ModelGECToR, Confidence: 0.95},
+	}}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	svc.SetWordAllowlist(fakeAllowlist{words: map[string]bool{"glorp": true, "zix": true}})
+	got, err := svc.Correct(context.Background(), Request{Text: "Glorp Zix teh"}) //nolint:misspell // intentional fixture
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1, "the fragment-span edit inside dictionary words is dropped")
+	require.Equal(t, "the", got.Suggestions[0].Replacement)
+}
+
+// Expansion must not OVER-suppress: an edit whose expanded words include a
+// non-dictionary token (e.g. punctuation glued to a dictionary word, or a
+// genuinely misspelled neighbour) is kept.
+func TestCorrectAllowlistExpansionKeepsNonDictionaryTokens(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{name: string(ModelGECToR), sugs: []Suggestion{
+		// Span {9,10} is the "." — expands to "Zix." which is NOT the
+		// dictionary word "Zix"; a punctuation fix next to a dictionary
+		// word must survive.
+		{Span: Span{9, 10}, Replacement: "!", Model: ModelGECToR, Confidence: 0.95},
+	}}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	svc.SetWordAllowlist(fakeAllowlist{words: map[string]bool{"glorp": true, "zix": true}})
+	got, err := svc.Correct(context.Background(), Request{Text: "Glorp Zix."})
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1, "a punctuation edit glued to a dictionary word is kept")
+}
