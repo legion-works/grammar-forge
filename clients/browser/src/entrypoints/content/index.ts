@@ -10,6 +10,7 @@
 // keeps the per-text transform pure and testable in @/lib/pipeline.
 
 import { createFieldObserver } from '@/input/observer'
+import { isEditableElement } from '@/input/detector'
 import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { isUndoRedoKeydown } from '@/input/undo-redo'
@@ -231,6 +232,15 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     // exactly like the active pill; the cleanups array is the single teardown
     // handle. null when paused mode isn't active.
     let pausedCleanups: Array<() => void> | null = null
+    // The most-recently focused editable field, tracked for the WHOLE content
+    // lifetime (both modes) by the persistent focusin listener below. Needed
+    // because disabling via the pill's Power button moves focus onto that
+    // button and then destroys it, leaving document.activeElement === <body>;
+    // the freshly-mounted paused pill is focus-gated and would otherwise never
+    // appear for the field the user was just editing (no in-page Enable). The
+    // button is not editable, so it never overwrites this reference. Cleared
+    // when the field leaves the DOM.
+    let lastFocusedField: HTMLElement | null = null
     // Status-pill drag offset — kept in start() scope (NOT on the runtime) so
     // it survives a settings-driven teardown: dragging the pill, then disabling
     // the site, must keep the re-enable pill at the same drag offset (the
@@ -384,9 +394,18 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             },
             onFieldDetached: (el) => {
                 fields.delete(el)
+                if (lastFocusedField === el) lastFocusedField = null
                 if (pillFor === el) hidePill()
             },
         })
+        // Seed the pill for the field the user was last editing. The field
+        // observer's initial sweep is deferred (rAF) and gated on
+        // document.activeElement, which is <body> right after the Power button
+        // that triggered the disable was destroyed — so without this seed no
+        // pill (hence no in-page Enable affordance) would appear until the user
+        // re-focuses a field. showPillFor only needs the element; the observer
+        // adds it to `fields` on its next tick (showPillFor is idempotent).
+        if (lastFocusedField?.isConnected) showPillFor(lastFocusedField)
         cleanups.push(stopObserver)
         const onFocusIn = (e: FocusEvent): void => {
             const t = e.target
@@ -432,6 +451,19 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         }
         pausedCleanups = null
     }
+
+    // Persistent focused-field tracker (BOTH modes, whole content lifetime).
+    // Records the editable field receiving focus so paused mode can anchor its
+    // pill to the field the user was last editing even when focus has since
+    // landed on <body> (e.g. right after the Power button that triggered the
+    // disable was destroyed). Non-editable targets (the pill's own buttons) are
+    // ignored, so the reference survives the disable gesture.
+    const trackFocus = (e: FocusEvent): void => {
+        const t = e.target
+        if (t instanceof HTMLElement && isEditableElement(t)) lastFocusedField = t
+    }
+    document.addEventListener('focusin', trackFocus)
+    ctx.onInvalidated(() => document.removeEventListener('focusin', trackFocus))
 
     // Reconcile the page state to the current settings: globally off -> nothing;
     // site paused -> paused-mode runtime only; otherwise -> full checking runtime.
