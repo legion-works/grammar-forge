@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     dismissRephraseCardsIn,
     showRephraseCard,
+    showRephraseError,
+    showRephrasePending,
     type RephraseCardOptions,
 } from '@/overlay/rephrase-card'
 
@@ -151,5 +153,53 @@ describe('showRephraseCard', () => {
         const hasPopoverApi = typeof (card as { showPopover?: unknown }).showPopover === 'function'
         const popoverAttr = hasPopoverApi ? card.getAttribute('popover') : null
         expect(popoverAttr).toBe('manual')
+    })
+})
+
+describe('pending and error states', () => {
+    let root: ShadowRoot
+    beforeEach(() => {
+        root = mkRoot()
+        installPopoverStub()
+    })
+    afterEach(() => {
+        removePopoverStub()
+    })
+
+    it('showRephrasePending renders a spinner card with no action buttons', () => {
+        const handle = showRephrasePending(root, {
+            anchorRect: new DOMRect(),
+            onClose: () => {},
+        })
+        const card = root.querySelector('.gf-rephrase-card--pending')
+        expect(card).not.toBeNull()
+        expect(card!.querySelector('[data-action="apply"]')).toBeNull()
+        expect(card!.textContent).toContain('Rephrasing')
+        expect(handle.isOpen()).toBe(true)
+    })
+
+    it('a result card replaces a pending card (one-per-root)', () => {
+        showRephrasePending(root, { anchorRect: new DOMRect(), onClose: () => {} })
+        showRephraseCard(root, mkOptions({}))
+        expect(root.querySelectorAll('.gf-rephrase-card')).toHaveLength(1)
+        expect(root.querySelector('.gf-rephrase-card--pending')).toBeNull()
+    })
+
+    it('showRephraseError renders the message and Retry fires onRetry', () => {
+        const onRetry = vi.fn<() => void>()
+        showRephraseError(root, {
+            anchorRect: new DOMRect(),
+            message: 'Rephrase failed',
+            onRetry,
+            onClose: () => {},
+        })
+        const card = root.querySelector('.gf-rephrase-card--error')!
+        expect(card.textContent).toContain('Rephrase failed')
+        const retry = card.querySelector<HTMLElement>('[data-action="retry"]')!
+        retry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        expect(onRetry).toHaveBeenCalledTimes(1)
+        // retry closes the card (the caller is expected to re-show pending or
+        // a result via the rephrase flow).
+        expect(root.querySelector('.gf-rephrase-card--error')).toBeNull()
     })
 })

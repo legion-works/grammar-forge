@@ -29,7 +29,13 @@ import {
     dismissRephraseButtonsIn,
     type RephraseButtonHandle,
 } from '@/overlay/rephrase-button'
-import { showRephraseCard, dismissRephraseCardsIn } from '@/overlay/rephrase-card'
+import {
+    showRephraseCard,
+    showRephraseError,
+    showRephrasePending,
+    dismissRephraseCardsIn,
+    type RephraseCardHandle,
+} from '@/overlay/rephrase-card'
 import {
     renderStatusButton,
     type StatusButtonHandle,
@@ -1209,10 +1215,13 @@ function wireRuntime(
     ): Promise<void> {
         const s = getSettings()
         hideRephraseButton()
-        // Lightweight pending toast (rephrase is a slow LLM round-trip).
-        // showToast requires actionLabel/onAction — auto-dismisses after the
-        // default 1200ms, so a no-op action is fine for a transient status.
-        showToast(overlay.root, { message: 'Rephrasing…', actionLabel: '', onAction: () => {} })
+        // Lightweight pending card on the rephrase layer (was: empty-action
+        // toast hack; the new card carries the round-trip status and updates
+        // in place with the result or an inline error).
+        const pending: RephraseCardHandle = showRephrasePending(overlay.root, {
+            anchorRect: el.getBoundingClientRect(),
+            onClose: () => {},
+        })
         try {
             const res = await runtime.client.rephrase({
                 text,
@@ -1223,6 +1232,7 @@ function wireRuntime(
                 override: s.rephraseOverride,
             })
             if (!ctx.isValid) return
+            pending.hide()
             showRephraseCard(overlay.root, {
                 anchorRect: el.getBoundingClientRect(),
                 original: res.original,
@@ -1244,10 +1254,13 @@ function wireRuntime(
             })
         } catch (e) {
             debugWarn('rephrase', 'rephrase failed', e)
-            showToast(overlay.root, {
+            if (!ctx.isValid) return
+            pending.hide()
+            showRephraseError(overlay.root, {
+                anchorRect: el.getBoundingClientRect(),
                 message: 'Rephrase failed',
-                actionLabel: '',
-                onAction: () => {},
+                onRetry: () => void openRephraseFor(el, text, span),
+                onClose: () => {},
             })
         }
     }

@@ -666,6 +666,24 @@ export const OVERLAY_CSS = `
     border-color: #1e40af;
   }
 
+  /* Pending card (LLM round-trip in flight). Inline spinner + status text,
+     no action buttons. Replaces the old empty-action toast hack. */
+  .gf-rephrase-card__pending-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 4px;
+  }
+  .gf-rephrase-card__spinner {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    border-top-color: rgba(255, 255, 255, 0.9);
+    animation: gf-spin 0.8s linear infinite;
+  }
+  @keyframes gf-spin { to { transform: rotate(360deg); } }
+
   /* ============================================================
    * Liquid-glass refractive RIM — an additive highlight ring (does not touch
    * the base box-shadow). Bright specular top edge + a hairline all around so
@@ -926,6 +944,8 @@ export const OVERLAY_CSS = `
     }
     .gf-highlight { transition: none; }
     .gf-highlight--applied { animation: none; }
+    /* Spinner spin is gratuitous motion — kill it. */
+    .gf-rephrase-card__spinner { animation: none; }
   }
   @keyframes gf-no-motion {
     from { opacity: 0; }
