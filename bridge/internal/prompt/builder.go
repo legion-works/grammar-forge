@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/grammarforge/bridge/internal/correction"
 	"github.com/grammarforge/bridge/internal/personalization"
@@ -29,13 +31,25 @@ type Personalizer interface {
 // vocabulary-blind LLM from mangling dictionary words in the first place
 // (verified live: a two-word dictionary name kept being rewritten into an
 // unrelated phrase).
+//
+// The block is CONDITIONALLY appended: the prompt only gains the protection
+// sentence when the request text contains at least one dictionary word as a
+// case-insensitive, word-boundary match. An unconditional protection
+// sentence is a live-measured regression (Gemma-4 QAT, temp 0, byte-stable
+// across restarts: golden cases 106/107/112 fail with the sentence present
+// and pass with the bare prompt). The matching is matched-words-only — the
+// sentence lists ONLY the entries that actually appear in the text.
 type VocabularySource interface {
 	Words() []string
 }
 
-// maxVocabularyWords caps how many dictionary words are injected, bounding
-// the prompt size (and the per-sentence cache key churn) for a pathologically
-// large dictionary. The earliest entries win (file order — oldest first).
+// maxVocabularyWords caps how many MATCHED dictionary words are rendered
+// in the protection sentence, bounding the prompt size (and the
+// per-sentence cache key churn) for a request whose text happens to match
+// many dictionary words. The dictionary SCAN is unbounded — every entry
+// is checked for a match — so a request whose text only matches word
+// #201 still gets its matched (single-entry) list rendered. Only the
+// rendered sentence is bounded. The earliest matches win (file order).
 const maxVocabularyWords = 200
 
 // systemPrompt is the instruction used for generic instruct models (chat_instruct).
@@ -93,11 +107,38 @@ type Builder struct {
 func (b *Builder) SetVocabularySource(v VocabularySource) { b.vocabulary = v }
 
 // vocabularyBlock renders the protected-words sentence appended to the chat
-// system prompts, or "" when there is no vocabulary. Words are rendered via
-// strconv.Quote — the dictionary is user-controlled text, and quoting keeps
-// an embedded quote/control char from breaking out of the sentence (the same
-// defence as the tone/style fields and the personalisation block).
-func (b *Builder) vocabularyBlock() string {
+// system prompts, or "" when there is no vocabulary OR no dictionary word
+// appears in the request text. Conditional on the text: an unconditional
+// block is a live-measured regression on Gemma-4 QAT (golden cases 106/107/
+// 112 — discrete→discreet, complement→compliment, laying→lying — all FAIL
+// with the sentence present and all PASS with the bare prompt). When
+// rendered, the sentence lists ONLY the matched entries in dictionary file
+// order, capped at maxVocabularyWords.
+//
+// A dictionary entry matches when it appears in the text as a contiguous,
+// word-bounded, Unicode-case-fold-equal substring (the rune immediately
+// before the match and the rune immediately after must be non-letter/
+// non-digit, or the string edge). Punctuation INSIDE the dictionary word
+// is consumed by the fold-prefix match — "Qwen3-4B" matches "Qwen3-4B" in
+// the text, and "O'Connor" matches "O'Connor" — but the right-boundary
+// check after the match keeps "Kins" from matching inside "napkins" and
+// keeps "Verlan" matching "Verlan's" (the apostrophe is a non-letter
+// boundary).
+//
+// The dictionary SCAN is unbounded — every entry is checked for a match
+// (the cap bounds the rendered prompt size, not the scan, so word #201
+// is still scanned if it's the only match). The fold-prefix scan walks
+// text and the dictionary word rune by rune using rune-level Unicode
+// case-fold equivalence, returning the byte length of the matched prefix
+// in text (or -1). Byte-by-byte comparison would break for characters
+// that fold to a different byte length (e.g. long-s "ſ", U+017F, 2 bytes
+// folds to "s", 1 byte).
+//
+// Words are rendered via strconv.Quote — the dictionary is user-controlled
+// text, and quoting keeps an embedded quote/control char from breaking out
+// of the sentence (the same defence as the tone/style fields and the
+// personalisation block).
+func (b *Builder) vocabularyBlock(text string) string {
 	if b.vocabulary == nil {
 		return ""
 	}
@@ -105,15 +146,144 @@ func (b *Builder) vocabularyBlock() string {
 	if len(words) == 0 {
 		return ""
 	}
-	if len(words) > maxVocabularyWords {
-		words = words[:maxVocabularyWords]
+	var matched []string
+	for _, w := range words {
+		if w == "" {
+			continue
+		}
+		if containsDictionaryWord(text, w) {
+			matched = append(matched, w)
+		}
 	}
-	quoted := make([]string, len(words))
-	for i, w := range words {
+	if len(matched) == 0 {
+		return ""
+	}
+	if len(matched) > maxVocabularyWords {
+		matched = matched[:maxVocabularyWords]
+	}
+	quoted := make([]string, len(matched))
+	for i, w := range matched {
 		quoted[i] = strconv.Quote(w)
 	}
 	return " The user's personal dictionary contains these words; they are correct as " +
 		"written — never change, respell, or remove them: " + strings.Join(quoted, ", ") + "."
+}
+
+// containsDictionaryWord reports whether dictWord appears in text as a
+// contiguous, word-bounded, case-fold-equal substring. The match must
+// start at a word boundary (start of text or previous rune not letter/
+// digit) and end at a word boundary (end of text or next rune not
+// letter/digit). Punctuation INSIDE the dictionary word is consumed by
+// the fold-prefix match — "Qwen3-4B" matches "Qwen3-4B" in the text —
+// but the right-boundary check after the match keeps "Kins" from
+// matching inside "napkins". Empty dictWord never matches.
+//
+// Walks the text at every rune-aligned position. At each position, runs
+// foldPrefixLength; if the whole word is consumed AND both boundaries
+// are non-word (or string edges), the match succeeds. The iteration
+// advances by rune (not byte) because matches can only start at rune
+// boundaries — valid UTF-8 never embeds ASCII bytes inside a multi-byte
+// rune, so a rune-aligned start is the only place a match can begin.
+func containsDictionaryWord(text, dictWord string) bool {
+	if dictWord == "" {
+		return false
+	}
+	pos := 0
+	for pos <= len(text) {
+		n := foldPrefixLength(text[pos:], dictWord)
+		if n >= 0 {
+			end := pos + n
+			if isPromptWordBoundedAt(text, pos, end) {
+				return true
+			}
+		}
+		if pos >= len(text) {
+			break
+		}
+		_, size := utf8.DecodeRuneInString(text[pos:])
+		pos += size
+	}
+	return false
+}
+
+// foldPrefixLength reports the byte length of the longest prefix of
+// text that case-folds-equal to the entirety of word, or -1 if no such
+// prefix exists. Case equivalence uses unicode.SimpleFold (the same
+// per-rune equivalence that strings.EqualFold uses for its case-fold
+// check), so multi-byte characters that fold to a different byte
+// length — e.g. the long-s "ſ" (U+017F, 2 bytes) which folds to "s"
+// (1 byte) — match without breaking the comparison. Walks text and
+// word rune by rune; returns -1 on the first mismatch. Returns 0 if
+// word is empty (the empty string is a prefix of every string).
+func foldPrefixLength(text, word string) int {
+	if word == "" {
+		return 0
+	}
+	ti := 0
+	wi := 0
+	for wi < len(word) {
+		if ti >= len(text) {
+			return -1
+		}
+		tr, tsize := utf8.DecodeRuneInString(text[ti:])
+		wr, wsize := utf8.DecodeRuneInString(word[wi:])
+		if !runesFoldEqual(tr, wr) {
+			return -1
+		}
+		ti += tsize
+		wi += wsize
+	}
+	return ti
+}
+
+// runesFoldEqual reports whether r1 and r2 are equal under Unicode
+// simple case folding (the equivalence strings.EqualFold uses for its
+// per-rune check). The check is symmetric: walks the case-fold class
+// of each rune via unicode.SimpleFold in turn. The symmetric walk is
+// required because SimpleFold's per-rune cycle may not include both
+// sides of an equivalence — e.g. for "S" (U+0053) and "ſ" (U+017F),
+// SimpleFold("S") cycles {S, s} without reaching "ſ"; only the walk
+// from "ſ" reaches "S" via "s". For ASCII letters the first walk
+// already finds the match; for non-ASCII fold pairs (long-s/s, final
+// sigma/regular sigma, etc.) the second walk covers the bridge.
+func runesFoldEqual(r1, r2 rune) bool {
+	if r1 == r2 {
+		return true
+	}
+	for rr := unicode.SimpleFold(r1); rr != r1; rr = unicode.SimpleFold(rr) {
+		if rr == r2 {
+			return true
+		}
+	}
+	for rr := unicode.SimpleFold(r2); rr != r2; rr = unicode.SimpleFold(rr) {
+		if rr == r1 {
+			return true
+		}
+	}
+	return false
+}
+
+// isPromptWordBoundedAt reports whether s[start:end] is bounded by
+// non-word runes (or the string edges) on both sides. A "word rune"
+// is unicode.IsLetter(r) || unicode.IsDigit(r). The same boundary
+// definition is used by isWordBoundedAt in internal/correction/overedit.go
+// and ExpandToWordBoundaries in internal/correction/segment.go. Mirror
+// of the same-named helper in overedit.go; duplicated here to keep the
+// prompt package free of correction-internals imports.
+func isPromptWordBoundedAt(s string, start, end int) bool {
+	if start > 0 {
+		r, _ := utf8.DecodeLastRuneInString(s[:start])
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
+	}
+	if end < len(s) {
+		r, _ := utf8.DecodeRuneInString(s[end:])
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // New returns a Builder for the given format ("chat_instruct" or "grmr_native").
@@ -143,7 +313,7 @@ func NewWithPersonalizer(format string, p Personalizer) *Builder {
 // system prompt so the LLM sees the few-shot examples.
 func (b *Builder) Build(req correction.Request) correction.Prompt {
 	if b.chat {
-		sys := systemPrompt + b.vocabularyBlock()
+		sys := systemPrompt + b.vocabularyBlock(req.Text)
 		if b.personalizer != nil {
 			if block := b.personalizer.Snapshot(); !block.Empty() {
 				sys += block.String()
@@ -295,7 +465,7 @@ func (b *Builder) BuildStyle(req correction.Request) correction.Prompt {
 		// the grammar pass doing it. (Rephrase deliberately does NOT get the
 		// block: a wholesale rewrite may legitimately drop any word.)
 		return correction.Prompt{
-			System:   styleSystemPrompt + b.vocabularyBlock(),
+			System:   styleSystemPrompt + b.vocabularyBlock(req.Text),
 			User:     req.Text,
 			Template: correction.TemplateChatInstruct,
 		}

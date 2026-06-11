@@ -198,12 +198,14 @@ func TestVocabularyEmptyIsByteIdentical(t *testing.T) {
 func TestVocabularyInjectsQuotedWords(t *testing.T) {
 	b := New("chat_instruct")
 	b.SetVocabularySource(fakeVocabulary{words: []string{"Glorp", "Zix"}})
-	p := b.Build(correction.Request{Text: "x"})
+	// Text must actually contain the dictionary words — the protection
+	// block is conditional on a case-insensitive word-boundary match.
+	p := b.Build(correction.Request{Text: "Hello Glorp and Zix, welcome"})
 	require.Contains(t, p.System, `"Glorp"`)
 	require.Contains(t, p.System, `"Zix"`)
 	require.Contains(t, p.System, "personal dictionary")
 	// The picky style pass must respect the vocabulary too.
-	ps := b.BuildStyle(correction.Request{Text: "x"})
+	ps := b.BuildStyle(correction.Request{Text: "Hello Glorp, you're great"})
 	require.Contains(t, ps.System, `"Glorp"`)
 	// Rephrase deliberately does NOT carry it (a wholesale rewrite may
 	// legitimately drop any word).
@@ -219,17 +221,254 @@ func TestVocabularyNoOpOnGRMRNative(t *testing.T) {
 	require.NotContains(t, p.User, "Glorp")
 }
 
-func TestVocabularyCapsWordCount(t *testing.T) {
-	words := make([]string, maxVocabularyWords+5)
+func TestVocabularyCapsMatchedList(t *testing.T) {
+	// The cap bounds the RENDERED sentence length, not the dictionary
+	// scan. A text that matches many dictionary words gets its matched
+	// list capped at maxVocabularyWords, regardless of total dictionary
+	// size. Every dictionary word is scanned for a match; only the
+	// rendered sentence is bounded.
+	const totalMatches = 250
+	words := make([]string, totalMatches)
 	for i := range words {
 		words[i] = "w" + strconv.Itoa(i)
 	}
+	// Text contains all 250 words. The matched list will be all 250
+	// (every word matches via case-insensitive word-boundary match),
+	// then capped to maxVocabularyWords=200.
+	var sb strings.Builder
+	for i, w := range words {
+		if i > 0 {
+			sb.WriteByte(' ')
+		}
+		sb.WriteString(w)
+	}
+	text := sb.String()
 	b := New("chat_instruct")
 	b.SetVocabularySource(fakeVocabulary{words: words})
-	sys := b.Build(correction.Request{Text: "x"}).System
-	require.Contains(t, sys, `"w0"`)
-	require.Contains(t, sys, `"w`+strconv.Itoa(maxVocabularyWords-1)+`"`)
-	require.NotContains(t, sys, `"w`+strconv.Itoa(maxVocabularyWords)+`"`)
+	sys := b.Build(correction.Request{Text: text}).System
+	require.Contains(t, sys, `"w0"`, "first match must appear")
+	require.Contains(t, sys, `"w`+strconv.Itoa(maxVocabularyWords-1)+`"`,
+		"match at index maxVocabularyWords-1 must be in the rendered sentence")
+	require.NotContains(t, sys, `"w`+strconv.Itoa(maxVocabularyWords)+`"`,
+		"match at index maxVocabularyWords must be capped from the rendered sentence")
+	require.NotContains(t, sys, `"w`+strconv.Itoa(totalMatches-1)+`"`,
+		"last match must be capped from the rendered sentence")
+}
+
+// Reviewer finding #1: the cap-before-match design dropped dictionary
+// word #201 when it was the only match. The fix scans ALL dictionary
+// words for matches, then caps the MATCHED list at maxVocabularyWords
+// (the cap bounds rendered prompt size, not the scan). With a 201-word
+// dictionary where only the last word matches the text, the matched
+// list is a single entry — well under the cap — and the protection
+// sentence must still render it.
+func TestVocabularyMatchesBeyondCapWhenOnlyMatch(t *testing.T) {
+	words := make([]string, maxVocabularyWords+1)
+	for i := range words {
+		words[i] = "w" + strconv.Itoa(i)
+	}
+	words[maxVocabularyWords] = "Verlan" // word #200 (0-indexed), beyond the old scan cap
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: words})
+	p := b.Build(correction.Request{Text: "I met Verlan yesterday"})
+	require.Contains(t, p.System, "personal dictionary",
+		"a dictionary entry beyond the scan cap must still match when it appears in the text")
+	require.Contains(t, p.System, `"Verlan"`,
+		"the only matched word must appear in the protection sentence")
+}
+
+// Reviewer finding #2: strings.ToLower + strings.Index is not full
+// Unicode case-folding. The long-s (U+017F, "ſ") is canonically
+// case-equivalent to "s" under Unicode simple case folding, so a
+// dictionary word "ſpam" must match a text token "Spam" via
+// strings.EqualFold semantics. The fix tokenizes the request text
+// into word-bounded candidates and compares each candidate to each
+// dictionary word with strings.EqualFold.
+func TestVocabularyUnicodeEqualFoldMatch(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"ſpam"}})
+	p := b.Build(correction.Request{Text: "Spam is intentional"})
+	require.Contains(t, p.System, "personal dictionary",
+		"text token case-equivalent to a dictionary word must trigger the protection sentence")
+	require.Contains(t, p.System, `"ſpam"`,
+		"the dictionary word must appear quoted in the protection sentence")
+}
+
+// ---- conditional vocabulary injection (Gemma-4 regression fix) ----
+//
+// Live-measured bug (Gemma-4 QAT, temp 0, byte-stable across restarts):
+// the unconditional protection sentence made the model miss secondary
+// confusable fixes — golden cases 106 (discrete→discreet), 107
+// (complement→compliment), 112 (laying→lying) all FAILED with the
+// sentence present and all PASSED with the bare prompt. Cost: 3/125
+// golden cases for protection that is irrelevant to texts not
+// containing dictionary words. Fix: render the sentence ONLY when the
+// text contains at least one dictionary word, listing ONLY the matched
+// words.
+
+// (1) Text without any dictionary word → System prompt byte-identical
+// to the no-vocabulary baseline (no protection sentence at all).
+// Covers both Build (grammar) and BuildStyle (picky).
+func TestVocabularyNotInjectedWhenTextHasNoDictionaryMatch(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Verlan", "Kins"}})
+	text := "hello world"
+	plain := New("chat_instruct").Build(correction.Request{Text: text}).System
+	require.Equal(t, plain, b.Build(correction.Request{Text: text}).System,
+		"text with no dictionary word must not add the protection sentence to the grammar prompt")
+	plainStyle := New("chat_instruct").BuildStyle(correction.Request{Text: text}).System
+	require.Equal(t, plainStyle, b.BuildStyle(correction.Request{Text: text}).System,
+		"text with no dictionary word must not add the protection sentence to the style prompt")
+}
+
+// (2) Case-insensitive match. The text "verlan" (lowercase) must trigger
+// the sentence and the sentence must list ONLY the matched word, not
+// the other dictionary entries.
+func TestVocabularyCaseInsensitiveMatchListsOnlyMatched(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Verlan", "Kins"}})
+	p := b.Build(correction.Request{Text: "I met verlan yesterday"})
+	require.Contains(t, p.System, "personal dictionary")
+	require.Contains(t, p.System, `"Verlan"`)
+	require.NotContains(t, p.System, `"Kins"`,
+		"dictionary word absent from the text must not appear in the protection sentence")
+}
+
+// (3) Two matches → both listed, in dictionary file order. A third
+// dictionary entry that does NOT appear in the text must NOT be in the
+// sentence. The cap is on the dictionary scan, not the matches.
+func TestVocabularyBothMatchesAppearInFileOrder(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Verlan", "Kins", "OtherWord"}})
+	p := b.Build(correction.Request{Text: "ping Kins. hi Verlan!"})
+	require.Contains(t, p.System, `"Verlan"`)
+	require.Contains(t, p.System, `"Kins"`)
+	require.NotContains(t, p.System, `"OtherWord"`,
+		"dictionary entry absent from the text must not appear in the protection sentence")
+	verlanIdx := strings.Index(p.System, `"Verlan"`)
+	kinsIdx := strings.Index(p.System, `"Kins"`)
+	require.Greater(t, kinsIdx, verlanIdx,
+		"matched words must appear in dictionary file order")
+}
+
+// (4) Substring non-match: "Kins" must NOT match inside "napkins". The
+// rune immediately before "kins" inside "napkins" is 'p' — a letter —
+// so the match must be rejected.
+func TestVocabularySubstringNonMatch(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Kins"}})
+	text := "he uses napkins daily"
+	plain := New("chat_instruct").Build(correction.Request{Text: text}).System
+	require.Equal(t, plain, b.Build(correction.Request{Text: text}).System,
+		"dictionary word that is only a substring of a longer word must not match")
+}
+
+// (5) Boundary edge cases: word at the start of text, at the end of
+// text, and adjacent to punctuation must all match. The rune bordering
+// the match must be a non-letter/non-digit (or the string edge). A
+// non-matching entry in the same dictionary must NOT be quoted.
+func TestVocabularyMatchesAtTextBoundariesAndPunctuation(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Verlan", "Kins", "OtherWord"}})
+	cases := []string{
+		"Verlan, hello", // start of text + comma right after
+		"ping Kins.",    // space before + period after
+		"Kins",          // the whole text
+		"x Verlan",      // space-bounded at the end
+	}
+	for _, txt := range cases {
+		p := b.Build(correction.Request{Text: txt})
+		require.Contains(t, p.System, "personal dictionary",
+			"text %q must trigger the protection sentence (word at boundary)", txt)
+		require.NotContains(t, p.System, `"OtherWord"`,
+			"text %q must not promote an absent dictionary entry", txt)
+	}
+}
+
+// (6) Empty dictionary source: existing behavior, no sentence at all.
+// Empty source must keep the prompt byte-identical even if the text
+// happens to match (the scan has nothing to match against).
+func TestVocabularyEmptySourceLeavesPromptByteIdentical(t *testing.T) {
+	plain := New("chat_instruct").Build(correction.Request{Text: "x"}).System
+	withNil := New("chat_instruct")
+	require.Equal(t, plain, withNil.Build(correction.Request{Text: "x"}).System,
+		"nil vocabulary source must not change the prompt")
+	withEmpty := New("chat_instruct")
+	withEmpty.SetVocabularySource(fakeVocabulary{})
+	require.Equal(t, plain, withEmpty.Build(correction.Request{Text: "Verlan"}).System,
+		"empty vocabulary source must not change the prompt even if text matches a (non-existent) entry")
+}
+
+// (7) grmr_native: still never gets a system prompt. The dictionary
+// protection must NOT be spliced into User either. Confirms the new
+// conditional path stays a no-op on the GRMR-native branch. The raw
+// user text WILL appear in the User envelope (that's the whole point of
+// the native format) — the assertion is on the protection SENTENCE,
+// not on the dictionary word.
+func TestVocabularyNoOpOnGRMRNativeWithConditionalInjection(t *testing.T) {
+	b := New("grmr_native")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Verlan"}})
+	p := b.Build(correction.Request{Text: "hello Verlan!"})
+	require.Empty(t, p.System, "GRMR-native never gets a system prompt")
+	require.NotContains(t, p.User, "personal dictionary",
+		"dictionary protection sentence must not be added to the GRMR-native User envelope")
+	require.NotContains(t, p.User, "never change, respell",
+		"dictionary protection sentence body must not leak into the GRMR-native User envelope")
+}
+
+// ---- punctuation-bearing dictionary entries (reviewer round 3) ----
+//
+// The old tokenizeWordTokens design split text on non-letter/non-digit
+// runes, then compared WHOLE tokens. That made any dictionary entry
+// containing punctuation (a hyphen like "Qwen3-4B", an apostrophe like
+// "O'Connor", a "++" like "C++") unmatchable — the text tokenised into
+// fragments that could never reassemble into the dictionary word. The
+// fix is a bounded-substring fold scan: for each word-bounded-left
+// position in the text, walk the text and the dictionary word rune by
+// rune using Unicode case-fold equivalence, and accept the match when
+// the entire word is consumed AND the rune after the match is
+// non-letter/non-digit (or string end). Punctuation INSIDE the
+// dictionary word is consumed by the fold-prefix; the boundary check
+// runs on the runes BEFORE and AFTER the match.
+
+// Reviewer main test: hyphenated dictionary entry.
+func TestVocabularyMatchesPunctuationBearingDictionaryWord(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Qwen3-4B"}})
+	p := b.Build(correction.Request{Text: "Use Qwen3-4B locally."})
+	require.Contains(t, p.System, "personal dictionary",
+		"hyphenated dictionary word in text must trigger the protection sentence")
+	require.Contains(t, p.System, `"Qwen3-4B"`,
+		"the hyphenated dictionary word must appear quoted in the protection sentence")
+}
+
+// Apostrophe inside dictionary entry: "O'Connor" must match "O'Connor"
+// in the text. The apostrophe is consumed by the fold-prefix, not
+// treated as a boundary.
+func TestVocabularyMatchesApostropheDictionaryWord(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"O'Connor"}})
+	p := b.Build(correction.Request{Text: "met O'Connor today"})
+	require.Contains(t, p.System, "personal dictionary",
+		"apostrophe-bearing dictionary word in text must trigger the protection sentence")
+	require.Contains(t, p.System, `"O'Connor"`,
+		"the apostrophe-bearing dictionary word must appear quoted in the protection sentence")
+}
+
+// Possessive form: "Verlan's" in the text must match the dictionary
+// word "Verlan". The apostrophe at the right end of the match is a
+// non-letter/non-digit, so the right-boundary check passes. This
+// pins the old behaviour — possessive forms are exactly the case
+// where the user would expect a name dictionary to cover the
+// unpossessivised base.
+func TestVocabularyPossessiveStillMatches(t *testing.T) {
+	b := New("chat_instruct")
+	b.SetVocabularySource(fakeVocabulary{words: []string{"Verlan"}})
+	p := b.Build(correction.Request{Text: "I met Verlan's friend today"})
+	require.Contains(t, p.System, "personal dictionary",
+		"text with possessive form must match the bare dictionary word")
+	require.Contains(t, p.System, `"Verlan"`,
+		"the bare dictionary word must appear quoted in the protection sentence")
 }
 
 // ---- fast-hint prompt-injection (GF_FAST_HINTS spike) ----
