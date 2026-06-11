@@ -696,7 +696,7 @@ func spansConflict(a, b Span) bool { return a.Start <= b.End && b.Start <= a.End
 // me" double-insertion class conflicts here even though the raw spans
 // don't touch). Invalid spans conflict unconditionally: an edit the rest
 // of the pipeline treats as suspect must never be merged in. The one-byte
-// widening can land mid-rune on multibyte text; expandToWordBoundaries
+// widening can land mid-rune on multibyte text; ExpandToWordBoundaries
 // walks byte-wise over non-space runes, so the zone only ever gets WIDER —
 // a conservative failure mode (more conflicts, fewer merges).
 func wordZonesConflict(text string, a, b Span) bool {
@@ -721,7 +721,7 @@ func wordZone(text string, sp Span) Span {
 			end++
 		}
 	}
-	ws, we := expandToWordBoundaries(text, start, end)
+	ws, we := ExpandToWordBoundaries(text, start, end)
 	return Span{Start: ws, End: we}
 }
 
@@ -780,7 +780,7 @@ func (s *Service) dropAllowlisted(text string, sugs []Suggestion) []Suggestion {
 	out := make([]Suggestion, 0, len(sugs))
 	for _, sg := range sugs {
 		if sg.Span.Validate(len(text)) == nil && sg.Span.End > sg.Span.Start {
-			wordStart, wordEnd := expandToWordBoundaries(text, sg.Span.Start, sg.Span.End)
+			wordStart, wordEnd := ExpandToWordBoundaries(text, sg.Span.Start, sg.Span.End)
 			if allTokensAllowlisted(text[wordStart:wordEnd], s.allowlist) {
 				continue
 			}
@@ -790,11 +790,15 @@ func (s *Service) dropAllowlisted(text string, sugs []Suggestion) []Suggestion {
 	return out
 }
 
-// expandToWordBoundaries widens a byte span to the surrounding whitespace-
+// ExpandToWordBoundaries widens a byte span to the surrounding whitespace-
 // delimited word boundaries: start walks back to the rune after the previous
 // whitespace (or 0), end walks forward to the rune before the next whitespace
 // (or len(text)). UTF-8-safe (rune-wise decoding in both directions).
-func expandToWordBoundaries(text string, start, end int) (int, int) {
+//
+// Exported because the store layer reuses it to reconstruct word-level
+// personalisation pairs from the span-level diff fragments the corrector
+// logs (see store.SQLite.PersonalizationExamples). One concept, one name.
+func ExpandToWordBoundaries(text string, start, end int) (int, int) {
 	for start > 0 {
 		r, size := utf8.DecodeLastRuneInString(text[:start])
 		if unicode.IsSpace(r) {

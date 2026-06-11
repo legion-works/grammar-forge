@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/grammarforge/bridge/internal/correction"
 )
@@ -115,9 +116,21 @@ func (c *Cache) Snapshot() Block {
 // literal and an embedded \n smuggle a new prompt line into the system
 // prompt — a prompt-injection vector (the "user's" text would appear as
 // a system instruction to the LLM).
+//
+// DEFENSE IN DEPTH: pairs whose Original is empty, whitespace-only,
+// equal to the Suggestion, or made of pure punctuation (no letter or
+// digit) are dropped before rendering. The store layer already filters
+// at aggregation time (word-boundary widening, invalid-span skip,
+// pairOriginal==pairSuggestion skip), but renderBlock must not trust
+// its source — a different Source implementation wired up later could
+// feed it junk.
 func renderBlock(data correction.PersonalizationData) Block {
-	positive := capSlice(data.Accepted, 10)
-	negative := capSlice(data.Rejected, 10)
+	// Filter FIRST, cap second. The cap applies to the survivors of the
+	// junk filter, not to the raw input: ten leading junk entries
+	// (e.g. pure-punctuation Originals from a buggy source) must not
+	// crowd out a valid pair at index 10.
+	positive := capSlice(filterRenderablePairs(data.Accepted), 10)
+	negative := capSlice(filterRenderablePairs(data.Rejected), 10)
 	if len(positive) == 0 && len(negative) == 0 {
 		return Block{}
 	}
@@ -147,6 +160,49 @@ func renderBlock(data correction.PersonalizationData) Block {
 		text = text[:cut+1]
 	}
 	return Block{text: text}
+}
+
+// filterRenderablePairs drops pairs that would render as junk regardless
+// of escaping. Returns a fresh slice; input is not mutated. Conditions
+// (all must hold for the pair to be kept):
+//   - Original is non-empty and contains at least one non-whitespace rune
+//   - Original != Suggestion (a no-op rewrite biases the LLM toward
+//     cosmetic noise)
+//   - Original contains at least one letter or digit (pure punctuation,
+//     e.g. period inserts logged as ”→'.', is useless and biased the
+//     cold golden eval 125/125 → 110/125)
+func filterRenderablePairs(pairs []correction.EditPair) []correction.EditPair {
+	// Fresh allocation — DO NOT reuse pairs[:0]. The input slice is
+	// owned by the store and may be referenced by other code paths
+	// (e.g. diff-based cache invalidation); aliasing the output onto
+	// the caller's backing array would silently mutate their view of
+	// the data when junk entries are dropped.
+	out := make([]correction.EditPair, 0, len(pairs))
+	for _, p := range pairs {
+		if strings.TrimSpace(p.Original) == "" {
+			continue
+		}
+		if p.Original == p.Suggestion {
+			continue
+		}
+		if !hasLetterOrDigit(p.Original) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// hasLetterOrDigit reports whether s contains at least one rune that is
+// a Unicode letter (any script) or an ASCII digit. False for pure
+// punctuation, whitespace, or symbol runs.
+func hasLetterOrDigit(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func capSlice(s []correction.EditPair, n int) []correction.EditPair {

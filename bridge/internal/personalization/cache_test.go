@@ -373,12 +373,14 @@ func countExampleLines(s string) int {
 // sequence valid UTF-8.
 func TestRenderBlockTruncatesOnLineBoundaryNotMidRune(t *testing.T) {
 	// Build pairs long enough to exceed the 2000-byte cap, full of multi-byte
-	// runes so a naive byte slice would cut mid-codepoint.
+	// runes so a naive byte slice would cut mid-codepoint. The
+	// renderBlock junk filter would drop identical Original/Suggestion,
+	// so the two examples carry different suggestion text.
 	long := strings.Repeat("café naïve résumé ", 60) // ~3 bytes/char accents
 	data := correction.PersonalizationData{
 		Accepted: []correction.EditPair{
-			{Original: long, Suggestion: long, Count: 1},
-			{Original: long, Suggestion: long, Count: 1},
+			{Original: long, Suggestion: long + "X", Count: 1},
+			{Original: long, Suggestion: long + "Y", Count: 1},
 		},
 	}
 	b := renderBlock(data)
@@ -386,4 +388,130 @@ func TestRenderBlockTruncatesOnLineBoundaryNotMidRune(t *testing.T) {
 	require.LessOrEqual(t, len(b.String()), 2000)
 	require.True(t, utf8.ValidString(b.String()), "truncation must not cut mid-rune")
 	require.True(t, strings.HasSuffix(b.String(), "\n"), "truncation must end on a complete example line")
+}
+
+// Defense-in-depth: a pair whose Original is empty or whitespace-only
+// would render as `Correct "" to "<repl>".` and "Do NOT change "  " ..."` —
+// both useless, both biasing the LLM. Drop them. Pairs from the store
+// SHOULD already be word-level, but renderBlock must not trust that —
+// the store layer and the renderer are independently written.
+func TestRenderBlockDropsEmptyOrWhitespaceOriginal(t *testing.T) {
+	data := correction.PersonalizationData{
+		Accepted: []correction.EditPair{
+			{Original: "", Suggestion: "real"},
+			{Original: "   ", Suggestion: "real"},
+			{Original: "\t\n", Suggestion: "real"},
+		},
+		Rejected: []correction.EditPair{
+			{Original: "", Suggestion: "real", Count: 3},
+			{Original: " ", Suggestion: "real", Count: 3},
+		},
+	}
+	b := renderBlock(data)
+	s := b.String()
+	require.NotContains(t, s, `Correct "" to`,
+		"empty Original must not be rendered as an accepted example")
+	require.NotContains(t, s, `Do NOT change ""`,
+		"empty Original must not be rendered as a rejected example")
+	require.Empty(t, strings.TrimSpace(s),
+		"all entries had empty/whitespace Original; the entire block must collapse to the header OR be empty — but no junk lines")
+}
+
+// Defense-in-depth: pairOriginal == pairSuggestion is a no-op. The store
+// skips these at aggregation time, but renderBlock must not render them
+// even if a caller wires up a different source. Feeding the LLM
+// `Correct "x" to "x".` is junk that biases it toward cosmetic rewrites.
+func TestRenderBlockDropsIdenticalOriginalAndSuggestion(t *testing.T) {
+	data := correction.PersonalizationData{
+		Accepted: []correction.EditPair{
+			{Original: "hello", Suggestion: "hello", Count: 1},
+			{Original: "real", Suggestion: "rewrite", Count: 1},
+		},
+	}
+	b := renderBlock(data)
+	s := b.String()
+	require.NotContains(t, s, `Correct "hello" to "hello".`,
+		"identical Original/Suggestion must not be rendered as an accepted example")
+	require.Contains(t, s, `Correct "real" to "rewrite".`,
+		"real word-level pairs must still be rendered")
+}
+
+// Defense-in-depth: an Original made of pure punctuation (no letters or
+// digits) is junk — production has no path to produce it after the
+// store-side word-boundary widening, but renderBlock must be robust to
+// a misbehaving source. Period inserts and stray whitespace would
+// otherwise render as `Correct "." to ".".`.
+func TestRenderBlockDropsPunctuationOnlyOriginal(t *testing.T) {
+	data := correction.PersonalizationData{
+		Accepted: []correction.EditPair{
+			{Original: "...", Suggestion: "word", Count: 1},
+			{Original: "!?", Suggestion: "word", Count: 1},
+			{Original: "—", Suggestion: "word", Count: 1},
+		},
+		Rejected: []correction.EditPair{
+			{Original: "...", Suggestion: "leave", Count: 3},
+		},
+	}
+	b := renderBlock(data)
+	s := b.String()
+	require.NotContains(t, s, `Correct "..."`,
+		"punctuation-only Original must not be rendered")
+	require.NotContains(t, s, `Correct "!"`,
+		"punctuation-only Original must not be rendered")
+	require.NotContains(t, s, `Do NOT change "..."`,
+		"punctuation-only Original must not be rendered in the negative pool")
+	require.Empty(t, strings.TrimSpace(s),
+		"all entries were junk; the block must not contain any example lines")
+}
+
+// Regression: the 10-pair cap used to be applied BEFORE the junk filter.
+// Ten leading junk entries (pure-punctuation Original) consumed the cap,
+// the filter then dropped them all, and a valid pair at index 10 was
+// silently lost. Filter first, cap second — the cap applies to the
+// survivors, so the LLM still gets to see its real learned preferences
+// even when the source is dominated by junk.
+func TestRenderBlockFiltersBeforeCap(t *testing.T) {
+	// 10 junk pairs (Original "..." is pure punctuation → filtered)
+	// followed by ONE valid pair at index 10. The cap is 10; if the
+	// cap is applied first, the valid pair is dropped along with the
+	// junk and the block is empty.
+	pairs := make([]correction.EditPair, 0, 11)
+	for i := 0; i < 10; i++ {
+		pairs = append(pairs, correction.EditPair{Original: "...", Suggestion: "word", Count: 1})
+	}
+	pairs = append(pairs, correction.EditPair{Original: "has", Suggestion: "have", Count: 1})
+	data := correction.PersonalizationData{Accepted: pairs}
+	b := renderBlock(data)
+	s := b.String()
+	require.Contains(t, s, `"has"`,
+		"valid pair at index 10 must still be rendered even when the first 10 entries are junk — filter before cap")
+}
+
+// Contract: filterRenderablePairs MUST NOT mutate the caller's backing
+// array. renderBlock is fed the PersonalizationData.Accepted / Rejected
+// slices from the store; the store may keep references to those slices
+// and rely on them being stable across Snapshot rebuilds (e.g. for diff-
+// based cache invalidation). A filter that aliased its output onto the
+// input would silently corrupt the store's data when junk entries were
+// dropped.
+func TestFilterRenderablePairsDoesNotMutateInput(t *testing.T) {
+	// Mix of kept, identical-pair, punctuation-only, and empty entries.
+	// The survivor is at index 3; everything before is dropped. If the
+	// filter uses the input's backing array (pairs[:0]) the survivor
+	// would be copied into index 0 and the slice would mutate to
+	// [{has have 1} ...truncated...].
+	original := []correction.EditPair{
+		{Original: "", Suggestion: "real", Count: 1},                         // dropped (empty)
+		{Original: "...", Suggestion: "word", Count: 1},                      // dropped (punctuation)
+		{Original: "same", Suggestion: "same", Count: 1},                     // dropped (identical)
+		{Original: "has", Suggestion: "have", Count: 1},                      // kept
+		{Original: "dropped", Suggestion: "kept-but-not-iterated", Count: 1}, // sentinel
+	}
+	snapshot := make([]correction.EditPair, len(original))
+	copy(snapshot, original)
+
+	_ = filterRenderablePairs(original)
+
+	require.Equal(t, snapshot, original,
+		"input slice must be byte-identical after filterRenderablePairs — the function must not alias its output onto the caller's backing array")
 }

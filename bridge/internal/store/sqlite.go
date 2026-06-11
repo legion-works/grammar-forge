@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/grammarforge/bridge/internal/correction"
@@ -153,59 +154,154 @@ func (s *SQLite) CountSignals(ctx context.Context) (correction.SignalCounts, err
 }
 
 // PersonalizationExamples aggregates the signal log into the few-shot pairs
-// the prompt builder injects into the chat system prompt. Both accepted
-// and rejected pairs are ordered most-recent-first (MAX(ts) DESC, then
-// MAX(id) DESC for deterministic ties within the same millisecond) so the
-// few-shot block reflects the user's LATEST preferences, not the loudest.
-// Rejected pairs are filtered to Count>=3 (a single reject is not a strong
-// signal; three is a pattern). Both sets are capped at 20 rows. Rows with
-// signal IS NULL (no user reaction) are ignored on both paths.
+// the prompt builder injects into the chat system prompt.
+//
+// The corrector logs edits as SPAN-LEVEL diff fragments (the diff between
+// the LLM's rewrite and the original text often returns the changed suffix
+// only — "has"→"have" stored as span over the trailing "s" with replacement
+// "ve", "a"→"an" stored as "a"→"n", period inserts as ”→'.'). A few-shot
+// block built from those raw fragments reads as `Correct "s" to "ve".` —
+// junk that biases the LLM and caused the cold golden eval to regress from
+// 125/125 → 110/125 (and the LLM to start deleting @mentions). At
+// aggregation time we JOIN each edit to its parent correction, widen the
+// span to the surrounding whitespace-delimited word boundaries, and
+// reconstruct the WORD-LEVEL pair (e.g. "has"→"have") that the user
+// actually accepted. Rows with invalid spans (span_end > len(parent) or
+// start>end) and rows whose reconstructed original==suggestion are
+// silently dropped.
+//
+// Both accepted and rejected pairs are ordered most-recent-first
+// (MAX(signal_ts) DESC, then MAX(id) DESC for deterministic ties within
+// the same millisecond) so the few-shot block reflects the user's LATEST
+// preferences, not the loudest. Rejected pairs are filtered to Count>=3
+// (a single reject is not a strong signal; three is a pattern). Both
+// sets are capped at 20 rows. Rows with signal IS NULL (no user
+// reaction) are ignored on both paths.
 func (s *SQLite) PersonalizationExamples(ctx context.Context) (correction.PersonalizationData, error) {
-	accepted, err := s.queryEditPairs(ctx,
-		`SELECT original, replacement, COUNT(*) c
-		 FROM edits
-		 WHERE signal = 'accepted'
-		 GROUP BY original, replacement
-		 ORDER BY MAX(signal_ts) DESC, MAX(id) DESC
-		 LIMIT 20`)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT e.id, c.original, e.span_start, e.span_end, e.replacement, e.signal, COALESCE(e.signal_ts, 0)
+		FROM edits e
+		JOIN corrections c ON c.id = e.correction_id
+		WHERE e.signal IS NOT NULL
+		  AND e.signal IN ('accepted', 'rejected', 'ignored')
+		ORDER BY COALESCE(e.signal_ts, 0) DESC, e.id DESC`)
 	if err != nil {
-		return correction.PersonalizationData{}, fmt.Errorf("accepted pairs: %w", err)
-	}
-	// 'rejected' OR 'ignored': the browser client only ever sends accepted /
-	// ignored (there is no Reject affordance), so a repeated ignore IS the
-	// negative pattern. >=3 keeps one-off dismissals out.
-	rejected, err := s.queryEditPairs(ctx,
-		`SELECT original, replacement, COUNT(*) c
-		 FROM edits
-		 WHERE signal IN ('rejected', 'ignored')
-		 GROUP BY original, replacement
-		 HAVING c >= 3
-		 ORDER BY MAX(signal_ts) DESC, MAX(id) DESC
-		 LIMIT 20`)
-	if err != nil {
-		return correction.PersonalizationData{}, fmt.Errorf("rejected pairs: %w", err)
-	}
-	return correction.PersonalizationData{Accepted: accepted, Rejected: rejected}, nil
-}
-
-func (s *SQLite) queryEditPairs(ctx context.Context, query string) ([]correction.EditPair, error) {
-	rows, err := s.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("query: %w", err)
+		return correction.PersonalizationData{}, fmt.Errorf("query pairs: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []correction.EditPair
+
+	// Two maps: one for accepted pairs, one for the negative pool
+	// (rejected + ignored). The negative pool is filtered to Count>=3
+	// at flatten time so the sort+cap is over the survivors only.
+	acc := map[pairKey]*pairAgg{}
+	rej := map[pairKey]*pairAgg{}
 	for rows.Next() {
-		var p correction.EditPair
-		if err := rows.Scan(&p.Original, &p.Suggestion, &p.Count); err != nil {
-			return nil, fmt.Errorf("scan: %w", err)
+		var (
+			id, signalTS        int64
+			parent              string
+			spanStart, spanEnd  int
+			replacement, signal string
+		)
+		if err := rows.Scan(&id, &parent, &spanStart, &spanEnd, &replacement, &signal, &signalTS); err != nil {
+			return correction.PersonalizationData{}, fmt.Errorf("scan pair: %w", err)
 		}
-		out = append(out, p)
+		// Skip rows whose span is unrecoverable (the corrector's diff
+		// never produces these, but a corrupt row must not panic the
+		// aggregation path).
+		if spanStart > spanEnd || spanEnd > len(parent) {
+			continue
+		}
+		// Widen to the surrounding word and splice the replacement in.
+		// The widened bounds are always inside [0, len(parent)].
+		wordStart, wordEnd := correction.ExpandToWordBoundaries(parent, spanStart, spanEnd)
+		pairOriginal := parent[wordStart:wordEnd]
+		pairSuggestion := parent[wordStart:spanStart] + replacement + parent[spanEnd:wordEnd]
+		// No-op edit: the widening turned the diff into a tautology.
+		// Most commonly an allowlisted word whose replacement happened
+		// to match the original at the wider boundary.
+		if pairOriginal == pairSuggestion {
+			continue
+		}
+		k := pairKey{Original: pairOriginal, Suggestion: pairSuggestion}
+		// 'rejected' OR 'ignored': the browser client only ever sends
+		// accepted / ignored (there is no Reject affordance), so a
+		// repeated ignore IS the negative pattern. >=3 keeps one-off
+		// dismissals out — applied at the flatten step.
+		var m map[pairKey]*pairAgg
+		if signal == "accepted" {
+			m = acc
+		} else {
+			m = rej
+		}
+		agg, ok := m[k]
+		if !ok {
+			m[k] = &pairAgg{
+				EditPair: correction.EditPair{Original: pairOriginal, Suggestion: pairSuggestion, Count: 1},
+				lastTS:   signalTS,
+				maxID:    id,
+			}
+			continue
+		}
+		agg.Count++
+		if signalTS > agg.lastTS {
+			agg.lastTS = signalTS
+		}
+		if id > agg.maxID {
+			agg.maxID = id
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows: %w", err)
+		return correction.PersonalizationData{}, fmt.Errorf("rows: %w", err)
 	}
-	return out, nil
+	return correction.PersonalizationData{
+		Accepted: orderAndCapPairs(acc, 20, 1),
+		Rejected: orderAndCapPairs(rej, 20, 3),
+	}, nil
+}
+
+// pairKey is the (Original, Suggestion) tuple the aggregation groups by.
+type pairKey struct {
+	Original   string
+	Suggestion string
+}
+
+// pairAgg is the per-key rollup kept on the side during the GROUP-BY-in-Go
+// pass. The recency sort keys (last signal_ts, last edit id) are NOT part
+// of the public PersonalizationData contract — the contract is
+// {Original, Suggestion, Count} — so they live here and never escape.
+type pairAgg struct {
+	correction.EditPair
+	lastTS int64
+	maxID  int64
+}
+
+// orderAndCapPairs flattens a per-key aggregate map into the public
+// EditPair slice, ordered most-recent-first (last signal_ts DESC, then
+// last edit id DESC for ties) and capped at capN. Entries with
+// Count < minCount are dropped first (the negative pool uses >=3 to
+// suppress one-off dismissals).
+func orderAndCapPairs(m map[pairKey]*pairAgg, capN, minCount int) []correction.EditPair {
+	out := make([]correction.EditPair, 0, len(m))
+	for _, agg := range m {
+		if agg.Count < minCount {
+			continue
+		}
+		out = append(out, agg.EditPair)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ki := pairKey{Original: out[i].Original, Suggestion: out[i].Suggestion}
+		kj := pairKey{Original: out[j].Original, Suggestion: out[j].Suggestion}
+		ti, tj := m[ki].lastTS, m[kj].lastTS
+		if ti != tj {
+			return ti > tj
+		}
+		ii, ij := m[ki].maxID, m[kj].maxID
+		return ii > ij
+	})
+	if len(out) > capN {
+		out = out[:capN]
+	}
+	return out
 }
 
 // PruneOlderThan deletes correction events older than `days` whose edits

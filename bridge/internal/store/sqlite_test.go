@@ -60,11 +60,14 @@ func TestPersonalizationExamplesGroupsAcceptedAndRejected(t *testing.T) {
 
 	// Seed 3 distinct accepted pairs (a/b, c/d, e/f) each logged once with
 	// signal='accepted'. Insertion order is a/b first, then c/d, then e/f
-	// last. "Most recent first" means e/f first.
+	// last. "Most recent first" means e/f first. Spans cover the whole
+	// single-char parent (SpanStart=0, SpanEnd=1) so the word-boundary
+	// widening in the store produces pairOriginal == parent and
+	// pairSuggestion == replacement, not a prefix-splice.
 	mkAccepted := func(orig, sug string) {
 		_, editIDs, err := s.LogCorrection(ctx, correction.Event{
 			Original: orig, Suggestion: sug, Model: correction.ModelLLM,
-			Edits: []correction.EditRecord{{Original: orig, Replacement: sug, Model: correction.ModelLLM}},
+			Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 1, Original: orig, Replacement: sug, Model: correction.ModelLLM}},
 		})
 		require.NoError(t, err)
 		require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
@@ -77,7 +80,7 @@ func TestPersonalizationExamplesGroupsAcceptedAndRejected(t *testing.T) {
 	mkRejected := func(orig, sug string) {
 		_, editIDs, err := s.LogCorrection(ctx, correction.Event{
 			Original: orig, Suggestion: sug, Model: correction.ModelLLM,
-			Edits: []correction.EditRecord{{Original: orig, Replacement: sug, Model: correction.ModelLLM}},
+			Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 1, Original: orig, Replacement: sug, Model: correction.ModelLLM}},
 		})
 		require.NoError(t, err)
 		require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalRejected))
@@ -117,15 +120,17 @@ func TestPersonalizationExamplesEmpty(t *testing.T) {
 func TestPersonalizationExamplesIgnoresSignallessRows(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	// Log two corrections, only one gets a signal.
+	// Log two corrections, only one gets a signal. Spans cover the whole
+	// single-char parent so the word-boundary widening reproduces the
+	// intended pair verbatim.
 	_, id1, err := s.LogCorrection(ctx, correction.Event{
 		Original: "p", Suggestion: "q", Model: correction.ModelLLM,
-		Edits: []correction.EditRecord{{Original: "p", Replacement: "q", Model: correction.ModelLLM}},
+		Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 1, Original: "p", Replacement: "q", Model: correction.ModelLLM}},
 	})
 	require.NoError(t, err)
 	_, _, err = s.LogCorrection(ctx, correction.Event{
 		Original: "r", Suggestion: "s", Model: correction.ModelLLM,
-		Edits: []correction.EditRecord{{Original: "r", Replacement: "s", Model: correction.ModelLLM}},
+		Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 1, Original: "r", Replacement: "s", Model: correction.ModelLLM}},
 	})
 	require.NoError(t, err)
 	require.NoError(t, s.LogSignal(ctx, id1[0], correction.SignalAccepted))
@@ -147,11 +152,12 @@ func TestPersonalizationExamplesRejectedOrderByRecency(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	// Helper: log a rejected event.
+	// Helper: log a rejected event. Spans cover the whole parent so the
+	// word-boundary widening reproduces the intended pair verbatim.
 	reject := func(orig, sug string) {
 		_, editIDs, err := s.LogCorrection(ctx, correction.Event{
 			Original: orig, Suggestion: sug, Model: correction.ModelLLM,
-			Edits: []correction.EditRecord{{Original: orig, Replacement: sug, Model: correction.ModelLLM}},
+			Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: len(orig), Original: orig, Replacement: sug, Model: correction.ModelLLM}},
 		})
 		require.NoError(t, err)
 		require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalRejected))
@@ -270,11 +276,17 @@ func TestLogCorrectionInsertsEditsAndReturnsIDs(t *testing.T) {
 
 func TestLogSignalAttributesToOneEdit(t *testing.T) {
 	s := newTestStore(t)
+	// Parent text carries the actual word — "I have a colour pencil" — and
+	// the edits carry valid spans into it. Spans are required by the word-
+	// boundary pair reconstruction (a zero-width span against "x" used to
+	// render the raw fragment, but the production behaviour widens to the
+	// surrounding word; this test exercises the signal-attribution contract
+	// against proper spans).
 	_, editIDs, err := s.LogCorrection(context.Background(), correction.Event{
-		Source: "browser", Original: "x", Suggestion: "y", Model: "llm",
+		Source: "browser", Original: "I have a colour pencil", Suggestion: "I have a color pencil", Model: "llm",
 		Edits: []correction.EditRecord{
-			{Original: "colour", Replacement: "color", Model: "llm"},
-			{Original: "teh", Replacement: "the", Model: "llm"}, //nolint:misspell // intentional fixture
+			{SpanStart: 9, SpanEnd: 15, Original: "colour", Replacement: "color", Model: "llm"},
+			{SpanStart: 15, SpanEnd: 22, Original: " pencil", Replacement: " pencil", Model: "llm"},
 		},
 	})
 	require.NoError(t, err)
@@ -288,10 +300,13 @@ func TestLogSignalAttributesToOneEdit(t *testing.T) {
 
 func TestPersonalizationNegativePoolCountsIgnored(t *testing.T) {
 	s := newTestStore(t)
+	// Parent text is the actual word being edited and the EditRecord carries
+	// a valid span (0..4). The word-boundary pair reconstruction in the
+	// store widens to (0,4) and the pair is "grey"→"gray".
 	for i := 0; i < 3; i++ {
 		_, editIDs, err := s.LogCorrection(context.Background(), correction.Event{
-			Source: "browser", Original: "x", Suggestion: "y", Model: "llm",
-			Edits: []correction.EditRecord{{Original: "grey", Replacement: "gray", Model: "llm"}},
+			Source: "browser", Original: "grey cat", Suggestion: "gray cat", Model: "llm",
+			Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 4, Original: "grey", Replacement: "gray", Model: "llm"}},
 		})
 		require.NoError(t, err)
 		require.NoError(t, s.LogSignal(context.Background(), editIDs[0], correction.SignalIgnored))
@@ -300,5 +315,201 @@ func TestPersonalizationNegativePoolCountsIgnored(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, data.Rejected, 1, "3x ignored of the same edit pair is a negative pattern")
 	require.Equal(t, "grey", data.Rejected[0].Original)
+	require.Equal(t, "gray", data.Rejected[0].Suggestion)
 	require.Equal(t, 3, data.Rejected[0].Count)
+}
+
+// Production logs edits as SPAN-LEVEL diff fragments (the diff between the
+// LLM's rewrite and the original text often returns the changed suffix only —
+// "has"→"have" stored as span over the trailing "s" with replacement "ve",
+// "a"→"an" stored as "a"→"n", period inserts as ”→'.'). The personalisation
+// few-shot block must reconstruct WORD-LEVEL pairs at aggregation time so the
+// LLM sees "Correct \"has\" to \"have\"." instead of "Correct \"s\" to \"ve\".".
+// Mirrors the production bug that regressed the cold golden eval 125/125
+// → 110/125 and caused the LLM to delete @mentions.
+func TestPersonalizationExamplesReconstructsWordPairsFromFragments(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// Parent sentence is the full input the user typed. The edits carry
+	// fragment-level spans: the trailing "s" of "has" (positions 4..5) and
+	// the misspelled word at positions 6..9. Both should be widened to the
+	// surrounding word and yield "has"→"have" and the misspelling→"the"
+	// — NOT the raw fragments.
+	_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+		Source: correction.SourceVencord, Original: "I has teh cat", Suggestion: "I have the cat", Model: correction.ModelLLM, //nolint:misspell // intentional fixture
+		Edits: []correction.EditRecord{
+			{SpanStart: 2, SpanEnd: 5, Original: "has", Replacement: "have", Model: correction.ModelLLM},
+			{SpanStart: 6, SpanEnd: 9, Original: "teh", Replacement: "the", Model: correction.ModelLLM}, //nolint:misspell // intentional fixture
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
+	require.NoError(t, s.LogSignal(ctx, editIDs[1], correction.SignalAccepted))
+
+	got, err := s.PersonalizationExamples(ctx)
+	require.NoError(t, err)
+	// Most-recent-first: the misspelled edit was signaled second, so it leads.
+	require.Equal(t, []correction.EditPair{
+		{Original: "teh", Suggestion: "the", Count: 1}, //nolint:misspell // intentional fixture
+		{Original: "has", Suggestion: "have", Count: 1},
+	}, got.Accepted, "fragments must be widened to the surrounding word boundaries, not stored verbatim")
+	require.Empty(t, got.Rejected)
+}
+
+// A tail-only fragment ("s"→"ve" inside "has") must still widen to the WHOLE
+// word "has" and reconstruct "have" — this is the exact shape of the
+// production bug.
+func TestPersonalizationExamplesReconstructsWordPairFromTailFragment(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// Span covers only the trailing "s" of "has" (positions 4..5); the
+	// replacement is "ve". After word-boundary expansion the original must
+	// be "has" and the suggestion must be "have".
+	_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+		Source: correction.SourceVencord, Original: "I has a cat", Suggestion: "I have a cat", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{
+			{SpanStart: 4, SpanEnd: 5, Original: "s", Replacement: "ve", Model: correction.ModelLLM},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
+
+	got, err := s.PersonalizationExamples(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []correction.EditPair{
+		{Original: "has", Suggestion: "have", Count: 1},
+	}, got.Accepted, "tail-fragment span must be widened to the containing word and the replacement spliced in")
+}
+
+// An out-of-range span (span_end > len(parent.Original) or start>end) is
+// unrecoverable: drop the row silently rather than emit a junk pair.
+func TestPersonalizationExamplesSkipsInvalidSpan(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// Parent Original is "abc" (length 3). The edit's span is [10,20) —
+	// far past the end. After word-boundary expansion on a span that's
+	// already outside the text, the reconstructed pair would be junk
+	// (or an out-of-range slice panic). Drop the row.
+	_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+		Original: "abc", Suggestion: "abc", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{
+			{SpanStart: 10, SpanEnd: 20, Original: "x", Replacement: "y", Model: correction.ModelLLM},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
+
+	got, err := s.PersonalizationExamples(ctx)
+	require.NoError(t, err)
+	require.Empty(t, got.Accepted, "rows with out-of-range spans must be skipped, not rendered as junk")
+	require.Empty(t, got.Rejected)
+}
+
+// An edit whose reconstruction produces pairOriginal == pairSuggestion is a
+// no-op (e.g. an allowlisted word that survived widening, or a span covering
+// a region whose reconstructed text is identical to the original). Drop it
+// — feeding the LLM "Correct \"x\" to \"x\"." is junk that biases the model.
+func TestPersonalizationExamplesSkipsIdenticalReconstructedPair(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// Parent "hello world". Span [6,11) is exactly "world". Replacement
+	// "world" is unchanged. After widening the boundaries are already at
+	// word edges, so pairOriginal == "world" and pairSuggestion == "world".
+	_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+		Original: "hello world", Suggestion: "hello world", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{
+			{SpanStart: 6, SpanEnd: 11, Original: "world", Replacement: "world", Model: correction.ModelLLM},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
+
+	got, err := s.PersonalizationExamples(ctx)
+	require.NoError(t, err)
+	require.Empty(t, got.Accepted, "pairs where original==suggestion after reconstruction must be skipped")
+}
+
+// Two separate corrections producing the same RECONSTRUCTED word pair must
+// collapse to one EditPair with Count=2 — the existing SQL GROUP BY semantics
+// move to Go on the reconstructed pair, not on the raw fragment.
+func TestPersonalizationExamplesGroupsSameWordPairAcrossCorrections(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	logAccepted := func() {
+		_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+			Original: "I has a cat", Suggestion: "I have a cat", Model: correction.ModelLLM,
+			Edits: []correction.EditRecord{
+				{SpanStart: 2, SpanEnd: 5, Original: "has", Replacement: "have", Model: correction.ModelLLM},
+			},
+		})
+		require.NoError(t, err)
+		require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
+	}
+	logAccepted()
+	logAccepted()
+
+	got, err := s.PersonalizationExamples(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []correction.EditPair{
+		{Original: "has", Suggestion: "have", Count: 2},
+	}, got.Accepted, "two corrections producing the same reconstructed word pair must collapse to one EditPair with Count=2")
+}
+
+// The Count>=3 threshold for the negative pool must apply to the
+// RECONSTRUCTED pair, not the raw fragment. Three ignored tail-fragment
+// edits of "has"→"have" must yield a single negative pattern.
+func TestPersonalizationExamplesRejectedHonorsCountThresholdOnReconstructedPair(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	logIgnored := func() {
+		_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+			Original: "I has a cat", Suggestion: "I have a cat", Model: correction.ModelLLM,
+			Edits: []correction.EditRecord{
+				{SpanStart: 4, SpanEnd: 5, Original: "s", Replacement: "ve", Model: correction.ModelLLM},
+			},
+		})
+		require.NoError(t, err)
+		require.NoError(t, s.LogSignal(ctx, editIDs[0], correction.SignalIgnored))
+	}
+	logIgnored()
+	logIgnored()
+	logIgnored()
+
+	got, err := s.PersonalizationExamples(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []correction.EditPair{
+		{Original: "has", Suggestion: "have", Count: 3},
+	}, got.Rejected, "3x ignored of the same reconstructed word pair is a negative pattern")
+	require.Empty(t, got.Accepted)
+}
+
+// Regression: the edits.signal_ts column is nullable (no NOT NULL
+// constraint) and a misbehaving writer (or a partial migration) can
+// produce a row with signal set but signal_ts=NULL. The aggregation
+// query must NOT error on this row — NULL is treated as the oldest
+// possible signal_ts (0) so it falls to the BOTTOM of the recency
+// ordering. Without COALESCE the Scan into int64 fails and a single
+// stray row breaks the whole few-shot block.
+func TestPersonalizationExamplesHandlesNullSignalTS(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	_, editIDs, err := s.LogCorrection(ctx, correction.Event{
+		Original: "has", Suggestion: "have", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{
+			{SpanStart: 2, SpanEnd: 3, Original: "s", Replacement: "ve", Model: correction.ModelLLM},
+		},
+	})
+	require.NoError(t, err)
+	// Force the exact shape the bug describes: signal set, signal_ts NULL.
+	// Bypasses LogSignal so the timestamp is not auto-stamped.
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE edits SET signal = 'accepted', signal_ts = NULL WHERE id = ?`,
+		editIDs[0])
+	require.NoError(t, err)
+
+	got, err := s.PersonalizationExamples(ctx)
+	require.NoError(t, err, "NULL signal_ts must not break PersonalizationExamples")
+	require.Equal(t, []correction.EditPair{
+		{Original: "has", Suggestion: "have", Count: 1},
+	}, got.Accepted, "row with NULL signal_ts is treated as oldest (0) and still surfaces the reconstructed pair")
 }
