@@ -302,6 +302,161 @@ func isWordBoundedAt(s string, start, end int) bool {
 	return true
 }
 
+// RepairMidWordCaseFlip reverts LLM mid-word case corruption (live-measured
+// 2026-06-11 on Gemma-4 QAT, deterministic at temp 0: "auto-detects" ->
+// "auto-detectS"). Two guards keep it from over-reaching:
+//
+//   - Balanced-gap guard: a fold-match pair is a candidate only when the
+//     gap BEFORE it and the gap AFTER it are balanced ((i-prevI)==(j-prevJ)
+//     and (nextI-i)==(nextJ-j), with the final tail using the token-slice
+//     lengths). Unbalanced surroundings mean insertion/deletion churn
+//     (e.g. an inserted case-changed duplicate at corr[0] when the orig
+//     starts at index 0 with a balanced body) — the fold-match is the LLM
+//     edit landing in the wrong slot, and we keep the edit (precision-
+//     first, consistent with the framework's stance).
+//
+//   - Direction guard: revert only when EVERY non-initial differing rune
+//     is lowercase in original AND uppercase in corrected — the measured
+//     Gemma-4 QAT corruption direction. Upper->lower (stuck-caps fixes
+//     like "THis"->"This", "IT"->"It") survives. Rune counts must match
+//     (EqualFold can match unequal byte lengths, e.g. Kelvin sign U+212A
+//     folds to ASCII "k"); the first rune must be byte-identical so the
+//     case change lives entirely in non-initial runes; first-rune flips
+//     (sentence case "it"->"It", proper nouns "paris"->"Paris") survive.
+//
+// Alignment is case-insensitive (alignTokensFold), not byte-exact like
+// RepairProximityAgreementFlip: byte-exact alignTokens pairs the orig "it"
+// with the LATER "it" in a sentence that contains "it" twice (e.g. the
+// measured case "it auto-detects ... so it controls ...") and leaves the
+// leading sentence-case "It" unaligned, so the "auto-detectS" corruption
+// lands in an unbalanced gap with no detected 1:1 substitution. Case-fold
+// alignment pairs positionally and lets the per-pair check below catch
+// the mid-word flip.
+//
+// Known accepted trade-off (deliberate, precision-first): a legit
+// "iphone"->"iPhone" fix is reverted by this rule — first rune is
+// byte-identical, mid-word 'p'/'P' flip is lower->upper (the measured
+// direction) and survives both guards. The measured mid-word case
+// corruption is high-frequency; iPhone is rare and the reversion is
+// recoverable by the user with one extra accept.
+func RepairMidWordCaseFlip(original, corrected string) string {
+	if original == corrected {
+		return corrected
+	}
+	origTokens := tokenizeWords(original)
+	corrTokens := tokenizeWords(corrected)
+	matches := alignTokensFold(origTokens, corrTokens)
+
+	type splice struct {
+		start, end int
+		text       string
+	}
+	var splices []splice
+	prevI, prevJ := -1, -1
+	for k, m := range matches {
+		i, j := m[0], m[1]
+		// Balanced-gap guard: see doc comment.
+		if (i - prevI) != (j - prevJ) {
+			prevI, prevJ = i, j
+			continue
+		}
+		var nextI, nextJ int
+		if k+1 < len(matches) {
+			nextI, nextJ = matches[k+1][0], matches[k+1][1]
+		} else {
+			nextI, nextJ = len(origTokens), len(corrTokens)
+		}
+		if (nextI - i) != (nextJ - j) {
+			prevI, prevJ = i, j
+			continue
+		}
+		prevI, prevJ = i, j
+
+		origToken := origTokens[i]
+		corrToken := corrTokens[j]
+		origCore, origTail := splitTrailingPunctuation(origToken.text)
+		corrCore, corrTail := splitTrailingPunctuation(corrToken.text)
+		if origTail != corrTail {
+			continue // punctuation also changed — not a bare case flip
+		}
+		if origCore == corrCore {
+			continue // identical cores — no case difference
+		}
+		if !strings.EqualFold(origCore, corrCore) {
+			continue // not a case-only difference
+		}
+		// EqualFold can match unequal rune counts (e.g. Kelvin sign
+		// U+212A folds to ASCII "k", changing byte length). Require
+		// identical rune counts so the direction check stays in a
+		// sane, rune-parallel regime.
+		if utf8.RuneCountInString(origCore) != utf8.RuneCountInString(corrCore) {
+			continue
+		}
+		origRune, origSize := utf8.DecodeRuneInString(origCore)
+		corrRune, corrSize := utf8.DecodeRuneInString(corrCore)
+		if origSize == 0 || origSize != corrSize || origRune != corrRune {
+			continue // empty core, UTF-8 size mismatch, or first rune differs
+		}
+		// Direction guard: see doc comment. Every non-initial differing
+		// rune must be lower in original AND upper in corrected.
+		origRunes := []rune(origCore)
+		corrRunes := []rune(corrCore)
+		allDiffsAreLowerToUpper := true
+		for r := 1; r < len(origRunes); r++ {
+			if origRunes[r] == corrRunes[r] {
+				continue
+			}
+			if !unicode.IsLower(origRunes[r]) || !unicode.IsUpper(corrRunes[r]) {
+				allDiffsAreLowerToUpper = false
+				break
+			}
+		}
+		if !allDiffsAreLowerToUpper {
+			continue
+		}
+		splices = append(splices, splice{
+			start: corrToken.start,
+			end:   corrToken.start + len(corrToken.text),
+			text:  origToken.text,
+		})
+	}
+
+	out := corrected
+	for i := len(splices) - 1; i >= 0; i-- {
+		sp := splices[i]
+		out = out[:sp.start] + sp.text + out[sp.end:]
+	}
+	return out
+}
+
+// alignTokensFold returns leftmost-match (origIndex, corrIndex) pairs using
+// case-insensitive token comparison (strings.ToLower). The same leftmost-
+// match rule applies: for each orig token (in order), pair it with the
+// earliest matching corr token after the previous match. Used by rules
+// whose semantics are case-insensitive (mid-word case flip revert) —
+// byte-exact alignTokens would pair "it" with the LATER "it" in a sentence
+// that contains "it" twice and miss the leading sentence-case "It".
+func alignTokensFold(orig, corr []wordToken) [][2]int {
+	positions := make(map[string][]int, len(corr))
+	for j, t := range corr {
+		key := strings.ToLower(t.text)
+		positions[key] = append(positions[key], j)
+	}
+	var pairs [][2]int
+	lastJ := -1
+	for i, t := range orig {
+		key := strings.ToLower(t.text)
+		for _, j := range positions[key] {
+			if j > lastJ {
+				pairs = append(pairs, [2]int{i, j})
+				lastJ = j
+				break
+			}
+		}
+	}
+	return pairs
+}
+
 // DefaultOverEditRules returns the over-edit repair chain wired by main when
 // GF_OVEREDIT_FILTER is enabled (the default). Rules are registered
 // explicitly — one entry per measured over-edit class.
@@ -309,5 +464,6 @@ func DefaultOverEditRules() []OverEditRule {
 	return []OverEditRule{
 		RepairProximityAgreementFlip,
 		RepairProperNounCommaRestructure,
+		RepairMidWordCaseFlip,
 	}
 }

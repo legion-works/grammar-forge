@@ -133,24 +133,134 @@ func TestRepairProperNounCommaRestructureNoOpWithoutCommaPair(t *testing.T) {
 	require.Equal(t, corrected, RepairProperNounCommaRestructure(original, corrected))
 }
 
+// ---- Rule 3: mid-word case flip revert ----
+
+func TestRepairMidWordCaseFlipRevertsMeasuredBug(t *testing.T) {
+	// Measured live 2026-06-11 on Gemma-4 QAT at temp 0: the model emits
+	// mid-word case corruption. The wanted sentence-case "it"->"It" must
+	// survive; the unwanted "auto-detectS" trailing-letter uppercase must
+	// be reverted.
+	original := "it auto-detects the amount of fans at start, so it controls all the fans rather than just the first one."
+	corrected := "It auto-detectS the amount of fans at start, so it controls all the fans rather than just the first one."
+	want := "It auto-detects the amount of fans at start, so it controls all the fans rather than just the first one."
+	require.Equal(t, want, RepairMidWordCaseFlip(original, corrected))
+}
+
+func TestRepairMidWordCaseFlipKeepsSentenceCaseFix(t *testing.T) {
+	// Sentence-initial "it"->"It" is a wanted grammar fix. The first rune
+	// differs ('i' vs 'I') so the rule must NOT revert it.
+	original := "it works."
+	corrected := "It works."
+	require.Equal(t, corrected, RepairMidWordCaseFlip(original, corrected))
+}
+
+func TestRepairMidWordCaseFlipKeepsProperNounFix(t *testing.T) {
+	// Proper-noun fixes ("paris"->"Paris", "june"->"June") flip the first
+	// rune; they must survive untouched.
+	original := "we visited paris in june."
+	corrected := "We visited Paris in June."
+	require.Equal(t, corrected, RepairMidWordCaseFlip(original, corrected))
+}
+
+func TestRepairMidWordCaseFlipRevertsWithTrailingPunctuation(t *testing.T) {
+	// Trailing period must not block the revert. Cores "auto-detects"/
+	// "auto-detectS" are compared; the period is the matching tail on both.
+	original := "the fan auto-detects."
+	corrected := "the fan auto-detectS."
+	want := "the fan auto-detects."
+	require.Equal(t, want, RepairMidWordCaseFlip(original, corrected))
+}
+
+func TestRepairMidWordCaseFlipSkipsWhenTailsDiffer(t *testing.T) {
+	// Punctuation also changed ("," added on the corrected side). The edit
+	// is not a bare case flip; leave the corrected region alone.
+	original := "auto-detects"
+	corrected := "auto-detectS,"
+	require.Equal(t, corrected, RepairMidWordCaseFlip(original, corrected))
+}
+
+func TestRepairMidWordCaseFlipNoOpOnIdenticalText(t *testing.T) {
+	s := "it auto-detects. we visited paris in june."
+	require.Equal(t, s, RepairMidWordCaseFlip(s, s))
+}
+
+func TestRepairMidWordCaseFlipMultibyteSafety(t *testing.T) {
+	// "café" / "cafÉ": first rune 'c' is byte-identical, mid-word 'é'/'É'
+	// is the case difference. Revert to "café". EqualFold handles Unicode
+	// (é == É), first-rune check is rune-based (multibyte-safe).
+	original := "the café reopens"
+	corrected := "the cafÉ reopens"
+	want := "the café reopens"
+	require.Equal(t, want, RepairMidWordCaseFlip(original, corrected))
+}
+
+func TestRepairMidWordCaseFlipIPhoneTradeOff(t *testing.T) {
+	// Accepted precision-first trade-off: a legit "iphone"->"iPhone" fix
+	// is reverted by this rule (first rune 'i' is byte-identical, mid-word
+	// 'p'/'P' flip triggers the revert). The measured Gemma-4 QAT mid-word
+	// case corruption is high-frequency; iPhone is rare and the reversion
+	// is recoverable by the user with one extra accept. Documented in the
+	// rule's comment. Direction guard: mid-word 'p'/'P' IS lower→upper
+	// (the measured direction), so the iPhone revert still fires.
+	original := "i bought an iphone"
+	corrected := "I bought an iPhone"
+	want := "I bought an iphone"
+	require.Equal(t, want, RepairMidWordCaseFlip(original, corrected))
+}
+
+func TestRepairMidWordCaseFlipKeepsStuckCapsFix(t *testing.T) {
+	// "THis" -> "This" is a UPPER->LOWER stuck-caps fix, the OPPOSITE
+	// direction from the measured corruption (which is lower->upper:
+	// "auto-detects" -> "auto-detectS"). The direction guard must NOT
+	// revert upper->lower flips — they are genuine grammar fixes.
+	original := "THis is fine."
+	corrected := "This is fine."
+	require.Equal(t, corrected, RepairMidWordCaseFlip(original, corrected))
+}
+
+func TestRepairMidWordCaseFlipKeepsAllCapsToSentenceCaseFix(t *testing.T) {
+	// "IT" -> "It" is a UPPER->LOWER all-caps-to-sentence-case fix
+	// (typed-Shift scenario). Same direction guard: keep it.
+	original := "IT was raining."
+	corrected := "It was raining."
+	require.Equal(t, corrected, RepairMidWordCaseFlip(original, corrected))
+}
+
+func TestRepairMidWordCaseFlipSkipsInsertedFoldDuplicate(t *testing.T) {
+	// Fold alignment with an inserted case-changed token: orig has 2
+	// tokens, corr has 3. The case-fold aligner pairs orig[0] with the
+	// LATER "foo" at corr[2] (leftmost-match) and orig[1] with corr[3]
+	// — wait, corr[1] is "foo" and orig[1] is "bar". So matches are
+	// (0,0) for "foo"/"fOo" and (1,2) for "bar"/"bar". The (0,0) pair
+	// has an unbalanced gap AFTER it (tail 1 vs 2) and an unbalanced
+	// gap before (1,2) (1 vs 2). Without the balanced-gap guard the
+	// rule would splice the orig "foo" over the inserted "fOo" and
+	// delete the LLM's legitimate edit. With the guard, both pairs
+	// are skipped and the corrected text is preserved.
+	original := "foo bar"
+	corrected := "fOo foo bar"
+	require.Equal(t, corrected, RepairMidWordCaseFlip(original, corrected))
+}
+
 // ---- framework ----
 
-func TestDefaultOverEditRulesContainsBothRules(t *testing.T) {
-	require.Len(t, DefaultOverEditRules(), 2)
+func TestDefaultOverEditRulesContainsAllMeasuredRules(t *testing.T) {
+	chain := DefaultOverEditRules()
+	require.Len(t, chain, 3)
 }
 
 func TestOverEditRuleChainComposesAndIsIdempotent(t *testing.T) {
-	// Both rule classes in one input: the chain repairs both, and applying
-	// the chain to its own output changes nothing (idempotent).
-	original := "neither the manager nor the employees were in paris in france."
-	corrected := "Neither the manager nor the employees was in Paris, France."
+	// All three measured rule classes in one input: the chain repairs all,
+	// and applying the chain to its own output changes nothing (idempotent).
+	original := "neither the manager nor the employees were in paris in france. it auto-detects."
+	corrected := "Neither the manager nor the employees was in Paris, France. It auto-detectS."
 	apply := func(orig, corr string) string {
 		for _, rule := range DefaultOverEditRules() {
 			corr = rule(orig, corr)
 		}
 		return corr
 	}
-	want := "Neither the manager nor the employees were in Paris in France."
+	want := "Neither the manager nor the employees were in Paris in France. It auto-detects."
 	once := apply(original, corrected)
 	require.Equal(t, want, once)
 	require.Equal(t, once, apply(original, once), "repair must be idempotent")
