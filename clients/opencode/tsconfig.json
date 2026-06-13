@@ -8,15 +8,19 @@
     "skipLibCheck": true,
     "noEmit": true,
     "lib": ["ES2022", "DOM"],
+    "types": ["node"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["../browser/src/*"]
-    }
+    },
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/solid"
   },
   "include": [
     "src/**/*",
     "../browser/src/api/**/*",
     "../browser/src/lib/**/*",
     "../browser/src/signal/**/*"
-  ]
+  ],
+  "exclude": []
 }

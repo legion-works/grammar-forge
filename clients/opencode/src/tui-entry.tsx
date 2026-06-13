@@ -1,0 +1,204 @@
+/** @jsxImportSource @opentui/solid */
+// GrammarForge TUI plugin — bun-loaded source entry. The host's
+// bun runtime transpiles this file via the package's tsconfig
+// (jsx: "react-jsx", jsxImportSource: "@opentui/solid"). solid-js /
+// @opentui/solid / @opentui/core resolve from the package's own
+// node_modules. Foreign-instance solid provably works this way
+// live (see anthropic-auth's quota sidebar).
+//
+// WHY IN-COMPONENT SIGNAL: our BUNDLED solid instance has its own
+// scheduler the host never pumps. Signals/effects created at
+// tui()-time or in a detached createRoot queue updates that never
+// flush. ONLY a signal created inside the component the HOST
+// MOUNTS rides the host's scheduler and reacts. The orchestrator
+// owns the controller (a pure setView+subscribe holder); the
+// PanelComponent creates its OWN createSignal at mount and
+// subscribes the local setter to the controller's setView
+// fanout. No monkeypatching; clean fanout.
+//
+// SINGLE REGISTRATION. The orchestrator does NOT register slots;
+// it only does the setView bridge. The slot registration and
+// JSX render live entirely here.
+//
+// FLOATING OVERLAY ARCHITECTURE:
+//   - Slot fn returns PanelComponent which renders a FRAGMENT:
+//     (a) an ALWAYS-PRESENT in-flow <box width={0} height={0}/> so
+//         the slot registry's hasInitialOutput check passes and the
+//         entry is never pruned (gotcha 3).
+//     (b) <Portal> rendering an AbsoluteCard at the render root,
+//         escaping the slot's cropping layout (gotcha 3 + Portal
+//         precedent from permission.tsx).
+//   - AbsoluteCard is positioned ABOVE the pinned word via
+//     api.prompt.ref()?.offsetToScreen(displayStart) (lazy read at
+//     render time — ref is null at tui()-time, gotcha 4).
+//   - clampAnchor() handles edge clamping (word near right/top edge).
+//   - GF_TUI_DEBUG=1 logs an "overlay anchor" line with all coords.
+
+import { createSignal, Show, onCleanup } from "solid-js";
+import { Portal, useTerminalDimensions } from "@opentui/solid";
+import { RGBA } from "@opentui/core";
+import type { TuiApi, TuiPlugin, TuiPluginModule } from "./opencode-types";
+import { startOrchestrator, type PanelController } from "./orchestrator";
+import { createDetailsPanelController } from "./details-panel-view";
+import type { PanelView } from "./details-panel-view";
+import { buildDetailsViewModel } from "./details-panel";
+import { buildCardSpec } from "./card-spec";
+import { clampAnchor } from "./overlay-anchor";
+import { logDebug } from "./debug";
+
+const ID = "grammarforge";
+
+// Card dimensions (columns × rows, including border).
+// Width: 44 cols is wide enough for most suggestions without
+// dominating the terminal. Height: 3 content rows + 2 border = 5.
+const CARD_W = 44;
+const CARD_H = 5; // 3 content rows + top/bottom border
+
+const tui: TuiPlugin = async (api: TuiApi) => {
+    logDebug("tui() entered", { id: ID });
+    const controller: PanelController = createDetailsPanelController();
+    const panelRenderer = (): PanelController => controller;
+    const stop = startOrchestrator(api, undefined, { panelRenderer });
+    api.lifecycle.onDispose(() => {
+        logDebug("plugin teardown: orchestrator stop + controller dispose");
+        stop();
+        controller.dispose();
+    });
+    if (api.slots) {
+        api.slots.register({
+            slots: {
+                home_prompt_right: () => {
+                    logDebug("slot fn home_prompt_right invoked");
+                    return <PanelComponent controller={controller} api={api} />;
+                },
+                session_prompt_right: () => {
+                    logDebug("slot fn session_prompt_right invoked");
+                    return <PanelComponent controller={controller} api={api} />;
+                },
+            },
+        });
+        logDebug("slots registered", { names: ["home_prompt_right", "session_prompt_right"] });
+    }
+};
+
+const plugin: TuiPluginModule & { id: string } = {
+    id: ID,
+    tui,
+};
+
+export default plugin;
+
+// Panel component: renders a FRAGMENT with:
+//   (a) an ALWAYS-PRESENT zero-size in-flow box (slot pruning guard)
+//   (b) a Portal containing the AbsoluteCard (floating overlay)
+//
+// The load-bearing piece: localView is a createSignal CREATED INSIDE
+// this function — it rides the host's scheduler. The controller's
+// setView fanout pushes the payload into localView via subscribe.
+function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
+    const [localView, setLocalView] = createSignal<PanelView | null>(null);
+    const unsubscribe = props.controller.subscribe((next) => {
+        setLocalView(next);
+    });
+    onCleanup(unsubscribe);
+    // useTerminalDimensions() is a reactive accessor from @opentui/solid.
+    // It returns { width, height } in terminal cells. Used for edge clamping.
+    const dimensions = useTerminalDimensions();
+    logDebug("panel component mounted (initial render)");
+    return (
+        <>
+            {/* ALWAYS-PRESENT in-flow anchor: zero size, invisible.
+                The slot registry's hasInitialOutput check requires
+                non-null initial output or it prunes the entry and
+                the component is never mounted (gotcha 3). */}
+            <box width={0} height={0} />
+            {/* Floating overlay: Portal renders at the render root,
+                escaping the slot's cropping layout. AbsoluteCard
+                uses position="absolute" + zIndex to float above
+                all other content. */}
+            <Portal
+                ref={(container: {}) => {
+                    const c = container as {
+                        position: string;
+                        left: number;
+                        top: number;
+                        zIndex: number;
+                    };
+                    c.position = "absolute";
+                    c.left = 0;
+                    c.top = 0;
+                    c.zIndex = 4000;
+                }}
+            >
+                <Show when={localView()} keyed>
+                    {(current) => {
+                        const item = current.item;
+                        const vm = buildDetailsViewModel(item, current.index, current.total);
+                        const spec = buildCardSpec(vm);
+                        // Lazily read the prompt ref at render time (gotcha 4:
+                        // ref is null at tui()-time; it's mounted by now because
+                        // something is pinned — the orchestrator only calls
+                        // setView when a cursor hit-test succeeds, which requires
+                        // a live ref).
+                        const anchor =
+                            props.api.prompt?.ref()?.offsetToScreen?.(current.displayStart) ?? null;
+                        const dims = dimensions();
+                        const screenW = dims.width;
+                        const screenH = dims.height;
+                        const clamped = anchor
+                            ? clampAnchor(anchor, CARD_W, CARD_H, screenW, screenH)
+                            : null;
+                        logDebug("panel content visible", {
+                            index: current.index,
+                            total: current.total,
+                            category: item.category,
+                        });
+                        logDebug("overlay anchor", {
+                            offset: current.displayStart,
+                            anchorX: anchor?.x ?? null,
+                            anchorY: anchor?.y ?? null,
+                            clampedLeft: clamped?.left ?? null,
+                            clampedTop: clamped?.top ?? null,
+                            screenW,
+                            screenH,
+                            cardW: CARD_W,
+                            cardH: CARD_H,
+                        });
+                        // If offsetToScreen returned null (prompt unmounted,
+                        // offset out of range, or no offsetToScreen support),
+                        // don't render the card — never crash.
+                        if (!clamped) return null;
+                        return (
+                            <box
+                                position="absolute"
+                                zIndex={4000}
+                                left={clamped.left}
+                                top={clamped.top}
+                                width={CARD_W}
+                                border
+                                borderStyle="single"
+                                borderColor={spec.borderColor}
+                                backgroundColor={RGBA.fromInts(28, 28, 30, 210)}
+                                paddingLeft={1}
+                                paddingRight={1}
+                                paddingTop={0}
+                                paddingBottom={0}
+                                flexDirection="column"
+                            >
+                                {spec.rows.map((row) => (
+                                    <box flexDirection="row">
+                                        {row.segments.map((seg) => (
+                                            <text fg={seg.fg}>
+                                                {seg.bold ? <b>{seg.text}</b> : seg.text}
+                                            </text>
+                                        ))}
+                                    </box>
+                                ))}
+                            </box>
+                        );
+                    }}
+                </Show>
+            </Portal>
+        </>
+    );
+}

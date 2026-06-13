@@ -5,6 +5,16 @@
 //   → buildRenderableItems → map cu→display → extmark create
 // The accept hotkey is the single write path; it also enqueues a
 // "accepted" signal so the bridge's edit-level log can attribute it.
+//
+// Panel rendering lives in src/tui-entry.tsx (the bun-loaded source
+// entry; see anthropic-auth/packages/opencode/src/tui.tsx for the
+// reference pattern). This module is the testable model layer
+// (vitest + Node, no FFI). The tui-entry imports this orchestrator
+// through deps.panelRenderer — a factory the orchestrator never
+// statically imports. The test-runner trap is preserved.
+//
+// All state transitions call GF_TUI_DEBUG=1 file logging (see
+// src/debug.ts) for live-smoke instrumentation.
 
 import { BridgeClient, type SignalEvent } from "@/api/client";
 import { buildRenderableItems, isSpanStillValid, type RenderableItem } from "@/lib/pipeline";
@@ -12,7 +22,11 @@ import { createSignalQueue } from "@/signal/queue";
 import type { CorrectRequest, CorrectResponse } from "@/api/types";
 import { displaySpanFromCodeUnits, makeDisplayWidth, bunSegmentWidth } from "./display-width";
 import { collectPartRanges, overlapsAnyRange, type DisplaySpan } from "./part-filter";
+import { createDetailsState, type DetailsState } from "./details-state";
+import { detectPromptPinSupport } from "./feature-detect";
+import { logDebug } from "./debug";
 import type { PromptRef, TuiApi } from "./opencode-types";
+import type { PanelController, PanelView } from "./details-panel-view";
 
 const SIGNAL_SOURCE = "opencode";
 
@@ -119,7 +133,34 @@ function emptyRefState(): RefState {
  *  and exercise the stale-fetch race guard. */
 export interface OrchestratorDeps {
     correct?: (req: CorrectRequest) => Promise<CorrectResponse>;
+    /**
+     * Details-panel controller factory. Returns a PanelController whose
+     * setView pushes pin/unpin transitions into a solid signal that
+     * the JSX PanelComponent (in tui-entry.tsx) reads directly via
+     * `view()`. The orchestrator uses ONLY setView (the bridge); the
+     * render path is owned by tui-entry.tsx (single registration).
+     * The production plugin entry (clients/opencode/src/tui-entry.tsx)
+     * provides the real factory that wraps details-controller's
+     * signal holder; tests pass a stub. Injecting here keeps the
+     * @opentui/solid → @opentui/core → bun-ffi import graph out of
+     * the test path (vitest runs under Node, not Bun).
+     */
+    panelRenderer?: () => PanelController;
 }
+
+/** Minimal shape of the item the panel needs to build its view-model.
+ *  Matches the bridge's RenderableItem; kept inline (not imported from
+ *  @/lib/pipeline) to avoid the panel module pulling pipeline code. */
+export interface PanelItemInput {
+    category: string;
+    original: string;
+    replacement: string;
+}
+
+// PanelController and PanelView are imported from details-panel-view.ts
+// (the canonical source). Re-export so callers that import from
+// orchestrator.ts still get the type.
+export type { PanelController, PanelView };
 
 export function startOrchestrator(
     api: TuiApi,
@@ -128,6 +169,7 @@ export function startOrchestrator(
 ): () => void {
     // Unpatched OpenCode build (no prompt facade): warn once, return no-op.
     if (!api.prompt) {
+        logDebug("feature-detect: api.prompt missing — plugin disabled", {});
         api.ui.toast({
             message: "GrammarForge: this OpenCode build lacks the prompt facade — plugin disabled",
             variant: "warning",
@@ -158,6 +200,32 @@ export function startOrchestrator(
 
     let trackedRef: PromptRef | null = null;
     const state: RefState = emptyRefState();
+    // Pin-state for the suggestion-details panel. Always created (the
+    // toast path needs it on every state transition) but its
+    // interactive commands (apply/ignore/cycle/unpin) are only wired
+    // when the cursor facade is present.
+    const detailsState: DetailsState = createDetailsState();
+
+    // Feature-detect via the extracted helper (see feature-detect.ts).
+    // One log line at startup captures the entire gate state for the
+    // next live run to inspect. This is the PRIME SUSPECT for the
+    // "no pin after click" symptom: if supported is false, the entire
+    // pin wiring is skipped at startup.
+    const pinSupport = detectPromptPinSupport(api);
+    logDebug("feature-detect", {
+        hasPrompt: pinSupport.hasPrompt,
+        hasCursorChange: pinSupport.hasCursorChange,
+        hasCursorOffset: pinSupport.hasCursorOffset,
+        supported: pinSupport.supported,
+        skipReason: pinSupport.supported
+            ? null
+            : !pinSupport.hasCursorChange
+              ? "api.prompt.onCursorChange is not a function — pin wiring will not be installed"
+              : !pinSupport.hasCursorOffset
+                ? "ref.cursorOffset is not a number — pin wiring will not be installed"
+                : "api.prompt is missing — plugin disabled (see unpatched-build toast)",
+    });
+    const cursorPinSupported = pinSupport.supported;
 
     const clearActiveExtmarks = (): void => {
         if (!trackedRef) return;
@@ -173,9 +241,6 @@ export function startOrchestrator(
 
     const renderDecorations = (ref: PromptRef, items: RenderableItem[]): void => {
         clearActiveExtmarks();
-        // Re-register the type id when the ref identity changes — a route
-        // remount replaces the underlying textarea, so old extmark ids
-        // point at nothing.
         if (state.extmarkTypeId === null) {
             state.extmarkTypeId = ref.extmarks.registerType("grammarforge");
         }
@@ -194,14 +259,38 @@ export function startOrchestrator(
             });
             state.activeExtmarkIds.push(id);
         }
+        // Log every rendered decoration so the next live run can
+        // diff: (a) "do underlines actually appear at all?" and
+        // (b) "what's the exact display span we hit-test against?".
+        // Smoking-gun: if `count === 0` here while items.length > 0,
+        // the partRanges/decorations filter dropped everything.
+        logDebug("render decorations", {
+            textLength: ref.text.length,
+            itemCount: items.length,
+            decorationCount: decorations.length,
+            decorations: decorations.map((d) => {
+                const it = items[d.itemIndex];
+                return {
+                    start: d.start,
+                    end: d.end,
+                    category: d.category,
+                    itemIndex: d.itemIndex,
+                    original: it?.original,
+                    replacement: it?.replacements?.[0],
+                };
+            }),
+        });
     };
 
     const runCheck = async (ref: PromptRef): Promise<void> => {
         const text = ref.text;
+        logDebug("check start", { textLength: text.length, seq: state.checkSeq + 1 });
         if (text === "") {
             state.items = [];
             state.checkedText = "";
             clearActiveExtmarks();
+            detailsState.itemsChanged(0);
+            logDebug("check empty (empty buffer, no suggestions)", {});
             return;
         }
         const seq = ++state.checkSeq;
@@ -209,22 +298,51 @@ export function startOrchestrator(
             const res = await correctFn({ text, source: SIGNAL_SOURCE });
             // Stale-seq guard: the ref-swap path bumps state.checkSeq to
             // invalidate every in-flight check against the OLD ref.
-            if (seq !== state.checkSeq) return;
-            // Re-read the LIVE ref (no ensureRef side-effect here — we must
-            // not re-track mid-validation). Drop unless ALL of:
-            //   - the ref we captured is still the live one,
-            //   - trackedRef hasn't moved on (paranoia; equivalent to the
-            //     previous check unless a SECOND swap landed),
-            //   - the buffer text we sent hasn't drifted.
+            if (seq !== state.checkSeq) {
+                logDebug("check dropped (stale seq)", { seq });
+                return;
+            }
             const liveRef = api.prompt?.ref();
-            if (liveRef !== ref) return;
-            if (ref !== trackedRef) return;
-            if (ref.text !== text) return;
-            state.items = buildRenderableItems(text, res).items;
+            if (liveRef !== ref) {
+                logDebug("check dropped (liveRef !== captured ref)", {});
+                return;
+            }
+            if (ref !== trackedRef) {
+                logDebug("check dropped (ref !== trackedRef)", {});
+                return;
+            }
+            if (ref.text !== text) {
+                logDebug("check dropped (text drifted)", {});
+                return;
+            }
+            const builtItems = buildRenderableItems(text, res).items;
+            state.items = builtItems;
             state.checkedText = text;
+            logDebug("check complete", {
+                suggestionCount: res.suggestions?.length ?? 0,
+                itemCount: builtItems.length,
+                items: builtItems.map((it) => ({
+                    category: it.category,
+                    original: it.original,
+                    replacement: it.replacements?.[0],
+                    cuStart: it.cuStart,
+                    cuEnd: it.cuEnd,
+                })),
+            });
             renderDecorations(ref, state.items);
-        } catch {
+            // Identity-swap detection (secondary): if items.count is the
+            // same as before but the pinned item's (hlStart, hlEnd,
+            // replacement) signature changed, the pin is now stale —
+            // unpin. The count-only check in itemsChanged would miss
+            // this. Read the prior items list from the itemsChanged
+            // path; detailsState.itemsChanged takes the new count but
+            // also gets a "signature" snapshot for the identity check.
+            detailsState.itemsChanged(state.items.length, state.items.map(snapshotOfItem));
+        } catch (e) {
             // Bridge unreachable / errored: silent idle, retry on the next change.
+            logDebug("check errored", {
+                message: e instanceof Error ? e.message : String(e),
+            });
         }
     };
 
@@ -239,11 +357,6 @@ export function startOrchestrator(
     const onChange = (): void => {
         const ref = api.prompt?.ref();
         if (!ref) return;
-        // Ref swap (route remount → fresh textarea) — reset per-ref state
-        // AND bump checkSeq to cancel any in-flight fetch against the old
-        // ref (its post-await validation would otherwise see a matching
-        // seq and render extmarks to the dead ref, polluting
-        // activeExtmarkIds with the old controller's ids).
         if (ref !== trackedRef) {
             clearActiveExtmarks();
             state.checkSeq += 1;
@@ -251,10 +364,9 @@ export function startOrchestrator(
             trackedRef = ref;
             state.items = [];
             state.checkedText = "";
+            detailsState.itemsChanged(0);
         }
         const text = ref.text;
-        // Submit/clear detection: items open and the user just emptied the
-        // buffer. Enqueue an "ignored" for every open item and clear.
         if (text === "" && state.items.length > 0 && state.checkedText !== "") {
             for (const it of state.items) {
                 if (typeof it.id !== "number") continue;
@@ -265,19 +377,18 @@ export function startOrchestrator(
             state.items = [];
             state.checkedText = "";
             clearActiveExtmarks();
+            detailsState.itemsChanged(0);
             return;
         }
         scheduleCheck(ref);
     };
 
-    // Accept hotkey: apply the first item's primary replacement, stale-guarded.
     const acceptFirst = (): void => {
         const ref = api.prompt?.ref();
         if (!ref) return;
         if (state.items.length === 0) return;
         const item = state.items[0]!;
         if (!isSpanStillValid(ref.text, item)) {
-            // Span moved → re-check rather than corrupt the buffer.
             scheduleCheck(ref);
             return;
         }
@@ -298,13 +409,13 @@ export function startOrchestrator(
             signalQueue.enqueue(ev);
         }
         api.ui.toast({ message: `Applied: ${replacement || item.original}`, variant: "success" });
-        // Re-render against the new text. The next onChange will also fire;
-        // this just keeps the underlines fresh in the same frame.
         onChange();
     };
 
     const unsubscribeChange = api.prompt.onChange(onChange);
-    const disposeKeymap = api.keymap.registerLayer({
+
+    // Accept layer — always on, no gate. Single binding (settings.acceptHotkey).
+    const disposeAcceptLayer = api.keymap.registerLayer({
         priority: 500,
         commands: [
             {
@@ -315,11 +426,299 @@ export function startOrchestrator(
         ],
         bindings: [{ key: settings.acceptHotkey, cmd: "grammarforge.accept" }],
     });
+
+    // Details layer — gated by enabled. When nothing is pinned, the
+    // host keymap does not dispatch any of the layer's bindings, so
+    // return/x/n/p/escape stay free for the host's own behavior. When
+    // a pin exists, the bindings become active.
+    let disposeDetailsLayer: (() => void) | null = null;
+    if (cursorPinSupported) {
+        logDebug("details keymap layer: registered", {
+            commands: [
+                "grammarforge.details.apply",
+                "grammarforge.details.ignore",
+                "grammarforge.details.cycleNext",
+                "grammarforge.details.cyclePrev",
+                "grammarforge.details.unpin",
+            ],
+            bindings: ["return", "x", "n", "p", "escape"],
+            enabled: () => detailsState.pinnedIndex() !== null,
+        });
+        const applyPinned = (): void => {
+            logDebug("keymap: applyPinned invoked", {
+                pinnedIndex: detailsState.pinnedIndex(),
+            });
+            const ref = api.prompt?.ref();
+            if (!ref) return;
+            const pinIndex = detailsState.pinnedIndex();
+            if (pinIndex === null) return;
+            if (pinIndex >= state.items.length) return;
+            const item = state.items[pinIndex]!;
+            if (!isSpanStillValid(ref.text, item)) {
+                scheduleCheck(ref);
+                return;
+            }
+            const replacement = item.replacements[0] ?? "";
+            const displaySpan = displaySpanFromCodeUnits(
+                ref.text,
+                { start: item.cuStart, end: item.cuEnd },
+                displayWidthOf,
+            );
+            ref.replaceRange(displaySpan.start, displaySpan.end, replacement);
+            if (typeof item.id === "number") {
+                const ev: SignalEvent = {
+                    id: item.id,
+                    action: "accepted",
+                    category: item.category,
+                    source: SIGNAL_SOURCE,
+                };
+                signalQueue.enqueue(ev);
+            }
+            api.ui.toast({
+                message: `Applied: ${replacement || item.original}`,
+                variant: "success",
+            });
+            onChange();
+        };
+        const ignorePinned = (): void => {
+            const ref = api.prompt?.ref();
+            const pinIndex = detailsState.pinnedIndex();
+            logDebug("keymap: ignorePinned invoked", { pinnedIndex: pinIndex });
+            if (pinIndex === null) return;
+            if (pinIndex >= state.items.length) return;
+            const item = state.items[pinIndex]!;
+            if (typeof item.id === "number") {
+                const ev: SignalEvent = {
+                    id: item.id,
+                    action: "ignored",
+                    source: SIGNAL_SOURCE,
+                };
+                signalQueue.enqueue(ev);
+            }
+            // BLOCKER 3 FIX: drop the item AND re-render decorations. The
+            // previous version left a stale underline because it only
+            // mutated state.items. Now we clear the active extmarks
+            // and re-render against the reduced item set. If the live
+            // ref is present, do a full render; otherwise just clear
+            // (the next onChange will resync).
+            state.items = state.items.filter((_, i) => i !== pinIndex);
+            detailsState.unpin();
+            if (ref) {
+                renderDecorations(ref, state.items);
+                detailsState.itemsChanged(state.items.length, state.items.map(snapshotOfItem));
+            } else {
+                clearActiveExtmarks();
+                detailsState.itemsChanged(0);
+            }
+        };
+        const cycleNext = (): void => {
+            logDebug("keymap: cycleNext invoked", {
+                pinnedIndex: detailsState.pinnedIndex(),
+                itemCount: state.items.length,
+            });
+            detailsState.cycle(1, state.items.length);
+        };
+        const cyclePrev = (): void => {
+            logDebug("keymap: cyclePrev invoked", {
+                pinnedIndex: detailsState.pinnedIndex(),
+                itemCount: state.items.length,
+            });
+            detailsState.cycle(-1, state.items.length);
+        };
+        const unpin = (): void => {
+            logDebug("keymap: unpin invoked", { pinnedIndex: detailsState.pinnedIndex() });
+            detailsState.unpin();
+        };
+        disposeDetailsLayer = api.keymap.registerLayer({
+            priority: 500,
+            enabled: () => detailsState.pinnedIndex() !== null,
+            commands: [
+                {
+                    name: "grammarforge.details.apply",
+                    title: "GrammarForge: apply pinned suggestion",
+                    run: applyPinned,
+                },
+                {
+                    name: "grammarforge.details.ignore",
+                    title: "GrammarForge: ignore pinned suggestion",
+                    run: ignorePinned,
+                },
+                {
+                    name: "grammarforge.details.cycleNext",
+                    title: "GrammarForge: next suggestion",
+                    run: cycleNext,
+                },
+                {
+                    name: "grammarforge.details.cyclePrev",
+                    title: "GrammarForge: previous suggestion",
+                    run: cyclePrev,
+                },
+                {
+                    name: "grammarforge.details.unpin",
+                    title: "GrammarForge: close details panel",
+                    run: unpin,
+                },
+            ],
+            bindings: [
+                { key: "return", cmd: "grammarforge.details.apply" },
+                { key: "x", cmd: "grammarforge.details.ignore" },
+                { key: "n", cmd: "grammarforge.details.cycleNext" },
+                { key: "p", cmd: "grammarforge.details.cyclePrev" },
+                { key: "escape", cmd: "grammarforge.details.unpin" },
+            ],
+        });
+    }
+
+    // Cursor-pin wiring: subscribe to onCursorChange, hit-test the
+    // cursor against the current items' display spans, and pin the
+    // matching item. Cursor-OUTSIDE any span is an explicit no-op
+    // (only esc/stale/apply/ignore/cycle clear — explicit design).
+    let unsubscribeCursorChange: (() => void) | null = null;
+    if (cursorPinSupported) {
+        const onCursorMove = (): void => {
+            const ref = api.prompt?.ref();
+            if (!ref) {
+                logDebug("onCursorChange: no live ref", {});
+                return;
+            }
+            const offset = ref.cursorOffset;
+            // THE smoking-gun log: every onCursorChange fire logs the
+            // raw offset. If this never logs after a click, the
+            // facade subscription is the bug (or the onCursorChange
+            // registration was overwritten by another subscriber).
+            if (typeof offset !== "number") {
+                logDebug("onCursorChange: cursorOffset not a number", { value: offset });
+                return;
+            }
+            if (state.items.length === 0) {
+                logDebug("onCursorChange: items empty (no hit-test candidates)", { offset });
+                return;
+            }
+            // Build the candidate span list for the diff. Display
+            // span (start, end) is what the hit-test compares offset
+            // against; the (hlStart, hlEnd) is the raw code-unit
+            // range. We log both so we can spot the offset-space
+            // mismatch if it ever happens.
+            const candidateSpans: Array<{
+                index: number;
+                category: string;
+                hlStart: number;
+                hlEnd: number;
+                displayStart: number;
+                displayEnd: number;
+            }> = [];
+            for (let i = 0; i < state.items.length; i++) {
+                const it = state.items[i]!;
+                const span: DisplaySpan = displaySpanFromCodeUnits(
+                    ref.text,
+                    { start: it.hlStart, end: it.hlEnd },
+                    displayWidthOf,
+                );
+                candidateSpans.push({
+                    index: i,
+                    category: it.category,
+                    hlStart: it.hlStart,
+                    hlEnd: it.hlEnd,
+                    displayStart: span.start,
+                    displayEnd: span.end,
+                });
+            }
+            let matchIndex: number | null = null;
+            for (let i = 0; i < candidateSpans.length; i++) {
+                const cs = candidateSpans[i]!;
+                // END-INCLUSIVE. Pre-fix used < (end-exclusive) which
+                // rejected word-end clicks: offset 14 vs span [8,14)
+                // returned no match. End-inclusive pins the word-end
+                // click. See hit-test.ts for the unit-tested contract.
+                if (offset >= cs.displayStart && offset <= cs.displayEnd) {
+                    matchIndex = i;
+                    break;
+                }
+            }
+            logDebug("hit-test", {
+                offset,
+                textLength: ref.text.length,
+                candidateCount: candidateSpans.length,
+                match: matchIndex === null ? "no match" : `index ${matchIndex}`,
+                candidates: candidateSpans,
+            });
+            if (matchIndex !== null) {
+                const it = state.items[matchIndex]!;
+                logDebug("pin transition", {
+                    index: matchIndex,
+                    category: it.category,
+                    offset,
+                });
+                detailsState.pin(matchIndex);
+            }
+        };
+        unsubscribeCursorChange = api.prompt.onCursorChange!(onCursorMove);
+        logDebug("onCursorChange subscription installed", {});
+    }
+
+    // Slot-panel wiring (RESTORED from d6cb2d2's descope). The render
+    // fn is supplied by the plugin entry via deps.panelRenderer — see
+    // the OrchestratorDeps docstring. The controller factory closes over
+    // its own solid signal; we just push transitions into it from
+    // detailsState.subscribe and let the JSX PanelComponent (in
+    // tui-entry.tsx) read the signal directly via controller.view().
+    // The orchestrator does NOT register slots or render anything —
+    // the single registration lives in tui-entry.tsx (verified via
+    // `grep -rn "api.slots.register" src/` — exactly one hit).
+    // This avoids the dual-registration bug that caused the host to
+    // receive two slot plugins for the same names.
+    let unsubscribeDetailsTransition: (() => void) | null = null;
+    if (cursorPinSupported && deps?.panelRenderer) {
+        const controller = deps.panelRenderer();
+        // The transition push: build the current panel payload and
+        // hand it to the controller's setter. The setter is what
+        // updates the solid signal that PanelComponent reads via
+        // controller.view().
+        const pushFromDetailsState = (): void => {
+            const index = detailsState.pinnedIndex();
+            if (index === null || index >= state.items.length) {
+                logDebug("unpin transition", { from: index });
+                controller.setView(null);
+                return;
+            }
+            const item = state.items[index]!;
+            // Compute the display-start offset for the overlay anchor.
+            // We need the live ref text to convert code-unit span to
+            // display-width offset. If the ref is gone, fall back to 0
+            // (the overlay will still render, just at column 0).
+            const liveRef = api.prompt?.ref();
+            const displaySpan = liveRef
+                ? displaySpanFromCodeUnits(
+                      liveRef.text,
+                      { start: item.hlStart, end: item.hlEnd },
+                      displayWidthOf,
+                  )
+                : { start: 0, end: 0 };
+            logDebug("panel content transition", {
+                index,
+                total: state.items.length,
+                category: item.category,
+                displayStart: displaySpan.start,
+            });
+            controller.setView({
+                item: {
+                    category: item.category,
+                    original: item.diffOriginal,
+                    replacement: item.diffCorrected,
+                    isDeletion: item.diffIsDeletion,
+                },
+                index,
+                total: state.items.length,
+                displayStart: displaySpan.start,
+            });
+        };
+        unsubscribeDetailsTransition = detailsState.subscribe(pushFromDetailsState);
+    }
+
     const onDispose = api.lifecycle.onDispose(() => {
         // Lifecycle owns its own teardown chain; nothing extra to do here.
     });
 
-    // Prime: if a prompt is already mounted, do an initial check.
     const initialRef = api.prompt.ref();
     if (initialRef) {
         trackedRef = initialRef;
@@ -332,9 +731,21 @@ export function startOrchestrator(
             state.debounceTimer = null;
         }
         unsubscribeChange();
-        disposeKeymap();
+        if (unsubscribeDetailsTransition) unsubscribeDetailsTransition();
+        if (unsubscribeCursorChange) unsubscribeCursorChange();
+        disposeAcceptLayer();
+        if (disposeDetailsLayer) disposeDetailsLayer();
         onDispose();
         clearActiveExtmarks();
         void signalQueue.flush();
     };
+}
+
+/** Compact identity signature for the secondary identity-swap check on
+ *  itemsChanged. Same length as the items array; indexed by position.
+ *  Used to detect "items count is the same but the pinned item's
+ *  (hlStart, hlEnd, replacement) changed" — a re-check that produced
+ *  different content for the same indices. */
+function snapshotOfItem(item: RenderableItem): string {
+    return `${item.hlStart}:${item.hlEnd}:${item.replacements[0] ?? ""}`;
 }

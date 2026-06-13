@@ -12,16 +12,28 @@ inert.
 
 ## Install
 
-1. Build: `pnpm install && pnpm build` (produces `dist/tui.js`).
-2. Register the plugin in your **TUI** config — project `tui.json` /
-   `tui.jsonc`, or the global file at `~/.config/opencode/tui.jsonc`
-   (override with the `OPENCODE_TUI_CONFIG` env var):
+1. Install deps: `pnpm install` (populates `node_modules` with
+   `solid-js`, `@opentui/solid`, `@opentui/core` — required at host
+   load time).
+2. Register the **package dir** in your **TUI** config — project
+   `tui.json` / `tui.jsonc`, or the global file at
+   `~/.config/opencode/tui.jsonc` (override with the `OPENCODE_TUI_CONFIG`
+   env var):
 
    ```json
-   { "plugin": ["file:///path/to/grammar-forge/clients/opencode/dist"] }
+   { "plugin": ["file:///path/to/grammar-forge/clients/opencode"] }
    ```
 
-3. Restart OpenCode.
+3. Restart OpenCode. The host's bun runtime reads the package's
+   `package.json` `exports["./tui"]` (which points at
+   `src/tui-entry.tsx` — source, not a bundle) and transpiles the
+   `.tsx` on load using the package's `tsconfig.json` (jsx:
+   `react-jsx`, `jsxImportSource: "@opentui/solid"`).
+
+This mirrors the anthropic-auth reference plugin
+(`~/projects/anthropic-auth/packages/opencode`) which also ships its
+tui entry as source. The host's bun handles the JSX transform; we
+don't pre-bundle.
 
 TUI plugins are configured in `tui.json`, NOT in `opencode.json` —
 `opencode.json`'s `plugin` array is the **server** plugin pipeline and
@@ -31,18 +43,20 @@ scans `tui.json`/`tui.jsonc` for the TUI side; and
 `packages/opencode/src/config/tui-migrate.ts`, which does not migrate
 plugin entries out of `opencode.json`).
 
-The build emits `dist/package.json` alongside `dist/tui.js` — that
-manifest's `exports` map declares the `./tui` entry the OpenCode loader
-looks for, so the loader knows the bundle is tui-only and skips the
-server entrypoint without erroring. The bundle is named `tui.js` (not
-`index.*`) so OpenCode's file-plugin server-kind resolver, which falls
-back to the directory's index.\* files, finds nothing and reports a
-silent missing-stage skip.
-
 Absolute paths in plugin entries are normalized to `file://` URLs by
 `ConfigPlugin.resolvePluginSpec`
 (`packages/opencode/src/config/plugin.ts:42-60`); the `file://` form is
 explicitly accepted and survives the round-trip.
+
+## Settings (plugin options)
+
+The TUI plugin spec is the same `ConfigPluginV1.Spec` used by
+`opencode.json` (see `packages/core/src/v1/config/plugin.ts:8`):
+either a string (path/URL) or a tuple `[path, options]` where options
+is a `Record<string, unknown>`. The same tuple form is therefore
+supported in `tui.json` — `ConfigPlugin.resolvePluginSpec` preserves
+`plugin[1]` through path normalization
+(`packages/opencode/src/config/plugin.ts:58`).
 
 ## Settings (plugin options)
 

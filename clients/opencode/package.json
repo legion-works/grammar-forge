@@ -1,7 +1,13 @@
 {
   "name": "grammarforge-opencode",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
+  "exports": {
+    "./tui": {
+      "types": "./src/tui-entry.tsx",
+      "import": "./src/tui-entry.tsx"
+    }
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "vitest run --passWithNoTests",
@@ -9,11 +15,26 @@
     "lint": "oxlint",
     "fmt": "oxfmt"
   },
+  "dependencies": {
+    "@opentui/core": ">=0.4.0",
+    "@opentui/solid": ">=0.4.0",
+    "solid-js": "^1.9.10"
+  },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "esbuild": "^0.25.0",
     "oxfmt": "0.53.0",
     "oxlint": "1.68.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.5"
-  }
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "oc-plugin": [
+    "tui"
+  ]
 }

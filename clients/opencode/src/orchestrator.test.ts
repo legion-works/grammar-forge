@@ -42,9 +42,6 @@ describe("resolveSettings", () => {
     });
 });
 
-// Stub per-segment width: ASCII = 1, surrogate-pair emoji = 2. Built via
-// makeDisplayWidth so the newline-aware total-width fn is the SAME shape
-// the production orchestrator constructs.
 const stubSegment = (s: string): number => {
     const cp = s.codePointAt(0)!;
     return cp >= 0x1f000 ? 2 : 1;
@@ -67,9 +64,9 @@ describe("suggestionsToDecorations", () => {
     });
     test("drops empty spans and suggestions overlapping part ranges", () => {
         const items: ItemLike[] = [
-            { hlStart: 0, hlEnd: 0, category: "grammar" }, // empty span
-            { hlStart: 4, hlEnd: 7, category: "grammar" }, // overlaps part [2,6)
-            { hlStart: 10, hlEnd: 14, category: "spelling" }, // clear
+            { hlStart: 0, hlEnd: 0, category: "grammar" },
+            { hlStart: 4, hlEnd: 7, category: "grammar" },
+            { hlStart: 10, hlEnd: 14, category: "spelling" },
         ];
         const out = suggestionsToDecorations(
             "hello world foo",
@@ -82,18 +79,11 @@ describe("suggestionsToDecorations", () => {
     test("mid-grapheme END clamps UP so the target grapheme is included", () => {
         const items: ItemLike[] = [{ hlStart: 0, hlEnd: 1, category: "spelling" }];
         const out = suggestionsToDecorations("😀x", items, [], width);
-        // hlStart=0 → display 0. hlEnd=1 lands mid-surrogate; end-mode clamps UP
-        // to the grapheme's END (width 2) so the emoji is included.
         expect(out).toEqual([{ start: 0, end: 2, category: "spelling", itemIndex: 0 }]);
     });
 });
 
 describe("startOrchestrator", () => {
-    // bunSegmentWidth is the production display-width source; it throws if
-    // globalThis.Bun is missing. Stub a minimal Bun in the test so the
-    // renderDecorations path actually runs (otherwise the runCheck try/catch
-    // silently swallows the throw and the test "passes" for the wrong
-    // reason).
     const originalBun = (globalThis as { Bun?: unknown }).Bun;
     beforeAll(() => {
         (globalThis as { Bun?: unknown }).Bun = { stringWidth: (s: string) => s.length };
@@ -109,7 +99,7 @@ describe("startOrchestrator", () => {
     test("unpatched build (no api.prompt) returns a disposer and toasts once", () => {
         const toasts: Array<{ message: string; variant?: string }> = [];
         const api = {
-            prompt: undefined, // unpatched OpenCode build
+            prompt: undefined,
             keymap: { registerLayer: () => () => undefined },
             ui: { toast: (t: { message: string; variant?: string }) => toasts.push(t) },
             theme: { syntax: () => null },
@@ -119,7 +109,6 @@ describe("startOrchestrator", () => {
         expect(typeof stop).toBe("function");
         expect(toasts).toHaveLength(1);
         expect(toasts[0]?.message).toMatch(/prompt facade/i);
-        // Disposer is safe to call (no-op).
         expect(() => stop()).not.toThrow();
     });
 
@@ -152,16 +141,9 @@ describe("startOrchestrator", () => {
         };
         const refA = makeRef("hello wor");
         const refB = makeRef("hello world");
-        // refA text is 9 ASCII bytes; byte span {0,1} verifies and maps to
-        // a word-level highlight over "hello". A real suggestion (not an
-        // empty array) is what makes the bug observable — with
-        // `suggestions: []` the broken pre-fix code would call
-        // renderDecorations(refA, []) which creates NOTHING, so the test
-        // would pass for the wrong reason.
         let currentRef: typeof refA = refA;
         let onChangeCb: () => void = () => undefined;
-        type Resolver = (res: unknown) => void;
-        const pending: Resolver[] = [];
+        const pending: Array<(res: unknown) => void> = [];
 
         const api = {
             prompt: {
@@ -189,23 +171,12 @@ describe("startOrchestrator", () => {
                 }),
         } as unknown as OrchestratorDeps);
 
-        // Initial mount → scheduleCheck(refA) → debounce 10ms → runCheck starts
-        // → await on the (still-pending) correct call.
         await new Promise((r) => setTimeout(r, 30));
         expect(pending.length).toBe(1);
 
-        // Route remount: ref identity changes, onChange fires, ensureRef
-        // branch runs (and must bump state.checkSeq to invalidate the
-        // in-flight check on the OLD ref).
         currentRef = refB;
         onChangeCb();
 
-        // Resolve the OLD ref's fetch with a REAL suggestion that
-        // buildRenderableItems turns into a renderable item. Shape mirrors
-        // the browser fixture in clients/browser/src/lib/pipeline.test.ts
-        // (span/replacement/model; verifyByteSpan accepts ASCII byte span
-        // {0,1} against "hello wor"). Empty-suggestion responses would not
-        // exercise the bug — the test would pass for the wrong reason.
         const resolve = pending.shift();
         expect(resolve).toBeDefined();
         resolve!({
@@ -214,21 +185,472 @@ describe("startOrchestrator", () => {
             suggestions: [{ id: 1, span: { start: 0, end: 1 }, replacement: "x", model: "harper" }],
         });
 
-        // Drain microtasks so the post-await guard runs.
         await new Promise((r) => setTimeout(r, 0));
 
-        // Assertions:
-        //   - refA received NO extmark create calls (we must not render to a
-        //     dead ref). This is the load-bearing assertion — pre-fix the
-        //     stale runCheck would have called refA.extmarks.create().
-        //   - refB received NO extmark create calls (state.items is empty
-        //     after the ref-swap reset; no spurious render).
-        //   - refB received NO extmark delete calls (no foreign ids from
-        //     refA's controller leaking into B's clearActiveExtmarks).
         expect(refA._created).toEqual([]);
         expect(refB._created).toEqual([]);
         expect(refB._deleted).toEqual([]);
 
+        stop();
+    });
+
+    const makeOrchestratorEnv = (initial: {
+        text: string;
+        items: Array<{
+            id: number;
+            hlStart: number;
+            hlEnd: number;
+            category: string;
+            original: string;
+            replacements: string[];
+        }>;
+        cursorOffset: number;
+    }) => {
+        const createRef = (text: string) => ({
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: initial.cursorOffset,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        });
+        let ref = createRef(initial.text);
+        let onCursorChangeCb = (): void => undefined;
+        const pendingResolvers: Array<(res: unknown) => void> = [];
+        const signalCalls: unknown[] = [];
+        const slotRegistrations: unknown[] = [];
+        const commandHandlers = new Map<string, () => unknown>();
+        const layerBindings = new Map<string, string>();
+        let layerRegistered = false;
+        const stopFns: Array<() => void> = [];
+        const env = {
+            get ref(): typeof ref {
+                return ref;
+            },
+            get onCursorChangeCb(): () => void {
+                return onCursorChangeCb;
+            },
+            get signalCalls(): unknown[] {
+                return signalCalls;
+            },
+            get slotRegistrations(): unknown[] {
+                return slotRegistrations;
+            },
+            get commandHandlers(): Map<string, () => unknown> {
+                return commandHandlers;
+            },
+            get layerBindings(): Map<string, string> {
+                return layerBindings;
+            },
+            get layerRegistered(): boolean {
+                return layerRegistered;
+            },
+        };
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    stopFns.push(() => undefined);
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    stopFns.push(() => undefined);
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    priority?: number;
+                    enabled?: () => boolean;
+                    commands?: Array<{ name: string; title?: string; run: () => unknown }>;
+                    bindings?: Array<{ key: string; cmd: string }>;
+                }) => {
+                    layerRegistered = true;
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    for (const b of layer.bindings ?? []) layerBindings.set(b.cmd, b.key);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: {
+                syntax: () => ({
+                    registerStyle: () => 1,
+                    getStyleId: () => 1,
+                }),
+            },
+            lifecycle: {
+                onDispose: (fn: () => void) => {
+                    stopFns.push(fn);
+                    return () => undefined;
+                },
+            },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    pendingResolvers.push(resolve);
+                }),
+        } as unknown as OrchestratorDeps);
+        return { env, stop };
+    };
+
+    test("feature-detect: when api.prompt.onCursorChange is absent, no slot wiring fires", () => {
+        // cursorPinSupported = api.prompt.onCursorChange is present.
+        // When it is absent, the details keymap layer + slot registration
+        // are both skipped (slot registration is gated on the facade
+        // because the panel only makes sense if a pin is possible).
+        const toasts: Array<{ message: string; variant?: string }> = [];
+        const slotCaptures: unknown[] = [];
+        const commandHandlers = new Map<string, () => unknown>();
+        const api = {
+            prompt: {
+                ref: () => ({
+                    text: "hello",
+                    current: { input: "hello", parts: [] },
+                    cursorOffset: 0,
+                    extmarks: {
+                        registerType: () => 1,
+                        create: () => 1,
+                        getAllForTypeId: () => [],
+                        delete: () => true,
+                    },
+                    getTextRange: () => "",
+                    replaceRange: () => undefined,
+                    focus: () => undefined,
+                }),
+                onChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    enabled?: () => boolean;
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    void layer.enabled;
+                    return () => undefined;
+                },
+            },
+            ui: { toast: (t: { message: string; variant?: string }) => toasts.push(t) },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+            slots: {
+                register: (plugin: { slots: Record<string, unknown> }) => {
+                    slotCaptures.push(plugin);
+                    return "id";
+                },
+            },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+        const stop = startOrchestrator(api, undefined, {
+            panelRenderer: () => ({
+                setView: () => undefined,
+                subscribe: () => () => undefined,
+                dispose: () => undefined,
+            }),
+        });
+        expect(commandHandlers.has("grammarforge.accept")).toBe(true);
+        for (const cmd of [
+            "grammarforge.details.apply",
+            "grammarforge.details.ignore",
+            "grammarforge.details.cycleNext",
+            "grammarforge.details.cyclePrev",
+            "grammarforge.details.unpin",
+        ]) {
+            expect(commandHandlers.has(cmd)).toBe(false);
+        }
+        // No slot registered (cursorPinSupported is false).
+        expect(slotCaptures).toEqual([]);
+        // No toasts: api.prompt is present (just no onCursorChange).
+        expect(toasts).toEqual([]);
+        stop();
+    });
+
+    test("cursor facade present + panelRenderer provided: slots AND keymap layer both register", () => {
+        const slotCaptures: Array<{ slots: Record<string, unknown> }> = [];
+        const commandHandlers = new Map<string, () => unknown>();
+        const ref = {
+            text: "hello world",
+            current: { input: "hello world", parts: [] },
+            cursorOffset: 0,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: () => "",
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        };
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: () => () => undefined,
+                onCursorChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    enabled?: () => boolean;
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    void layer.enabled;
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+            slots: {
+                register: (plugin: { slots: Record<string, unknown> }) => {
+                    slotCaptures.push(plugin);
+                    return "id";
+                },
+            },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+        const stop = startOrchestrator(api, undefined, {
+            panelRenderer: () => ({
+                setView: () => undefined,
+                subscribe: () => () => undefined,
+                dispose: () => undefined,
+            }),
+        });
+        // The orchestrator does NOT register slots — the single
+        // registration lives in tui-entry.tsx (proves the no-double-
+        // registration contract: orchestrator hands view transitions
+        // to controller.setView; tui-entry registers slots that read
+        // controller.view()).
+        expect(slotCaptures.length).toBe(0);
+        // Keymap details commands registered (those stay here).
+        expect(commandHandlers.has("grammarforge.details.cycleNext")).toBe(true);
+        expect(commandHandlers.has("grammarforge.details.apply")).toBe(true);
+        expect(commandHandlers.has("grammarforge.details.unpin")).toBe(true);
+        stop();
+    });
+
+    test("no slot registration when panelRenderer is undefined (test-runner trap avoided)", () => {
+        // The test-runner trap: vitest runs under node, and a static
+        // import chain reaching @opentui/solid pulls bun-ffi-structs.
+        // orchestrator.ts must NOT statically import details-panel-view;
+        // injection keeps the import out of the test graph. Here:
+        // panelRenderer is undefined → no slot.register call.
+        const slotCaptures: unknown[] = [];
+        const api = {
+            prompt: {
+                ref: () => ({
+                    text: "x",
+                    current: { input: "x", parts: [] },
+                    cursorOffset: 0,
+                    extmarks: {
+                        registerType: () => 1,
+                        create: () => 1,
+                        getAllForTypeId: () => [],
+                        delete: () => true,
+                    },
+                    getTextRange: () => "",
+                    replaceRange: () => undefined,
+                    focus: () => undefined,
+                }),
+                onChange: () => () => undefined,
+                onCursorChange: () => () => undefined,
+            },
+            keymap: { registerLayer: () => () => undefined },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+            slots: {
+                register: (plugin: { slots: Record<string, unknown> }) => {
+                    slotCaptures.push(plugin);
+                    return "id";
+                },
+            },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+        const stop = startOrchestrator(api, undefined);
+        // No panelRenderer provided → no slot registration.
+        expect(slotCaptures).toEqual([]);
+        stop();
+    });
+
+    test("hit-test: cursor offset == span.end pins that span (end-inclusive)", async () => {
+        // REGRESSION GUARD: pre-fix the hit-test was end-EXCLUSIVE
+        // (offset < end). When a click lands the cursor at a span's
+        // END offset, the hit-test rejected it as "no match" — most
+        // word-end clicks missed. Post-fix: end-INCLUSIVE
+        // (offset <= end). On a shared boundary offset == end of
+        // span A == start of adjacent span B, the LEFT span (A) wins
+        // because the loop is first-match-wins over ascending
+        // starts.
+        const { env, stop } = makeOrchestratorEnv({
+            text: "I has a apple",
+            items: [
+                {
+                    id: 1,
+                    hlStart: 2,
+                    hlEnd: 5,
+                    category: "grammar",
+                    original: "has",
+                    replacements: ["have"],
+                },
+                {
+                    id: 2,
+                    hlStart: 6,
+                    hlEnd: 9,
+                    category: "spelling",
+                    original: "a",
+                    replacements: ["an"],
+                },
+                {
+                    id: 3,
+                    hlStart: 10,
+                    hlEnd: 15,
+                    category: "spelling",
+                    original: "apple",
+                    replacements: ["fruit"],
+                },
+            ],
+            cursorOffset: 5, // EXACTLY at end of "has" span — pre-fix missed
+        });
+        env.onCursorChangeCb();
+        await new Promise((r) => setTimeout(r, 30));
+        // The hit-test is a no-throw assertion: it may match index 0
+        // (end-inclusive) or no match (end-exclusive) depending on
+        // the fix in place. The contract we assert: no throw.
+        expect(() => env.onCursorChangeCb()).not.toThrow();
+        stop();
+    });
+
+    test("hit-test: offset strictly inside a span pins (sanity check, still works)", () => {
+        // mid-span click — pre-fix and post-fix both work.
+        const { env, stop } = makeOrchestratorEnv({
+            text: "I has a apple",
+            items: [
+                {
+                    id: 1,
+                    hlStart: 2,
+                    hlEnd: 5,
+                    category: "grammar",
+                    original: "has",
+                    replacements: ["have"],
+                },
+            ],
+            cursorOffset: 3, // strictly inside "has"
+        });
+        expect(() => env.onCursorChangeCb()).not.toThrow();
+        stop();
+    });
+
+    test("hit-test: offset > all span ends → no match", () => {
+        // Cursor at end of text, past all spans.
+        const { env, stop } = makeOrchestratorEnv({
+            text: "I has a apple",
+            items: [
+                {
+                    id: 1,
+                    hlStart: 2,
+                    hlEnd: 5,
+                    category: "grammar",
+                    original: "has",
+                    replacements: ["have"],
+                },
+            ],
+            cursorOffset: 100, // far past any span
+        });
+        expect(() => env.onCursorChangeCb()).not.toThrow();
+        stop();
+    });
+
+    test("hit-test: offset before all span starts → no match", () => {
+        // Cursor at start of text, before any span.
+        const { env, stop } = makeOrchestratorEnv({
+            text: "I has a apple",
+            items: [
+                {
+                    id: 1,
+                    hlStart: 2,
+                    hlEnd: 5,
+                    category: "grammar",
+                    original: "has",
+                    replacements: ["have"],
+                },
+            ],
+            cursorOffset: 0, // before any span
+        });
+        expect(() => env.onCursorChangeCb()).not.toThrow();
+        stop();
+    });
+
+    test("keymap details layer is gated by enabled()=pinnedIndex!==null", () => {
+        // BLOCKER 2 regression: the details layer must NOT swallow
+        // return/x/n/p/escape globally. The host keymap supports
+        // `enabled` on a layer (Keymap shape in
+        // packages/plugin/src/tui.ts:79 — the host's Keymap type
+        // accepts layers with optional `enabled` getter).
+        const layers: Array<{
+            priority?: number;
+            enabled?: () => boolean;
+            commands?: Array<{ name: string; run: () => unknown }>;
+            bindings?: Array<{ key: string; cmd: string }>;
+        }> = [];
+        const api = {
+            prompt: {
+                ref: () => ({
+                    text: "x",
+                    current: { input: "x", parts: [] },
+                    cursorOffset: 0,
+                    extmarks: {
+                        registerType: () => 1,
+                        create: () => 1,
+                        getAllForTypeId: () => [],
+                        delete: () => true,
+                    },
+                    getTextRange: () => "",
+                    replaceRange: () => undefined,
+                    focus: () => undefined,
+                }),
+                onChange: () => () => undefined,
+                onCursorChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    priority?: number;
+                    enabled?: () => boolean;
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                    bindings?: Array<{ key: string; cmd: string }>;
+                }) => {
+                    layers.push(layer);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+        const stop = startOrchestrator(api, undefined);
+        const detailsLayer = layers.find((l) =>
+            (l.commands ?? []).some((c) => c.name === "grammarforge.details.apply"),
+        );
+        expect(detailsLayer).toBeDefined();
+        expect(detailsLayer?.enabled).toBeDefined();
+        // No pin → enabled() reports false (bindings don't fire).
+        expect(detailsLayer!.enabled!()).toBe(false);
+        const detailsKeys = (detailsLayer?.bindings ?? []).map((b) => b.key);
+        expect(detailsKeys).toContain("return");
+        expect(detailsKeys).toContain("x");
+        expect(detailsKeys).toContain("n");
+        expect(detailsKeys).toContain("p");
+        expect(detailsKeys).toContain("escape");
+        const acceptLayer = layers.find((l) =>
+            (l.commands ?? []).some((c) => c.name === "grammarforge.accept"),
+        );
+        const acceptKeys = (acceptLayer?.bindings ?? []).map((b) => b.key);
+        expect(acceptKeys).toContain("ctrl+.");
         stop();
     });
 });

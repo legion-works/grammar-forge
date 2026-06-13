@@ -1,53 +1,34 @@
-import { build } from "esbuild";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+// The tui entry is now source-shipped (src/tui-entry.tsx, pointed at
+// by package.json exports["./tui"]). The host loads it directly via
+// bun's runtime transform; no esbuild bundle is needed for the TUI
+// surface. We keep this script as a no-op so existing pnpm build
+// invocations don't fail — it intentionally produces nothing.
+//
+// If a future task needs a CI sanity check (typecheck the entry,
+// verify the imports resolve), add that logic here WITHOUT
+// emitting dist/ — the loader path is source-only.
+//
+// Reference: anthropic-auth/packages/opencode exports["./tui"] →
+// "./src/tui.tsx" with bun:transform. Their build script
+// (scripts.build in package.json) bundles dist/{index,cli,...}.ts
+// but explicitly ships src/tui.tsx uncompiled.
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const distDir = resolve(import.meta.dirname, "../dist");
+const packageJsonPath = resolve(import.meta.dirname, "../package.json");
+const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+const tuiExport = pkg.exports?.["./tui"]?.import;
 
-// Wipe dist before re-emitting: stale files from a prior build (in
-// particular an old dist/index.js) must NOT linger. See the comment on
-// the manifest below for why dist/index.js is a hard error.
-rmSync(distDir, { recursive: true, force: true });
-mkdirSync(distDir, { recursive: true });
+if (!tuiExport) {
+  console.error("build: no exports['.\\/tui'].import in package.json — tui entry missing");
+  process.exit(1);
+}
 
-await build({
-  entryPoints: [resolve(import.meta.dirname, "../src/index.ts")],
-  bundle: true,
-  format: "esm",
-  platform: "neutral",
-  mainFields: ["module", "main"],
-  outfile: resolve(distDir, "tui.js"),
-  alias: { "@": resolve(import.meta.dirname, "../../browser/src") },
-});
+const tuiPath = resolve(import.meta.dirname, "..", tuiExport);
+if (!existsSync(tuiPath)) {
+  console.error(`build: tui entry not found at ${tuiPath}`);
+  process.exit(1);
+}
 
-// OpenCode's plugin loader iterates the config `plugin` array for BOTH
-// server and tui kinds. For FILE plugins the server-kind resolver falls
-// back to the directory INDEX_FILES list (index.ts/tsx/js/mjs/cjs) EVEN
-// when package.json exports exist (packages/opencode/src/plugin/shared.ts
-// lines 158-165). If the dist directory contains any index.* file, the
-// server loader imports it and throws "must default export an object
-// with server()" before the tui kind gets a clean shot.
-//
-// Fix: name the bundle dist/tui.js (NOT index.*) and map exports["./tui"]
-// to it. The server loader then fails to resolve a server entry, logs
-// "does not expose a server entrypoint", and the tui loader resolves
-// "./tui" via exports. The `oc-plugin: ['tui']` metadata field lists
-// the supported kinds.
-//
-// Also: rmSync at the top of this script guarantees no stale index.js
-// from a previous build can survive — the directory-index fallback
-// would otherwise still find it.
-const pluginManifest = {
-  name: "grammarforge-opencode",
-  type: "module",
-  "oc-plugin": ["tui"],
-  exports: { "./tui": "./tui.js" },
-};
-writeFileSync(
-  resolve(distDir, "package.json"),
-  JSON.stringify(pluginManifest, null, 2) + "\n",
-  "utf8",
-);
-
-console.log("built dist/tui.js");
-console.log("built dist/package.json");
+console.log(`build: source-shipped tui entry verified at ${tuiExport}`);
+console.log("build: no bundle to produce — the host loads src/tui-entry.tsx via bun:transform");

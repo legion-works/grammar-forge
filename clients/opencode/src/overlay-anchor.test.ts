@@ -1,0 +1,58 @@
+import { describe, it, expect } from "vitest";
+import { clampAnchor } from "./overlay-anchor";
+
+// Terminal: 80 cols × 24 rows. Card: 44 wide × 5 tall.
+const SCREEN_W = 80;
+const SCREEN_H = 24;
+const CARD_W = 44;
+const CARD_H = 5;
+
+describe("clampAnchor", () => {
+    it("normal case: word in the middle, card fits above", () => {
+        // anchor at col 10, row 15 — plenty of room above and to the right
+        const pos = clampAnchor({ x: 10, y: 15 }, CARD_W, CARD_H, SCREEN_W, SCREEN_H);
+        expect(pos.left).toBe(10);
+        expect(pos.top).toBe(10); // 15 - 5 = 10
+    });
+
+    it("word near right edge: left is clamped so card stays on screen", () => {
+        // anchor at col 70 — card would overflow: 70 + 44 = 114 > 80
+        const pos = clampAnchor({ x: 70, y: 15 }, CARD_W, CARD_H, SCREEN_W, SCREEN_H);
+        expect(pos.left).toBe(36); // 80 - 44 = 36
+        expect(pos.top).toBe(10); // 15 - 5 = 10
+    });
+
+    it("word near top: card flips below when no room above", () => {
+        // anchor at row 2 — card height 5, so topAbove = 2 - 5 = -3 < 0 → flip below
+        const pos = clampAnchor({ x: 10, y: 2 }, CARD_W, CARD_H, SCREEN_W, SCREEN_H);
+        expect(pos.left).toBe(10);
+        expect(pos.top).toBe(3); // anchor.y + 1 = 3
+    });
+
+    it("word at row 0: card flips below", () => {
+        const pos = clampAnchor({ x: 5, y: 0 }, CARD_W, CARD_H, SCREEN_W, SCREEN_H);
+        expect(pos.left).toBe(5);
+        expect(pos.top).toBe(1); // 0 + 1 = 1
+    });
+
+    it("word at exact boundary: topAbove = 0 is valid (fits above)", () => {
+        // anchor.y = cardH → topAbove = 0 → fits above
+        const pos = clampAnchor({ x: 10, y: CARD_H }, CARD_W, CARD_H, SCREEN_W, SCREEN_H);
+        expect(pos.top).toBe(0);
+    });
+
+    it("word at anchor.y = cardH - 1: topAbove = -1 → flip below", () => {
+        const pos = clampAnchor({ x: 10, y: CARD_H - 1 }, CARD_W, CARD_H, SCREEN_W, SCREEN_H);
+        expect(pos.top).toBe(CARD_H); // anchor.y + 1 = cardH
+    });
+
+    it("left is never negative even if anchor.x < 0", () => {
+        const pos = clampAnchor({ x: -5, y: 10 }, CARD_W, CARD_H, SCREEN_W, SCREEN_H);
+        expect(pos.left).toBe(0);
+    });
+
+    it("narrow terminal: left clamped to 0 when screenW < cardW", () => {
+        const pos = clampAnchor({ x: 10, y: 10 }, CARD_W, CARD_H, 20, SCREEN_H);
+        expect(pos.left).toBe(0); // max(0, 20 - 44) = 0
+    });
+});
