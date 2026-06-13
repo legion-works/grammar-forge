@@ -76,7 +76,9 @@ supported in `tui.json` — `ConfigPlugin.resolvePluginSpec` preserves
       {
         "bridgeUrl": "http://localhost:8000",
         "realtimeDelayMs": 500,
-        "acceptHotkey": "ctrl+.",
+        "applyAllHotkey": "ctrl+.",
+        "cycleNextHotkey": ".",
+        "cyclePrevHotkey": "/",
         "allowRemoteBridge": false
       }
     ]
@@ -91,7 +93,10 @@ localhost/private-network bridge URLs are accepted.
 
 - Typing pauses for `realtimeDelayMs` → the prompt text is checked →
   category-colored underlines appear on flagged ranges.
-- `ctrl+.` applies the first suggestion (toast confirms) and re-checks.
+- `ctrl+.` applies ALL suggestions (toast confirms count) and re-checks.
+- When a suggestion is pinned (cursor on an underline), `/`/`.` cycle to the
+  previous/next suggestion; `return` applies the pinned one; `x` ignores it;
+  `escape` closes the details panel.
 - Pasted blocks, file attachments, and agent mentions are never flagged
   (their ranges are excluded). Limitation: pastes under 3 lines / 150
   chars are inserted as plain text by OpenCode and are therefore checked.
@@ -102,7 +107,7 @@ localhost/private-network bridge URLs are accepted.
 ## Smoke checklist (manual, bridge on localhost:8000)
 
 1. Type `I has a apple` → wait ~1 s → underlines appear in the prompt.
-2. `ctrl+.` → first suggestion applies in place, toast confirms.
+2. `ctrl+.` → all suggestions apply in place, toast confirms count.
 3. Paste a 5-line error-laden block → its range is not underlined.
 4. Submit a prompt with open underlines → `curl localhost:8000/stats`
    shows the ignored count moved.

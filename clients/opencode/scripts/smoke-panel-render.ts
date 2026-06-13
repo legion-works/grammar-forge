@@ -26,7 +26,12 @@
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { BoxRenderable, TextRenderable } from "@opentui/core";
 import { buildDetailsViewModel } from "../src/details-panel.ts";
-import { buildCardSpec, type CardSpec } from "../src/card-spec.ts";
+import {
+    buildCardSpec,
+    buildRephraseLoadingCardSpec,
+    buildRephraseResultCardSpec,
+    type CardSpec,
+} from "../src/card-spec.ts";
 
 interface BoxSurface {
     add: (child: unknown) => number;
@@ -319,8 +324,124 @@ async function main() {
         `smoke: absolute card dims width=${absoluteDims.width} height=${absoluteDims.height} ✓`,
     );
 
+    // ─── Rephrase card smokes ─────────────────────────────────────────────────
+    // Verify rephrase-loading and rephrase-result cards build with non-zero dims
+    // and all text segments populated. These are live-only (spinner animation +
+    // result layout), so this is the only render coverage for them.
+
+    const verifyRephrase = async (
+        label: string,
+        spec: CardSpec,
+        expectedRows: number,
+        setup: TestRendererSetup,
+    ): Promise<{ width: number; height: number }> => {
+        const root = (
+            setup.renderer as unknown as {
+                root?: {
+                    add: (x: unknown) => number;
+                    getChildren: () => unknown[];
+                    _ctx?: unknown;
+                };
+            }
+        ).root;
+        if (!root || !root._ctx) {
+            console.error("FAIL: no root._ctx on test renderer");
+            process.exit(1);
+        }
+        const box = buildAbsoluteCard(root._ctx, spec, 5, 5);
+        root.add(box);
+        if (typeof setup.flush === "function") await setup.flush();
+        if (typeof setup.renderOnce === "function") await setup.renderOnce();
+        await new Promise((r) => setTimeout(r, 30));
+        const yogaNode = box.yogaNode;
+        const width =
+            yogaNode && typeof yogaNode.getComputedWidth === "function"
+                ? yogaNode.getComputedWidth()
+                : 0;
+        const height =
+            yogaNode && typeof yogaNode.getComputedHeight === "function"
+                ? yogaNode.getComputedHeight()
+                : 0;
+        console.log(`smoke[${label}]: post-layout width=${width} height=${height}`);
+        if (width <= 0) {
+            console.error(`FAIL[${label}]: width=${width} (expected > 0)`);
+            process.exit(1);
+        }
+        if (height <= 0) {
+            console.error(`FAIL[${label}]: height=${height} (expected > 0)`);
+            process.exit(1);
+        }
+        const children = box.getChildren();
+        if (children.length !== expectedRows) {
+            console.error(
+                `FAIL[${label}]: expected ${expectedRows} row children, got ${children.length}`,
+            );
+            process.exit(1);
+        }
+        let textCount = 0;
+        for (let r = 0; r < children.length; r++) {
+            const row = children[r] as { getChildren: () => unknown[] };
+            const rowKids = row.getChildren();
+            for (let s = 0; s < rowKids.length; s++) {
+                const t = rowKids[s] as {
+                    content: string | { chunks: Array<{ text: string }> };
+                };
+                let text = "";
+                if (typeof t.content === "string") {
+                    text = t.content;
+                } else if (t.content && Array.isArray(t.content.chunks)) {
+                    text = t.content.chunks.map((c) => c.text).join("");
+                }
+                if (text.length === 0) {
+                    console.error(
+                        `FAIL[${label}]: row ${r} seg ${s} empty content: ${JSON.stringify(t.content)}`,
+                    );
+                    process.exit(1);
+                }
+                textCount++;
+            }
+        }
+        console.log(`smoke[${label}]: ${textCount} text children populated ✓`);
+        return { width, height };
+    };
+
+    // Rephrase loading card (frame 0 and frame 5 to test spinner cycling).
+    const loadingSpec0 = buildRephraseLoadingCardSpec(0);
+    const loadingSpec5 = buildRephraseLoadingCardSpec(5);
+    for (const [label, spec] of [
+        ["rephrase-loading-frame0", loadingSpec0],
+        ["rephrase-loading-frame5", loadingSpec5],
+    ] as const) {
+        const dims = await verifyRephrase(label, spec, 1, setup);
+        console.log(`smoke[${label}]: dims width=${dims.width} height=${dims.height} ✓`);
+    }
+
+    // Rephrase result card.
+    const resultSpec = buildRephraseResultCardSpec({
+        kind: "rephrase-result",
+        original: "Hello world",
+        rephrased: "Hi there world",
+        displayStart: 0,
+    });
+    const resultDims = await verifyRephrase("rephrase-result", resultSpec, 4, setup);
     console.log(
-        "\nsmoke: PASS — bordered card builds with non-zero dim, all text populated, all 3 modes verified, absolute overlay card verified",
+        `smoke[rephrase-result]: dims width=${resultDims.width} height=${resultDims.height} ✓`,
+    );
+
+    // Rephrase result card with long text (truncation path).
+    const resultSpecLong = buildRephraseResultCardSpec({
+        kind: "rephrase-result",
+        original: "a".repeat(60),
+        rephrased: "b".repeat(60),
+        displayStart: 0,
+    });
+    const resultLongDims = await verifyRephrase("rephrase-result-long", resultSpecLong, 4, setup);
+    console.log(
+        `smoke[rephrase-result-long]: dims width=${resultLongDims.width} height=${resultLongDims.height} ✓`,
+    );
+
+    console.log(
+        "\nsmoke: PASS — bordered card builds with non-zero dim, all text populated, all 3 modes verified, absolute overlay card verified, rephrase-loading + rephrase-result cards verified",
     );
     process.exit(0);
 }

@@ -42,7 +42,11 @@ import { startOrchestrator, type PanelController } from "./orchestrator";
 import { createDetailsPanelController } from "./details-panel-view";
 import type { PanelView } from "./details-panel-view";
 import { buildDetailsViewModel } from "./details-panel";
-import { buildCardSpec } from "./card-spec";
+import {
+    buildCardSpec,
+    buildRephraseLoadingCardSpec,
+    buildRephraseResultCardSpec,
+} from "./card-spec";
 import { clampAnchor } from "./overlay-anchor";
 import { logDebug } from "./debug";
 
@@ -132,9 +136,23 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
             >
                 <Show when={localView()} keyed>
                     {(current) => {
-                        const item = current.item;
-                        const vm = buildDetailsViewModel(item, current.index, current.total);
-                        const spec = buildCardSpec(vm);
+                        // Build the card spec by discriminating on kind.
+                        let spec;
+                        if (current.kind === "rephrase-loading") {
+                            spec = buildRephraseLoadingCardSpec(current.frame);
+                        } else if (current.kind === "rephrase-result") {
+                            spec = buildRephraseResultCardSpec(current);
+                        } else {
+                            // kind === "suggestion"
+                            const vm = buildDetailsViewModel(
+                                current.item,
+                                current.index,
+                                current.total,
+                                current.cycleNextKey,
+                                current.cyclePrevKey,
+                            );
+                            spec = buildCardSpec(vm);
+                        }
                         // Lazily read the prompt ref at render time (gotcha 4:
                         // ref is null at tui()-time; it's mounted by now because
                         // something is pinned — the orchestrator only calls
@@ -145,14 +163,20 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                         const dims = dimensions();
                         const screenW = dims.width;
                         const screenH = dims.height;
+                        // Card height varies by kind: loading=3 rows+border, result=6 rows+border.
+                        const cardH = current.kind === "rephrase-result" ? 6 : CARD_H;
                         const clamped = anchor
-                            ? clampAnchor(anchor, CARD_W, CARD_H, screenW, screenH)
+                            ? clampAnchor(anchor, CARD_W, cardH, screenW, screenH)
                             : null;
-                        logDebug("panel content visible", {
-                            index: current.index,
-                            total: current.total,
-                            category: item.category,
-                        });
+                        if (current.kind === "suggestion") {
+                            logDebug("panel content visible", {
+                                index: current.index,
+                                total: current.total,
+                                category: current.item.category,
+                            });
+                        } else {
+                            logDebug("panel content visible", { kind: current.kind });
+                        }
                         logDebug("overlay anchor", {
                             offset: current.displayStart,
                             anchorX: anchor?.x ?? null,
@@ -162,7 +186,7 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                             screenW,
                             screenH,
                             cardW: CARD_W,
-                            cardH: CARD_H,
+                            cardH,
                         });
                         // If offsetToScreen returned null (prompt unmounted,
                         // offset out of range, or no offsetToScreen support),

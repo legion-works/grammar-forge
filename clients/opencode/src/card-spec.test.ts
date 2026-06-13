@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { buildCardSpec } from "./card-spec";
+import {
+    buildCardSpec,
+    buildRephraseLoadingCardSpec,
+    buildRephraseResultCardSpec,
+    SPINNER_FRAMES,
+    REPHRASE_ACCENT_HEX,
+} from "./card-spec";
 import { buildDetailsViewModel } from "./details-panel";
 import { CATEGORY_FG } from "./category-palette";
 
@@ -122,12 +128,12 @@ describe("buildCardSpec", () => {
         expect(right.colorKey).toBe("insert");
     });
 
-    test("hints row: single dim segment containing all four bindings", () => {
+    test("hints row: single dim segment containing all four bindings (default keys)", () => {
         const spec = buildCardSpec(vm());
         const hintsRow = spec.rows[2]!;
         expect(hintsRow.segments).toHaveLength(1);
         expect(hintsRow.segments[0]!.colorKey).toBe("dim");
-        expect(hintsRow.segments[0]!.text).toBe("⏎ apply · x ignore · n/p cycle · esc close");
+        expect(hintsRow.segments[0]!.text).toBe("⏎ apply · x ignore · / . cycle · esc close");
     });
 
     test("category color resolves correctly for every known category", () => {
@@ -141,6 +147,157 @@ describe("buildCardSpec", () => {
         ] as const) {
             const spec = buildCardSpec(vm({ category: cat }));
             expect(spec.borderColor).toBe(CATEGORY_FG[cat]);
+        }
+    });
+});
+
+describe("buildRephraseLoadingCardSpec", () => {
+    test("returns a spec with the rephrase accent border color", () => {
+        const spec = buildRephraseLoadingCardSpec(0);
+        expect(spec.borderColor).toBe(REPHRASE_ACCENT_HEX);
+    });
+
+    test("has exactly 1 row with 2 segments (title + spinner+text)", () => {
+        const spec = buildRephraseLoadingCardSpec(0);
+        expect(spec.rows).toHaveLength(1);
+        expect(spec.rows[0]!.segments).toHaveLength(2);
+    });
+
+    test("title segment is bold and accent-colored", () => {
+        const spec = buildRephraseLoadingCardSpec(0);
+        const title = spec.rows[0]!.segments[0]!;
+        expect(title.text).toBe("✎ Rephrase");
+        expect(title.bold).toBe(true);
+        expect(title.fg).toBe(REPHRASE_ACCENT_HEX);
+    });
+
+    test("spinner segment contains the correct braille glyph for frame 0", () => {
+        const spec = buildRephraseLoadingCardSpec(0);
+        const spinner = spec.rows[0]!.segments[1]!;
+        expect(spinner.text).toContain(SPINNER_FRAMES[0]);
+        expect(spinner.text).toContain("Rephrasing");
+    });
+
+    test("spinner glyph cycles through all SPINNER_FRAMES by frame index", () => {
+        for (let i = 0; i < SPINNER_FRAMES.length; i++) {
+            const spec = buildRephraseLoadingCardSpec(i);
+            const spinner = spec.rows[0]!.segments[1]!;
+            expect(spinner.text).toContain(SPINNER_FRAMES[i]);
+        }
+    });
+
+    test("spinner glyph wraps around (frame >= SPINNER_FRAMES.length)", () => {
+        const spec0 = buildRephraseLoadingCardSpec(0);
+        const specN = buildRephraseLoadingCardSpec(SPINNER_FRAMES.length);
+        expect(spec0.rows[0]!.segments[1]!.text).toBe(specN.rows[0]!.segments[1]!.text);
+    });
+
+    test("REGRESSION GUARD: every segment.text is a non-empty string", () => {
+        for (let frame = 0; frame < SPINNER_FRAMES.length * 2; frame++) {
+            const spec = buildRephraseLoadingCardSpec(frame);
+            for (const row of spec.rows) {
+                for (const seg of row.segments) {
+                    expect(typeof seg.text).toBe("string");
+                    expect(seg.text.length).toBeGreaterThan(0);
+                }
+            }
+        }
+    });
+});
+
+describe("buildRephraseResultCardSpec", () => {
+    const makeView = (original: string, rephrased: string) => ({
+        kind: "rephrase-result" as const,
+        original,
+        rephrased,
+        displayStart: 0,
+    });
+
+    test("returns a spec with the rephrase accent border color", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        expect(spec.borderColor).toBe(REPHRASE_ACCENT_HEX);
+    });
+
+    test("has 4 rows: title, original, arrow+rephrased, hints", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        expect(spec.rows).toHaveLength(4);
+    });
+
+    test("title row: bold accent-colored '✎ Rephrase'", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        const title = spec.rows[0]!.segments[0]!;
+        expect(title.text).toBe("✎ Rephrase");
+        expect(title.bold).toBe(true);
+        expect(title.fg).toBe(REPHRASE_ACCENT_HEX);
+    });
+
+    test("original row: contains the original text", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello world", "hi there"));
+        const origSeg = spec.rows[1]!.segments[0]!;
+        expect(origSeg.text).toBe("hello world");
+    });
+
+    test("arrow+rephrased row: contains arrow and rephrased text", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        const row = spec.rows[2]!;
+        const texts = row.segments.map((s) => s.text);
+        expect(texts.join("")).toContain("→");
+        expect(texts.join("")).toContain("hi there");
+    });
+
+    test("rephrased text segment has insert colorKey (green)", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        const row = spec.rows[2]!;
+        const replSeg = row.segments.find((s) => s.text === "hi there");
+        expect(replSeg).toBeDefined();
+        expect(replSeg!.colorKey).toBe("insert");
+    });
+
+    test("hints row: contains accept and reject hints", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        const hints = spec.rows[3]!.segments[0]!;
+        expect(hints.text).toContain("apply");
+        expect(hints.text).toContain("reject");
+        expect(hints.colorKey).toBe("dim");
+    });
+
+    test("long original text is truncated with ellipsis", () => {
+        const longText = "a".repeat(60);
+        const spec = buildRephraseResultCardSpec(makeView(longText, "short"));
+        const origSeg = spec.rows[1]!.segments[0]!;
+        expect(origSeg.text.length).toBeLessThanOrEqual(41); // 40 chars + ellipsis
+        expect(origSeg.text.endsWith("…")).toBe(true);
+    });
+
+    test("long rephrased text is truncated with ellipsis", () => {
+        const longText = "b".repeat(60);
+        const spec = buildRephraseResultCardSpec(makeView("short", longText));
+        const row = spec.rows[2]!;
+        const replSeg = row.segments.find((s) => s.colorKey === "insert")!;
+        expect(replSeg.text.length).toBeLessThanOrEqual(41);
+        expect(replSeg.text.endsWith("…")).toBe(true);
+    });
+
+    test("short text is NOT truncated", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        const origSeg = spec.rows[1]!.segments[0]!;
+        expect(origSeg.text).toBe("hello");
+    });
+
+    test("REGRESSION GUARD: every segment.text is a non-empty string", () => {
+        const cases = [
+            makeView("hello", "hi there"),
+            makeView("a".repeat(60), "b".repeat(60)),
+            makeView("x", "y"),
+        ];
+        for (const view of cases) {
+            const spec = buildRephraseResultCardSpec(view);
+            for (const row of spec.rows) {
+                for (const seg of row.segments) {
+                    expect(typeof seg.text).toBe("string");
+                    expect(seg.text.length).toBeGreaterThan(0);
+                }
+            }
         }
     });
 });

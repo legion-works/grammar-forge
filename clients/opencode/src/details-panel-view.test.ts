@@ -19,17 +19,23 @@ describe("createDetailsPanelController", () => {
         c.subscribe((next) => received.push(next));
         c.subscribe((next) => received.push(next));
         c.setView({
+            kind: "suggestion",
             item: { category: "grammar", original: "teh", replacement: "the" },
             index: 0,
             total: 3,
             displayStart: 0,
+            cycleNextKey: ".",
+            cyclePrevKey: "/",
         });
         expect(received).toHaveLength(2);
         expect(received[0]).toEqual({
+            kind: "suggestion",
             item: { category: "grammar", original: "teh", replacement: "the" },
             index: 0,
             total: 3,
             displayStart: 0,
+            cycleNextKey: ".",
+            cyclePrevKey: "/",
         });
         expect(received[1]).toEqual(received[0]);
     });
@@ -37,10 +43,13 @@ describe("createDetailsPanelController", () => {
     test("setView(null) fans out the unpin payload to all subscribers", () => {
         const c = createDetailsPanelController();
         let last: PanelView | null = {
+            kind: "suggestion",
             item: { category: "x", original: "x", replacement: "x" },
             index: 0,
             total: 1,
             displayStart: 0,
+            cycleNextKey: ".",
+            cyclePrevKey: "/",
         };
         c.subscribe((next) => {
             last = next;
@@ -54,10 +63,13 @@ describe("createDetailsPanelController", () => {
         let called = 0;
         const unsub = c.subscribe(() => called++);
         c.setView({
+            kind: "suggestion",
             item: { category: "x", original: "x", replacement: "x" },
             index: 0,
             total: 1,
             displayStart: 0,
+            cycleNextKey: ".",
+            cyclePrevKey: "/",
         });
         expect(called).toBe(1);
         unsub();
@@ -72,10 +84,13 @@ describe("createDetailsPanelController", () => {
         c.subscribe((next) => a.push(next));
         c.subscribe((next) => b.push(next));
         c.setView({
+            kind: "suggestion",
             item: { category: "spelling", original: "abc", replacement: "x" },
             index: 1,
             total: 2,
             displayStart: 0,
+            cycleNextKey: ".",
+            cyclePrevKey: "/",
         });
         expect(a).toHaveLength(1);
         expect(b).toHaveLength(1);
@@ -91,24 +106,30 @@ describe("createDetailsPanelController", () => {
         const received: Array<PanelView | null | undefined> = [];
         c.subscribe((next) => received.push(next));
         c.setView({
+            kind: "suggestion",
             item: { category: "spelling", original: "x", replacement: "y" },
             index: 0,
             total: 1,
             displayStart: 0,
+            cycleNextKey: ".",
+            cyclePrevKey: "/",
         });
         c.setView(null);
         expect(received).toHaveLength(2);
         expect(received[0]).not.toBeUndefined();
         expect(received[0]).not.toBeNull();
         expect(received[1]).toBeNull();
-        if (received[0] !== null && received[0] !== undefined) {
-            expect(typeof received[0].item.category).toBe("string");
-            expect(typeof received[0].item.original).toBe("string");
-            expect(typeof received[0].item.replacement).toBe("string");
-            expect(typeof received[0].item.isDeletion).toBe("undefined");
-            expect(typeof received[0].index).toBe("number");
-            expect(typeof received[0].total).toBe("number");
-            expect(typeof received[0].displayStart).toBe("number");
+        const first = received[0];
+        if (first !== null && first !== undefined && first.kind === "suggestion") {
+            expect(typeof first.item.category).toBe("string");
+            expect(typeof first.item.original).toBe("string");
+            expect(typeof first.item.replacement).toBe("string");
+            expect(typeof first.item.isDeletion).toBe("undefined");
+            expect(typeof first.index).toBe("number");
+            expect(typeof first.total).toBe("number");
+            expect(typeof first.displayStart).toBe("number");
+            expect(typeof first.cycleNextKey).toBe("string");
+            expect(typeof first.cyclePrevKey).toBe("string");
         }
     });
 
@@ -117,19 +138,25 @@ describe("createDetailsPanelController", () => {
         let called = 0;
         c.subscribe(() => called++);
         c.setView({
+            kind: "suggestion",
             item: { category: "x", original: "x", replacement: "x" },
             index: 0,
             total: 1,
             displayStart: 0,
+            cycleNextKey: ".",
+            cyclePrevKey: "/",
         });
         expect(called).toBe(1);
         c.dispose();
         c.setView(null);
         c.setView({
+            kind: "suggestion",
             item: { category: "x", original: "x", replacement: "x" },
             index: 0,
             total: 1,
             displayStart: 0,
+            cycleNextKey: ".",
+            cyclePrevKey: "/",
         });
         expect(called).toBe(1);
     });

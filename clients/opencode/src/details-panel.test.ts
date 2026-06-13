@@ -67,9 +67,26 @@ describe("buildDetailsViewModel — bordered card shape", () => {
         expect(vm.diffLeft).toBe("∅");
         expect(vm.diffRight).toBe("the");
     });
-    test("hints line lists all four bindings with ⏎ glyph", () => {
+    test("hints line lists all four bindings with ⏎ glyph (explicit keys)", () => {
+        const vm = buildDetailsViewModel(item(), 0, 1, "/", ".");
+        expect(vm.hints).toBe("⏎ apply · x ignore · / . cycle · esc close");
+    });
+    test("hints line defaults to '/ . cycle' when no keys are passed", () => {
         const vm = buildDetailsViewModel(item(), 0, 1);
-        expect(vm.hints).toBe("⏎ apply · x ignore · n/p cycle · esc close");
+        expect(vm.hints).toBe("⏎ apply · x ignore · / . cycle · esc close");
+    });
+    test("hints line derives from the actual bound cycle keys (no n/p drift)", () => {
+        // Pass a custom set of cycle keys and confirm the hint matches.
+        const vm = buildDetailsViewModel(item(), 0, 1, "]", "[");
+        expect(vm.hints).toBe("⏎ apply · x ignore · ] [ cycle · esc close");
+        // Must never contain the stale n/p shorthand.
+        expect(vm.hints).not.toMatch(/n\/p/);
+    });
+    test("hints line never contains the legacy n/p cycle text", () => {
+        const vmDefault = buildDetailsViewModel(item(), 0, 1);
+        const vmExplicit = buildDetailsViewModel(item(), 0, 1, "/", ".");
+        expect(vmDefault.hints).not.toMatch(/n\/p/);
+        expect(vmExplicit.hints).not.toMatch(/n\/p/);
     });
     test("category label uses the override category", () => {
         const vm = buildDetailsViewModel(item({ category: "grammar" }), 0, 1);
@@ -83,7 +100,7 @@ describe("buildDetailsViewModel — bordered card shape", () => {
     test("fullText joins title + diff + hints with newlines", () => {
         const vm = buildDetailsViewModel(item(), 0, 1);
         expect(vm.fullText).toBe(
-            "✎ Spelling 1/1\nteh → the\n⏎ apply · x ignore · n/p cycle · esc close",
+            "✎ Spelling 1/1\nteh → the\n⏎ apply · x ignore · / . cycle · esc close",
         );
     });
 

@@ -14,7 +14,10 @@
 //             The diff ships as THREE pre-rendered strings (left,
 //             arrow, right) so the bun-only renderer can color
 //             left=red, arrow=dim, right=green without re-parsing.
-//   hints  : "⏎ apply · x ignore · n/p cycle · esc close"
+//   hints  : "⏎ apply · x ignore · {cycleNextKey} {cyclePrevKey} cycle · esc close"
+//             (cycleNextKey/cyclePrevKey are threaded in from the
+//             settings; the hint always reflects the actually bound
+//             keys so it never drifts from the keymap).
 //
 // Categories mirror CATEGORY_META in clients/browser/src/api/category.ts;
 // the COLORS are in ./category-palette.ts (single source of truth for
@@ -70,6 +73,8 @@ export function buildDetailsViewModel(
     item: DetailsItemInput,
     index: number,
     total: number,
+    cycleNextKey: string = "/",
+    cyclePrevKey: string = ".",
 ): DetailsViewModel {
     const categoryLabel =
         CATEGORY_LABEL[(item.category as Category) ?? "unknown"] ?? CATEGORY_LABEL.unknown;
@@ -95,7 +100,7 @@ export function buildDetailsViewModel(
         diffRight = item.replacement;
     }
     const diffArrow = " → ";
-    const hints = "⏎ apply · x ignore · n/p cycle · esc close";
+    const hints = `⏎ apply · x ignore · ${cycleNextKey} ${cyclePrevKey} cycle · esc close`;
     const fullText = [title, `${diffLeft}${diffArrow}${diffRight}`, hints].join("\n");
     return {
         title,

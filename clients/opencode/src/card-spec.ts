@@ -19,6 +19,7 @@
 
 import { CATEGORY_FG } from "./category-palette";
 import type { DetailsViewModel } from "./details-panel";
+import type { RephraseResultView } from "./details-panel-view";
 
 export type SegmentColorKey = "category" | "delete" | "insert" | "dim";
 
@@ -97,3 +98,82 @@ export function buildCardSpec(vm: DetailsViewModel): CardSpec {
 // Re-export so tests can spot-check the palette key (intentionally
 // subset of CATEGORY_FG keys).
 export type CategoryColorKey = keyof typeof CATEGORY_FG;
+
+// ─── Rephrase card builders ───────────────────────────────────────────────────
+// Pure functions — no I/O, no opentui. Vitest-testable headlessly.
+
+/** Braille spinner frames for the rephrase loading animation.
+ *  The orchestrator pushes setView() on a timer to advance the frame;
+ *  the component just reads the frame from the view (no in-component timer). */
+export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+
+/** Accent color for the rephrase card border (single source of truth). */
+export const REPHRASE_ACCENT_HEX = "#8b5cf6"; // style-purple — distinct from category colors
+
+/** Max display width for original/rephrased text before truncation. */
+const REPHRASE_TEXT_MAX = 40;
+
+function truncateText(text: string, max: number): string {
+    if (text.length <= max) return text;
+    return text.slice(0, max - 1) + "…";
+}
+
+/** Build a CardSpec for the rephrase-loading state.
+ *  PURE — no I/O. The spinner glyph cycles by frame index. */
+export function buildRephraseLoadingCardSpec(frame: number): CardSpec {
+    const glyph = SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? "⠋";
+    return {
+        borderColor: REPHRASE_ACCENT_HEX,
+        rows: [
+            {
+                segments: [
+                    {
+                        text: "✎ Rephrase",
+                        colorKey: "category",
+                        fg: REPHRASE_ACCENT_HEX,
+                        bold: true,
+                    },
+                    {
+                        text: `  ${glyph} Rephrasing…`,
+                        colorKey: "dim",
+                        fg: DIM_HEX,
+                    },
+                ],
+            },
+        ],
+    };
+}
+
+/** Build a CardSpec for the rephrase-result state.
+ *  PURE — no I/O. Shows original → rephrased with accept/reject hints. */
+export function buildRephraseResultCardSpec(view: RephraseResultView): CardSpec {
+    const orig = truncateText(view.original, REPHRASE_TEXT_MAX);
+    const repl = truncateText(view.rephrased, REPHRASE_TEXT_MAX);
+    return {
+        borderColor: REPHRASE_ACCENT_HEX,
+        rows: [
+            {
+                segments: [
+                    {
+                        text: "✎ Rephrase",
+                        colorKey: "category",
+                        fg: REPHRASE_ACCENT_HEX,
+                        bold: true,
+                    },
+                ],
+            },
+            {
+                segments: [{ text: orig, colorKey: "delete", fg: DIM_HEX }],
+            },
+            {
+                segments: [
+                    { text: " → ", colorKey: "dim", fg: DIM_HEX },
+                    { text: repl, colorKey: "insert", fg: INSERT_HEX },
+                ],
+            },
+            {
+                segments: [{ text: "⏎ apply · esc reject", colorKey: "dim", fg: DIM_HEX }],
+            },
+        ],
+    };
+}

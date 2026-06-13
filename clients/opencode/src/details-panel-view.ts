@@ -24,13 +24,40 @@ export interface PanelItemInput {
     isDeletion?: boolean;
 }
 
-export interface PanelView {
+export type PanelView = SuggestionPanelView | RephraseLoadingView | RephraseResultView;
+
+export interface SuggestionPanelView {
+    kind: "suggestion";
     item: PanelItemInput;
     index: number;
     total: number;
     /** Display-width offset of the pinned word's START in the prompt
      *  buffer. Used by the overlay card to call offsetToScreen and
      *  anchor the popup above the word. */
+    displayStart: number;
+    /** Resolved cycleNext hotkey (settings.cycleNextHotkey). Threaded
+     *  in so the card's hint line can reflect the actual bound key
+     *  — never drift from the keymap. */
+    cycleNextKey: string;
+    /** Resolved cyclePrev hotkey (settings.cyclePrevHotkey). Threaded
+     *  in so the card's hint line can reflect the actual bound key
+     *  — never drift from the keymap. */
+    cyclePrevKey: string;
+}
+
+export interface RephraseLoadingView {
+    kind: "rephrase-loading";
+    /** Spinner frame index — incremented by the orchestrator's setInterval
+     *  timer and pushed via controller.setView so the host's scheduler
+     *  drives the animation (NOT an in-component setInterval). */
+    frame: number;
+    displayStart: number;
+}
+
+export interface RephraseResultView {
+    kind: "rephrase-result";
+    original: string;
+    rephrased: string;
     displayStart: number;
 }
 

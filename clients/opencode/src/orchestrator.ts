@@ -19,7 +19,12 @@
 import { BridgeClient, type SignalEvent } from "@/api/client";
 import { buildRenderableItems, isSpanStillValid, type RenderableItem } from "@/lib/pipeline";
 import { createSignalQueue } from "@/signal/queue";
-import type { CorrectRequest, CorrectResponse } from "@/api/types";
+import type {
+    CorrectRequest,
+    CorrectResponse,
+    RephraseRequest,
+    RephraseResponse,
+} from "@/api/types";
 import {
     displaySpanFromCodeUnits,
     displaySpansForItems,
@@ -52,12 +57,18 @@ const CATEGORY_FG: Record<string, string> = {
 
 const DEFAULT_BRIDGE_URL = "http://localhost:8000";
 const DEFAULT_REALTIME_DELAY_MS = 500;
-const DEFAULT_ACCEPT_HOTKEY = "ctrl+.";
+const DEFAULT_APPLY_ALL_HOTKEY = "ctrl+.";
+const DEFAULT_CYCLE_NEXT_HOTKEY = "/";
+const DEFAULT_CYCLE_PREV_HOTKEY = ".";
+const DEFAULT_REPHRASE_HOTKEY = "ctrl+/";
 
 export interface GrammarForgeSettings {
     bridgeUrl: string;
     realtimeDelayMs: number;
-    acceptHotkey: string;
+    applyAllHotkey: string;
+    cycleNextHotkey: string;
+    cyclePrevHotkey: string;
+    rephraseHotkey: string;
     allowRemoteBridge: boolean;
 }
 
@@ -73,11 +84,30 @@ export function resolveSettings(
         typeof raw.realtimeDelayMs === "number" && Number.isFinite(raw.realtimeDelayMs)
             ? raw.realtimeDelayMs
             : DEFAULT_REALTIME_DELAY_MS;
-    const acceptHotkeyRaw =
-        typeof raw.acceptHotkey === "string" ? raw.acceptHotkey.trim().toLowerCase() : "";
-    const acceptHotkey = acceptHotkeyRaw === "" ? DEFAULT_ACCEPT_HOTKEY : acceptHotkeyRaw;
+    const applyAllHotkeyRaw =
+        typeof raw.applyAllHotkey === "string" ? raw.applyAllHotkey.trim().toLowerCase() : "";
+    const applyAllHotkey = applyAllHotkeyRaw === "" ? DEFAULT_APPLY_ALL_HOTKEY : applyAllHotkeyRaw;
+    const cycleNextHotkeyRaw =
+        typeof raw.cycleNextHotkey === "string" ? raw.cycleNextHotkey.trim().toLowerCase() : "";
+    const cycleNextHotkey =
+        cycleNextHotkeyRaw === "" ? DEFAULT_CYCLE_NEXT_HOTKEY : cycleNextHotkeyRaw;
+    const cyclePrevHotkeyRaw =
+        typeof raw.cyclePrevHotkey === "string" ? raw.cyclePrevHotkey.trim().toLowerCase() : "";
+    const cyclePrevHotkey =
+        cyclePrevHotkeyRaw === "" ? DEFAULT_CYCLE_PREV_HOTKEY : cyclePrevHotkeyRaw;
+    const rephraseHotkeyRaw =
+        typeof raw.rephraseHotkey === "string" ? raw.rephraseHotkey.trim().toLowerCase() : "";
+    const rephraseHotkey = rephraseHotkeyRaw === "" ? DEFAULT_REPHRASE_HOTKEY : rephraseHotkeyRaw;
     const allowRemoteBridge = raw.allowRemoteBridge === true;
-    return { bridgeUrl, realtimeDelayMs, acceptHotkey, allowRemoteBridge };
+    return {
+        bridgeUrl,
+        realtimeDelayMs,
+        applyAllHotkey,
+        cycleNextHotkey,
+        cyclePrevHotkey,
+        rephraseHotkey,
+        allowRemoteBridge,
+    };
 }
 
 export interface Decoration {
@@ -113,6 +143,20 @@ export function suggestionsToDecorations(
     return out;
 }
 
+interface RephraseState {
+    mode: "loading" | "result";
+    original: string;
+    rephrased?: string;
+    /** Monotonic sequence number — incremented on each new rephrase
+     *  invocation and on reject/cancel. In-flight async callbacks
+     *  compare against this to detect stale results. */
+    seq: number;
+    /** The prompt ref that was active when this rephrase started.
+     *  Used to detect ref swaps (route remounts) and discard stale
+     *  results that arrived for a different prompt instance. */
+    ref: PromptRef;
+}
+
 interface RefState {
     items: RenderableItem[];
     /** Precomputed display spans parallel to `items`, computed once at
@@ -124,6 +168,8 @@ interface RefState {
     debounceTimer: ReturnType<typeof setTimeout> | null;
     extmarkTypeId: number | null;
     activeExtmarkIds: number[];
+    /** Non-null while a rephrase is in-flight or showing a result card. */
+    rephrase: RephraseState | null;
 }
 
 function emptyRefState(): RefState {
@@ -135,6 +181,7 @@ function emptyRefState(): RefState {
         debounceTimer: null,
         extmarkTypeId: null,
         activeExtmarkIds: [],
+        rephrase: null,
     };
 }
 
@@ -144,6 +191,10 @@ function emptyRefState(): RefState {
  *  and exercise the stale-fetch race guard. */
 export interface OrchestratorDeps {
     correct?: (req: CorrectRequest) => Promise<CorrectResponse>;
+    /** Rephrase injection seam — mirrors `correct?`. Production callers
+     *  leave undefined; the orchestrator defaults to client.rephrase.
+     *  Tests inject a deferred stub to exercise the stale-seq guard. */
+    rephrase?: (req: RephraseRequest) => Promise<RephraseResponse>;
     /**
      * Details-panel controller factory. Returns a PanelController whose
      * setView pushes pin/unpin transitions into a solid signal that
@@ -193,6 +244,7 @@ export function startOrchestrator(
     const client = new BridgeClient(settings.bridgeUrl, settings.allowRemoteBridge);
     const signalQueue = createSignalQueue({ send: (events) => client.signal(events) });
     const correctFn = deps?.correct ?? ((req: CorrectRequest) => client.correct(req));
+    const rephraseFn = deps?.rephrase ?? ((req: RephraseRequest) => client.rephrase(req));
 
     // Style id cache: category → styleId. Lazy; one registerStyle per
     // category the first time we see it.
@@ -412,6 +464,14 @@ export function startOrchestrator(
             state.displaySpans = [];
             state.checkedText = "";
             detailsState.itemsChanged(0);
+            // Cancel any in-flight or showing rephrase — it was for the old ref.
+            if (state.rephrase !== null) {
+                rephraseSeq++;
+                stopSpinner();
+                state.rephrase = null;
+                const ctrl = rephraseController;
+                if (ctrl) ctrl.setView(null);
+            }
         }
         const text = ref.text;
         if (text === "" && state.items.length > 0 && state.checkedText !== "") {
@@ -431,32 +491,42 @@ export function startOrchestrator(
         scheduleCheck(ref);
     };
 
-    const acceptFirst = (): void => {
-        const ref = api.prompt?.ref();
-        if (!ref) return;
+    const applyAll = (): void => {
         if (state.items.length === 0) return;
-        const item = state.items[0]!;
-        if (!isSpanStillValid(ref.text, item)) {
-            scheduleCheck(ref);
-            return;
+        // Sort a copy descending by cuStart so higher-offset edits apply
+        // first and never shift lower-offset spans.
+        const sorted = [...state.items].sort((a, b) => b.cuStart - a.cuStart);
+        let count = 0;
+        for (const item of sorted) {
+            // Re-read live ref each iteration — replaceRange is synchronous
+            // and the text object may be updated in place.
+            const live = api.prompt?.ref();
+            if (!live) break;
+            if (!isSpanStillValid(live.text, item)) continue;
+            const ds = displaySpanFromCodeUnits(
+                live.text,
+                { start: item.cuStart, end: item.cuEnd },
+                displayWidthOf,
+            );
+            const replacement = item.replacements[0] ?? "";
+            live.replaceRange(ds.start, ds.end, replacement);
+            if (typeof item.id === "number") {
+                const ev: SignalEvent = {
+                    id: item.id,
+                    action: "accepted",
+                    category: item.category,
+                    source: SIGNAL_SOURCE,
+                };
+                signalQueue.enqueue(ev);
+            }
+            count++;
         }
-        const replacement = item.replacements[0] ?? "";
-        const displaySpan = displaySpanFromCodeUnits(
-            ref.text,
-            { start: item.cuStart, end: item.cuEnd },
-            displayWidthOf,
-        );
-        ref.replaceRange(displaySpan.start, displaySpan.end, replacement);
-        if (typeof item.id === "number") {
-            const ev: SignalEvent = {
-                id: item.id,
-                action: "accepted",
-                category: item.category,
-                source: SIGNAL_SOURCE,
-            };
-            signalQueue.enqueue(ev);
+        if (count > 0) {
+            api.ui.toast({
+                message: `Applied ${count} suggestion${count === 1 ? "" : "s"}`,
+                variant: "success",
+            });
         }
-        api.ui.toast({ message: `Applied: ${replacement || item.original}`, variant: "success" });
         // Clear stale underlines + state so the details card dismisses
         // immediately and the next onChange-scheduled re-check rebuilds
         // on the edited text. Do NOT call renderDecorations here —
@@ -472,23 +542,197 @@ export function startOrchestrator(
 
     const unsubscribeChange = api.prompt.onChange(onChange);
 
-    // Accept layer — always on, no gate. Single binding (settings.acceptHotkey).
+    // ─── Rephrase state machine ───────────────────────────────────────────────
+    // rephraseSeq: monotonic counter — bumped on each new rephrase + on reject.
+    // spinnerTimer: drives the loading animation by pushing setView() on a timer.
+    // The orchestrator owns the timer (NOT the component) per the render-reactivity
+    // constraint: only controller.setView() → PanelComponent's local signal drives
+    // re-renders. An in-component setInterval would queue updates that never flush.
+    let rephraseSeq = 0;
+    let spinnerTimer: ReturnType<typeof setInterval> | null = null;
+
+    // Helper: get the panel controller if available (injected via panelRenderer).
+    // We need it for rephrase setView calls outside the detailsState subscription.
+    let rephraseController: PanelController | null = null;
+
+    const stopSpinner = (): void => {
+        if (spinnerTimer !== null) {
+            clearInterval(spinnerTimer);
+            spinnerTimer = null;
+        }
+    };
+
+    const rephrase = (): void => {
+        const ref = api.prompt?.ref();
+        if (!ref) return;
+        const text = ref.text;
+        if (!text.trim()) {
+            api.ui.toast({ message: "Nothing to rephrase", variant: "info" });
+            return;
+        }
+        logDebug("rephrase start", { textLen: text.length });
+        // Clear any suggestion pin so the suggestion card doesn't fight the rephrase card.
+        detailsState.unpin();
+        clearActiveExtmarks();
+        const seq = ++rephraseSeq;
+        state.rephrase = { mode: "loading", original: text, seq, ref };
+        let frame = 0;
+        const ctrl = rephraseController;
+        if (ctrl) {
+            ctrl.setView({ kind: "rephrase-loading", frame, displayStart: 0 });
+        }
+        stopSpinner();
+        spinnerTimer = setInterval(() => {
+            frame++;
+            if (state.rephrase?.mode === "loading" && state.rephrase.seq === seq && ctrl) {
+                ctrl.setView({ kind: "rephrase-loading", frame, displayStart: 0 });
+            }
+        }, 100);
+        void (async () => {
+            try {
+                const res = await rephraseFn({ text, source: SIGNAL_SOURCE });
+                // Belt-and-suspenders: drop if seq stale OR the live ref no longer
+                // matches the captured ref (onChange ref-swap normally already cleared
+                // state.rephrase, but this guard handles any ordering where onChange
+                // hasn't fired yet and ensures the spinner can't linger).
+                const liveRef = api.prompt?.ref();
+                if (state.rephrase?.seq !== seq) {
+                    // Superseded by a newer rephrase — do NOT stopSpinner (that timer belongs to the newer one).
+                    logDebug("rephrase cancelled (stale seq)", {});
+                    return;
+                }
+                if (liveRef !== ref) {
+                    // Our rephrase, but the prompt ref swapped before onChange cancelled us — fully cancel.
+                    logDebug("rephrase cancelled (ref swap)", {});
+                    stopSpinner();
+                    state.rephrase = null;
+                    const ctrl = rephraseController;
+                    if (ctrl) ctrl.setView(null);
+                    return;
+                }
+                stopSpinner();
+                const rephrased = res.rephrased ?? "";
+                if (!rephrased || rephrased === text) {
+                    state.rephrase = null;
+                    if (ctrl) ctrl.setView(null);
+                    api.ui.toast({
+                        message: rephrased === text ? "No changes suggested" : "Rephrase empty",
+                        variant: "info",
+                    });
+                    return;
+                }
+                logDebug("rephrase result", { origLen: text.length, newLen: rephrased.length });
+                state.rephrase = { mode: "result", original: text, rephrased, seq, ref };
+                if (ctrl) {
+                    ctrl.setView({
+                        kind: "rephrase-result",
+                        original: text,
+                        rephrased,
+                        displayStart: 0,
+                    });
+                }
+            } catch (e) {
+                if (state.rephrase?.seq === seq) {
+                    stopSpinner();
+                    state.rephrase = null;
+                    if (ctrl) ctrl.setView(null);
+                    api.ui.toast({ message: "Rephrase failed", variant: "error" });
+                }
+                logDebug("rephrase error", { message: e instanceof Error ? e.message : String(e) });
+            }
+        })();
+    };
+
+    const rephraseAccept = (): void => {
+        if (state.rephrase?.mode !== "result") return;
+        const ctrl = rephraseController;
+        const ref = api.prompt?.ref();
+        if (!ref) {
+            state.rephrase = null;
+            if (ctrl) ctrl.setView(null);
+            return;
+        }
+        // Ref-identity check: if the prompt ref swapped (route remount) since
+        // the rephrase started, discard — we must not apply to the new ref even
+        // if its text happens to match the original.
+        if (ref !== state.rephrase.ref) {
+            api.ui.toast({ message: "Prompt changed; rephrase discarded", variant: "info" });
+            state.rephrase = null;
+            if (ctrl) ctrl.setView(null);
+            return;
+        }
+        if (ref.text !== state.rephrase.original) {
+            api.ui.toast({ message: "Prompt changed; rephrase discarded", variant: "info" });
+            state.rephrase = null;
+            if (ctrl) ctrl.setView(null);
+            return;
+        }
+        const rephrased = state.rephrase.rephrased ?? "";
+        const end = displayWidthOf(ref.text);
+        ref.replaceRange(0, end, rephrased);
+        state.rephrase = null;
+        if (ctrl) ctrl.setView(null);
+        stopSpinner();
+        onChange();
+        api.ui.toast({ message: "Rephrased", variant: "success" });
+    };
+
+    const rephraseReject = (): void => {
+        rephraseSeq++; // invalidate any in-flight request
+        stopSpinner();
+        state.rephrase = null;
+        const ctrl = rephraseController;
+        if (ctrl) ctrl.setView(null);
+    };
+
+    // Apply-all + rephrase layer — always on, no gate.
     const disposeAcceptLayer = api.keymap.registerLayer({
         priority: 500,
         commands: [
             {
-                name: "grammarforge.accept",
-                title: "GrammarForge: accept first suggestion",
-                run: acceptFirst,
+                name: "grammarforge.applyAll",
+                title: "GrammarForge: apply all suggestions",
+                run: applyAll,
+            },
+            {
+                name: "grammarforge.rephrase",
+                title: "GrammarForge: rephrase prompt",
+                run: rephrase,
             },
         ],
-        bindings: [{ key: settings.acceptHotkey, cmd: "grammarforge.accept" }],
+        bindings: [
+            { key: settings.applyAllHotkey, cmd: "grammarforge.applyAll" },
+            { key: settings.rephraseHotkey, cmd: "grammarforge.rephrase" },
+        ],
+    });
+
+    // Rephrase result/loading layer — gated: active whenever state.rephrase !== null.
+    // enter accepts (no-op if still loading), esc cancels in both modes.
+    const disposeRephraseLayer = api.keymap.registerLayer({
+        priority: 500,
+        enabled: () => state.rephrase !== null,
+        commands: [
+            {
+                name: "grammarforge.rephrase.accept",
+                title: "GrammarForge: accept rephrase",
+                run: rephraseAccept,
+            },
+            {
+                name: "grammarforge.rephrase.reject",
+                title: "GrammarForge: reject rephrase",
+                run: rephraseReject,
+            },
+        ],
+        bindings: [
+            { key: "return", cmd: "grammarforge.rephrase.accept" },
+            { key: "escape", cmd: "grammarforge.rephrase.reject" },
+        ],
     });
 
     // Details layer — gated by enabled. When nothing is pinned, the
     // host keymap does not dispatch any of the layer's bindings, so
-    // return/x/n/p/escape stay free for the host's own behavior. When
-    // a pin exists, the bindings become active.
+    // return/x/cycleNext/cyclePrev/escape stay free for the host's own
+    // behavior. When a pin exists, the bindings become active.
     let disposeDetailsLayer: (() => void) | null = null;
     if (cursorPinSupported) {
         logDebug("details keymap layer: registered", {
@@ -499,7 +743,7 @@ export function startOrchestrator(
                 "grammarforge.details.cyclePrev",
                 "grammarforge.details.unpin",
             ],
-            bindings: ["return", "x", "n", "p", "escape"],
+            bindings: ["return", "x", settings.cycleNextHotkey, settings.cyclePrevHotkey, "escape"],
             enabled: () => detailsState.pinnedIndex() !== null,
         });
         const applyPinned = (): void => {
@@ -570,6 +814,7 @@ export function startOrchestrator(
             // ref is present, do a full render; otherwise just clear
             // (the next onChange will resync).
             state.items = state.items.filter((_, i) => i !== pinIndex);
+            state.displaySpans = state.displaySpans.filter((_, i) => i !== pinIndex);
             detailsState.unpin();
             if (ref) {
                 renderDecorations(ref, state.items);
@@ -646,8 +891,8 @@ export function startOrchestrator(
             bindings: [
                 { key: "return", cmd: "grammarforge.details.apply" },
                 { key: "x", cmd: "grammarforge.details.ignore" },
-                { key: "n", cmd: "grammarforge.details.cycleNext" },
-                { key: "p", cmd: "grammarforge.details.cyclePrev" },
+                { key: settings.cycleNextHotkey, cmd: "grammarforge.details.cycleNext" },
+                { key: settings.cyclePrevHotkey, cmd: "grammarforge.details.cyclePrev" },
                 { key: "escape", cmd: "grammarforge.details.unpin" },
             ],
         });
@@ -665,6 +910,9 @@ export function startOrchestrator(
                 logDebug("onCursorChange: no live ref", {});
                 return;
             }
+            // Rephrase suppression: during rephrase (loading or result), cursor
+            // moves must NOT pin/unpin suggestions — they'd clobber the rephrase card.
+            if (state.rephrase !== null) return;
             const offset = ref.cursorOffset;
             // THE smoking-gun log: every onCursorChange fire logs the
             // raw offset. If this never logs after a click, the
@@ -757,6 +1005,9 @@ export function startOrchestrator(
     let unsubscribeDetailsTransition: (() => void) | null = null;
     if (cursorPinSupported && deps?.panelRenderer) {
         const controller = deps.panelRenderer();
+        // Wire the rephrase controller reference so the rephrase state machine
+        // can call controller.setView() for loading/result cards.
+        rephraseController = controller;
         // The transition push: build the current panel payload and
         // hand it to the controller's setter. The setter is what
         // updates the solid signal that PanelComponent reads via
@@ -788,6 +1039,7 @@ export function startOrchestrator(
                 displayStart: displaySpan.start,
             });
             controller.setView({
+                kind: "suggestion",
                 item: {
                     category: item.category,
                     original: item.diffOriginal,
@@ -797,6 +1049,8 @@ export function startOrchestrator(
                 index,
                 total: state.items.length,
                 displayStart: displaySpan.start,
+                cycleNextKey: settings.cycleNextHotkey,
+                cyclePrevKey: settings.cyclePrevHotkey,
             });
         };
         unsubscribeDetailsTransition = detailsState.subscribe(pushFromDetailsState);
@@ -817,10 +1071,13 @@ export function startOrchestrator(
             clearTimeout(state.debounceTimer);
             state.debounceTimer = null;
         }
+        stopSpinner();
+        state.rephrase = null;
         unsubscribeChange();
         if (unsubscribeDetailsTransition) unsubscribeDetailsTransition();
         if (unsubscribeCursorChange) unsubscribeCursorChange();
         disposeAcceptLayer();
+        disposeRephraseLayer();
         if (disposeDetailsLayer) disposeDetailsLayer();
         onDispose();
         clearActiveExtmarks();

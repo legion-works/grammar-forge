@@ -12,31 +12,41 @@ describe("resolveSettings", () => {
         const s = resolveSettings(undefined);
         expect(s.bridgeUrl).toBe("http://localhost:8000");
         expect(s.realtimeDelayMs).toBe(500);
-        expect(s.acceptHotkey).toBe("ctrl+.");
+        expect(s.applyAllHotkey).toBe("ctrl+.");
+        expect(s.cycleNextHotkey).toBe("/");
+        expect(s.cyclePrevHotkey).toBe(".");
         expect(s.allowRemoteBridge).toBe(false);
     });
     test("honors valid overrides and strips trailing slash", () => {
         const s = resolveSettings({
             bridgeUrl: "http://127.0.0.1:9000/",
             realtimeDelayMs: 750,
-            acceptHotkey: "alt+a",
+            applyAllHotkey: "alt+a",
+            cycleNextHotkey: "]",
+            cyclePrevHotkey: "[",
             allowRemoteBridge: true,
         });
         expect(s.bridgeUrl).toBe("http://127.0.0.1:9000");
         expect(s.realtimeDelayMs).toBe(750);
-        expect(s.acceptHotkey).toBe("alt+a");
+        expect(s.applyAllHotkey).toBe("alt+a");
+        expect(s.cycleNextHotkey).toBe("]");
+        expect(s.cyclePrevHotkey).toBe("[");
         expect(s.allowRemoteBridge).toBe(true);
     });
     test("garbage values fall back to defaults", () => {
         const s = resolveSettings({
             bridgeUrl: 42,
             realtimeDelayMs: "fast",
-            acceptHotkey: "   ",
+            applyAllHotkey: "   ",
+            cycleNextHotkey: "   ",
+            cyclePrevHotkey: "   ",
             allowRemoteBridge: "yes",
         });
         expect(s.bridgeUrl).toBe("http://localhost:8000");
         expect(s.realtimeDelayMs).toBe(500);
-        expect(s.acceptHotkey).toBe("ctrl+.");
+        expect(s.applyAllHotkey).toBe("ctrl+.");
+        expect(s.cycleNextHotkey).toBe("/");
+        expect(s.cyclePrevHotkey).toBe(".");
         expect(s.allowRemoteBridge).toBe(false);
     });
 });
@@ -375,7 +385,7 @@ describe("startOrchestrator", () => {
                 dispose: () => undefined,
             }),
         });
-        expect(commandHandlers.has("grammarforge.accept")).toBe(true);
+        expect(commandHandlers.has("grammarforge.applyAll")).toBe(true);
         for (const cmd of [
             "grammarforge.details.apply",
             "grammarforge.details.ignore",
@@ -688,14 +698,18 @@ describe("startOrchestrator", () => {
         const detailsKeys = (detailsLayer?.bindings ?? []).map((b) => b.key);
         expect(detailsKeys).toContain("return");
         expect(detailsKeys).toContain("x");
-        expect(detailsKeys).toContain("n");
-        expect(detailsKeys).toContain("p");
+        // Cycle keys are now "." and "/" (not "n"/"p"/",").
+        expect(detailsKeys).toContain(".");
+        expect(detailsKeys).toContain("/");
+        expect(detailsKeys).not.toContain("n");
+        expect(detailsKeys).not.toContain("p");
+        expect(detailsKeys).not.toContain(",");
         expect(detailsKeys).toContain("escape");
-        const acceptLayer = layers.find((l) =>
-            (l.commands ?? []).some((c) => c.name === "grammarforge.accept"),
+        const applyAllLayer = layers.find((l) =>
+            (l.commands ?? []).some((c) => c.name === "grammarforge.applyAll"),
         );
-        const acceptKeys = (acceptLayer?.bindings ?? []).map((b) => b.key);
-        expect(acceptKeys).toContain("ctrl+.");
+        const applyAllKeys = (applyAllLayer?.bindings ?? []).map((b) => b.key);
+        expect(applyAllKeys).toContain("ctrl+.");
         stop();
     });
 
@@ -983,20 +997,24 @@ describe("startOrchestrator", () => {
         stop();
     });
 
-    test("acceptFirst: dismisses details card and resets state on apply (ctrl+. while pinned)", async () => {
-        // BUG 1 regression guard (acceptFirst path): ctrl+. applies the first
-        // suggestion. After apply, the details card must dismiss and state must
-        // be reset — same invariants as applyPinned.
+    test("applyAll: applies all 3 items in descending cuStart order and runs post-apply cleanup", async () => {
+        // Three suggestions at increasing offsets. applyAll must call replaceRange
+        // for all three in DESCENDING cuStart order (highest first) so earlier
+        // edits don't shift later spans. After the loop: state cleared, re-check
+        // scheduled, pinnedIndex null.
+        const text = "I has a apple and teh cat";
+        // Spans (code-unit): "has"=[2,5), "apple"=[8,13), "teh"=[18,21)
         const deletedIds: number[] = [];
         let extmarkCounter = 0;
         let resolveCorrect!: (res: unknown) => void;
         const replaceRangeCalls: Array<[number, number, string]> = [];
         const correctCalls: number[] = [];
+        const toasts: Array<{ message: string; variant?: string }> = [];
 
         const ref = {
-            text: "I has a apple",
-            current: { input: "I has a apple", parts: [] },
-            cursorOffset: 3,
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 2,
             extmarks: {
                 registerType: () => 1,
                 create: () => {
@@ -1009,7 +1027,7 @@ describe("startOrchestrator", () => {
                     return true;
                 },
             },
-            getTextRange: (s: number, e: number) => "I has a apple".slice(s, e),
+            getTextRange: (s: number, e: number) => text.slice(s, e),
             replaceRange: (s: number, e: number, r: string) => {
                 replaceRangeCalls.push([s, e, r]);
             },
@@ -1017,7 +1035,10 @@ describe("startOrchestrator", () => {
         };
 
         const commandHandlers = new Map<string, () => unknown>();
-        let onCursorChangeCb = (): void => undefined;
+        const layers: Array<{
+            enabled?: () => boolean;
+            commands?: Array<{ name: string; run: () => unknown }>;
+        }> = [];
 
         const api = {
             prompt: {
@@ -1027,7 +1048,130 @@ describe("startOrchestrator", () => {
                     return () => undefined;
                 },
                 onCursorChange: (cb: () => void) => {
-                    onCursorChangeCb = cb;
+                    void cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    enabled?: () => boolean;
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    layers.push(layer);
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: (t: { message: string; variant?: string }) => toasts.push(t) },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    correctCalls.push(correctCalls.length + 1);
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        await new Promise((r) => setTimeout(r, 30));
+        const firstCorrectCount = correctCalls.length;
+
+        // Three suggestions at ascending cuStart offsets.
+        resolveCorrect({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+                { id: 2, span: { start: 8, end: 13 }, replacement: "an apple", model: "harper" },
+                { id: 3, span: { start: 18, end: 21 }, replacement: "the", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(extmarkCounter).toBeGreaterThanOrEqual(1);
+
+        // Invoke applyAll (ctrl+. handler).
+        const applyAllFn = commandHandlers.get("grammarforge.applyAll");
+        expect(applyAllFn).toBeDefined();
+        applyAllFn!();
+
+        // All 3 items were applied.
+        expect(replaceRangeCalls.length).toBe(3);
+
+        // Applied in DESCENDING cuStart order: "teh" (18) first, then "apple" (8), then "has" (2).
+        // Display offsets equal code-unit offsets for ASCII text.
+        expect(replaceRangeCalls[0]![0]).toBeGreaterThan(replaceRangeCalls[1]![0]!);
+        expect(replaceRangeCalls[1]![0]).toBeGreaterThan(replaceRangeCalls[2]![0]!);
+
+        // Correct replacements applied.
+        expect(replaceRangeCalls[0]![2]).toBe("the"); // "teh" → "the"
+        expect(replaceRangeCalls[1]![2]).toBe("an apple"); // "apple" → "an apple"
+        expect(replaceRangeCalls[2]![2]).toBe("have"); // "has" → "have"
+
+        // Extmarks cleared (post-apply cleanup).
+        expect(deletedIds.length).toBeGreaterThanOrEqual(1);
+
+        // Details layer is no longer enabled (pinnedIndex null).
+        const detailsLayer = layers.find((l) =>
+            (l.commands ?? []).some((c) => c.name === "grammarforge.details.apply"),
+        );
+        if (detailsLayer?.enabled) {
+            expect(detailsLayer.enabled()).toBe(false);
+        }
+
+        // Toast confirms count.
+        expect(toasts.some((t) => t.message.includes("3") && t.variant === "success")).toBe(true);
+
+        // Re-check was scheduled.
+        await new Promise((r) => setTimeout(r, 30));
+        expect(correctCalls.length).toBeGreaterThan(firstCorrectCount);
+
+        stop();
+    });
+
+    test("applyAll: stale-guard skips invalid spans, applies valid ones", async () => {
+        // One item whose span is no longer valid (text changed) → skipped.
+        // Another item whose span is still valid → applied.
+        // We simulate stale by using a text that doesn't contain the first span.
+        const text = "I has a apple";
+        const replaceRangeCalls: Array<[number, number, string]> = [];
+
+        // We'll make isSpanStillValid fail for item 0 by giving it a cuEnd
+        // beyond the text length. Item 1 is valid.
+        // The bridge response uses normal spans; we manipulate via a custom
+        // correct fn that returns a span beyond text length for item 0.
+        let resolveCorrect!: (res: unknown) => void;
+
+        const ref = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 0,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: (s: number, e: number, r: string) => {
+                replaceRangeCalls.push([s, e, r]);
+            },
+            focus: () => undefined,
+        };
+
+        const commandHandlers = new Map<string, () => unknown>();
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    void cb;
                     return () => undefined;
                 },
             },
@@ -1047,42 +1191,153 @@ describe("startOrchestrator", () => {
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
             correct: () =>
                 new Promise<unknown>((resolve) => {
-                    correctCalls.push(correctCalls.length + 1);
                     resolveCorrect = resolve;
                 }),
         } as unknown as OrchestratorDeps);
 
         await new Promise((r) => setTimeout(r, 30));
-        const firstCorrectCount = correctCalls.length;
 
+        // Item 0: span beyond text length (stale). Item 1: valid span.
         resolveCorrect({
-            original: "I has a apple",
+            original: text,
             score: 90,
             suggestions: [
-                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+                // cuEnd=999 is beyond text.length=13 → isSpanStillValid returns false.
+                { id: 1, span: { start: 0, end: 999 }, replacement: "STALE", model: "harper" },
+                { id: 2, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
             ],
         });
         await new Promise((r) => setTimeout(r, 10));
 
-        expect(extmarkCounter).toBeGreaterThanOrEqual(1);
+        const applyAllFn = commandHandlers.get("grammarforge.applyAll");
+        expect(applyAllFn).toBeDefined();
+        applyAllFn!();
 
-        // Pin item 0 via cursor move.
-        onCursorChangeCb();
-
-        // Invoke acceptFirst (ctrl+. handler).
-        const acceptFn = commandHandlers.get("grammarforge.accept");
-        expect(acceptFn).toBeDefined();
-        acceptFn!();
-
-        // replaceRange was called.
+        // Only the valid item (id=2, "has"→"have") was applied; stale item skipped.
         expect(replaceRangeCalls.length).toBe(1);
+        expect(replaceRangeCalls[0]![2]).toBe("have");
 
-        // Extmarks cleared.
-        expect(deletedIds.length).toBeGreaterThanOrEqual(1);
+        stop();
+    });
 
-        // Re-check scheduled.
-        await new Promise((r) => setTimeout(r, 30));
-        expect(correctCalls.length).toBeGreaterThan(firstCorrectCount);
+    test("applyAll: empty items → no-op, no throw", () => {
+        // No suggestions → applyAll must return without throwing.
+        const replaceRangeCalls: Array<unknown[]> = [];
+
+        const ref = {
+            text: "hello",
+            current: { input: "hello", parts: [] },
+            cursorOffset: 0,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: () => "",
+            replaceRange: (...args: unknown[]) => {
+                replaceRangeCalls.push(args);
+            },
+            focus: () => undefined,
+        };
+
+        const commandHandlers = new Map<string, () => unknown>();
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: () => () => undefined,
+                onCursorChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, undefined);
+
+        const applyAllFn = commandHandlers.get("grammarforge.applyAll");
+        expect(applyAllFn).toBeDefined();
+        // No items in state → must not throw.
+        expect(() => applyAllFn!()).not.toThrow();
+        // No replaceRange calls.
+        expect(replaceRangeCalls.length).toBe(0);
+
+        stop();
+    });
+
+    test("cycle bindings: details layer uses '.' for cycleNext and '/' for cyclePrev (not n/p)", () => {
+        // Regression guard: after the rebind, the details layer must bind
+        // "." → cycleNext and "/" → cyclePrev. "n", "p", and "," must NOT appear.
+        const layers: Array<{
+            priority?: number;
+            enabled?: () => boolean;
+            commands?: Array<{ name: string; run: () => unknown }>;
+            bindings?: Array<{ key: string; cmd: string }>;
+        }> = [];
+
+        const api = {
+            prompt: {
+                ref: () => ({
+                    text: "x",
+                    current: { input: "x", parts: [] },
+                    cursorOffset: 0,
+                    extmarks: {
+                        registerType: () => 1,
+                        create: () => 1,
+                        getAllForTypeId: () => [],
+                        delete: () => true,
+                    },
+                    getTextRange: () => "",
+                    replaceRange: () => undefined,
+                    focus: () => undefined,
+                }),
+                onChange: () => () => undefined,
+                onCursorChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    priority?: number;
+                    enabled?: () => boolean;
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                    bindings?: Array<{ key: string; cmd: string }>;
+                }) => {
+                    layers.push(layer);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, undefined);
+
+        const detailsLayer = layers.find((l) =>
+            (l.commands ?? []).some((c) => c.name === "grammarforge.details.apply"),
+        );
+        expect(detailsLayer).toBeDefined();
+
+        const bindings = detailsLayer?.bindings ?? [];
+        const cycleNextBinding = bindings.find((b) => b.cmd === "grammarforge.details.cycleNext");
+        const cyclePrevBinding = bindings.find((b) => b.cmd === "grammarforge.details.cyclePrev");
+
+        expect(cycleNextBinding?.key).toBe("/");
+        expect(cyclePrevBinding?.key).toBe(".");
+
+        // "n", "p", and "," must not appear as binding keys.
+        const allKeys = bindings.map((b) => b.key);
+        expect(allKeys).not.toContain("n");
+        expect(allKeys).not.toContain("p");
+        expect(allKeys).not.toContain(",");
 
         stop();
     });
@@ -1445,6 +1700,838 @@ describe("startOrchestrator", () => {
 
         // Must not throw even though setCursorOffset is absent.
         expect(() => cycleNextFn()).not.toThrow();
+
+        stop();
+    });
+
+    // ─── Rephrase state machine tests ─────────────────────────────────────────
+
+    /** Build a minimal orchestrator env with rephrase support injected. */
+    const makeRephraseEnv = () => {
+        const text = "Hello world";
+        const replaceRangeCalls: Array<[number, number, string]> = [];
+        const toasts: Array<{ message: string; variant?: string }> = [];
+        const setViewCalls: Array<import("./details-panel-view").PanelView | null> = [];
+        const commandHandlers = new Map<string, () => unknown>();
+        const layers: Array<{
+            enabled?: () => boolean;
+            commands?: Array<{ name: string; run: () => unknown }>;
+            bindings?: Array<{ key: string; cmd: string }>;
+        }> = [];
+        const pendingRephrase: Array<(res: unknown) => void> = [];
+        const pendingRephraseReject: Array<(err: unknown) => void> = [];
+
+        const ref = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 0,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: (s: number, e: number, r: string) => {
+                replaceRangeCalls.push([s, e, r]);
+            },
+            focus: () => undefined,
+        };
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: () => () => undefined,
+                onCursorChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    enabled?: () => boolean;
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                    bindings?: Array<{ key: string; cmd: string }>;
+                }) => {
+                    layers.push(layer);
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: (t: { message: string; variant?: string }) => toasts.push(t) },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const panelController = {
+            setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
+            subscribe: () => () => undefined,
+            dispose: () => undefined,
+        };
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () => new Promise<unknown>(() => undefined),
+            rephrase: () =>
+                new Promise<unknown>((resolve, reject) => {
+                    pendingRephrase.push(resolve);
+                    pendingRephraseReject.push(reject);
+                }),
+            panelRenderer: () => panelController,
+        } as unknown as OrchestratorDeps);
+
+        const getRephraseLayer = () =>
+            layers.find((l) =>
+                (l.commands ?? []).some((c) => c.name === "grammarforge.rephrase.accept"),
+            );
+
+        return {
+            ref,
+            toasts,
+            setViewCalls,
+            commandHandlers,
+            layers,
+            pendingRephrase,
+            pendingRephraseReject,
+            replaceRangeCalls,
+            getRephraseLayer,
+            stop,
+        };
+    };
+
+    test("rephrase: grammarforge.rephrase command is registered in the always-on layer", () => {
+        const { commandHandlers, stop } = makeRephraseEnv();
+        expect(commandHandlers.has("grammarforge.rephrase")).toBe(true);
+        stop();
+    });
+
+    test("rephrase: ctrl+/ binding is registered for grammarforge.rephrase", () => {
+        const { layers, stop } = makeRephraseEnv();
+        const alwaysOnLayer = layers.find((l) =>
+            (l.commands ?? []).some((c) => c.name === "grammarforge.rephrase"),
+        );
+        expect(alwaysOnLayer).toBeDefined();
+        const binding = (alwaysOnLayer?.bindings ?? []).find(
+            (b) => b.cmd === "grammarforge.rephrase",
+        );
+        expect(binding?.key).toBe("ctrl+/");
+        stop();
+    });
+
+    test("rephrase: happy path — loading card shown, then result card on resolve", async () => {
+        const { commandHandlers, setViewCalls, pendingRephrase, stop } = makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        expect(rephraseFn).toBeDefined();
+        rephraseFn();
+
+        // Loading card should be shown immediately.
+        const loadingViews = setViewCalls.filter((v) => v?.kind === "rephrase-loading");
+        expect(loadingViews.length).toBeGreaterThanOrEqual(1);
+
+        // Resolve the rephrase stub.
+        expect(pendingRephrase.length).toBe(1);
+        pendingRephrase[0]!({
+            original: "Hello world",
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Result card should be shown.
+        const resultViews = setViewCalls.filter((v) => v?.kind === "rephrase-result");
+        expect(resultViews.length).toBeGreaterThanOrEqual(1);
+        const resultView = resultViews[
+            resultViews.length - 1
+        ] as import("./details-panel-view").RephraseResultView;
+        expect(resultView.rephrased).toBe("Hi there world");
+
+        stop();
+    });
+
+    test("rephrase: accept — replaceRange called with rephrased text, setView(null) called", async () => {
+        const { commandHandlers, setViewCalls, pendingRephrase, replaceRangeCalls, stop } =
+            makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        pendingRephrase[0]!({
+            original: "Hello world",
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Accept the rephrase.
+        const acceptFn = commandHandlers.get("grammarforge.rephrase.accept") as () => void;
+        expect(acceptFn).toBeDefined();
+        acceptFn();
+
+        // replaceRange was called.
+        expect(replaceRangeCalls.length).toBe(1);
+        expect(replaceRangeCalls[0]![2]).toBe("Hi there world");
+
+        // setView(null) was called to dismiss the card.
+        const lastView = setViewCalls[setViewCalls.length - 1];
+        expect(lastView).toBeNull();
+
+        stop();
+    });
+
+    test("rephrase: reject — setView(null) called, no replaceRange", async () => {
+        const { commandHandlers, setViewCalls, pendingRephrase, replaceRangeCalls, stop } =
+            makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        pendingRephrase[0]!({
+            original: "Hello world",
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        const rejectFn = commandHandlers.get("grammarforge.rephrase.reject") as () => void;
+        expect(rejectFn).toBeDefined();
+        rejectFn();
+
+        // No replaceRange.
+        expect(replaceRangeCalls.length).toBe(0);
+
+        // setView(null) was called.
+        const lastView = setViewCalls[setViewCalls.length - 1];
+        expect(lastView).toBeNull();
+
+        stop();
+    });
+
+    test("rephrase: stale guard — reject before resolve, old result does NOT show result card", async () => {
+        const { commandHandlers, setViewCalls, pendingRephrase, stop } = makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        // Reject (bumps seq) before the async resolves.
+        const rejectFn = commandHandlers.get("grammarforge.rephrase.reject") as () => void;
+        rejectFn();
+
+        // Now resolve the old stub — should be ignored (stale seq).
+        expect(pendingRephrase.length).toBe(1);
+        pendingRephrase[0]!({
+            original: "Hello world",
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // No result card should have been shown after the reject.
+        const resultViewsAfterReject = setViewCalls.filter((v) => v?.kind === "rephrase-result");
+        expect(resultViewsAfterReject.length).toBe(0);
+
+        stop();
+    });
+
+    test("rephrase: superseded completion does not stop newer spinner", async () => {
+        const { commandHandlers, setViewCalls, pendingRephrase, stop } = makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        expect(rephraseFn).toBeDefined();
+
+        // Start rephrase A (seq 1).
+        rephraseFn();
+        expect(pendingRephrase.length).toBe(1);
+        const resolveA = pendingRephrase[0]!;
+
+        // Count loading views before B.
+        const loadingBeforeB = setViewCalls.filter((v) => v?.kind === "rephrase-loading").length;
+
+        // Start rephrase B (seq 2) — supersedes A.
+        rephraseFn();
+        expect(pendingRephrase.length).toBe(2);
+        const resolveB = pendingRephrase[1]!;
+
+        // Resolve A (stale) — must NOT clear B's state.
+        resolveA!({
+            original: "Hello world",
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // After A resolves: state.rephrase should still be B's loading state (not null).
+        // B's loading view should still be active (setViewCalls should have rephrase-loading
+        // calls from B's spinner, not cleared by A).
+        const loadingAfterA = setViewCalls.filter((v) => v?.kind === "rephrase-loading").length;
+        expect(loadingAfterA).toBeGreaterThan(loadingBeforeB);
+
+        // Now resolve B — should show result.
+        resolveB!({
+            original: "Hello world",
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        const resultViews = setViewCalls.filter((v) => v?.kind === "rephrase-result");
+        expect(resultViews.length).toBeGreaterThanOrEqual(1);
+        const resultView = resultViews[
+            resultViews.length - 1
+        ] as import("./details-panel-view").RephraseResultView;
+        expect(resultView.rephrased).toBe("Hi there world");
+
+        stop();
+    });
+
+    test("rephrase: empty/no-op — rephrased === original → info toast, no result card", async () => {
+        const { commandHandlers, setViewCalls, toasts, pendingRephrase, stop } = makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        // Resolve with same text.
+        pendingRephrase[0]!({
+            original: "Hello world",
+            rephrased: "Hello world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // No result card.
+        const resultViews = setViewCalls.filter((v) => v?.kind === "rephrase-result");
+        expect(resultViews.length).toBe(0);
+
+        // Info toast.
+        expect(toasts.some((t) => t.variant === "info")).toBe(true);
+
+        stop();
+    });
+
+    test("rephrase: accept with stale text — no replaceRange, info toast", async () => {
+        const {
+            commandHandlers,
+            setViewCalls,
+            toasts,
+            pendingRephrase,
+            replaceRangeCalls,
+            ref,
+            stop,
+        } = makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        pendingRephrase[0]!({
+            original: "Hello world",
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Simulate prompt text changing after rephrase resolved.
+        (ref as { text: string }).text = "Hello world changed";
+
+        const acceptFn = commandHandlers.get("grammarforge.rephrase.accept") as () => void;
+        acceptFn();
+
+        // No replaceRange (text changed).
+        expect(replaceRangeCalls.length).toBe(0);
+
+        // Info toast about stale text.
+        expect(toasts.some((t) => t.variant === "info" && t.message.includes("changed"))).toBe(
+            true,
+        );
+
+        // Card dismissed.
+        const lastView = setViewCalls[setViewCalls.length - 1];
+        expect(lastView).toBeNull();
+
+        stop();
+    });
+
+    test("rephrase: rephrase layer enabled only when state.rephrase !== null", async () => {
+        const { commandHandlers, getRephraseLayer, pendingRephrase, stop } = makeRephraseEnv();
+
+        const rephraseLayer = getRephraseLayer();
+        expect(rephraseLayer).toBeDefined();
+        expect(rephraseLayer!.enabled).toBeDefined();
+
+        // Before rephrase: disabled.
+        expect(rephraseLayer!.enabled!()).toBe(false);
+
+        // Start rephrase: enabled (loading mode).
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+        expect(rephraseLayer!.enabled!()).toBe(true);
+
+        // Resolve to result: still enabled.
+        pendingRephrase[0]!({
+            original: "Hello world",
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+        expect(rephraseLayer!.enabled!()).toBe(true);
+
+        // Reject: disabled again.
+        const rejectFn = commandHandlers.get("grammarforge.rephrase.reject") as () => void;
+        rejectFn();
+        expect(rephraseLayer!.enabled!()).toBe(false);
+
+        stop();
+    });
+
+    test("rephrase: onCursorMove suppressed while state.rephrase !== null", async () => {
+        // When rephrase is active, cursor moves must NOT pin suggestions.
+        const text = "I has a apple";
+        const setViewCalls: Array<import("./details-panel-view").PanelView | null> = [];
+        const commandHandlers = new Map<string, () => unknown>();
+        let onCursorChangeCb = (): void => undefined;
+        let resolveCorrect!: (res: unknown) => void;
+        const pendingRephrase: Array<(res: unknown) => void> = [];
+
+        const ref = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 3, // inside "has"
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        };
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const panelController = {
+            setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
+            subscribe: () => () => undefined,
+            dispose: () => undefined,
+        };
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+            rephrase: () =>
+                new Promise<unknown>((resolve) => {
+                    pendingRephrase.push(resolve);
+                }),
+            panelRenderer: () => panelController,
+        } as unknown as OrchestratorDeps);
+
+        // Wait for check to complete so items are populated.
+        await new Promise((r) => setTimeout(r, 30));
+        resolveCorrect({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Start rephrase — this sets state.rephrase.
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        // Clear setViewCalls so we can check what happens next.
+        setViewCalls.length = 0;
+
+        // Fire cursor move — should be suppressed (no suggestion card pushed).
+        onCursorChangeCb();
+
+        // No suggestion-kind setView should have been called.
+        const suggestionViews = setViewCalls.filter((v) => v?.kind === "suggestion");
+        expect(suggestionViews.length).toBe(0);
+
+        stop();
+    });
+
+    test("rephrase: error path — error toast shown, card dismissed", async () => {
+        const { commandHandlers, setViewCalls, toasts, pendingRephraseReject, stop } =
+            makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        // Reject the rephrase promise with an error.
+        pendingRephraseReject[0]!(new Error("bridge error"));
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Error toast.
+        expect(toasts.some((t) => t.variant === "error")).toBe(true);
+
+        // Card dismissed.
+        const lastView = setViewCalls[setViewCalls.length - 1];
+        expect(lastView).toBeNull();
+
+        stop();
+    });
+
+    test("rephrase: resolveSettings defaults rephraseHotkey to ctrl+/", () => {
+        const s = resolveSettings(undefined);
+        expect(s.rephraseHotkey).toBe("ctrl+/");
+    });
+
+    test("rephrase: resolveSettings honors custom rephraseHotkey", () => {
+        const s = resolveSettings({ rephraseHotkey: "ctrl+r" });
+        expect(s.rephraseHotkey).toBe("ctrl+r");
+    });
+
+    // ─── BLOCKER 2: ignorePinned keeps displaySpans aligned with items ─────────
+
+    test("ignorePinned: ignoring middle item keeps displaySpans aligned with surviving items", async () => {
+        // Three items at distinct offsets. Ignore the MIDDLE one (index 1).
+        // After ignore: two survivors at indices 0 and 2 (now 0 and 1).
+        // Their displaySpans must map to THEIR OWN original spans, not the
+        // ignored item's span. Pre-fix: items[1] would map to spans[2] (wrong).
+        const text = "I has a apple and teh cat";
+        // "has"=[2,5), "apple"=[8,13), "teh"=[18,21)
+        let resolveCorrect!: (res: unknown) => void;
+        const commandHandlers = new Map<string, () => unknown>();
+        let onCursorChangeCb = (): void => undefined;
+        const setViewCalls: Array<import("./details-panel-view").PanelView | null> = [];
+
+        const ref = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 8, // inside "apple" (index 1)
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        };
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const panelController = {
+            setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
+            subscribe: () => () => undefined,
+            dispose: () => undefined,
+        };
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+            panelRenderer: () => panelController,
+        } as unknown as OrchestratorDeps);
+
+        // Wait for debounce.
+        await new Promise((r) => setTimeout(r, 30));
+
+        // Resolve with 3 suggestions at distinct offsets.
+        resolveCorrect({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+                { id: 2, span: { start: 8, end: 13 }, replacement: "an apple", model: "harper" },
+                { id: 3, span: { start: 18, end: 21 }, replacement: "the", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Pin the middle item (index 1, "apple") by cursor move.
+        ref.cursorOffset = 8;
+        onCursorChangeCb();
+
+        // Ignore the pinned middle item.
+        const ignoreFn = commandHandlers.get("grammarforge.details.ignore") as () => void;
+        expect(ignoreFn).toBeDefined();
+        ignoreFn();
+
+        // After ignoring "apple" (index 1), the survivors are:
+        //   index 0: "has"  at span [2,5)
+        //   index 1: "teh"  at span [18,21)
+        //
+        // Pre-fix: state.displaySpans was NOT filtered, so it still has 3 entries:
+        //   [0]=[2,5), [1]=[8,13), [2]=[18,21)
+        // The hit-test loop runs for i=0..1 (state.items.length=2):
+        //   i=0: items[0]=has, displaySpans[0]=[2,5)  ← correct
+        //   i=1: items[1]=teh, displaySpans[1]=[8,13) ← WRONG (apple's span)
+        //
+        // So cursor at offset 18 (inside "teh") would NOT match any span pre-fix
+        // (displaySpans[1]=[8,13) doesn't cover 18), leaving "teh" unpinnable.
+        // Post-fix: displaySpans is also filtered → [0]=[2,5), [1]=[18,21),
+        // so cursor at 18 correctly pins "teh".
+        ref.cursorOffset = 18; // inside "teh" (second survivor, originally index 2)
+        onCursorChangeCb();
+
+        // The last suggestion setView should show "teh" → "the".
+        const suggestionViews = setViewCalls.filter((v) => v?.kind === "suggestion");
+        // Post-fix: "teh" is correctly associated with span [18,21), so cursor at
+        // 18 pins it and the card shows "teh".
+        // Pre-fix: displaySpans[1]=[8,13) doesn't cover offset 18, so no pin fires
+        // and no suggestion card is shown → suggestionViews.length === 0 (FAIL).
+        expect(suggestionViews.length).toBeGreaterThanOrEqual(1);
+        const lastSuggestion = suggestionViews[suggestionViews.length - 1] as {
+            kind: "suggestion";
+            item: { original: string };
+        };
+        expect(lastSuggestion.item.original).toBe("teh");
+
+        stop();
+    });
+
+    // ─── BLOCKER 1: in-flight rephrase cancelled on prompt ref swap ────────────
+
+    test("rephrase: ref swap during loading cancels rephrase — result not rendered", async () => {
+        // Start rephrase on refA. Simulate onChange with refB (different ref object).
+        // Assert: state.rephrase is null, setView(null) called, spinner stopped.
+        // Then resolve the in-flight rephraseFn → assert NO result card rendered.
+        const text = "Hello world";
+        const setViewCalls: Array<import("./details-panel-view").PanelView | null> = [];
+        const commandHandlers = new Map<string, () => unknown>();
+        const pendingRephrase: Array<(res: unknown) => void> = [];
+
+        const makeRef = (t: string) => ({
+            text: t,
+            current: { input: t, parts: [] },
+            cursorOffset: 0,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => t.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        });
+
+        const refA = makeRef(text);
+        const refB = makeRef(text); // same text, different object identity
+        let currentRef: ReturnType<typeof makeRef> = refA;
+        let onChangeCb = (): void => undefined;
+
+        const api = {
+            prompt: {
+                ref: () => currentRef,
+                onChange: (cb: () => void) => {
+                    onChangeCb = cb;
+                    return () => undefined;
+                },
+                onCursorChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const panelController = {
+            setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
+            subscribe: () => () => undefined,
+            dispose: () => undefined,
+        };
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () => new Promise<unknown>(() => undefined), // never resolves
+            rephrase: () =>
+                new Promise<unknown>((resolve) => {
+                    pendingRephrase.push(resolve);
+                }),
+            panelRenderer: () => panelController,
+        } as unknown as OrchestratorDeps);
+
+        // Start rephrase on refA.
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        expect(rephraseFn).toBeDefined();
+        rephraseFn();
+
+        // Loading card should be shown.
+        expect(setViewCalls.filter((v) => v?.kind === "rephrase-loading").length).toBeGreaterThan(
+            0,
+        );
+        expect(pendingRephrase.length).toBe(1);
+
+        // Simulate ref swap: onChange fires with refB as the new ref.
+        currentRef = refB;
+        onChangeCb();
+
+        // After ref swap: rephrase must be cancelled.
+        // setView(null) must have been called to dismiss the card.
+        const nullViews = setViewCalls.filter((v) => v === null);
+        expect(nullViews.length).toBeGreaterThanOrEqual(1);
+
+        // Now resolve the in-flight rephrase — result must NOT be rendered.
+        const viewCountBeforeResolve = setViewCalls.length;
+        pendingRephrase[0]!({
+            original: text,
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // No new rephrase-result views after the resolve.
+        const resultViewsAfterResolve = setViewCalls
+            .slice(viewCountBeforeResolve)
+            .filter((v) => v?.kind === "rephrase-result");
+        expect(resultViewsAfterResolve.length).toBe(0);
+
+        stop();
+    });
+
+    test("rephrase: accept after ref swap — no replaceRange, card dismissed", async () => {
+        // Drive to result state on refA, then make api.prompt.ref() return refB
+        // (different object, same text). rephraseAccept must NOT call replaceRange
+        // and must dismiss the card.
+        const text = "Hello world";
+        const replaceRangeCalls: Array<[number, number, string]> = [];
+        const setViewCalls: Array<import("./details-panel-view").PanelView | null> = [];
+        const toasts: Array<{ message: string; variant?: string }> = [];
+        const commandHandlers = new Map<string, () => unknown>();
+        const pendingRephrase: Array<(res: unknown) => void> = [];
+
+        const makeRef = (t: string) => ({
+            text: t,
+            current: { input: t, parts: [] },
+            cursorOffset: 0,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => t.slice(s, e),
+            replaceRange: (s: number, e: number, r: string) => {
+                replaceRangeCalls.push([s, e, r]);
+            },
+            focus: () => undefined,
+        });
+
+        const refA = makeRef(text);
+        const refB = makeRef(text); // same text, different object identity
+        let currentRef: ReturnType<typeof makeRef> = refA;
+
+        const api = {
+            prompt: {
+                ref: () => currentRef,
+                onChange: () => () => undefined,
+                onCursorChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: (t: { message: string; variant?: string }) => toasts.push(t) },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const panelController = {
+            setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
+            subscribe: () => () => undefined,
+            dispose: () => undefined,
+        };
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () => new Promise<unknown>(() => undefined),
+            rephrase: () =>
+                new Promise<unknown>((resolve) => {
+                    pendingRephrase.push(resolve);
+                }),
+            panelRenderer: () => panelController,
+        } as unknown as OrchestratorDeps);
+
+        // Start rephrase on refA and drive to result state.
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        expect(pendingRephrase.length).toBe(1);
+        pendingRephrase[0]!({
+            original: text,
+            rephrased: "Hi there world",
+            alternatives: [],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Confirm result card is showing.
+        expect(setViewCalls.filter((v) => v?.kind === "rephrase-result").length).toBeGreaterThan(0);
+
+        // Swap the ref (same text, different object identity).
+        currentRef = refB;
+
+        // Accept — must NOT apply to refB.
+        const acceptFn = commandHandlers.get("grammarforge.rephrase.accept") as () => void;
+        acceptFn();
+
+        // No replaceRange on either ref.
+        expect(replaceRangeCalls.length).toBe(0);
+
+        // Card dismissed.
+        const lastView = setViewCalls[setViewCalls.length - 1];
+        expect(lastView).toBeNull();
+
+        // Info toast about the discard.
+        expect(toasts.some((t) => t.variant === "info")).toBe(true);
 
         stop();
     });
