@@ -1,0 +1,19 @@
+{
+  "name": "grammarforge-opencode",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "fmt": "oxfmt"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "oxfmt": "0.53.0",
+    "oxlint": "1.68.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.5"
+  }
+}

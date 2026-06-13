@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "lib": ["ES2022", "DOM"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../browser/src/*"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "../browser/src/api/**/*",
+    "../browser/src/lib/**/*",
+    "../browser/src/signal/**/*"
+  ]
+}
