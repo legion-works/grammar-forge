@@ -27,6 +27,7 @@ import {
     bunSegmentWidth,
 } from "./display-width";
 import { collectPartRanges, overlapsAnyRange, type DisplaySpan } from "./part-filter";
+import { maskPastePlaceholders } from "./paste-mask";
 import { createDetailsState, type DetailsState } from "./details-state";
 import { detectPromptPinSupport } from "./feature-detect";
 import { logDebug } from "./debug";
@@ -306,9 +307,34 @@ export function startOrchestrator(
             logDebug("check empty (empty buffer, no suggestions)", {});
             return;
         }
+        // Mask paste placeholders so the bridge sees neutral whitespace instead
+        // of placeholder tokens like "[Pasted ~5 lines]". Equal-length replacement
+        // preserves all downstream offsets — no remapping needed. ONLY bridgeText
+        // is sent to the bridge; everything else (stale guard, buildRenderableItems,
+        // display spans, decorations) uses the original `text`.
+        const parts = ref.current?.parts ?? [];
+        const bridgeText = maskPastePlaceholders(text, parts);
+        if (bridgeText.length !== text.length) {
+            // Invariant: maskPastePlaceholders must return equal-length output.
+            // This branch should never be reached; it is a defensive assertion.
+            logDebug("paste mask length mismatch (bug — using original text)", {
+                origLen: text.length,
+                maskedLen: bridgeText.length,
+            });
+        }
+        if (bridgeText !== text) {
+            logDebug("paste mask applied", {
+                maskedRanges: parts.filter((p) => p.type === "text" && p.source?.text?.value)
+                    .length,
+                origLen: text.length,
+            });
+        }
         const seq = ++state.checkSeq;
         try {
-            const res = await correctFn({ text, source: SIGNAL_SOURCE });
+            const res = await correctFn({
+                text: bridgeText.length === text.length ? bridgeText : text,
+                source: SIGNAL_SOURCE,
+            });
             // Stale-seq guard: the ref-swap path bumps state.checkSeq to
             // invalidate every in-flight check against the OLD ref.
             if (seq !== state.checkSeq) {
