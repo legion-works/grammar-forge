@@ -19,8 +19,10 @@ authoritative, but **still v0.1 draft**; confirm details before treating them as
   apply + dictionary, ctrl+. hotkey, paste-skip, signals, chat-bar button with
   hover pill + corrections panel, apply-all/undo/rephrase/pause; text edits go
   through the Slate-safe `slate-apply.ts` — never mutate the DOM selection).
-  OpenCode client and Phase-3 learning loop not started. Polyglot repo — each service
-  brings its own toolchain (below).
+  OpenCode client built in `clients/opencode/` (TUI plugin; requires the
+  `feat/tui-prompt-facade` OpenCode core patch carried via the maintainer's
+  release-watch tool; not yet live-tested), Phase-3 learning loop not started.
+  Polyglot repo — each service brings its own toolchain (below).
 
 ## Where things live
 
