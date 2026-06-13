@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
     codeUnitToDisplayOffset,
     displaySpanFromCodeUnits,
+    displaySpansForItems,
     makeDisplayWidth,
 } from "./display-width";
 
@@ -75,6 +76,110 @@ describe("displaySpanFromCodeUnits", () => {
             start: 0,
             end: 2,
         });
+    });
+});
+
+describe("buildDisplayOffsetLookup / displaySpansForItems — parity with per-span path", () => {
+    // PROPERTY TEST: displaySpansForItems must return EXACTLY the same result
+    // as mapping displaySpanFromCodeUnits over each span individually.
+    // This guarantees byte-identical behavior for the cached batch path.
+
+    const texts = [
+        // ASCII
+        "hello world",
+        // CJK
+        "你好世界",
+        // emoji ZWJ cluster
+        "👨‍👩‍👧‍👦 hi",
+        // combining marks (e + combining acute = é)
+        "cafe\u0301 test",
+        // embedded newline
+        "line one\nline two",
+        // empty
+        "",
+        // mixed
+        "abc汉def😀ghi",
+    ];
+
+    const spanSets: Array<Array<{ start: number; end: number }>> = [
+        // ASCII spans
+        [
+            { start: 0, end: 5 },
+            { start: 6, end: 11 },
+            { start: 3, end: 3 }, // zero-width
+            { start: -1, end: 0 }, // out-of-range start
+            { start: 0, end: 999 }, // past-end
+        ],
+        // CJK spans (each char is 3 bytes in UTF-8 but 1 code unit)
+        [
+            { start: 0, end: 2 },
+            { start: 1, end: 3 },
+            { start: 0, end: 4 },
+        ],
+        // emoji ZWJ spans (mid-grapheme)
+        [
+            { start: 0, end: 1 }, // mid-grapheme end
+            { start: 0, end: 11 }, // full ZWJ cluster (👨‍👩‍👧‍👦 = 11 code units)
+            { start: 12, end: 14 }, // " h"
+        ],
+        // combining marks
+        [
+            { start: 0, end: 4 }, // "cafe" (e not yet combined)
+            { start: 0, end: 5 }, // "cafe\u0301" = "café" as one grapheme cluster
+            { start: 5, end: 10 },
+        ],
+        // newline spans
+        [
+            { start: 0, end: 8 }, // "line one"
+            { start: 8, end: 9 }, // "\n"
+            { start: 9, end: 17 }, // "line two"
+        ],
+        // empty text — all spans should return {start:0, end:0}
+        [
+            { start: 0, end: 0 },
+            { start: 0, end: 5 },
+        ],
+        // mixed
+        [
+            { start: 0, end: 3 }, // "abc"
+            { start: 3, end: 4 }, // "汉"
+            { start: 4, end: 7 }, // "def"
+            { start: 7, end: 9 }, // "😀" (surrogate pair = 2 code units)
+            { start: 8, end: 9 }, // mid-emoji end
+            { start: 7, end: 8 }, // mid-emoji start
+        ],
+    ];
+
+    for (let ti = 0; ti < texts.length; ti++) {
+        const text = texts[ti]!;
+        const spans = spanSets[ti]!;
+        test(`parity: text[${ti}] "${text.slice(0, 20).replace(/\n/g, "\\n")}"`, () => {
+            const expected = spans.map((span) => displaySpanFromCodeUnits(text, span, width));
+            const actual = displaySpansForItems(text, spans, width);
+            expect(actual).toEqual(expected);
+        });
+    }
+
+    test("returns empty array for empty spans input", () => {
+        expect(displaySpansForItems("hello", [], width)).toEqual([]);
+    });
+
+    test("single span matches displaySpanFromCodeUnits exactly", () => {
+        const text = "汉a汉";
+        const span = { start: 1, end: 2 };
+        expect(displaySpansForItems(text, [span], width)).toEqual([
+            displaySpanFromCodeUnits(text, span, width),
+        ]);
+    });
+
+    test("out-of-order spans are each converted independently (no sort assumption)", () => {
+        const text = "hello world";
+        const spans = [
+            { start: 6, end: 11 },
+            { start: 0, end: 5 },
+        ];
+        const expected = spans.map((s) => displaySpanFromCodeUnits(text, s, width));
+        expect(displaySpansForItems(text, spans, width)).toEqual(expected);
     });
 });
 

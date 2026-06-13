@@ -6,7 +6,6 @@ import {
     type Decoration,
     type OrchestratorDeps,
 } from "./orchestrator";
-import { makeDisplayWidth } from "./display-width";
 
 describe("resolveSettings", () => {
     test("defaults when no options", () => {
@@ -42,44 +41,56 @@ describe("resolveSettings", () => {
     });
 });
 
-const stubSegment = (s: string): number => {
-    const cp = s.codePointAt(0)!;
-    return cp >= 0x1f000 ? 2 : 1;
-};
-const width = makeDisplayWidth(stubSegment);
-
 describe("suggestionsToDecorations", () => {
-    type ItemLike = { hlStart: number; hlEnd: number; category: string };
+    // New signature: accepts precomputed display spans (parallel to items)
+    // instead of text + displayWidthOf. The caller (renderDecorations) now
+    // passes state.displaySpans computed once at check-complete.
+    type ItemLike = { category: string };
+    type SpanLike = { start: number; end: number };
 
-    test("maps cu→display (ASCII) and preserves itemIndex", () => {
-        const items: ItemLike[] = [
-            { hlStart: 1, hlEnd: 4, category: "grammar" },
-            { hlStart: 6, hlEnd: 8, category: "spelling" },
+    test("maps precomputed spans and preserves itemIndex", () => {
+        const items: ItemLike[] = [{ category: "grammar" }, { category: "spelling" }];
+        const spans: SpanLike[] = [
+            { start: 1, end: 4 },
+            { start: 6, end: 8 },
         ];
-        const out: Decoration[] = suggestionsToDecorations("hello world", items, [], width);
+        const out: Decoration[] = suggestionsToDecorations(spans, items, []);
         expect(out).toEqual([
             { start: 1, end: 4, category: "grammar", itemIndex: 0 },
             { start: 6, end: 8, category: "spelling", itemIndex: 1 },
         ]);
     });
-    test("drops empty spans and suggestions overlapping part ranges", () => {
+    test("drops empty spans (start === end) and suggestions overlapping part ranges", () => {
         const items: ItemLike[] = [
-            { hlStart: 0, hlEnd: 0, category: "grammar" },
-            { hlStart: 4, hlEnd: 7, category: "grammar" },
-            { hlStart: 10, hlEnd: 14, category: "spelling" },
+            { category: "grammar" },
+            { category: "grammar" },
+            { category: "spelling" },
         ];
-        const out = suggestionsToDecorations(
-            "hello world foo",
-            items,
-            [{ start: 2, end: 6 }],
-            width,
-        );
+        const spans: SpanLike[] = [
+            { start: 0, end: 0 }, // empty — dropped
+            { start: 4, end: 7 }, // overlaps partRange [2,6] — dropped
+            { start: 10, end: 14 }, // kept
+        ];
+        const out = suggestionsToDecorations(spans, items, [{ start: 2, end: 6 }]);
         expect(out).toEqual([{ start: 10, end: 14, category: "spelling", itemIndex: 2 }]);
     });
-    test("mid-grapheme END clamps UP so the target grapheme is included", () => {
-        const items: ItemLike[] = [{ hlStart: 0, hlEnd: 1, category: "spelling" }];
-        const out = suggestionsToDecorations("😀x", items, [], width);
+    test("mid-grapheme END clamps UP so the target grapheme is included (precomputed span)", () => {
+        // The span is already precomputed by displaySpansForItems which uses end-mode clamping.
+        // We just verify suggestionsToDecorations passes it through unchanged.
+        const items: ItemLike[] = [{ category: "spelling" }];
+        const spans: SpanLike[] = [{ start: 0, end: 2 }]; // already clamped UP
+        const out = suggestionsToDecorations(spans, items, []);
         expect(out).toEqual([{ start: 0, end: 2, category: "spelling", itemIndex: 0 }]);
+    });
+    test("mismatched spans/items lengths: uses min(spans.length, items.length)", () => {
+        // Defensive: if somehow lengths differ, we only iterate up to the shorter.
+        const items: ItemLike[] = [{ category: "grammar" }];
+        const spans: SpanLike[] = [
+            { start: 0, end: 3 },
+            { start: 5, end: 8 }, // no corresponding item
+        ];
+        const out = suggestionsToDecorations(spans, items, []);
+        expect(out).toEqual([{ start: 0, end: 3, category: "grammar", itemIndex: 0 }]);
     });
 });
 
@@ -582,6 +593,31 @@ describe("startOrchestrator", () => {
             ],
             cursorOffset: 0, // before any span
         });
+        expect(() => env.onCursorChangeCb()).not.toThrow();
+        stop();
+    });
+
+    test("onCursorMove early-returns when ref.text !== checkedText (stale-guard)", async () => {
+        // After a check completes, state.displaySpans/items are for checkedText.
+        // If the user types between checks, ref.text drifts from checkedText.
+        // Hit-testing cached spans against new text is wrong — the stale guard
+        // must return early without pinning.
+        const { env, stop } = makeOrchestratorEnv({
+            text: "I has a apple",
+            items: [
+                {
+                    id: 1,
+                    hlStart: 2,
+                    hlEnd: 5,
+                    category: "grammar",
+                    original: "has",
+                    replacements: ["have"],
+                },
+            ],
+            cursorOffset: 3, // inside "has" span
+        });
+        // Before any check completes, checkedText is "" but ref.text is "I has a apple".
+        // The stale guard should fire and return early (no throw, no pin).
         expect(() => env.onCursorChangeCb()).not.toThrow();
         stop();
     });

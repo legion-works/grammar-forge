@@ -20,7 +20,12 @@ import { BridgeClient, type SignalEvent } from "@/api/client";
 import { buildRenderableItems, isSpanStillValid, type RenderableItem } from "@/lib/pipeline";
 import { createSignalQueue } from "@/signal/queue";
 import type { CorrectRequest, CorrectResponse } from "@/api/types";
-import { displaySpanFromCodeUnits, makeDisplayWidth, bunSegmentWidth } from "./display-width";
+import {
+    displaySpanFromCodeUnits,
+    displaySpansForItems,
+    makeDisplayWidth,
+    bunSegmentWidth,
+} from "./display-width";
 import { collectPartRanges, overlapsAnyRange, type DisplaySpan } from "./part-filter";
 import { createDetailsState, type DetailsState } from "./details-state";
 import { detectPromptPinSupport } from "./feature-detect";
@@ -85,21 +90,21 @@ export interface Decoration {
  *  (start === end) and any whose span overlaps a prompt-part range
  *  (pastes, file attachments, agent mentions) — the typed-input-only
  *  invariant. Word range (`hlStart/hlEnd`) is used so zero-width insertions
- *  still highlight their target word. */
+ *  still highlight their target word.
+ *
+ *  Accepts PRECOMPUTED display spans (parallel to items, computed once at
+ *  check-complete via displaySpansForItems) instead of recomputing per call.
+ *  This eliminates the O(text × items) cost on the debounced check path. */
 export function suggestionsToDecorations(
-    text: string,
-    items: ReadonlyArray<{ hlStart: number; hlEnd: number; category: string }>,
+    spans: ReadonlyArray<DisplaySpan>,
+    items: ReadonlyArray<{ category: string }>,
     partRanges: ReadonlyArray<DisplaySpan>,
-    displayWidthOf: (value: string) => number,
 ): Decoration[] {
     const out: Decoration[] = [];
-    for (let i = 0; i < items.length; i++) {
+    const len = Math.min(spans.length, items.length);
+    for (let i = 0; i < len; i++) {
+        const span = spans[i]!;
         const it = items[i]!;
-        const span: DisplaySpan = displaySpanFromCodeUnits(
-            text,
-            { start: it.hlStart, end: it.hlEnd },
-            displayWidthOf,
-        );
         if (span.start === span.end) continue;
         if (overlapsAnyRange(span, partRanges)) continue;
         out.push({ start: span.start, end: span.end, category: it.category, itemIndex: i });
@@ -109,6 +114,10 @@ export function suggestionsToDecorations(
 
 interface RefState {
     items: RenderableItem[];
+    /** Precomputed display spans parallel to `items`, computed once at
+     *  check-complete via displaySpansForItems. Cached so onCursorMove
+     *  can hit-test without re-scanning the text on every cursor tick. */
+    displaySpans: DisplaySpan[];
     checkedText: string;
     checkSeq: number;
     debounceTimer: ReturnType<typeof setTimeout> | null;
@@ -119,6 +128,7 @@ interface RefState {
 function emptyRefState(): RefState {
     return {
         items: [],
+        displaySpans: [],
         checkedText: "",
         checkSeq: 0,
         debounceTimer: null,
@@ -245,7 +255,9 @@ export function startOrchestrator(
             state.extmarkTypeId = ref.extmarks.registerType("grammarforge");
         }
         const partRanges = collectPartRanges(ref.current.parts);
-        const decorations = suggestionsToDecorations(ref.text, items, partRanges, displayWidthOf);
+        // Use precomputed display spans (state.displaySpans, parallel to items).
+        // These were computed once at check-complete; no re-scan needed here.
+        const decorations = suggestionsToDecorations(state.displaySpans, items, partRanges);
         const typeId = state.extmarkTypeId;
         for (const d of decorations) {
             const styleId = getStyleId(d.category);
@@ -287,6 +299,7 @@ export function startOrchestrator(
         logDebug("check start", { textLength: text.length, seq: state.checkSeq + 1 });
         if (text === "") {
             state.items = [];
+            state.displaySpans = [];
             state.checkedText = "";
             clearActiveExtmarks();
             detailsState.itemsChanged(0);
@@ -318,6 +331,13 @@ export function startOrchestrator(
             const builtItems = buildRenderableItems(text, res).items;
             state.items = builtItems;
             state.checkedText = text;
+            // Compute display spans ONCE here — O(text + items·log text) — so
+            // onCursorMove can hit-test from the cache without re-scanning.
+            state.displaySpans = displaySpansForItems(
+                text,
+                builtItems.map((it) => ({ start: it.hlStart, end: it.hlEnd })),
+                displayWidthOf,
+            );
             logDebug("check complete", {
                 suggestionCount: res.suggestions?.length ?? 0,
                 itemCount: builtItems.length,
@@ -363,6 +383,7 @@ export function startOrchestrator(
             state.extmarkTypeId = null;
             trackedRef = ref;
             state.items = [];
+            state.displaySpans = [];
             state.checkedText = "";
             detailsState.itemsChanged(0);
         }
@@ -375,6 +396,7 @@ export function startOrchestrator(
             }
             void signalQueue.flush();
             state.items = [];
+            state.displaySpans = [];
             state.checkedText = "";
             clearActiveExtmarks();
             detailsState.itemsChanged(0);
@@ -594,11 +616,15 @@ export function startOrchestrator(
                 logDebug("onCursorChange: items empty (no hit-test candidates)", { offset });
                 return;
             }
-            // Build the candidate span list for the diff. Display
-            // span (start, end) is what the hit-test compares offset
-            // against; the (hlStart, hlEnd) is the raw code-unit
-            // range. We log both so we can spot the offset-space
-            // mismatch if it ever happens.
+            // Stale guard: state.displaySpans/items are for checkedText.
+            // If the user typed since the last check, ref.text has drifted —
+            // hit-testing cached spans against new text is wrong, so skip.
+            if (ref.text !== state.checkedText) {
+                logDebug("onCursorChange: text drifted from checkedText", {});
+                return;
+            }
+            // Build the candidate span list from the CACHED display spans
+            // (computed once at check-complete). No Segmenter re-scan here.
             const candidateSpans: Array<{
                 index: number;
                 category: string;
@@ -609,11 +635,7 @@ export function startOrchestrator(
             }> = [];
             for (let i = 0; i < state.items.length; i++) {
                 const it = state.items[i]!;
-                const span: DisplaySpan = displaySpanFromCodeUnits(
-                    ref.text,
-                    { start: it.hlStart, end: it.hlEnd },
-                    displayWidthOf,
-                );
+                const span = state.displaySpans[i] ?? { start: 0, end: 0 };
                 candidateSpans.push({
                     index: i,
                     category: it.category,

@@ -74,3 +74,88 @@ export function displaySpanFromCodeUnits(
         end: codeUnitToDisplayOffset(text, span.end, displayWidthOf, "end"),
     };
 }
+
+/** A lookup table built in ONE Segmenter pass over `text`.
+ *  `offsetAt(codeUnit, mode)` is byte-identical to
+ *  `codeUnitToDisplayOffset(text, codeUnit, displayWidthOf, mode)` but
+ *  uses a binary search over pre-built checkpoints instead of re-scanning
+ *  from the start each time. Complexity: O(text) to build, O(log text) per
+ *  query. */
+export interface DisplayOffsetLookup {
+    offsetAt(codeUnit: number, mode: "start" | "end"): number;
+}
+
+export function buildDisplayOffsetLookup(
+    text: string,
+    displayWidthOf: (value: string) => number,
+): DisplayOffsetLookup {
+    // Each checkpoint records the cumulative code-unit position and the
+    // cumulative display-width AFTER consuming that grapheme.
+    // Index 0 is the implicit "before text" sentinel: {cu:0, display:0}.
+    // Index k is the boundary AFTER the k-th grapheme.
+    const cuBoundaries: number[] = [0];
+    const displayBoundaries: number[] = [0];
+
+    let consumedCodeUnits = 0;
+    let displayOffset = 0;
+    for (const part of graphemeSegmenter.segment(text)) {
+        consumedCodeUnits += part.segment.length;
+        displayOffset += part.segment === "\n" ? 1 : displayWidthOf(part.segment);
+        cuBoundaries.push(consumedCodeUnits);
+        displayBoundaries.push(displayOffset);
+    }
+    const totalDisplay = displayOffset;
+    const totalCu = consumedCodeUnits;
+
+    return {
+        offsetAt(codeUnit: number, mode: "start" | "end"): number {
+            // Mirror codeUnitToDisplayOffset semantics exactly:
+            if (codeUnit <= 0) return 0;
+            if (codeUnit >= totalCu) return totalDisplay;
+
+            // Binary search for the grapheme boundary AFTER codeUnit.
+            // cuBoundaries is sorted ascending. We want the smallest index i
+            // such that cuBoundaries[i] >= codeUnit.
+            let lo = 0;
+            let hi = cuBoundaries.length - 1;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (cuBoundaries[mid]! < codeUnit) {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            // lo is now the index of the first boundary >= codeUnit.
+            if (cuBoundaries[lo] === codeUnit) {
+                // Exact boundary hit — same as the loop's `if (codeUnitOffset === consumedCodeUnits)` branch.
+                return displayBoundaries[lo]!;
+            }
+            // codeUnit lands INSIDE the grapheme that ends at boundary lo.
+            // The grapheme STARTS at boundary lo-1.
+            // start-mode → clamp DOWN to grapheme start = displayBoundaries[lo-1]
+            // end-mode   → clamp UP to grapheme end   = displayBoundaries[lo]
+            if (mode === "end") {
+                return displayBoundaries[lo]!;
+            }
+            return displayBoundaries[lo - 1]!;
+        },
+    };
+}
+
+/** Convert many code-unit spans to display spans in a single Segmenter pass.
+ *  Byte-identical to mapping `displaySpanFromCodeUnits(text, span, displayWidthOf)`
+ *  over each span, but O(text + spans·log text) instead of O(text·spans).
+ *  Spans are processed in input order; no sorting is assumed or applied. */
+export function displaySpansForItems(
+    text: string,
+    spans: ReadonlyArray<CodeUnitSpan>,
+    displayWidthOf: (value: string) => number,
+): CodeUnitSpan[] {
+    if (spans.length === 0) return [];
+    const lookup = buildDisplayOffsetLookup(text, displayWidthOf);
+    return spans.map((span) => ({
+        start: lookup.offsetAt(span.start, "start"),
+        end: lookup.offsetAt(span.end, "end"),
+    }));
+}
