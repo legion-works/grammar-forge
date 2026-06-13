@@ -266,7 +266,7 @@ export function startOrchestrator(
             const id = ref.extmarks.create({
                 start: d.start,
                 end: d.end,
-                virtual: true,
+                virtual: false,
                 styleId,
                 typeId,
             });
@@ -457,6 +457,16 @@ export function startOrchestrator(
             signalQueue.enqueue(ev);
         }
         api.ui.toast({ message: `Applied: ${replacement || item.original}`, variant: "success" });
+        // Clear stale underlines + state so the details card dismisses
+        // immediately and the next onChange-scheduled re-check rebuilds
+        // on the edited text. Do NOT call renderDecorations here —
+        // spans are stale after the edit.
+        detailsState.unpin();
+        clearActiveExtmarks();
+        state.items = [];
+        state.displaySpans = [];
+        state.checkedText = "";
+        detailsState.itemsChanged(0);
         onChange();
     };
 
@@ -526,6 +536,16 @@ export function startOrchestrator(
                 message: `Applied: ${replacement || item.original}`,
                 variant: "success",
             });
+            // Clear stale underlines + state so the details card dismisses
+            // immediately and the next onChange-scheduled re-check rebuilds
+            // on the edited text. Do NOT call renderDecorations here —
+            // spans are stale after the edit.
+            detailsState.unpin();
+            clearActiveExtmarks();
+            state.items = [];
+            state.displaySpans = [];
+            state.checkedText = "";
+            detailsState.itemsChanged(0);
             onChange();
         };
         const ignorePinned = (): void => {
@@ -565,6 +585,14 @@ export function startOrchestrator(
                 itemCount: state.items.length,
             });
             detailsState.cycle(1, state.items.length);
+            const idx = detailsState.pinnedIndex();
+            if (idx !== null && state.displaySpans[idx] !== undefined) {
+                logDebug("cycle moved cursor", {
+                    index: idx,
+                    offset: state.displaySpans[idx]?.start,
+                });
+                api.prompt?.ref()?.setCursorOffset?.(state.displaySpans[idx]!.start);
+            }
         };
         const cyclePrev = (): void => {
             logDebug("keymap: cyclePrev invoked", {
@@ -572,6 +600,14 @@ export function startOrchestrator(
                 itemCount: state.items.length,
             });
             detailsState.cycle(-1, state.items.length);
+            const idx = detailsState.pinnedIndex();
+            if (idx !== null && state.displaySpans[idx] !== undefined) {
+                logDebug("cycle moved cursor", {
+                    index: idx,
+                    offset: state.displaySpans[idx]?.start,
+                });
+                api.prompt?.ref()?.setCursorOffset?.(state.displaySpans[idx]!.start);
+            }
         };
         const unpin = (): void => {
             logDebug("keymap: unpin invoked", { pinnedIndex: detailsState.pinnedIndex() });
@@ -698,6 +734,9 @@ export function startOrchestrator(
                     offset,
                 });
                 detailsState.pin(matchIndex);
+            } else {
+                logDebug("cursor off all suggestions — unpin", { offset });
+                detailsState.unpin();
             }
         };
         unsubscribeCursorChange = api.prompt.onCursorChange!(onCursorMove);

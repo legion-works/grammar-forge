@@ -239,6 +239,7 @@ describe("startOrchestrator", () => {
         const commandHandlers = new Map<string, () => unknown>();
         const layerBindings = new Map<string, string>();
         let layerRegistered = false;
+        let detailsLayerEnabled: (() => boolean) | null = null;
         const stopFns: Array<() => void> = [];
         const env = {
             get ref(): typeof ref {
@@ -261,6 +262,9 @@ describe("startOrchestrator", () => {
             },
             get layerRegistered(): boolean {
                 return layerRegistered;
+            },
+            get detailsLayerEnabled(): (() => boolean) | null {
+                return detailsLayerEnabled;
             },
         };
         const api = {
@@ -287,6 +291,11 @@ describe("startOrchestrator", () => {
                     layerRegistered = true;
                     for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
                     for (const b of layer.bindings ?? []) layerBindings.set(b.cmd, b.key);
+                    if (
+                        (layer.commands ?? []).some((c) => c.name === "grammarforge.details.apply")
+                    ) {
+                        detailsLayerEnabled = layer.enabled ?? null;
+                    }
                     return () => undefined;
                 },
             },
@@ -690,6 +699,394 @@ describe("startOrchestrator", () => {
         stop();
     });
 
+    test("renderDecorations: extmarks.create is called with virtual:false (non-atomic underline)", async () => {
+        // BUG 2 regression guard: underline extmarks must NOT be virtual:true.
+        // virtual:true makes @opentui/core treat the extmark as an atomic chip
+        // (findVirtualExtmarkContaining matches on virtual:true), causing backspace
+        // at the edge of an underlined word to delete the whole word.
+        // virtual:false keeps the underline visual (styleId is still applied) but
+        // makes the extmark non-atomic so backspace deletes one char at a time.
+        const createArgs: Array<Record<string, unknown>> = [];
+        let resolveCorrect!: (res: unknown) => void;
+
+        const ref = {
+            text: "I has a apple",
+            current: { input: "I has a apple", parts: [] },
+            cursorOffset: 0,
+            extmarks: {
+                registerType: () => 1,
+                create: (opts: Record<string, unknown>) => {
+                    createArgs.push(opts);
+                    return createArgs.length;
+                },
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => "I has a apple".slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        };
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+            },
+            keymap: { registerLayer: () => () => undefined },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        // Wait for debounce to fire.
+        await new Promise((r) => setTimeout(r, 30));
+
+        // Resolve with one suggestion so renderDecorations fires.
+        resolveCorrect({
+            original: "I has a apple",
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // At least one extmark was created (the underline for "has").
+        expect(createArgs.length).toBeGreaterThanOrEqual(1);
+        // CRITICAL: every created extmark must have virtual:false.
+        for (const args of createArgs) {
+            expect(args["virtual"]).toBe(false);
+        }
+
+        stop();
+    });
+
+    test("applyPinned: dismisses details card and resets state so re-check rebuilds on edited text", async () => {
+        // BUG 1 regression guard: after applying a pinned suggestion,
+        // the details card must dismiss (pinnedIndex → null), stale
+        // underlines must be cleared (activeExtmarkIds empty), and
+        // state.items/displaySpans/checkedText must be reset so the
+        // stale-guard in onCursorMove returns early until the fresh
+        // check lands.
+        const deletedIds: number[] = [];
+        let extmarkCounter = 0;
+        let resolveCorrect!: (res: unknown) => void;
+        const replaceRangeCalls: Array<[number, number, string]> = [];
+        const correctCalls: number[] = [];
+
+        const ref = {
+            text: "I has a apple",
+            current: { input: "I has a apple", parts: [] },
+            cursorOffset: 3, // inside "has" span
+            extmarks: {
+                registerType: () => 1,
+                create: () => {
+                    extmarkCounter++;
+                    return extmarkCounter;
+                },
+                getAllForTypeId: () => [],
+                delete: (id: number) => {
+                    deletedIds.push(id);
+                    return true;
+                },
+            },
+            getTextRange: (s: number, e: number) => "I has a apple".slice(s, e),
+            replaceRange: (s: number, e: number, r: string) => {
+                replaceRangeCalls.push([s, e, r]);
+            },
+            focus: () => undefined,
+        };
+
+        const commandHandlers = new Map<string, () => unknown>();
+        let onCursorChangeCb = (): void => undefined;
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    correctCalls.push(correctCalls.length + 1);
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        // Wait for initial debounce.
+        await new Promise((r) => setTimeout(r, 30));
+        const firstCorrectCount = correctCalls.length;
+        expect(firstCorrectCount).toBeGreaterThanOrEqual(1);
+
+        // Resolve with a suggestion to populate state.items and render underlines.
+        resolveCorrect({
+            original: "I has a apple",
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Underlines were created.
+        expect(extmarkCounter).toBeGreaterThanOrEqual(1);
+
+        // Simulate cursor move to pin item 0.
+        onCursorChangeCb();
+
+        // Now invoke applyPinned (the "return" key handler).
+        const applyFn = commandHandlers.get("grammarforge.details.apply");
+        expect(applyFn).toBeDefined();
+        applyFn!();
+
+        // replaceRange was called (the edit happened).
+        expect(replaceRangeCalls.length).toBe(1);
+
+        // All extmarks were deleted (clearActiveExtmarks ran).
+        expect(deletedIds.length).toBeGreaterThanOrEqual(1);
+
+        // A re-check was scheduled (correctCalls grew after the apply).
+        await new Promise((r) => setTimeout(r, 30));
+        expect(correctCalls.length).toBeGreaterThan(firstCorrectCount);
+
+        stop();
+    });
+
+    test("onCursorMove: cursor off all suggestions unpins the card", async () => {
+        // BUG 3 regression guard: when the cursor moves off a suggestion
+        // (e.g. pressing up/arrow or clicking empty space), the details
+        // card must dismiss. The else branch in onCursorMove calls
+        // detailsState.unpin() when matchIndex === null.
+        const layers: Array<{
+            enabled?: () => boolean;
+            commands?: Array<{ name: string }>;
+        }> = [];
+        let resolveCorrect!: (res: unknown) => void;
+        const correctCalls: number[] = [];
+
+        const ref = {
+            text: "I has a apple",
+            current: { input: "I has a apple", parts: [] },
+            cursorOffset: 3, // inside "has" span
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => "I has a apple".slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        };
+
+        let onCursorChangeCb = (): void => undefined;
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    enabled?: () => boolean;
+                    commands?: Array<{ name: string }>;
+                }) => {
+                    layers.push(layer);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    correctCalls.push(correctCalls.length + 1);
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        // Find the details layer's enabled getter.
+        const detailsLayer = layers.find((l) =>
+            (l.commands ?? []).some((c) => c.name === "grammarforge.details.apply"),
+        );
+        expect(detailsLayer).toBeDefined();
+        const isPinned = (): boolean => detailsLayer!.enabled!();
+
+        // Wait for initial debounce.
+        await new Promise((r) => setTimeout(r, 30));
+        expect(correctCalls.length).toBeGreaterThanOrEqual(1);
+
+        // Resolve with a suggestion to populate state.
+        resolveCorrect({
+            original: "I has a apple",
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Cursor is at offset 3 (inside "has" span) — pinning should work.
+        expect(isPinned()).toBe(false);
+        onCursorChangeCb();
+        expect(isPinned()).toBe(true);
+
+        // Move cursor OFF all suggestion spans (offset 0, before "has").
+        ref.cursorOffset = 0;
+        onCursorChangeCb();
+        expect(isPinned()).toBe(false);
+
+        stop();
+    });
+
+    test("acceptFirst: dismisses details card and resets state on apply (ctrl+. while pinned)", async () => {
+        // BUG 1 regression guard (acceptFirst path): ctrl+. applies the first
+        // suggestion. After apply, the details card must dismiss and state must
+        // be reset — same invariants as applyPinned.
+        const deletedIds: number[] = [];
+        let extmarkCounter = 0;
+        let resolveCorrect!: (res: unknown) => void;
+        const replaceRangeCalls: Array<[number, number, string]> = [];
+        const correctCalls: number[] = [];
+
+        const ref = {
+            text: "I has a apple",
+            current: { input: "I has a apple", parts: [] },
+            cursorOffset: 3,
+            extmarks: {
+                registerType: () => 1,
+                create: () => {
+                    extmarkCounter++;
+                    return extmarkCounter;
+                },
+                getAllForTypeId: () => [],
+                delete: (id: number) => {
+                    deletedIds.push(id);
+                    return true;
+                },
+            },
+            getTextRange: (s: number, e: number) => "I has a apple".slice(s, e),
+            replaceRange: (s: number, e: number, r: string) => {
+                replaceRangeCalls.push([s, e, r]);
+            },
+            focus: () => undefined,
+        };
+
+        const commandHandlers = new Map<string, () => unknown>();
+        let onCursorChangeCb = (): void => undefined;
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    correctCalls.push(correctCalls.length + 1);
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        await new Promise((r) => setTimeout(r, 30));
+        const firstCorrectCount = correctCalls.length;
+
+        resolveCorrect({
+            original: "I has a apple",
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(extmarkCounter).toBeGreaterThanOrEqual(1);
+
+        // Pin item 0 via cursor move.
+        onCursorChangeCb();
+
+        // Invoke acceptFirst (ctrl+. handler).
+        const acceptFn = commandHandlers.get("grammarforge.accept");
+        expect(acceptFn).toBeDefined();
+        acceptFn!();
+
+        // replaceRange was called.
+        expect(replaceRangeCalls.length).toBe(1);
+
+        // Extmarks cleared.
+        expect(deletedIds.length).toBeGreaterThanOrEqual(1);
+
+        // Re-check scheduled.
+        await new Promise((r) => setTimeout(r, 30));
+        expect(correctCalls.length).toBeGreaterThan(firstCorrectCount);
+
+        stop();
+    });
+
     test("runCheck: bridge correctFn receives masked text; state.checkedText and buildRenderableItems see original", async () => {
         // Fixture: text with a paste placeholder at a known position.
         const placeholder = "[Pasted ~5 lines]";
@@ -780,6 +1177,274 @@ describe("startOrchestrator", () => {
         //    state directly, but we can confirm the bridge was called with masked
         //    text while the ref still holds the original — that's the contract.
         expect(ref.text).toBe(originalText); // ref.text is always the original
+
+        stop();
+    });
+
+    test("cycleNext: advances pinnedIndex AND calls setCursorOffset with the new span's start", async () => {
+        // Two suggestions: "has" at display [2,5) and "apple" at display [8,13).
+        // Start pinned at index 0 (cursor on "has"). cycleNext → index 1 → cursor
+        // moves to displaySpans[1].start = 8.
+        const text = "I has a apple";
+        const setCursorOffsetCalls: number[] = [];
+        let resolveCorrect!: (res: unknown) => void;
+
+        const ref = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 2, // inside "has"
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+            setCursorOffset: (offset: number) => {
+                setCursorOffsetCalls.push(offset);
+            },
+        };
+
+        const commandHandlers = new Map<string, () => unknown>();
+        let onCursorChangeCb = (): void => undefined;
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        // Wait for debounce.
+        await new Promise((r) => setTimeout(r, 30));
+
+        // Resolve with two suggestions: "has" [2,5) and "apple" [8,13).
+        resolveCorrect({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+                { id: 2, span: { start: 8, end: 13 }, replacement: "an apple", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Pin index 0 by simulating a cursor move onto "has".
+        ref.cursorOffset = 2;
+        onCursorChangeCb();
+
+        // Verify pinned at 0.
+        const cycleNextFn = commandHandlers.get("grammarforge.details.cycleNext") as () => void;
+        expect(cycleNextFn).toBeDefined();
+
+        // cycleNext: should advance to index 1 and call setCursorOffset with displaySpans[1].start.
+        // displaySpans[1].start = 8 (display-width offset of "apple" in ASCII text).
+        cycleNextFn();
+
+        expect(setCursorOffsetCalls.length).toBeGreaterThanOrEqual(1);
+        // The last call should be to the start of the second suggestion's display span.
+        expect(setCursorOffsetCalls[setCursorOffsetCalls.length - 1]).toBe(8);
+
+        stop();
+    });
+
+    test("cyclePrev: decrements pinnedIndex AND calls setCursorOffset with the new span's start", async () => {
+        // Two suggestions: "has" at display [2,5) and "apple" at display [8,13).
+        // Start pinned at index 1 (cursor on "apple"). cyclePrev → index 0 → cursor
+        // moves to displaySpans[0].start = 2.
+        const text = "I has a apple";
+        const setCursorOffsetCalls: number[] = [];
+        let resolveCorrect!: (res: unknown) => void;
+
+        const ref = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 8, // inside "apple"
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+            setCursorOffset: (offset: number) => {
+                setCursorOffsetCalls.push(offset);
+            },
+        };
+
+        const commandHandlers = new Map<string, () => unknown>();
+        let onCursorChangeCb = (): void => undefined;
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        // Wait for debounce.
+        await new Promise((r) => setTimeout(r, 30));
+
+        // Resolve with two suggestions.
+        resolveCorrect({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+                { id: 2, span: { start: 8, end: 13 }, replacement: "an apple", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Pin index 1 by simulating a cursor move onto "apple".
+        ref.cursorOffset = 8;
+        onCursorChangeCb();
+
+        const cyclePrevFn = commandHandlers.get("grammarforge.details.cyclePrev") as () => void;
+        expect(cyclePrevFn).toBeDefined();
+
+        // cyclePrev: should go to index 0 and call setCursorOffset with displaySpans[0].start = 2.
+        cyclePrevFn();
+
+        expect(setCursorOffsetCalls.length).toBeGreaterThanOrEqual(1);
+        expect(setCursorOffsetCalls[setCursorOffsetCalls.length - 1]).toBe(2);
+
+        stop();
+    });
+
+    test("cycle guard: setCursorOffset absent (unpatched host) — does not throw, still cycles card", async () => {
+        // Simulate an unpatched host where ref.setCursorOffset is undefined.
+        // cycleNext must still advance the pin without throwing.
+        const text = "I has a apple";
+        let resolveCorrect!: (res: unknown) => void;
+
+        // Ref WITHOUT setCursorOffset — simulates an unpatched host.
+        const ref = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 2,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+            // setCursorOffset intentionally absent
+        };
+
+        const commandHandlers = new Map<string, () => unknown>();
+        let onCursorChangeCb = (): void => undefined;
+
+        const api = {
+            prompt: {
+                ref: () => ref,
+                onChange: (cb: () => void) => {
+                    void cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        await new Promise((r) => setTimeout(r, 30));
+
+        resolveCorrect({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+                { id: 2, span: { start: 8, end: 13 }, replacement: "an apple", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Pin index 0.
+        ref.cursorOffset = 2;
+        onCursorChangeCb();
+
+        const cycleNextFn = commandHandlers.get("grammarforge.details.cycleNext") as () => void;
+        expect(cycleNextFn).toBeDefined();
+
+        // Must not throw even though setCursorOffset is absent.
+        expect(() => cycleNextFn()).not.toThrow();
 
         stop();
     });

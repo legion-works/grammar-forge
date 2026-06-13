@@ -52,6 +52,11 @@ export interface PromptRef {
      */
     readonly cursorOffset?: number;
     /**
+     * Move the cursor to a display-width offset (same model as cursorOffset).
+     * Optional: unpatched builds lack it; feature-detect before calling.
+     */
+    setCursorOffset?(offset: number): void;
+    /**
      * Convert a display-width offset (same model as cursorOffset) to
      * absolute screen coordinates {x, y}. Returns null when the prompt
      * is unmounted, the offset is out of range, or the textarea has not
