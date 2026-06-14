@@ -115,16 +115,16 @@ describe('keepHighlightsBeforeEdit', () => {
     it('keeps every spec whose end is at or before the edit offset', () => {
         // Plan deviation: the original plan text wrote this case with the
         // assertion `[before]` only, which is inconsistent with the doc-comment
-        // rule `cuEnd <= editOffset` (the atBoundary and intersecting cases
+        // rule `cuEnd <= editOffset` (the atBoundary and endsBefore cases
         // would also survive) and with the sibling "exact boundary" test.
         // We follow the spec text (`end <= editOffset`) and the exact-boundary
         // test, which the doc-comment also codifies ("edit is AFTER them").
         const before = stub({ cuStart: 0, cuEnd: 5 })
-        const intersecting = stub({ cuStart: 4, cuEnd: 9 })
+        const endsBefore = stub({ cuStart: 4, cuEnd: 9 })
         const atBoundary = stub({ cuStart: 0, cuEnd: 10 })
         const after = stub({ cuStart: 12, cuEnd: 20 })
-        const out = keepHighlightsBeforeEdit([before, intersecting, atBoundary, after], 10)
-        expect(out).toEqual([before, intersecting, atBoundary])
+        const out = keepHighlightsBeforeEdit([before, endsBefore, atBoundary, after], 10)
+        expect(out).toEqual([before, endsBefore, atBoundary])
     })
     it('treats an exact boundary as keepable (end === editOffset survives)', () => {
         // Span [0, 10) survives when the edit is AT 10: the inserted character
