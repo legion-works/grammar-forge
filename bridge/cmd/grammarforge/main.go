@@ -156,6 +156,19 @@ func main() {
 		})
 	}
 
+	// Tone analysis reuses the rephrase factory; wire its cache, gate, and
+	// optional dedicated backend (GF_TONE_* -> falls back to rephrase -> llm).
+	svc.SetToneCache(cfg.ToneCacheSize)
+	svc.SetToneConfig(cfg.ToneEnabled, cfg.ToneMinChars)
+	if cfg.ToneProvider != "" {
+		svc.SetToneDefaultBackend(&correction.RephraseBackend{
+			Provider: cfg.ToneProvider,
+			BaseURL:  cfg.ToneBaseURL,
+			Model:    cfg.ToneModel,
+			APIKey:   cfg.ToneAPIKey,
+		})
+	}
+
 	go func() {
 		lis, err := net.Listen("tcp", cfg.GRPCAddr)
 		if err != nil {
