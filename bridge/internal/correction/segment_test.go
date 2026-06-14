@@ -186,3 +186,56 @@ func TestSegmentSentencesMultiLineLooksLikeCodeFallsBackPerLine(t *testing.T) {
 	require.Equal(t, 44, segs[1].Start)
 	require.Equal(t, len(text), segs[1].End)
 }
+
+func TestSegmentLinesWithoutTokenizerMultiline(t *testing.T) {
+	// Direct test for the tokenizer-unavailable fallback: one segment per
+	// non-empty line, '\n' bytes uncovered, offsets in the ORIGINAL text.
+	text := "alpha\nbeta\ngamma"
+	segs := segmentLinesWithoutTokenizer(text)
+	require.Len(t, segs, 3)
+	require.Equal(t, SentenceSegment{Start: 0, End: 5}, segs[0])
+	require.Equal(t, SentenceSegment{Start: 6, End: 10}, segs[1])
+	require.Equal(t, SentenceSegment{Start: 11, End: 16}, segs[2])
+	// '\n' bytes (5, 10) must be uncovered; the rest covered.
+	covered := make([]bool, len(text))
+	for _, s := range segs {
+		for i := s.Start; i < s.End; i++ {
+			covered[i] = true
+		}
+	}
+	for i, c := range covered {
+		if text[i] == '\n' {
+			require.False(t, c, "byte %d is '\\n' — must be uncovered", i)
+		} else {
+			require.True(t, c, "byte %d (%q) must be covered", i, text[i])
+		}
+	}
+}
+
+func TestSegmentLinesWithoutTokenizerCRLFStripsCarriageReturn(t *testing.T) {
+	// "a\r\nb" must yield two segments with neither the '\r' nor the '\n'
+	// inside any returned span. CRLF is one line break, not two.
+	text := "a\r\nb"
+	segs := segmentLinesWithoutTokenizer(text)
+	require.Len(t, segs, 2, "CRLF is one boundary, not two")
+	require.Equal(t, SentenceSegment{Start: 0, End: 1}, segs[0])
+	require.Equal(t, SentenceSegment{Start: 3, End: 4}, segs[1])
+	for i, s := range segs {
+		got := text[s.Start:s.End]
+		require.NotContains(t, got, "\r", "seg %d must not contain '\\r'", i)
+		require.NotContains(t, got, "\n", "seg %d must not contain '\\n'", i)
+	}
+}
+
+func TestSegmentLinesWithoutTokenizerBlankLineProducesNoEmptySegment(t *testing.T) {
+	// "a\n\nb" must yield exactly two non-empty segments; the blank line
+	// in the middle produces no segment at all.
+	text := "a\n\nb"
+	segs := segmentLinesWithoutTokenizer(text)
+	require.Len(t, segs, 2, "blank line must not produce a segment")
+	require.Equal(t, SentenceSegment{Start: 0, End: 1}, segs[0])
+	require.Equal(t, SentenceSegment{Start: 3, End: 4}, segs[1])
+	for i, s := range segs {
+		require.Greater(t, s.End, s.Start, "seg %d must be non-empty", i)
+	}
+}
