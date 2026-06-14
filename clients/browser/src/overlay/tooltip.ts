@@ -1,4 +1,4 @@
-// Lightweight hover tooltip — a minimal "preview chip" (category dot +
+// Lightweight hover tooltip — a minimal "preview pill" (category dot +
 // diff). The popover (click → actionable card) is the single source of
 // rich information; the hover chip is intentionally stripped down to a
 // glanceable diff so it never duplicates the card. pointer-events:none
@@ -14,7 +14,14 @@ const VIEWPORT_GUTTER = 10
 const ANCHOR_GAP = 6
 
 export interface TooltipOptions {
-    /** Viewport rect of the edit (word) the tooltip is anchored to. */
+    /**
+     * Viewport rect of the edit (word) the tooltip is anchored to.
+     * ⚠️ The orchestrator MUST measure this BEFORE re-rendering the
+     * underline overlay — a detached node's getBoundingClientRect() is
+     * all zeros and the pill lands off-screen. (Spec: INSTRUCTIONS §D.)
+     * The tooltip takes the rect as a plain value so the ordering is a
+     * caller-side invariant; the function itself never re-measures.
+     */
     anchorRect: DOMRect
     category: Category
     /** Word-level diff: original word(s) (shown red, struck) -> corrected
@@ -43,7 +50,10 @@ export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipH
     const view = doc.defaultView ?? window
 
     const tip = doc.createElement('div')
-    tip.className = 'gf-tooltip'
+    // W1-2: the design-system class is `.gf-tip` (the old `.gf-tooltip`
+    // is gone). The matching tail is appended as `.gf-tip__tail` so the
+    // CSS can draw a downward caret pointing at the word.
+    tip.className = 'gf-tip'
     tip.id = 'gf-chip'
     tip.setAttribute('role', 'tooltip')
 
@@ -63,7 +73,7 @@ export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipH
 
 /** Remove every tooltip mounted in `root`. Used on teardown. */
 export function dismissTooltipsIn(root: ShadowRoot): void {
-    root.querySelectorAll('.gf-tooltip').forEach((el) => el.remove())
+    root.querySelectorAll('.gf-tip').forEach((el) => el.remove())
 }
 
 function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void {
@@ -87,10 +97,13 @@ function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void 
 }
 
 function renderInnerHTML(badge: string, opts: TooltipOptions): string {
+    // The diff fragment is already built (.gf-diff with __old/__arrow/
+    // __new) by diffInnerHTML; the tip just wraps it with the category
+    // dot and the downward caret (gf-tip__tail). The whole pill is
+    // pointer-events:none via the .gf-tip CSS rule — see styles.ts.
     return (
-        `<span class="gf-tooltip__dot" style="background:${badge}"></span>` +
-        `<span class="gf-tooltip__chip-diff">` +
+        `<span class="gf-tip__dot" style="background:${badge}"></span>` +
         diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion) +
-        `</span>`
+        `<span class="gf-tip__tail" aria-hidden="true"></span>`
     )
 }
