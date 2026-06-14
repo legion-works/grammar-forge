@@ -115,6 +115,8 @@ The **Bridge runs two listeners**, which is easy to miss:
   source of truth remains REST `GET /health`. The upstream LT browser add-on is
   closed-source/outdated and cannot be patched (fork `codextde/textchecker` for the
   custom UI instead).
+  `POST /tone` — fixed co-occurring tone tags (field or per-sentence); off unless
+  `GF_TONE_ENABLED=true`; uses the rephrase backend.
 - **Phase order matters.** Phase-1 personalisation is a prompt-level accept/reject cache,
   **not training**. We log `base_model`/`adapter` now to *architect* for the Phase-3 QLoRA
   loop, but don't build it before ~500 accepted corrections.
@@ -130,7 +132,7 @@ The **Bridge runs two listeners**, which is easy to miss:
 
 | Service | Host | Container | Endpoint |
 |---|---|---|---|
-| Bridge REST | 8000 | 8000 | `/correct`, `/correct/stream` (SSE), `/rephrase`, `/signal`, `/health`, `/stats`, **`/v2/check` + `/v2/languages` (LT-compatible, served natively)** |
+| Bridge REST | 8000 | 8000 | `/correct`, `/correct/stream` (SSE), `/rephrase`, `/tone`, `/signal`, `/health`, `/stats`, **`/v2/check` + `/v2/languages` (LT-compatible, served natively)** |
 | Bridge gRPC | 8082 | 8082 | RemoteRule (only consumed by the OPTIONAL real-LT profile) |
 | LanguageTool (optional profile) | 8081 | 8010 | real LT's `/v2/check` (union of LT rules + bridge matches) |
 | LLM backend | — | 8000 (llama.cpp / vLLM) / 11434 (Ollama) | internal only — clients hit the bridge, not the LLM |
