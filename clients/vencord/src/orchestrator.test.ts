@@ -5,7 +5,12 @@ import type { RenderableItem } from '@/lib/pipeline'
 import * as rephraseCard from '@/overlay/rephrase-card'
 import type { BridgeClient } from '@/api/client'
 import { openRephraseFor, type RephraseDeps } from './rephrase'
-import { inputGate, resolveSelectionSpan } from './orchestrator'
+import {
+    inputGate,
+    resolveSelectionSpan,
+    hoverDecision,
+    buildHoverPreviewText,
+} from './orchestrator'
 import { isWithinOverlay } from '@/overlay/shadow-host'
 
 describe('inputGate', () => {
@@ -179,6 +184,101 @@ describe('onFieldBlur overlay-focus guard (vencord)', () => {
 
     it('isWithinOverlay returns false for null relatedTarget', () => {
         expect(isWithinOverlay(null)).toBe(false)
+    })
+})
+
+describe('hoverDecision — pure hover-index change detection', () => {
+    // hoverDecision(itemRects, x, y, prevIndex) → { index: number|null, changed: boolean }
+    // Extracted pure function: given cursor position + item rects + previous hover index,
+    // returns the new index (or null) and whether it changed.
+    it('returns index 0 and changed=true when hovering item 0 from null', () => {
+        const rects = [
+            {
+                item: stub({ diffOriginal: 'teh', diffCorrected: 'the' }),
+                rects: [new DOMRect(10, 10, 40, 20)],
+            },
+        ]
+        const result = hoverDecision(rects, 20, 15, null)
+        expect(result).toEqual({ index: 0, changed: true })
+    })
+
+    it('returns null and changed=true when moving off all items', () => {
+        const rects = [
+            {
+                item: stub({ diffOriginal: 'teh', diffCorrected: 'the' }),
+                rects: [new DOMRect(10, 10, 40, 20)],
+            },
+        ]
+        const result = hoverDecision(rects, 200, 200, 0)
+        expect(result).toEqual({ index: null, changed: true })
+    })
+
+    it('returns same index and changed=false when still hovering the same item', () => {
+        const rects = [
+            {
+                item: stub({ diffOriginal: 'teh', diffCorrected: 'the' }),
+                rects: [new DOMRect(10, 10, 40, 20)],
+            },
+        ]
+        const result = hoverDecision(rects, 25, 15, 0)
+        expect(result).toEqual({ index: 0, changed: false })
+    })
+
+    it('returns index 1 and changed=true when moving from item 0 to item 1', () => {
+        const rects = [
+            {
+                item: stub({ diffOriginal: 'teh', diffCorrected: 'the' }),
+                rects: [new DOMRect(10, 10, 40, 20)],
+            },
+            {
+                item: stub({ diffOriginal: 'aple', diffCorrected: 'apple' }),
+                rects: [new DOMRect(60, 10, 50, 20)],
+            },
+        ]
+        const result = hoverDecision(rects, 80, 15, 0)
+        expect(result).toEqual({ index: 1, changed: true })
+    })
+
+    it('returns null and changed=false when still off all items', () => {
+        const rects = [
+            {
+                item: stub({ diffOriginal: 'teh', diffCorrected: 'the' }),
+                rects: [new DOMRect(10, 10, 40, 20)],
+            },
+        ]
+        const result = hoverDecision(rects, 200, 200, null)
+        expect(result).toEqual({ index: null, changed: false })
+    })
+})
+
+describe('buildHoverPreviewText — preview text from a RenderableItem', () => {
+    // buildHoverPreviewText(item) → string like "teh → the" or "aple → apple"
+    it('returns "original → corrected" for a normal correction', () => {
+        const item = stub({ diffOriginal: 'teh', diffCorrected: 'the', diffIsDeletion: false })
+        expect(buildHoverPreviewText(item)).toBe('teh → the')
+    })
+
+    it('returns "original → (deleted)" for a deletion', () => {
+        const item = stub({ diffOriginal: 'very', diffCorrected: '', diffIsDeletion: true })
+        expect(buildHoverPreviewText(item)).toBe('very → (deleted)')
+    })
+
+    it('hovering item 0 then item 1 yields two distinct preview texts', () => {
+        const item0 = stub({ diffOriginal: 'teh', diffCorrected: 'the', diffIsDeletion: false })
+        const item1 = stub({ diffOriginal: 'aple', diffCorrected: 'apple', diffIsDeletion: false })
+        const text0 = buildHoverPreviewText(item0)
+        const text1 = buildHoverPreviewText(item1)
+        expect(text0).not.toBe(text1)
+        expect(text0).toBe('teh → the')
+        expect(text1).toBe('aple → apple')
+    })
+
+    it('hovering off yields null (no preview text)', () => {
+        // When hoverDecision returns index=null, the caller hides the tooltip.
+        // buildHoverPreviewText is not called; this test documents the null→hide contract.
+        const rects: Array<{ item: ReturnType<typeof stub>; rects: DOMRect[] }> = []
+        const result = hoverDecision(rects, 0, 0, null)
+        expect(result.index).toBeNull()
     })
 })
 

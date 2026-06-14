@@ -5,6 +5,7 @@
 // contenteditable composer (no textarea/input branch, beforeinput-driven
 // check, capture-phase paste fallback). All teardown handles are collected so
 // stop() restores Discord to its unmonitored state.
+import { showTooltip, dismissTooltipsIn, type TooltipHandle } from '@/overlay/tooltip'
 import { createFieldObserver } from '@/input/observer'
 import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
@@ -84,6 +85,37 @@ export function resolveSelectionSpan(
     return { start, end }
 }
 
+/** Pure: given cursor (x,y) + itemRects + the previous hoverItemIndex, return
+ *  the new index (or null) and whether it changed. Extracted so the hover
+ *  decision is unit-testable without a DOM listener harness. */
+export function hoverDecision(
+    itemRects: ReadonlyArray<{ item: RenderableItem; rects: DOMRect[] }>,
+    x: number,
+    y: number,
+    prevIndex: number | null,
+): { index: number | null; changed: boolean } {
+    let index: number | null = null
+    for (let i = 0; i < itemRects.length; i++) {
+        const entry = itemRects[i]!
+        for (const r of entry.rects) {
+            if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+                index = i
+                break
+            }
+        }
+        if (index !== null) break
+    }
+    return { index, changed: index !== prevIndex }
+}
+
+/** Pure: build the glanceable preview text for a hover tooltip chip.
+ *  Mirrors the browser client's tooltip content: "original → corrected"
+ *  or "original → (deleted)" for deletions. */
+export function buildHoverPreviewText(item: RenderableItem): string {
+    if (item.diffIsDeletion) return `${item.diffOriginal} → (deleted)`
+    return `${item.diffOriginal} → ${item.diffCorrected}`
+}
+
 interface FieldState {
     attachment: FieldAttachment
     items: RenderableItem[]
@@ -91,6 +123,11 @@ interface FieldState {
     checkSeq: number
     pasteGraceTimer: ReturnType<typeof setTimeout> | null
     highlightLayer: HighlightLayer | null
+    /** Index of the item the pointer is currently hovering (parallel to
+     *  items), or null when nothing is hovered. Drives the per-word
+     *  highlight intensity via highlightLayer.setState({hoverItemIndex}).
+     *  Mirrors the browser client's FieldState.hoverItemIndex. */
+    hoverItemIndex: number | null
     /** Last apply action's inverse edits (single undo slot; a new apply
      *  overwrites it, undo consumes it). null = nothing to undo. Per-field
      *  so a settings-driven teardown doesn't lose it and different fields
@@ -217,12 +254,26 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     let pillAnchor: DOMRect | null = null
     let panelOpen = false
     let lastActiveField: HTMLElement | null = null
+    // Single hover tooltip (one per overlay, mirrors browser client).
+    // Shared across all fields; a new showTooltip call dismisses the prior.
+    let activeTooltip: TooltipHandle | null = null
+    let activeTooltipItem: RenderableItem | null = null
 
     const clearPasteGrace = (st: FieldState): void => {
         if (st.pasteGraceTimer != null) {
             clearTimeout(st.pasteGraceTimer)
             st.pasteGraceTimer = null
         }
+    }
+
+    /** Hide the hover tooltip immediately and reset tracking state.
+     *  Called on blur, detach, click (before opening the popover), and
+     *  teardown — mirrors the browser client's hideTooltipNow. */
+    const hideTooltipNow = (): void => {
+        activeTooltip?.hide()
+        activeTooltip = null
+        activeTooltipItem = null
+        dismissTooltipsIn(overlay.root)
     }
 
     // Resolve the composer the pill should summarise / be anchored to.
@@ -904,6 +955,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             checkSeq: nextCheckSeq(),
             pasteGraceTimer: null,
             highlightLayer: null,
+            hoverItemIndex: null,
             lastApplied: null,
         }
         fields.set(el, st)
@@ -942,10 +994,72 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 })
             }
             if (!hit) return
+            // Hide the hover preview before opening the full popover so the
+            // two surfaces never overlap (mirrors browser client's click handler).
+            hideTooltipNow()
             openPopoverFor(el, hit.item, hit.rect)
         }
         el.addEventListener('click', onFieldClick)
         cleanups.push(() => el.removeEventListener('click', onFieldClick))
+
+        // Hover preview: mousemove hit-tests the pointer against itemRects and
+        // shows a lightweight tooltip chip (diff only, no buttons). Only updates
+        // when the hovered item index CHANGES so the tooltip doesn't thrash.
+        // mouseleave hides the tooltip and resets hoverItemIndex.
+        // Mirrors the browser client's onFieldMouseMove / onFieldMouseLeave.
+        const onFieldMouseMove = (e: MouseEvent): void => {
+            if (paused) return
+            const s = fields.get(el)
+            if (!s || s.items.length === 0) return
+            const { index, changed } = hoverDecision(
+                s.itemRects,
+                e.clientX,
+                e.clientY,
+                s.hoverItemIndex,
+            )
+            if (changed) {
+                s.hoverItemIndex = index
+                s.highlightLayer?.setState({
+                    focused: document.activeElement === el,
+                    hoverItemIndex: index,
+                })
+            }
+            if (!changed) return
+            if (index === null) {
+                activeTooltip?.hide()
+                activeTooltip = null
+                activeTooltipItem = null
+                return
+            }
+            // Already previewing this exact item: keep it open (no thrash).
+            if (activeTooltipItem === s.items[index] && activeTooltip?.isOpen()) return
+            const item = s.items[index]!
+            activeTooltipItem = item
+            activeTooltip = showTooltip(overlay.root, {
+                anchorRect: s.itemRects[index]!.rects[0] ?? new DOMRect(),
+                category: item.category,
+                diffOriginal: item.diffOriginal,
+                diffCorrected: item.diffCorrected,
+                diffIsDeletion: item.diffIsDeletion,
+            })
+        }
+        const onFieldMouseLeave = (): void => {
+            const s = fields.get(el)
+            if (s && s.hoverItemIndex !== null) {
+                s.hoverItemIndex = null
+                s.highlightLayer?.setState({
+                    focused: document.activeElement === el,
+                    hoverItemIndex: null,
+                })
+            }
+            hideTooltipNow()
+        }
+        el.addEventListener('mousemove', onFieldMouseMove)
+        el.addEventListener('mouseleave', onFieldMouseLeave)
+        cleanups.push(() => {
+            el.removeEventListener('mousemove', onFieldMouseMove)
+            el.removeEventListener('mouseleave', onFieldMouseLeave)
+        })
 
         // Focus-flow tracing for the caret-jump investigation: log every
         // focus hand-off involving the composer, with where focus went/came
@@ -1038,9 +1152,13 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             if (isWithinOverlay(e.relatedTarget)) return
             const s = fields.get(el)
             if (!s) return
+            // Hide the hover tooltip on genuine field exit (mirrors browser
+            // client's hideTooltipNow call in onFieldBlur).
+            hideTooltipNow()
             closePopoverFor(el)
             s.items = []
             s.itemRects = []
+            s.hoverItemIndex = null
             s.highlightLayer?.reconcile([])
         }
         el.addEventListener('blur', onFieldBlur)
@@ -1074,6 +1192,11 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         const st = fields.get(el)
         if (!st) return
         clearPasteGrace(st)
+        // Hide the hover tooltip if it was anchored to this field (mirrors
+        // browser client's hideTooltipNow call in detach).
+        if (activeTooltipItem && st.items.includes(activeTooltipItem)) {
+            hideTooltipNow()
+        }
         st.highlightLayer?.destroy()
         st.highlightLayer = null
         openPopovers.get(el)?.hide()
@@ -1199,6 +1322,8 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // Tear down the pill BEFORE the overlay so its destroy runs in
             // a live root.
             cancelPillHide()
+            // Hide the hover tooltip on teardown (mirrors browser client).
+            hideTooltipNow()
             pillHandle?.destroy()
             pillHandle = null
             pillAnchor = null
