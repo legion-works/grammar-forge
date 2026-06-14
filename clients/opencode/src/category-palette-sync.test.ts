@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { CATEGORY_FG } from './category-palette'
-import { CATEGORY_META, type Category } from '@/api/category'
+import { CATEGORY_META } from '@/api/category'
+import type { Category } from '@/api/types'
 
 describe('category-palette sync (shared source of truth)', () => {
     test('CATEGORY_FG mirrors CATEGORY_META.badge for every Category', () => {
