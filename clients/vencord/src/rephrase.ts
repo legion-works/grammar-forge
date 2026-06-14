@@ -16,6 +16,7 @@ import { getText } from '@/input/text'
 import { applySlateFix, type ApplyTraceLogger } from '@/input/rich-editor-apply'
 import type { BridgeClient } from '@/api/client'
 import { showRephraseCard, showRephraseError, showRephrasePending } from '@/overlay/rephrase-card'
+import { selectRephraseTarget, type RephraseSelection } from '@/hotkeys/rephrase-target'
 
 export interface RephraseScope {
     el: HTMLElement
@@ -27,10 +28,20 @@ export function resolveRephraseScope(
     target: HTMLElement,
     found: RephraseScope | null,
 ): RephraseScope | null {
-    if (found && found.el === target) return found
-    const text = getText(target)
-    if (!text.trim()) return null
-    return { el: target, text, span: { start: 0, end: text.length } }
+    // Delegate to the shared `selectRephraseTarget` so both DOM clients
+    // use the same decision. `wholeText` is a thunk so the selection-match
+    // fast path doesn't pay the whole-field read cost.
+    const out = selectRephraseTarget({
+        selection: found ? toSharedSelection(found) : null,
+        currentEl: target,
+        wholeText: () => getText(target),
+    })
+    if (!out) return null
+    return { el: target, text: out.text, span: out.span }
+}
+
+function toSharedSelection(scope: RephraseScope): RephraseSelection {
+    return { el: scope.el, text: scope.text, span: scope.span }
 }
 
 export interface RephraseDeps {
