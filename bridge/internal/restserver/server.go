@@ -28,6 +28,11 @@ type CorrectionService interface {
 	CountCorrections(ctx context.Context) (int64, error)
 	CountSignals(ctx context.Context) (correction.SignalCounts, error)
 	Rephrase(ctx context.Context, req correction.RephraseRequest) (correction.RephraseResult, error)
+	// AnalyzeTone is the tone-detection entry point. ToneEnabled gates the
+	// /tone route (404 when off) so the endpoint is off the wire until
+	// clients opt in via GF_TONE_ENABLED.
+	AnalyzeTone(ctx context.Context, req correction.ToneRequest) (correction.ToneResult, error)
+	ToneEnabled() bool
 }
 
 // Config is the subset of settings the REST server needs.
@@ -70,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /correct", s.handleCorrect)
 	mux.HandleFunc("POST /correct/stream", s.handleCorrectStream)
 	mux.HandleFunc("POST /rephrase", s.handleRephrase)
+	mux.HandleFunc("POST /tone", s.handleTone)
 	mux.HandleFunc("POST /signal", s.handleSignal)
 	mux.HandleFunc("GET /stats", s.handleStats)
 	mux.HandleFunc("GET /dictionary", s.handleDictionaryList)

@@ -25,6 +25,9 @@ type fakeService struct {
 	rephraseSeen correction.RephraseRequest
 	lastCorrect  correction.Request
 	fastSugs     []correction.Suggestion
+	toneEnabled  bool
+	toneOut      correction.ToneResult
+	toneErr      error
 }
 
 func (f *fakeService) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
@@ -52,6 +55,12 @@ func (f *fakeService) Rephrase(_ context.Context, req correction.RephraseRequest
 	f.rephraseSeen = req
 	return f.rephraseOut, f.rephraseErr
 }
+
+func (f *fakeService) AnalyzeTone(_ context.Context, _ correction.ToneRequest) (correction.ToneResult, error) {
+	return f.toneOut, f.toneErr
+}
+
+func (f *fakeService) ToneEnabled() bool { return f.toneEnabled }
 
 func serve(svc CorrectionService) http.Handler { return New(Config{}, svc).Handler() }
 
@@ -514,4 +523,50 @@ func TestCorrectStreamRequiresFlusher(t *testing.T) {
 	srv.Handler().ServeHTTP(noFlush, req)
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.NotContains(t, rec.Body.String(), "event:")
+}
+
+// POST /tone contract: 200 with {tags, sentences?}; tags always non-nil.
+func TestToneOK(t *testing.T) {
+	svc := &fakeService{
+		toneEnabled: true,
+		toneOut: correction.ToneResult{
+			Tags: []correction.ToneTag{{Tag: "frustrated", Confidence: 0.8}},
+		},
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/tone", strings.NewReader(`{"text":"ugh fine whatever","source":"vencord"}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got toneResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, []toneTagJSON{{Tag: "frustrated", Confidence: 0.8}}, got.Tags)
+	require.Empty(t, got.Sentences)
+}
+
+// 404 when the feature is disabled — keeps the route off the wire for
+// clients that haven't opted in.
+func TestToneDisabled(t *testing.T) {
+	svc := &fakeService{toneEnabled: false}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/tone", strings.NewReader(`{"text":"hi"}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+// 400 on malformed JSON; nothing reaches the service.
+func TestToneBadJSON(t *testing.T) {
+	svc := &fakeService{toneEnabled: true}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/tone", strings.NewReader(`{`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// 400 on empty text — same contract as /rephrase: required field.
+func TestToneEmptyText(t *testing.T) {
+	svc := &fakeService{toneEnabled: true}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/tone", strings.NewReader(`{"text":""}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
 }

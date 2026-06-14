@@ -54,6 +54,36 @@ type rephraseResult struct {
 	Alternatives []string `json:"alternatives"`
 }
 
+// toneRequest is the JSON shape of POST /tone. Granularity is "field" (default)
+// or "sentence". Override mirrors the rephrase backend override.
+type toneRequest struct {
+	Text        string            `json:"text"`
+	Granularity string            `json:"granularity,omitempty"`
+	Source      string            `json:"source,omitempty"`
+	Override    *rephraseOverride `json:"override,omitempty"`
+}
+
+type toneTagJSON struct {
+	Tag        string  `json:"tag"`
+	Confidence float64 `json:"confidence"`
+}
+
+type toneSentenceJSON struct {
+	Span struct {
+		Start int `json:"start"`
+		End   int `json:"end"`
+	} `json:"span"`
+	Tags []toneTagJSON `json:"tags"`
+}
+
+// toneResponse is the JSON shape of the /tone response. Tags is always non-nil
+// (serialises as [] not null). Sentences is present only for granularity
+// "sentence".
+type toneResponse struct {
+	Tags      []toneTagJSON      `json:"tags"`
+	Sentences []toneSentenceJSON `json:"sentences,omitempty"`
+}
+
 // healthResponse is the GET /health payload. premium is statically true:
 // this is a self-hosted "premium" box. Bridge-native clients
 // (Vencord, OpenCode, the textchecker fork) gate premium features on
@@ -311,6 +341,75 @@ func (s *Server) handleRephrase(w http.ResponseWriter, r *http.Request) {
 		Rephrased:    result.Rephrased,
 		Alternatives: alts,
 	})
+}
+
+// handleTone decodes a tone request and delegates to the service. 404 when the
+// feature is disabled, 400 on bad JSON / empty text, 502 on backend error.
+func (s *Server) handleTone(w http.ResponseWriter, r *http.Request) {
+	if !s.svc.ToneEnabled() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "tone disabled"})
+		return
+	}
+	var req toneRequest
+	if err := decodeStrict(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if req.Text == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text is required"})
+		return
+	}
+	gran := correction.ToneGranularityField
+	if req.Granularity == "sentence" {
+		gran = correction.ToneGranularitySentence
+	}
+	var override *correction.RephraseBackend
+	if req.Override != nil {
+		switch req.Override.Provider {
+		case "", "openai", "anthropic":
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown provider"})
+			return
+		}
+		override = &correction.RephraseBackend{
+			Provider: req.Override.Provider,
+			BaseURL:  req.Override.BaseURL,
+			Model:    req.Override.Model,
+			APIKey:   req.Override.APIKey,
+		}
+	}
+	result, err := s.svc.AnalyzeTone(r.Context(), correction.ToneRequest{
+		Text:        req.Text,
+		Granularity: gran,
+		Source:      correction.Source(req.Source),
+		Override:    override,
+	})
+	if err != nil {
+		s.log.Error("tone failed", "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "tone backend unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, toToneResponse(result))
+}
+
+// toToneResponse maps the domain result to the wire shape (Tags always []).
+func toToneResponse(r correction.ToneResult) toneResponse {
+	out := toneResponse{Tags: toToneTags(r.Tags)}
+	for _, sent := range r.Sentences {
+		var sj toneSentenceJSON
+		sj.Span.Start, sj.Span.End = sent.Start, sent.End
+		sj.Tags = toToneTags(sent.Tags)
+		out.Sentences = append(out.Sentences, sj)
+	}
+	return out
+}
+
+func toToneTags(tags []correction.ToneTag) []toneTagJSON {
+	out := make([]toneTagJSON, 0, len(tags))
+	for _, t := range tags {
+		out = append(out, toneTagJSON{Tag: t.Tag, Confidence: t.Confidence})
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
