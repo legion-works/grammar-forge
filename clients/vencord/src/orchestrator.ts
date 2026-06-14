@@ -21,6 +21,7 @@ import {
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue } from '@/signal/queue'
+import { addWordToDictionary, type DictionaryDeps } from './dictionary'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightLayer, type HighlightSpec } from '@/overlay/highlight'
@@ -37,7 +38,6 @@ import {
     showRephraseError,
     showRephrasePending,
 } from '@/overlay/rephrase-card'
-import { showToast } from '@/overlay/toast'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
 import { isDiscordComposer } from './composer'
 import type { GrammarForgeConfig } from './settings'
@@ -183,6 +183,15 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         send: (events) => refreshClient().signal(events),
     })
     const overlay = createOverlayHost()
+    // Deps bundle for the extracted addWordToDictionary (./dictionary.ts).
+    // Built here so the deps reference the live closures (refreshClient,
+    // rerunFor, signalQueue, overlay.root) instead of being passed in.
+    const dictionaryDeps: DictionaryDeps = {
+        client: () => refreshClient(),
+        signalQueue,
+        rerun: (el) => (text) => rerunFor(el)(text),
+        overlayRoot: overlay.root,
+    }
     const fields = new Map<HTMLElement, FieldState>()
     const trackedFields = new Set<HTMLElement>()
     const openPopovers = new WeakMap<HTMLElement, PopoverHandle>()
@@ -362,48 +371,6 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         void applyItem(el, item)
     }
 
-    // Add the flagged word(s) to the user dictionary: persist on the bridge,
-    // log a rejected signal for the edit, re-check (the suggestion
-    // disappears), and offer Undo. The LLM can merge two adjacent unknown
-    // words into ONE edit, so a multi-token original is split and each
-    // token added. Bridge-unreachable failures are debugLog'd only.
-    const addWordToDictionary = async (
-        el: HTMLElement,
-        item: RenderableItem,
-        word: string,
-    ): Promise<void> => {
-        const tokens = [...new Set(word.split(/\s+/).filter((t) => t.length > 0))]
-        if (tokens.length === 0) return
-        const c = refreshClient()
-        try {
-            await Promise.all(tokens.map((t) => c.dictionaryAdd(t)))
-        } catch (e) {
-            debugLog('dictionary add failed', e)
-            return
-        }
-        signalQueue.enqueue({
-            id: item.id,
-            action: 'rejected',
-            category: item.category,
-            source: 'vencord',
-        })
-        debugLog('dictionary add', { tokens, itemId: item.id })
-        void rerunFor(el)(getText(el))
-        const label =
-            tokens.length === 1
-                ? `Added "${tokens[0]}" to dictionary`
-                : `Added ${tokens.length} words to dictionary`
-        showToast(overlay.root, {
-            message: label,
-            actionLabel: 'Undo',
-            onAction: () => {
-                Promise.all(tokens.map((t) => c.dictionaryRemove(t)))
-                    .then(() => rerunFor(el)(getText(el)))
-                    .catch((e) => debugLog('dictionary undo remove failed', e))
-            },
-        })
-    }
-
     // Pill panel: apply ALL corrections. Apply them ONE AT A TIME, last-to-
     // first so earlier offsets stay valid — but YIELD A FRAME between edits
     // so Discord's Slate reconciler syncs before the next applyFix reads the
@@ -505,7 +472,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             original: item.diffOriginal,
             onAddToDictionary:
                 item.category === 'spelling' && item.diffOriginal.trim().length > 0
-                    ? (word: string) => void addWordToDictionary(el, item, word)
+                    ? (word: string) => void addWordToDictionary(el, item, word, dictionaryDeps)
                     : undefined,
             onApply: (replacementIndex: number) => {
                 const live = getText(el)
