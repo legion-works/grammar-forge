@@ -1,14 +1,14 @@
-import { describe, expect, test } from 'vitest'
-import { CATEGORY_FG } from './category-palette'
-import { CATEGORY_META } from '@/api/category'
-import type { Category } from '@/api/types'
+import { describe, expect, test } from "vitest";
+import { CATEGORY_FG } from "./category-palette";
+import { CATEGORY_META } from "@/api/category";
+import type { Category } from "@/api/types";
 
-describe('category-palette sync (shared source of truth)', () => {
-    test('CATEGORY_FG mirrors CATEGORY_META.badge for every Category', () => {
-        const categories = Object.keys(CATEGORY_META) as Category[]
-        expect(Object.keys(CATEGORY_FG).sort()).toEqual([...categories].sort())
+describe("category-palette sync (shared source of truth)", () => {
+    test("CATEGORY_FG mirrors CATEGORY_META.badge for every Category", () => {
+        const categories = Object.keys(CATEGORY_META) as Category[];
+        expect(Object.keys(CATEGORY_FG).sort()).toEqual([...categories].sort());
         for (const cat of categories) {
-            expect(CATEGORY_FG[cat]).toBe(CATEGORY_META[cat].badge)
+            expect(CATEGORY_FG[cat]).toBe(CATEGORY_META[cat].badge);
         }
-    })
-})
+    });
+});

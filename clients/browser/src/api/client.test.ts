@@ -294,7 +294,9 @@ describe('BridgeClient.correctStream', () => {
         // with 2 distinct fast frames + final and assert the order.
         const FAST_A = {
             ...FAST,
-            suggestions: [{ span: { start: 2, end: 5 }, replacement: 'have', model: 'gector' as const }],
+            suggestions: [
+                { span: { start: 2, end: 5 }, replacement: 'have', model: 'gector' as const },
+            ],
         }
         const FAST_B = {
             ...FAST,

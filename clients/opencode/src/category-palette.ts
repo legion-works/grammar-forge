@@ -7,15 +7,13 @@
 // the type union (Category) update propagates here automatically and the sync test
 // (category-palette-sync.test.ts) catches any drift.
 
-import { CATEGORY_META } from '@/api/category'
-import type { Category } from '@/api/types'
+import { CATEGORY_META } from "@/api/category";
+import type { Category } from "@/api/types";
 
 export const CATEGORY_FG: Record<Category, string> = Object.fromEntries(
     Object.entries(CATEGORY_META).map(([k, v]) => [k, v.badge]),
-) as Record<Category, string>
+) as Record<Category, string>;
 
 export function categoryColor(category: string): string {
-    return (CATEGORY_FG as Record<string, string>)[category]
-        ?? CATEGORY_FG.unknown
-        ?? '#9ca3af'
+    return (CATEGORY_FG as Record<string, string>)[category] ?? CATEGORY_FG.unknown ?? "#9ca3af";
 }
