@@ -29,6 +29,7 @@ import {
     tallyByCategory,
     type RenderableItem,
 } from '@/lib/pipeline'
+import { applyScopedOverlayClear } from '@/lib/scoped-clear'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
@@ -711,19 +712,13 @@ function wireRuntime(
                 kept.map((it) => ({ cuStart: it.hlStart, cuEnd: it.hlEnd, category: it.category })),
             )
         } else {
-            // Overlay: for each DROPPED index, hide the pooled node. We
-            // can't call clearItem for indices that have SHIFTED (because
-            // removing item 0 would hide the wrong pool node) — so
-            // iterate the OLD state.items and clear by data-item when the
-            // item is no longer in `kept`. (clearItem looks up by
-            // data-item, so the old index → node mapping is irrelevant;
-            // it hides EVERY rect-node of the dropped item.)
-            const keptSet = new Set(kept)
-            for (let i = 0; i < state.items.length; i++) {
-                if (!keptSet.has(state.items[i]!)) {
-                    state.highlightLayer?.clearItem(i)
-                }
-            }
+            // Overlay path — the per-item clearItem loop + the
+            // null-caret short-circuit live in @/lib/scoped-clear so
+            // the Finding 5 fast path is testable in isolation.
+            const layer = state.highlightLayer as unknown as
+                | { clearItem(i: number): void; reconcile(s: readonly never[]): void }
+                | undefined
+            if (layer) applyScopedOverlayClear(layer, state.items, kept)
         }
     }
 

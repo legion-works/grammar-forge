@@ -19,6 +19,7 @@ import {
     type RenderableItem,
 } from '@/lib/pipeline'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
+import { applyScopedOverlayClear } from '@/lib/scoped-clear'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue } from '@/signal/queue'
 import { addWordToDictionary, type DictionaryDeps } from './dictionary'
@@ -831,12 +832,15 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         kept: readonly RenderableItem[],
     ): void => {
         if (st.items.length === kept.length) return
-        const keptSet = new Set(kept)
-        for (let i = 0; i < st.items.length; i++) {
-            if (!keptSet.has(st.items[i]!)) {
-                st.highlightLayer?.clearItem(i)
-            }
-        }
+        // Mirror of the browser orchestrator's wire-up. The per-item
+        // clearItem loop + the null-caret short-circuit live in
+        // @/lib/scoped-clear so the Finding 5 fast path is testable
+        // in isolation. (Vencord is contenteditable-only → no native
+        // path; the browser helper's native branch is omitted here.)
+        const layer = st.highlightLayer as unknown as
+            | { clearItem(i: number): void; reconcile(s: readonly never[]): void }
+            | undefined
+        if (layer) applyScopedOverlayClear(layer, st.items, kept)
     }
 
     const attach = (el: HTMLElement): void => {
