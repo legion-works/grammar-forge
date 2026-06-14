@@ -17,6 +17,7 @@ import { isUndoRedoKeydown } from '@/input/undo-redo'
 import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
 import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
 import { nextCheckSeq } from '@/lib/check-seq'
+import { mountRephraseFlow, resolveSelection as resolveRephraseSelectionFor } from './rephrase'
 import { isFrameworkRichEditor } from '@/input/rich-editor-apply'
 import { requestMainWorldApply } from '@/input/main-world-apply'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
@@ -79,7 +80,10 @@ export default defineContentScript({
  *  omits the virtual newlines at block boundaries and would disagree with
  *  the flat model on any multi-line selection. Unresolvable endpoints yield
  *  a collapsed {0,0} span, which every caller discards as empty. */
-function selectionToCodeUnitSpan(el: HTMLElement, range: Range): { start: number; end: number } {
+export function selectionToCodeUnitSpan(
+    el: HTMLElement,
+    range: Range,
+): { start: number; end: number } {
     const start = domPointToFlatOffset(el, range.startContainer, range.startOffset)
     const end = domPointToFlatOffset(el, range.endContainer, range.endOffset)
     if (start == null || end == null || end < start) return { start: 0, end: 0 }
@@ -1267,8 +1271,12 @@ function wireRuntime(
             return undefined
         }
         if (isMessage(raw, 'REPHRASE_SELECTION')) {
-            const found = resolveSelection()
-            if (found) void openRephraseFor(found.el, found.text, found.span)
+            // Trigger the rephrase flow for the currently focused field —
+            // same shape as the user clicking the Rephrase button on the
+            // pill. The flow's rephraseFor() uses the selection when in-el,
+            // else the whole field, then the same async path.
+            const el = focusedTrackedField()
+            if (el) rephraseFlow.rephraseFor(el)
             return undefined
         }
         if (isMessage(raw, 'GET_TAB_STATUS')) {
@@ -1301,7 +1309,7 @@ function wireRuntime(
         dismissPopoversIn(overlay.root)
         dismissRephraseButtonsIn(overlay.root)
         dismissRephraseCardsIn(overlay.root)
-        rephraseButtonHandle = null
+        rephraseFlow.dismissButton()
         runtime.active = null
         // dismissPopoversIn removes the popover DOM directly (not via
         // closePopoverFor), so clear the active-field back-reference too.
@@ -1333,153 +1341,28 @@ function wireRuntime(
     }
 
     // ---- Rephrase selection (slow LLM path) ----
-    // The Rephrase button is one-per-root (showRephraseButton dismisses any
-    // prior), so we only need to track the latest handle to hide on dismiss.
-    let rephraseButtonHandle: RephraseButtonHandle | null = null
-    const hideRephraseButton = (): void => {
-        rephraseButtonHandle?.hide()
-        rephraseButtonHandle = null
-    }
-
-    // Resolve the focused tracked field's CURRENT non-empty selection into the
-    // text, its code-unit span, and a viewport rect to anchor UI. Returns null
-    // when there is no usable selection (collapsed, empty, or not in a field).
-    const resolveSelection = (): {
-        el: HTMLElement
-        text: string
-        span: { start: number; end: number }
-        rect: DOMRect
-    } | null => {
-        const el = focusedTrackedField()
-        if (!el) return null
-        if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-            const start = el.selectionStart ?? 0
-            const end = el.selectionEnd ?? 0
-            if (end <= start) return null
-            const text = el.value.slice(start, end)
-            if (!text.trim()) return null
-            const rects = getSpanRectsBatch(el, [{ start, end }])
-            const rect = rects[0]?.[0] ?? el.getBoundingClientRect()
-            return { el, text, span: { start, end }, rect }
-        }
-        // contenteditable
-        const sel = el.ownerDocument.getSelection()
-        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
-        const range = sel.getRangeAt(0)
-        if (!el.contains(range.commonAncestorContainer)) return null
-        const span = selectionToCodeUnitSpan(el, range)
-        // Slice the FLAT model (not range.toString(), which omits the virtual
-        // newlines) so the rephrase stale-guard `live.slice(...) === text`
-        // compares like with like on multi-line selections.
-        const text = getText(el).slice(span.start, span.end)
-        if (!text.trim()) return null
-        const r = range.getBoundingClientRect()
-        const rect = r.width || r.height ? r : el.getBoundingClientRect()
-        return { el, text, span, rect }
-    }
-
-    // Panel Rephrase: the current selection when usable, else the WHOLE field.
-    function rephraseFor(el: HTMLElement): void {
-        const found = resolveSelection()
-        if (found && found.el === el) {
-            void openRephraseFor(el, found.text, found.span)
-            return
-        }
-        const text = getText(el)
-        if (!text.trim()) return
-        void openRephraseFor(el, text, { start: 0, end: text.length })
-    }
-
-    // Rephrase the given selection: call the bridge (slow LLM path), show a
-    // pending state, then a result card. Apply replaces the SELECTION span.
-    async function openRephraseFor(
-        el: HTMLElement,
-        text: string,
-        span: { start: number; end: number },
-    ): Promise<void> {
-        const s = getSettings()
-        hideRephraseButton()
-        // Lightweight pending card on the rephrase layer (was: empty-action
-        // toast hack; the new card carries the round-trip status and updates
-        // in place with the result or an inline error).
-        const pending: RephraseCardHandle = showRephrasePending(overlay.root, {
-            anchorRect: el.getBoundingClientRect(),
-            onClose: () => {},
-        })
-        try {
-            const res = await runtime.client.rephrase({
-                text,
-                tone: s.rephraseTone || undefined,
-                style: s.rephraseStyle || undefined,
-                alternatives: s.rephraseAlternatives,
-                source: 'browser',
-                override: s.rephraseOverride,
-            })
-            if (!ctx.isValid) return
-            pending.hide()
-            showRephraseCard(overlay.root, {
-                anchorRect: el.getBoundingClientRect(),
-                original: res.original,
-                rephrased: res.rephrased,
-                alternatives: res.alternatives,
-                onApply: (chosen: string) => {
-                    // Re-validate the span against live text: if the field
-                    // changed since selection, the offsets may be stale. Only
-                    // apply when the slice still equals the original selection.
-                    const live = getText(el)
-                    if (live.slice(span.start, span.end) !== text) {
-                        debugWarn('rephrase', 'selection span went stale; not applying')
-                        return
-                    }
-                    void applyEdit(el, span, chosen).then(() => {
-                        void rerunFor(el)(getText(el))
-                    })
-                },
-                onClose: () => {},
-            })
-        } catch (e) {
-            debugWarn('rephrase', 'rephrase failed', e)
-            if (!ctx.isValid) return
-            pending.hide()
-            showRephraseError(overlay.root, {
-                anchorRect: el.getBoundingClientRect(),
-                message: 'Rephrase failed',
-                onRetry: () => void openRephraseFor(el, text, span),
-                onClose: () => {},
-            })
-        }
-    }
-
-    // Debounced selection listener: shows/hides the Rephrase button as the
-    // user drags a selection. 150ms debounce so a dragging selection doesn't
-    // thrash. showRephraseButton is one-per-root (dismisses the prior), so
-    // re-showing on every settled change is fine. `found` is captured by
-    // value in the onClick closure (fresh const each tick).
-    let selectionDebounce: ReturnType<typeof setTimeout> | null = null
-    const onSelectionChange = (): void => {
-        if (selectionDebounce) clearTimeout(selectionDebounce)
-        selectionDebounce = setTimeout(() => {
-            selectionDebounce = null
-            const found = resolveSelection()
-            if (!found) {
-                hideRephraseButton()
-                return
+    // Extracted to ./rephrase.ts (Task 4b-1). The orchestrator passes the
+    // active-field resolver as a dep; the module owns the selection
+    // debouncer, the scope decision, the bridge call, and the
+    // apply/stale-guard. The returned `rephraseFor` is wired to the pill's
+    // onRephrase below. The module's stop() is pushed to runtime.cleanups
+    // so a script-invalidation teardown releases the selectionchange
+    // listener and the Rephrase button.
+    const rephraseFlow = mountRephraseFlow({
+        client: runtime.client,
+        overlayRoot: overlay.root,
+        rerun: (el, text) => void rerunFor(el)(text),
+        ctxIsValid: () => ctx.isValid,
+        resolveActiveSelection: () => {
+            for (const tel of runtime.trackedFields) {
+                const f = resolveRephraseSelectionFor(tel)
+                if (f) return f
             }
-            rephraseButtonHandle = showRephraseButton(overlay.root, {
-                anchorRect: found.rect,
-                onClick: () => {
-                    hideRephraseButton()
-                    void openRephraseFor(found.el, found.text, found.span)
-                },
-            })
-        }, 150)
-    }
-    document.addEventListener('selectionchange', onSelectionChange)
-    runtime.cleanups.push(() => {
-        document.removeEventListener('selectionchange', onSelectionChange)
-        if (selectionDebounce) clearTimeout(selectionDebounce)
-        hideRephraseButton()
+            return null
+        },
+        applyEdit,
     })
+    runtime.cleanups.push(rephraseFlow.stop)
 
     // Accept hotkey (in-content keydown, NOT browser.commands — the commands
     // API is unreliable for arbitrary chords cross-OS). Pressing the configured
@@ -1839,7 +1722,7 @@ function wireRuntime(
             onApplyAll: () => void applyAllFor(el),
             onApplyOne: (i) => applyOneFor(el, i),
             onUndo: () => void undoFor(el),
-            onRephrase: () => rephraseFor(el),
+            onRephrase: () => rephraseFlow.rephraseFor(el),
             undoAvailable: (state.lastApplied?.length ?? 0) > 0,
             // Persisted (session) pill drag offset — a dragged spot survives
             // re-renders and the enabled↔disabled swap (state in start() scope),
