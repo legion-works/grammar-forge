@@ -104,6 +104,25 @@ export function buildRenderableItems(
             dropped += 1
             continue
         }
+        // C1 client belt (newline→spurious-correction). The bridge's C2 fix
+        // is the root cause; this is an instant client guard + regression
+        // test, redundant once C2 ships but cheap and defensive. Mirrors the
+        // OpenCode part-filter pattern (clients/opencode/src/part-filter.ts)
+        // — the spec calls this out by name.
+        //
+        // Plan deviation: the plan text suggested a boundary-only check
+        // (`text[cu.start] === '\n' || text[cu.end] === '\n'`), but the
+        // "drops suggestions whose span crosses a newline" test demands we
+        // also catch spans that contain a newline INTERNALLY, and the
+        // "abuts end boundary" test demands a lookahead past cu.end. The
+        // contract is "abuts OR crosses", so the slice-with-lookahead check
+        // is the right one (catches all three: internal, start-abut, end-abut).
+        if (text.slice(cu.start, cu.end + 1).includes('\n')) {
+            // oxlint-disable-next-line no-console
+            console.warn('grammarforge: dropped suggestion crossing newline', cu, s)
+            dropped += 1
+            continue
+        }
         const replacements =
             s.replacements && s.replacements.length > 0 ? s.replacements : [s.replacement]
         const original = text.slice(cu.start, cu.end)

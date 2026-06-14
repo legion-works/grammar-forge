@@ -208,6 +208,61 @@ describe('buildRenderableItems', () => {
         expect(items).toHaveLength(1)
         expect(items[0]?.preview).toBeUndefined()
     })
+
+    it('drops suggestions whose span abuts a newline (start boundary)', () => {
+        const res = {
+            original: 'a\nb',
+            suggestions: [
+                { span: { start: 1, end: 2 }, replacement: 'B', model: 'gector' as const },
+            ],
+            score: 90,
+        }
+        const { items, dropped } = buildRenderableItems('a\nb', res, {})
+        expect(items).toEqual([])
+        expect(dropped).toBe(1)
+    })
+
+    it('drops suggestions whose span abuts a newline (end boundary)', () => {
+        // The suggestion ends right before a \n — the rect will land on a
+        // wrapped line, not the joined token; the client belt drops it.
+        const res = {
+            original: 'a\nb',
+            suggestions: [
+                { span: { start: 0, end: 1 }, replacement: 'A', model: 'gector' as const },
+            ],
+            score: 90,
+        }
+        const { items, dropped } = buildRenderableItems('a\nb', res, {})
+        expect(items).toEqual([])
+        expect(dropped).toBe(1)
+    })
+
+    it('drops suggestions whose span crosses a newline', () => {
+        // [0, 3) on "a\nbc" crosses the \n.
+        const res = {
+            original: 'a\nbc',
+            suggestions: [
+                { span: { start: 0, end: 3 }, replacement: 'A BC', model: 'gector' as const },
+            ],
+            score: 90,
+        }
+        const { items, dropped } = buildRenderableItems('a\nbc', res, {})
+        expect(items).toEqual([])
+        expect(dropped).toBe(1)
+    })
+
+    it('keeps suggestions whose span is fully on one line (no-newline control)', () => {
+        const res = {
+            original: 'teh quick',
+            suggestions: [
+                { span: { start: 0, end: 3 }, replacement: 'the', model: 'gector' as const },
+            ],
+            score: 90,
+        }
+        const { items, dropped } = buildRenderableItems('teh quick', res, {})
+        expect(items).toHaveLength(1)
+        expect(dropped).toBe(0)
+    })
 })
 
 describe('isSpanStillValid', () => {
