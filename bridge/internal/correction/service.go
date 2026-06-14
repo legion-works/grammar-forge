@@ -92,6 +92,15 @@ type Service struct {
 	// overEditRules pattern: text-level repair before diffToSuggestions so
 	// the fix fires even when the LLM misses it.
 	articleFix bool
+	// irregularPluralFix enables the Harper irregular-plural possessive
+	// misfire repair (see irregular_plural.go). When true,
+	// repairIrregularPluralPossessive is applied to the Harper fast-path
+	// suggestions before they are merged, replacing confident-wrong
+	// possessive suggestions (tooths→tooth's) with the correct plural
+	// (teeth). Default false (zero value); enabled by
+	// SetIrregularPluralFix(true) / GF_IRREGULAR_PLURAL_FIX=true (default
+	// true in config).
+	irregularPluralFix bool
 }
 
 // MergeFastEditsMode values for Service.mergeFastEditsMode
@@ -155,6 +164,15 @@ func (s *Service) SetOverEditRules(rules []OverEditRule) { s.overEditRules = rul
 // LLM misses them. Default false (zero value); set true in main when
 // GF_ARTICLE_FIX is enabled (default true).
 func (s *Service) SetArticleFix(enabled bool) { s.articleFix = enabled }
+
+// SetIrregularPluralFix enables or disables the Harper irregular-plural
+// possessive misfire repair (GF_IRREGULAR_PLURAL_FIX). When enabled,
+// repairIrregularPluralPossessive is applied to the raw Harper suggestions
+// before they are merged into the fast-path result, replacing confident-wrong
+// possessive suggestions (tooths→tooth's, womans→woman's, luggages→luggage's)
+// with the correct plural (teeth, women, luggage). Default false (zero value);
+// set true in main when GF_IRREGULAR_PLURAL_FIX is enabled (default true).
+func (s *Service) SetIrregularPluralFix(enabled bool) { s.irregularPluralFix = enabled }
 
 // SetMergeFastEditsMode selects the escalation result composition (see the
 // MergeFastEdits* constants). Optional; zero value = legacy replace semantics.
@@ -557,6 +575,11 @@ func (s *Service) runFast(ctx context.Context, req Request) []Suggestion {
 			s.log.Warn("fast corrector failed", "model", c.Name(), "err", err)
 			continue
 		}
+		// Repair Harper's irregular-plural possessive misfires before merging.
+		// Applied per-corrector so the fix fires on Harper's slice before
+		// GECToR suggestions are appended (safe: GECToR never emits
+		// CategorySpelling, so the filter is a no-op for GECToR output).
+		sugs = repairIrregularPluralPossessive(s.irregularPluralFix, sugs)
 		raw = append(raw, sugs...)
 	}
 	return mergeSuggestions(raw)
@@ -601,6 +624,9 @@ func (s *Service) runFastIncremental(ctx context.Context, req Request, onFast fu
 			s.log.Warn("fast corrector failed", "model", c.Name(), "err", err)
 			continue
 		}
+		// Mirror runFast: repair irregular-plural possessive misfires before
+		// accumulating so the streaming first frame is also correct.
+		sugs = repairIrregularPluralPossessive(s.irregularPluralFix, sugs)
 		accumulated = append(accumulated, sugs...)
 		preview := mergeSuggestions(accumulated)
 		if s.allowlist != nil && len(preview) > 0 {

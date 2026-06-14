@@ -140,6 +140,13 @@ type Config struct {
 	// GF_ARTICLE_FIX=false. The full cold golden eval is the FP gate before
 	// expanding the silent-h stem list beyond v1's 5 unambiguous stems.
 	ArticleFixEnabled bool
+	// IrregularPluralFixEnabled wires the Harper irregular-plural possessive
+	// misfire repair (correction.repairIrregularPluralPossessive) applied to
+	// Harper fast-path suggestions before merging. Replaces confident-wrong
+	// possessive suggestions (tooths→tooth's, womans→woman's,
+	// luggages→luggage's) with the correct plural (teeth, women, luggage).
+	// Default true; opt out with GF_IRREGULAR_PLURAL_FIX=false.
+	IrregularPluralFixEnabled bool
 
 	// Phase-2 P4 prompt-cache personalisation. On by default. The cache is
 	// TTL-bounded (no background goroutine) and the snapshot is read
@@ -256,9 +263,10 @@ func Load(getenv Getenv) Config {
 		EscalateOnFastEdit:     getBool("GF_ESCALATE_ON_FAST_EDIT", true),
 		SkipLLMForSpellingOnly: getBool("GF_SKIP_LLM_FOR_SPELLING_ONLY", false),
 		MergeFastEditsMode:     get("GF_MERGE_FAST_EDITS", ""),
-		OverEditFilterEnabled:  getBool("GF_OVEREDIT_FILTER", true),
-		ArticleFixEnabled:      getBool("GF_ARTICLE_FIX", true),
-		FastHintsEnabled:       getBool("GF_FAST_HINTS", false),
+		OverEditFilterEnabled:      getBool("GF_OVEREDIT_FILTER", true),
+		ArticleFixEnabled:          getBool("GF_ARTICLE_FIX", true),
+		IrregularPluralFixEnabled:  getBool("GF_IRREGULAR_PLURAL_FIX", true),
+		FastHintsEnabled:           getBool("GF_FAST_HINTS", false),
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),
 		PersonalizationTTL:     getDuration("GF_PERSONALIZATION_TTL", 5*time.Minute),

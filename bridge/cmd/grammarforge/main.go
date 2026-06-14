@@ -124,6 +124,12 @@ func main() {
 	// GF_ARTICLE_FIX=false disables. The full cold golden eval is the FP gate
 	// before expanding the silent-h stem list (see internal/correction/article.go).
 	svc.SetArticleFix(cfg.ArticleFixEnabled)
+	// Harper irregular-plural possessive misfire repair: applied to Harper
+	// fast-path suggestions before merging. Replaces confident-wrong
+	// possessive suggestions (tooths→tooth's, womans→woman's,
+	// luggages→luggage's) with the correct plural (teeth, women, luggage).
+	// Default on; GF_IRREGULAR_PLURAL_FIX=false disables.
+	svc.SetIrregularPluralFix(cfg.IrregularPluralFixEnabled)
 	// Merge-not-replace escalation composition (experimental spike; default
 	// "" keeps the measured replace semantics). See correction.MergeFastEdits*.
 	if cfg.MergeFastEditsMode != "" {
