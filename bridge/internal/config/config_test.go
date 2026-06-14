@@ -317,3 +317,30 @@ func TestFastHintsDefaultsOffAndReadsEnv(t *testing.T) {
 	require.False(t, Load(off).FastHintsEnabled,
 		"GF_FAST_HINTS=false must explicitly disable, not fall through to the default")
 }
+
+func TestLoadToneConfig(t *testing.T) {
+	// defaults
+	c := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, "", c.ToneProvider)
+	require.False(t, c.ToneEnabled)
+	require.Equal(t, 80, c.ToneMinChars)
+	require.Equal(t, 512, c.ToneCacheSize)
+
+	env := map[string]string{
+		"GF_TONE_PROVIDER":   "anthropic",
+		"GF_TONE_BASE_URL":   "https://api.deepseek.com/anthropic",
+		"GF_TONE_MODEL":      "deepseek-v4-flash",
+		"GF_TONE_API_KEY":    "secret",
+		"GF_TONE_ENABLED":    "true",
+		"GF_TONE_MIN_CHARS":  "40",
+		"GF_TONE_CACHE_SIZE": "1024",
+	}
+	c2 := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	require.Equal(t, "anthropic", c2.ToneProvider)
+	require.Equal(t, "https://api.deepseek.com/anthropic", c2.ToneBaseURL)
+	require.Equal(t, "deepseek-v4-flash", c2.ToneModel)
+	require.Equal(t, "secret", c2.ToneAPIKey)
+	require.True(t, c2.ToneEnabled)
+	require.Equal(t, 40, c2.ToneMinChars)
+	require.Equal(t, 1024, c2.ToneCacheSize)
+}

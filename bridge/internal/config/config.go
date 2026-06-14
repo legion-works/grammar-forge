@@ -29,7 +29,23 @@ type Config struct {
 	RephraseBaseURL  string
 	RephraseModel    string
 	RephraseAPIKey   string // env only, never logged
-	DBPath           string
+	// Optional dedicated tone backend (GF_TONE_*). Empty Provider => fall back
+	// to the rephrase backend, then the default LLM. Mirrors Rephrase*.
+	ToneProvider string // "" | "openai" | "anthropic"
+	ToneBaseURL  string
+	ToneModel    string
+	ToneAPIKey   string // env only, never logged
+	// ToneEnabled gates the /tone endpoint (default false — no accidental paid
+	// calls until the clients ship; enable explicitly in the deploy compose).
+	ToneEnabled bool
+	// ToneMinChars: field-granularity tone requests below this many bytes return
+	// empty without calling the LLM (defense-in-depth; on-demand sentence
+	// requests are exempt). 0 = no floor.
+	ToneMinChars int
+	// ToneCacheSize is the LRU capacity for the per-text-unit tone cache
+	// (0 disables; default 512).
+	ToneCacheSize int
+	DBPath        string
 	LogLevel         string
 
 	// Fast path (Plan 1C): Harper + GECToR run in-process; the LLM is
@@ -208,6 +224,14 @@ func Load(getenv Getenv) Config {
 		RephraseBaseURL:  get("GF_REPHRASE_BASE_URL", ""),
 		RephraseModel:    get("GF_REPHRASE_MODEL", ""),
 		RephraseAPIKey:   get("GF_REPHRASE_API_KEY", ""),
+
+		ToneProvider:  get("GF_TONE_PROVIDER", ""),
+		ToneBaseURL:   get("GF_TONE_BASE_URL", ""),
+		ToneModel:     get("GF_TONE_MODEL", ""),
+		ToneAPIKey:    get("GF_TONE_API_KEY", ""),
+		ToneEnabled:   getBool("GF_TONE_ENABLED", false),
+		ToneMinChars:  getInt("GF_TONE_MIN_CHARS", 80),
+		ToneCacheSize: getInt("GF_TONE_CACHE_SIZE", 512),
 
 		GECToRModelDir:         get("GF_GECTOR_MODEL_DIR", "/models/gector"),
 		HarperEnabled:          getBool("GF_HARPER_ENABLED", true),
