@@ -19,6 +19,7 @@ import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
 import { nextCheckSeq } from '@/lib/check-seq'
 import { mountRephraseFlow, resolveSelection as resolveRephraseSelectionFor } from './rephrase'
 import { mountPausedMode, nextPauseMode, type PauseMode } from './pause'
+import { mountReanchor } from './reanchor'
 import { isFrameworkRichEditor } from '@/input/rich-editor-apply'
 import { requestMainWorldApply } from '@/input/main-world-apply'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
@@ -778,76 +779,36 @@ function wireRuntime(
             return true
         }
 
-    // Shared, rAF-coalesced loop that re-processes every tracked field on
-    // scroll/resize. One document scroll (capture) + window resize listener
-    // drives it (installed in wireRuntime, not per field), so an N-field page
-    // incurs N field updates per frame IN TOTAL, not N × (scroll-fires-per-
-    // frame). The per-field ResizeObserver (which observes THIS element's box,
-    // not the viewport) still routes here so a single-element resize also
-    // coalesces.
-    let remeasureScheduled = false
-    const scheduleRemeasureAll = (): void => {
-        if (remeasureScheduled) return
-        remeasureScheduled = true
-        requestAnimationFrame(() => {
-            remeasureScheduled = false
-            for (const el of runtime.trackedFields) remeasureField(el)
-        })
-    }
-    // Re-measure a field's hit-test rects (+ reconcile its OVERLAY highlights)
-    // and re-anchor its status pill, on scroll/resize. Runs for BOTH native and
-    // overlay fields:
-    //   - itemRects is rebuilt for every field — the hover/click hit-test reads
-    //     it, and on a native field it would otherwise go stale on scroll
-    //     (breaking the hover popup + click popover after scrolling).
-    //   - The overlay highlight layer is reconciled ONLY for overlay fields
-    //     (native CSS Custom Highlight visuals self-track reflow).
-    //   - The pill is re-anchored to the field's live rect (with the drag
-    //     offset) so it tracks the field instead of staying pinned.
-    // Defensive: getSpanRectsBatch is wrapped so a measurement throw can't kill
-    // the loop (or the pill reposition) for the rest of the fields.
-    const remeasureField = (el: HTMLElement): void => {
-        const st = runtime.fields.get(el)
-        if (!st) return
-        if (st.items.length > 0) {
-            // Highlight/hit-test the WORD range (hlStart/hlEnd), not the raw edit
-            // span — a zero-width insertion (e.g. "sw"->"saw") has no rect.
-            const spans = st.items.map((it) => ({ start: it.hlStart, end: it.hlEnd }))
-            let allRects: DOMRect[][]
-            try {
-                allRects = getSpanRectsBatch(el, spans)
-            } catch {
-                // Measurement failed (detached node / odd layout) — leave the
-                // prior rects in place and still reposition the pill below.
-                allRects = []
+    // Shared, rAF-coalesced scroll/resize re-anchor loop. Extracted to
+    // ./reanchor.ts (Task 4b-3) as a byte-equivalent shell; the perf plan
+    // rewrites the per-field body in-place. We stitch the orchestrator's
+    // `item` references back into the reanchor's itemRects patch via
+    // setFieldState (reanchor never sees the items).
+    const reanchor = mountReanchor({
+        getTrackedFields: () => runtime.trackedFields,
+        getFieldState: (el) => {
+            const st = runtime.fields.get(el)
+            if (!st) return undefined
+            return {
+                items: st.items,
+                useNativeHighlight: st.useNativeHighlight,
+                highlightLayer: st.highlightLayer,
+                hoverItemIndex: st.hoverItemIndex,
+                statusHandle: st.statusHandle
+                    ? { reposition: (r) => st.statusHandle!.reposition(r) }
+                    : null,
             }
-            if (allRects.length > 0) {
-                st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
-                if (!st.useNativeHighlight && st.highlightLayer) {
-                    const specs: HighlightSpec[] = []
-                    for (let i = 0; i < st.items.length; i++) {
-                        for (const rect of allRects[i] ?? [])
-                            specs.push({ rect, category: st.items[i]!.category, itemIndex: i })
-                    }
-                    st.highlightLayer.reconcile(specs)
-                    st.highlightLayer.setState({
-                        focused: document.activeElement === el,
-                        hoverItemIndex: st.hoverItemIndex,
-                    })
-                }
-            }
-        }
-        // Re-anchor the pill to the field's current position (with the live
-        // drag offset). Cheap; runs even when there are no items so the pill
-        // tracks the field whether or not it has suggestions.
-        st.statusHandle?.reposition(el.getBoundingClientRect())
-    }
-    document.addEventListener('scroll', scheduleRemeasureAll, { capture: true, passive: true })
-    window.addEventListener('resize', scheduleRemeasureAll, { passive: true })
-    runtime.cleanups.push(() => {
-        document.removeEventListener('scroll', scheduleRemeasureAll, { capture: true })
-        window.removeEventListener('resize', scheduleRemeasureAll)
+        },
+        setFieldState: (el, patch) => {
+            const st = runtime.fields.get(el)
+            if (!st) return
+            st.itemRects = st.items.map((it, i) => ({
+                item: it,
+                rects: patch.itemRects[i]?.rects ?? [],
+            }))
+        },
     })
+    runtime.cleanups.push(reanchor.stop)
 
     const attach = (el: HTMLElement): void => {
         if (runtime.fields.has(el)) return
@@ -1133,7 +1094,7 @@ function wireRuntime(
         // hover/click hit-test rects would go stale on scroll), and both
         // re-anchor their status pill.
         runtime.trackedFields.add(el)
-        const ro = new ResizeObserver(() => scheduleRemeasureAll())
+        const ro = new ResizeObserver(() => reanchor.schedule())
         ro.observe(el)
         runtime.cleanups.push(() => ro.disconnect())
 
