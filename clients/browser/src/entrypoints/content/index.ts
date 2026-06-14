@@ -54,6 +54,7 @@ import {
     type Settings,
 } from '@/storage/settings'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
+import { handleRephraseHotkey } from './keydown-rephrase'
 import { debugLog, debugWarn, setDebugLoggingEnabled } from '@/lib/debug-log'
 import type { ContentScriptContext } from 'wxt/utils/content-script-context'
 import type { Category, CorrectResponse } from '@/api/types'
@@ -1263,6 +1264,20 @@ function wireRuntime(
     const onKeydown = (e: KeyboardEvent): void => {
         const s = getSettings()
         const field = focusedTrackedField()
+        // Rephrase hotkey runs BEFORE the accept branch (handles Rephrase on
+        // a focused tracked field, with or without active suggestions). The
+        // matchers are distinct by default (Ctrl+/ vs Ctrl+.) so order is
+        // documentation, not a tie-breaker — but if a user rebinds the
+        // accept hotkey to Ctrl+/ the rephrase branch wins.
+        if (
+            handleRephraseHotkey(e, {
+                hotkey: s.rephraseHotkey,
+                rephraseFor: (el) => rephraseFlow.rephraseFor(el),
+                field,
+            })
+        ) {
+            return
+        }
         const hasSuggestions = field != null && (runtime.fields.get(field)?.items.length ?? 0) > 0
         if (
             !shouldAcceptHotkey(e, {
