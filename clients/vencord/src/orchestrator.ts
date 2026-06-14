@@ -22,6 +22,7 @@ import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue } from '@/signal/queue'
 import { addWordToDictionary, type DictionaryDeps } from './dictionary'
+import { openRephraseFor, resolveRephraseScope, type RephraseDeps } from './rephrase'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightLayer, type HighlightSpec } from '@/overlay/highlight'
@@ -32,12 +33,7 @@ import {
     type StatusButtonHandle,
     type StatusButtonOptions,
 } from '@/overlay/status-button'
-import {
-    dismissRephraseCardsIn,
-    showRephraseCard,
-    showRephraseError,
-    showRephrasePending,
-} from '@/overlay/rephrase-card'
+import { dismissRephraseCardsIn } from '@/overlay/rephrase-card'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
 import { isDiscordComposer } from './composer'
 import type { GrammarForgeConfig } from './settings'
@@ -191,6 +187,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         signalQueue,
         rerun: (el) => (text) => rerunFor(el)(text),
         overlayRoot: overlay.root,
+    }
+    // Deps bundle for the extracted openRephraseFor (./rephrase.ts).
+    const rephraseDeps: RephraseDeps = {
+        client: () => refreshClient(),
+        overlayRoot: overlay.root,
+        debugLog,
     }
     const fields = new Map<HTMLElement, FieldState>()
     const trackedFields = new Set<HTMLElement>()
@@ -560,68 +562,6 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         return { el, text, span }
     }
 
-    // Rephrase the focused composer's current selection (when usable), else
-    // the WHOLE field. No selection → use whole text as the span.
-    const rephraseFor = (el: HTMLElement): void => {
-        const found = resolveSelection()
-        if (found && found.el === el) {
-            void openRephraseFor(el, found.text, found.span)
-            return
-        }
-        const text = getText(el)
-        if (!text.trim()) return
-        void openRephraseFor(el, text, { start: 0, end: text.length })
-    }
-
-    // Rephrase the given selection: call the bridge (slow LLM path), show a
-    // pending state, then a result card. Apply replaces the SELECTION span.
-    const openRephraseFor = async (
-        el: HTMLElement,
-        text: string,
-        span: { start: number; end: number },
-    ): Promise<void> => {
-        debugLog('rephrase start', { textLen: text.length, span })
-        const pending = showRephrasePending(overlay.root, {
-            anchorRect: el.getBoundingClientRect(),
-            onClose: () => {},
-        })
-        try {
-            const res = await refreshClient().rephrase({ text, source: 'vencord' })
-            pending.hide()
-            showRephraseCard(overlay.root, {
-                anchorRect: el.getBoundingClientRect(),
-                original: res.original,
-                rephrased: res.rephrased,
-                alternatives: res.alternatives,
-                onApply: (chosen: string) => {
-                    // Re-validate the span against live text: if the field
-                    // changed since selection, the offsets may be stale.
-                    // Only apply when the slice still equals the original
-                    // selection.
-                    const live = getText(el)
-                    if (live.slice(span.start, span.end) !== text) {
-                        debugLog('rephrase stale span; not applying')
-                        return
-                    }
-                    void applySlateFix(el, span, chosen, debugLog).then(() => {
-                        void rerunFor(el)(getText(el))
-                    })
-                },
-                onClose: () => {},
-            })
-            debugLog('rephrase done', { alternatives: res.alternatives.length })
-        } catch (e) {
-            debugLog('rephrase failed', e)
-            pending.hide()
-            showRephraseError(overlay.root, {
-                anchorRect: el.getBoundingClientRect(),
-                message: 'Rephrase failed',
-                onRetry: () => void openRephraseFor(el, text, span),
-                onClose: () => {},
-            })
-        }
-    }
-
     const focusedTrackedField = (): HTMLElement | null => {
         const active = document.activeElement
         if (!(active instanceof HTMLElement)) return null
@@ -659,7 +599,17 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             onApplyAll: () => void applyAllFor(el),
             onApplyOne: (i) => applyOneFor(el, i),
             onUndo: () => void undoFor(el),
-            onRephrase: () => rephraseFor(el),
+            onRephrase: () => {
+                const found = resolveSelection()
+                const scope = resolveRephraseScope(
+                    el,
+                    found ? { el: found.el, text: found.text, span: found.span } : null,
+                )
+                if (!scope) return
+                void openRephraseFor(scope.el, scope.text, scope.span, rephraseDeps, () => {
+                    void rerunFor(el)(getText(el))
+                })
+            },
             undoAvailable: (st.lastApplied?.length ?? 0) > 0,
             initiallyVisible: true,
         }
