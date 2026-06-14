@@ -22,6 +22,7 @@ import {
 } from '@/overlay/rephrase-card'
 import { debugWarn } from '@/lib/debug-log'
 import { getSettings } from '@/storage/settings'
+import { selectRephraseTarget, type RephraseSelection } from '@/hotkeys/rephrase-target'
 import type { BridgeClient } from '@/api/client'
 
 export interface RephraseScope {
@@ -62,16 +63,23 @@ export function resolveSelection(el: HTMLElement): RephraseScope | null {
 /** Pure: given a `resolveSelection()` result and the target element, decide
  *  which text+span the rephrase should target. Selection matches the
  *  element → use it. Otherwise → whole field (empty/trim-only fields
- *  short-circuit to null so the caller can no-op). */
+ *  short-circuit to null so the caller can no-op). Delegates to the
+ *  shared `selectRephraseTarget` so both DOM clients use the same
+ *  decision. */
 export function resolveRephraseScope(
     el: HTMLElement,
     found: RephraseScope | null,
     getWholeFieldText: (el: HTMLElement) => string = getText,
 ): { text: string; span: { start: number; end: number } } | null {
-    if (found && found.el === el) return { text: found.text, span: found.span }
-    const text = getWholeFieldText(el)
-    if (!text.trim()) return null
-    return { text, span: { start: 0, end: text.length } }
+    return selectRephraseTarget({
+        selection: found ? toSharedSelection(found) : null,
+        currentEl: el,
+        wholeText: () => getWholeFieldText(el),
+    })
+}
+
+function toSharedSelection(scope: RephraseScope): RephraseSelection {
+    return { el: scope.el, text: scope.text, span: scope.span }
 }
 
 export interface RephraseDeps {

@@ -20,19 +20,21 @@ export interface RephraseSelection {
 export interface SelectRephraseTargetInput {
     selection: RephraseSelection | null
     currentEl: HTMLElement | string
-    wholeText: string
+    wholeText: string | (() => string)
 }
 
 /** Pure: pick the rephrase target. Selection wins when its `el` matches
  *  `currentEl`; otherwise fall back to the whole field. A whitespace-only
- *  whole field returns null so the caller can no-op. */
+ *  whole field returns null so the caller can no-op. `wholeText` may be a
+ *  string or a thunk; the thunk is only invoked on the fallback path so a
+ *  selection match doesn't pay the whole-field read cost. */
 export function selectRephraseTarget(
     input: SelectRephraseTargetInput,
 ): { text: string; span: { start: number; end: number } } | null {
     if (input.selection && input.selection.el === input.currentEl) {
         return { text: input.selection.text, span: input.selection.span }
     }
-    const text = input.wholeText
+    const text = typeof input.wholeText === 'function' ? input.wholeText() : input.wholeText
     if (!text.trim()) return null
     return { text, span: { start: 0, end: text.length } }
 }

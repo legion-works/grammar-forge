@@ -15,6 +15,7 @@ const settings = (over: Partial<Settings> = {}): Settings => ({
     autocorrect: false,
     acceptHotkey: 'Alt+Period',
     onDemandHotkey: 'Ctrl+Shift+Period',
+    rephraseHotkey: 'Ctrl+/',
     suppressNativeSpellcheck: false,
     debugLogging: false,
     rephraseTone: '',
