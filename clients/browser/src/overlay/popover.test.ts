@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// Unit tests for the popover's action wiring. The glass visual is not
-// unit-tested; we only verify that Apply / Show N more / Ignore once /
-// Add to dictionary buttons dispatch the right callback with the right
-// replacement index. Outside-click dismiss is also tested.
+// Unit tests for the correction card's action wiring + the W1-3 surface
+// (source chip, confidence bar, alt chips, nav, keyboard). The glass
+// visual is not unit-tested; we verify the rendered structure, the
+// dispatched callbacks, and the keyboard shortcuts.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { showPopover, type PopoverOptions } from '@/overlay/popover'
 
@@ -65,7 +65,7 @@ function mkRoot(): ShadowRoot {
     return host.attachShadow({ mode: 'open' })
 }
 
-describe('showPopover', () => {
+describe('showPopover (W1-3: correction card)', () => {
     let root: ShadowRoot
     beforeEach(() => {
         root = mkRoot()
@@ -75,46 +75,110 @@ describe('showPopover', () => {
         removePopoverStub()
     })
 
-    it('renders a panel with the category label, message, and primary replacement', () => {
-        showPopover(root, mkOptions())
-        const panel = root.querySelector('.gf-panel')
-        expect(panel).not.toBeNull()
-        expect(panel?.textContent).toContain('Spelling')
-        expect(panel?.textContent).toContain('Misspelled word')
-        expect(panel?.textContent).toContain('hello')
+    it('renders a .gf-card with category label, message, source chip, and primary replacement', () => {
+        showPopover(root, mkOptions({ model: 'harper' }))
+        const card = root.querySelector('.gf-card')
+        expect(card).not.toBeNull()
+        expect(card?.getAttribute('role')).toBe('dialog')
+        expect(card?.getAttribute('aria-label')).toBe('Grammar correction')
+        expect(card?.textContent).toContain('Spelling')
+        expect(card?.textContent).toContain('Misspelled word')
+        expect(card?.textContent).toContain('hello')
+        // Source chip shows Harper with the "· instant" hint (W1-3)
+        const chip = card?.querySelector('.gf-chip-source')
+        expect(chip).not.toBeNull()
+        expect(chip?.textContent).toContain('Harper')
+        expect(chip?.classList.contains('gf-chip-source--ai')).toBe(false)
     })
 
-    it('positions the panel within the viewport (clamped)', () => {
+    it('renders the AI source chip for LLM items', () => {
+        showPopover(root, mkOptions({ model: 'llm' }))
+        const chip = root.querySelector('.gf-chip-source')
+        expect(chip).not.toBeNull()
+        expect(chip?.classList.contains('gf-chip-source--ai')).toBe(true)
+        expect(chip?.textContent?.trim()).toBe('✨ AI')
+    })
+
+    it('renders the confidence bar at the right width and band', () => {
+        showPopover(root, mkOptions({ confidence: 0.95 }))
+        const fill = root.querySelector<HTMLElement>('.gf-card__confbar-fill')
+        expect(fill).not.toBeNull()
+        expect(fill?.style.width).toBe('95%')
+        expect(fill?.classList.contains('gf-card__confbar-fill--high')).toBe(true)
+        // High label
+        const color = root.querySelector('.gf-card__conf-color')
+        expect(color?.textContent?.trim()).toBe('High')
+    })
+
+    it('renders the medium band for 0.75..0.89', () => {
+        showPopover(root, mkOptions({ confidence: 0.82 }))
+        const fill = root.querySelector('.gf-card__confbar-fill')
+        expect(fill?.classList.contains('gf-card__confbar-fill--medium')).toBe(true)
+        expect(root.querySelector('.gf-card__conf-color')?.textContent?.trim()).toBe('Medium')
+    })
+
+    it('renders the low band for < 0.75', () => {
+        showPopover(root, mkOptions({ confidence: 0.5 }))
+        const fill = root.querySelector('.gf-card__confbar-fill')
+        expect(fill?.classList.contains('gf-card__confbar-fill--low')).toBe(true)
+        expect(root.querySelector('.gf-card__conf-color')?.textContent?.trim()).toBe('Low')
+    })
+
+    it('renders the alternative replacement chips when replacements.length > 1', () => {
+        showPopover(root, mkOptions())
+        const alts = root.querySelectorAll<HTMLButtonElement>('.gf-chip-alt')
+        expect(alts).toHaveLength(2) // 3 total - 1 primary = 2 extras
+        expect(alts[0]?.textContent?.trim()).toBe('helo')
+        expect(alts[1]?.textContent?.trim()).toBe('helllo')
+    })
+
+    it('omits the alternatives block when only one replacement', () => {
+        showPopover(root, mkOptions({ replacements: ['hello'] }))
+        expect(root.querySelector('.gf-card__alts')).toBeNull()
+    })
+
+    it('renders the nav row with the "N of M" label when navTotal > 0', () => {
+        showPopover(root, mkOptions({ navIndex: 2, navTotal: 5 }))
+        const nav = root.querySelector('.gf-card__nav')
+        expect(nav).not.toBeNull()
+        expect(nav?.getAttribute('aria-label')).toBe('Issue navigation')
+        expect(nav?.querySelector('.gf-card__nav-count')?.textContent?.trim()).toBe('2 of 5')
+        expect(nav?.querySelector('[data-action="nav-prev"]')).not.toBeNull()
+        expect(nav?.querySelector('[data-action="nav-next"]')).not.toBeNull()
+    })
+
+    it('omits the nav row when navTotal is undefined or 0', () => {
+        showPopover(root, mkOptions())
+        expect(root.querySelector('.gf-card__nav')).toBeNull()
+        showPopover(mkRoot(), mkOptions({ navIndex: 1, navTotal: 0 }))
+        expect(root.querySelector('.gf-card__nav')).toBeNull()
+    })
+
+    it('positions the card within the viewport (clamped)', () => {
         showPopover(root, mkOptions({ anchorRect: new DOMRect(-9999, -9999, 80, 16) }))
-        const panel = root.querySelector('.gf-panel') as HTMLElement
+        const card = root.querySelector('.gf-card') as HTMLElement
         // left/top must parse as numbers (jsdom leaves them as "")
-        const left = parseFloat(panel.style.left)
-        const top = parseFloat(panel.style.top)
+        const left = parseFloat(card.style.left)
+        const top = parseFloat(card.style.top)
         expect(Number.isFinite(left)).toBe(true)
         expect(Number.isFinite(top)).toBe(true)
     })
 
-    it('Apply button calls onApply with index 0 (the primary replacement)', () => {
+    it('Apply button (data-action="apply") calls onApply with index 0', () => {
         const opts = mkOptions()
         showPopover(root, opts)
         const apply = root.querySelector<HTMLButtonElement>('[data-action="apply"]')
         expect(apply).not.toBeNull()
+        // W1-3: the primary button is .gf-btn-primary (was .gf-panel__btn--primary)
+        expect(apply?.classList.contains('gf-btn-primary')).toBe(true)
         apply?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
         expect(opts.onApply).toHaveBeenCalledExactlyOnceWith(0)
     })
 
-    it('"Show N more" expander reveals alternatives; clicking one calls onApply with the right index', () => {
+    it('clicking an alternative chip calls onApply with the chip index', () => {
         const opts = mkOptions()
-        const handle = showPopover(root, opts)
-        expect(handle).not.toBeNull()
-        // the alternative list must be hidden initially
-        expect(root.querySelector('.gf-panel__alternatives')).toBeNull()
-        const expander = root.querySelector<HTMLButtonElement>('[data-action="more"]')
-        expect(expander).not.toBeNull()
-        expander?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-        // now alternatives are visible
-        const alts = root.querySelectorAll<HTMLButtonElement>('.gf-panel__alternative')
-        expect(alts).toHaveLength(2) // 3 total - 1 primary = 2 extras
+        showPopover(root, opts)
+        const alts = root.querySelectorAll<HTMLButtonElement>('.gf-chip-alt')
         alts[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         alts[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         expect(opts.onApply).toHaveBeenCalledTimes(2)
@@ -122,27 +186,25 @@ describe('showPopover', () => {
         expect(opts.onApply).toHaveBeenNthCalledWith(2, 2)
     })
 
-    it('Ignore once calls onIgnore and dismisses the popover', () => {
+    it('Dismiss (data-action="dismiss") calls onIgnore and closes the card', () => {
         const opts = mkOptions()
         const handle = showPopover(root, opts)
-        const ignore = root.querySelector<HTMLButtonElement>('[data-action="ignore"]')
-        expect(ignore).not.toBeNull()
-        ignore?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        const dismiss = root.querySelector<HTMLButtonElement>('[data-action="dismiss"]')
+        expect(dismiss).not.toBeNull()
+        // The old "ignore" action name is gone — the data-action is "dismiss"
+        expect(root.querySelector('[data-action="ignore"]')).toBeNull()
+        dismiss?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         expect(opts.onIgnore).toHaveBeenCalledOnce()
-        // the panel is removed
-        expect(root.querySelector('.gf-panel')).toBeNull()
+        expect(root.querySelector('.gf-card')).toBeNull()
         expect(handle?.isOpen()).toBe(false)
     })
 
     it('Add to dictionary is rendered for spelling only', () => {
-        // spelling → button present
         showPopover(root, mkOptions({ category: 'spelling' }))
         expect(root.querySelector('[data-action="dictionary"]')).not.toBeNull()
-        // grammar → button absent
         const r2 = mkRoot()
         showPopover(r2, mkOptions({ category: 'grammar' }))
         expect(r2.querySelector('[data-action="dictionary"]')).toBeNull()
-        // punctuation → button absent
         const r3 = mkRoot()
         showPopover(r3, mkOptions({ category: 'punctuation' }))
         expect(r3.querySelector('[data-action="dictionary"]')).toBeNull()
@@ -156,23 +218,40 @@ describe('showPopover', () => {
         expect(opts.onAddToDictionary).toHaveBeenCalledExactlyOnceWith('teh')
     })
 
-    it('hide() removes the panel and prevents outside-click from firing callbacks', () => {
+    it('nav-prev and nav-next buttons dispatch their callbacks', () => {
+        const opts = mkOptions({
+            navIndex: 2,
+            navTotal: 5,
+            onNavPrev: vi.fn<() => void>(),
+            onNavNext: vi.fn<() => void>(),
+        })
+        showPopover(root, opts)
+        root.querySelector<HTMLButtonElement>('[data-action="nav-prev"]')?.dispatchEvent(
+            new MouseEvent('click', { bubbles: true }),
+        )
+        root.querySelector<HTMLButtonElement>('[data-action="nav-next"]')?.dispatchEvent(
+            new MouseEvent('click', { bubbles: true }),
+        )
+        expect(opts.onNavPrev).toHaveBeenCalledOnce()
+        expect(opts.onNavNext).toHaveBeenCalledOnce()
+    })
+
+    it('hide() removes the card and prevents outside-click from firing callbacks', () => {
         const opts = mkOptions()
         const handle = showPopover(root, opts)
         handle?.hide()
-        expect(root.querySelector('.gf-panel')).toBeNull()
-        // a click elsewhere should not call any callback
+        expect(root.querySelector('.gf-card')).toBeNull()
         document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
         expect(opts.onApply).not.toHaveBeenCalled()
         expect(opts.onIgnore).not.toHaveBeenCalled()
     })
 
     it('uses popover="manual" when the Popover API is available', () => {
-        expect(root.querySelector('.gf-panel')).toBeNull()
+        expect(root.querySelector('.gf-card')).toBeNull()
         showPopover(root, mkOptions())
-        const panel = root.querySelector('.gf-panel') as HTMLElement
-        const hasPopoverApi = typeof (panel as { showPopover?: unknown }).showPopover === 'function'
-        const popoverAttr = hasPopoverApi ? panel.getAttribute('popover') : null
+        const card = root.querySelector('.gf-card') as HTMLElement
+        const hasPopoverApi = typeof (card as { showPopover?: unknown }).showPopover === 'function'
+        const popoverAttr = hasPopoverApi ? card.getAttribute('popover') : null
         expect(popoverAttr).toBe('manual')
     })
 
@@ -182,12 +261,38 @@ describe('showPopover', () => {
         const apply = root.querySelector<HTMLButtonElement>('[data-action="apply"]')
         expect(apply).not.toBeNull()
         expect(apply?.disabled).toBe(true)
-        expect(apply?.textContent?.trim()).toBe('Checking…')
-        // Clicking a disabled button is a no-op in real browsers, but
-        // dispatchEvent('click') still fires the listener — the guard
-        // inside bindActions is the actual safety net.
+        expect(apply?.textContent?.trim()).toContain('Checking')
         apply?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
         expect(opts.onApply).not.toHaveBeenCalled()
+    })
+
+    it('keyboard: Enter accepts the primary replacement', () => {
+        const opts = mkOptions()
+        showPopover(root, opts)
+        const card = root.querySelector('.gf-card') as HTMLElement
+        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+        expect(opts.onApply).toHaveBeenCalledExactlyOnceWith(0)
+    })
+
+    it('keyboard: ArrowLeft/Right dispatch onNavPrev/onNavNext', () => {
+        const opts = mkOptions({
+            onNavPrev: vi.fn<() => void>(),
+            onNavNext: vi.fn<() => void>(),
+        })
+        showPopover(root, opts)
+        const card = root.querySelector('.gf-card') as HTMLElement
+        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+        expect(opts.onNavPrev).toHaveBeenCalledOnce()
+        expect(opts.onNavNext).toHaveBeenCalledOnce()
+    })
+
+    it('keyboard: Escape closes the card via hide()', () => {
+        const opts = mkOptions()
+        const handle = showPopover(root, opts)
+        const card = root.querySelector('.gf-card') as HTMLElement
+        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        expect(handle?.isOpen()).toBe(false)
     })
 })
 
@@ -203,28 +308,24 @@ describe('showPopover outside-click dismiss', () => {
         removePopoverStub()
     })
 
-    it('dismisses on a mousedown outside the popover (after the 100ms mount delay)', () => {
+    it('dismisses on a mousedown outside the card (after the 100ms mount delay)', () => {
         const opts = mkOptions()
         const handle = showPopover(root, opts)
         // outside-click handler is installed on a 100ms delay; advance time
         vi.advanceTimersByTime(120)
-        // dispatch a click somewhere far from the popover
+        // dispatch a click somewhere far from the card
         const outsideEl = document.createElement('div')
         document.body.appendChild(outsideEl)
         outsideEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
         expect(handle?.isOpen()).toBe(false)
     })
 
-    it('a click inside the popover does not dismiss', () => {
+    it('a click inside the card does not dismiss', () => {
         const opts = mkOptions()
         const handle = showPopover(root, opts)
         vi.advanceTimersByTime(120)
-        const panel = root.querySelector('.gf-panel') as HTMLElement
-        // mousedown's composedPath() includes the shadow root path; in jsdom
-        // the path is built from the target. Walk the target back up to its
-        // composed parent: the panel itself is inside the shadow root, so
-        // dispatching a bubbling event on it sets composedPath() to include it.
-        panel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, composed: true }))
+        const card = root.querySelector('.gf-card') as HTMLElement
+        card.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, composed: true }))
         expect(handle?.isOpen()).toBe(true)
     })
 })

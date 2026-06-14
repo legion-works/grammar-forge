@@ -1,16 +1,24 @@
-// Adapted from codextde/textchecker @ 7b66d78e74379f9fc909f6d4a2d984cb50a5d088 (MIT)
-// The click-to-fix popover. Renders a glass panel anchored to a viewport
-// rect (the highlight). The panel shows the category, the bridge message,
-// the primary replacement, and an action row: Apply · "Show N more" (when
-// there are alternatives) · Ignore once · Add to dictionary (spelling only).
+// The click-to-fix correction card. Renders the design-system .gf-card
+// anchored to a viewport rect (the highlight). The card shows the
+// category, a model source chip, the bridge message, a confidence bar,
+// the primary replacement, alternative replacement chips, an
+// add-to-dictionary button (spelling only), and a ‹N of M› nav with
+// keyboard (Enter accept / ←→ nav / Esc close).
 //
 // Outside-click dismiss is delayed by ~100ms after mount so the click that
-// OPENED the popover doesn't immediately close it; the handler is installed
+// OPENED the card doesn't immediately close it; the handler is installed
 // on document and inspects composedPath() (shadow-DOM aware). The previous
-// popover is always torn down before a new one mounts.
+// card is always torn down before a new one mounts.
 import { CATEGORY_META } from '@/api/category'
 import { diffInnerHTML } from '@/overlay/diff-view'
-import type { Category } from '@/api/types'
+import {
+    clampNavIndex,
+    confidenceBand,
+    confidenceBarWidth,
+    navLabel,
+    sourceChipLabel,
+} from '@/overlay/popover-helpers'
+import type { BridgeSuggestion, Category } from '@/api/types'
 
 const OUTSIDE_CLICK_DELAY_MS = 100
 const PANEL_HEIGHT_ESTIMATE = 220
@@ -18,7 +26,8 @@ const PANEL_WIDTH = 300
 const VIEWPORT_GUTTER = 10
 
 export interface PopoverOptions {
-    /** Viewport rect of the highlight the popover is anchored to. */
+    /** Viewport rect of the highlight the card is anchored to. Measure
+     *  BEFORE re-rendering the overlay (INSTRUCTIONS §D). */
     anchorRect: DOMRect
     category: Category
     /** Bridge-supplied explanation. */
@@ -32,10 +41,27 @@ export interface PopoverOptions {
     replacements: string[]
     /** Original text being replaced (used by Add to dictionary). */
     original?: string
+    /** Bridge confidence in [0, 1]; drives the card's confidence bar
+     *  + High/Medium/Low label. Undefined = LLM item, bar shows full +
+     *  "High" label (decorative). */
+    confidence?: number
+    /** Bridge model tag; drives the source chip in the card head
+     *  (Harper/GECToR → "· instant", LLM/lt_rule → "✨ AI"). */
+    model?: BridgeSuggestion['model']
+    /** 1-based index of THIS issue across all open issues; drives the
+     *  "‹ N of M ›" nav label. Undefined → 1. */
+    navIndex?: number
+    /** Total open issues; drives the "‹ N of M ›" nav label and the
+     *  visibility of the nav row. Undefined → 0 (nav hidden). */
+    navTotal?: number
     onApply: (replacementIndex: number) => void
     onIgnore: () => void
     /** Spelling-only callback; the button is hidden for other categories. */
     onAddToDictionary?: (word: string) => void
+    /** Move focus to the previous open issue (← key). */
+    onNavPrev?: () => void
+    /** Move focus to the next open issue (→ key). */
+    onNavNext?: () => void
     /** Fast-path preview: render Apply disabled with a "Checking…" label.
      *  The final frame re-renders the popover with preview unset. */
     preview?: boolean
@@ -99,11 +125,12 @@ function isPopoverSupported(panel: HTMLElement): boolean {
 }
 
 /**
- * Mount a popover in the supplied shadow root, anchored to the given rect.
- * Only one popover per root is open at a time (opening a new one dismisses
- * the previous). Returns a handle with hide() / isOpen(); the caller
- * (typically the content script) is responsible for hiding it on blur /
- * navigation. The host's destroy() will also dismiss any open popover.
+ * Mount a correction card in the supplied shadow root, anchored to the
+ * given rect. Only one card per root is open at a time (opening a new
+ * one dismisses the previous). Returns a handle with hide() / isOpen();
+ * the caller (typically the content script) is responsible for hiding
+ * it on blur / navigation. The host's destroy() will also dismiss any
+ * open card.
  */
 export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverHandle {
     dismissPopoversIn(root)
@@ -111,7 +138,11 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
     const view = doc.defaultView ?? window
 
     const panel = doc.createElement('div')
-    panel.className = 'gf-panel'
+    // W1-3: the design-system class is .gf-card (the old .gf-panel
+    // stays in styles.ts for the W2 review panel, but the click-card
+    // is no longer it). The card is a `role="dialog"` so screen readers
+    // announce it correctly.
+    panel.className = 'gf-card'
     panel.setAttribute('role', 'dialog')
     panel.setAttribute('aria-label', 'Grammar correction')
 
@@ -142,11 +173,36 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
     // temporal-dead-zone trap for future refactors.
     let handle: PopoverHandle
 
-    // Escape closes the popover (keyboard parity with the click-outside path).
+    // Keyboard parity: Enter accepts, ←/→ nav, Esc closes.
     function onKeydown(event: KeyboardEvent): void {
         if (event.key === 'Escape') {
             event.preventDefault()
             handle.hide()
+            return
+        }
+        if (event.key === 'Enter') {
+            // The primary button already has focus (see below), so the
+            // browser's native Enter activates it. We listen at the
+            // panel level too so Enter works even if focus has wandered
+            // to a nav button or an alternative chip — guard against the
+            // preview frame via the same defense-in-depth as the click
+            // handler.
+            if (options.preview) return
+            if (event.target instanceof HTMLButtonElement) return // native activation
+            event.preventDefault()
+            handle.hide()
+            options.onApply(0)
+            return
+        }
+        if (event.key === 'ArrowLeft' && typeof options.onNavPrev === 'function') {
+            event.preventDefault()
+            options.onNavPrev()
+            return
+        }
+        if (event.key === 'ArrowRight' && typeof options.onNavNext === 'function') {
+            event.preventDefault()
+            options.onNavNext()
+            return
         }
     }
     panel.addEventListener('keydown', onKeydown)
@@ -165,7 +221,7 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
 
     // Move focus to the primary action so keyboard users can apply with Enter
     // / Space without tabbing in from the field.
-    panel.querySelector<HTMLButtonElement>('.gf-panel__btn--primary')?.focus()
+    panel.querySelector<HTMLButtonElement>('.gf-btn-primary')?.focus()
 
     let outsideListenerInstalled = false
     function onOutsideMouseDown(event: MouseEvent): void {
@@ -175,7 +231,7 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
         // bail.
         const path = event.composedPath()
         if (path.includes(panel)) return
-        const highlights = root.querySelectorAll('.gf-highlight')
+        const highlights = root.querySelectorAll('.gf-u')
         for (const h of highlights) {
             if (path.includes(h)) return
         }
@@ -246,32 +302,70 @@ function renderInnerHTML(label: string, badge: string, opts: PopoverOptions): st
     const hasExtras = extras.length > 0
     const showDict = opts.category === 'spelling' && typeof opts.onAddToDictionary === 'function'
     const wordAttr = escapeText(opts.original ?? '')
+
+    const chip = sourceChipLabel(opts.model)
+    const chipClass = chip.variant === 'ai' ? 'gf-chip-source gf-chip-source--ai' : 'gf-chip-source'
+    const band = confidenceBand(opts.confidence)
+    const barWidth = confidenceBarWidth(opts.confidence)
+    const nav = clampNavIndex(opts.navIndex, opts.navTotal)
+
     return `
-        <div class="gf-panel__header">
-            <span class="gf-panel__dot" style="background:${badge}"></span>
-            <span class="gf-panel__label">${escapeText(label)}</span>
+        <span class="gf-card__tail" aria-hidden="true"></span>
+        <div class="gf-card__head">
+            <span class="gf-dot" style="background:${badge}"></span>
+            <span class="gf-card__cat">${escapeText(label)}</span>
+            <span style="flex:1"></span>
+            <span class="${chipClass}">${chip.text}</span>
         </div>
-        ${opts.message ? `<div class="gf-panel__message">${escapeText(opts.message)}</div>` : ''}
-        <div class="gf-panel__diff">${diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion)}</div>
-        <div class="gf-panel__actions">
-            <button class="gf-panel__btn gf-panel__btn--primary" data-action="apply" type="button"${opts.preview ? ' disabled' : ''}>
-                ${opts.preview ? 'Checking…' : 'Apply'}
-            </button>
-            ${
-                hasExtras
-                    ? `<button class="gf-panel__btn" data-action="more" type="button">Show ${extras.length} more</button>`
-                    : ''
-            }
-            <button class="gf-panel__btn gf-panel__btn--ghost" data-action="ignore" type="button">
-                Ignore once
-            </button>
-            ${
-                showDict
-                    ? `<button class="gf-panel__btn gf-panel__btn--ghost" data-action="dictionary" data-word="${wordAttr}" type="button">Add to dictionary</button>`
-                    : ''
-            }
+        <div class="gf-diff">${diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion)}</div>
+        ${opts.message ? `<p class="gf-card__msg">${escapeText(opts.message)}</p>` : ''}
+        <div class="gf-card__conf">
+            <span class="gf-card__conf-label">Confidence</span>
+            <span class="gf-card__confbar"><i class="gf-card__confbar-fill gf-card__confbar-fill--${band}" style="width:${barWidth}%"></i></span>
+            <span class="gf-card__conf-color gf-card__conf-color--${band}">${capitalize(band)}</span>
         </div>
+        <div class="gf-card__actions">
+            <button class="gf-btn-primary" data-action="apply" type="button"${opts.preview ? ' disabled' : ''} style="flex:1">
+                ${opts.preview ? 'Checking…' : 'Accept'} <kbd class="gf-kbd">⏎</kbd>
+            </button>
+            <button class="gf-btn-soft" data-action="dismiss" type="button">
+                Dismiss
+            </button>
+        </div>
+        ${
+            hasExtras
+                ? `<div class="gf-card__alts">
+                    <span class="gf-card__alts-label">Or:</span>
+                    ${extras
+                        .map(
+                            (alt, i) =>
+                                `<button class="gf-chip-alt" data-action="apply-alt" data-index="${i + 1}" type="button">${escapeText(alt)}</button>`,
+                        )
+                        .join('')}
+                </div>`
+                : ''
+        }
+        ${
+            showDict
+                ? `<button class="gf-card__dict gf-btn-soft" data-action="dictionary" data-word="${wordAttr}" type="button">＋ Add &ldquo;${wordAttr}&rdquo; to dictionary</button>`
+                : ''
+        }
+        ${
+            nav
+                ? `<nav class="gf-card__nav" aria-label="Issue navigation">
+                    <button class="gf-iconbtn" data-action="nav-prev" type="button" aria-label="Previous">‹</button>
+                    <span class="gf-card__nav-count">${navLabel(nav.current, nav.total)}</span>
+                    <button class="gf-iconbtn" data-action="nav-next" type="button" aria-label="Next">›</button>
+                    <span style="flex:1"></span>
+                    <span class="gf-card__nav-hint"><kbd class="gf-kbd">→</kbd> next</span>
+                </nav>`
+                : ''
+        }
     `
+}
+
+function capitalize(s: string): string {
+    return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 function bindActions(panel: HTMLElement, opts: PopoverOptions, dismiss: () => void): void {
@@ -291,30 +385,6 @@ function bindActions(panel: HTMLElement, opts: PopoverOptions, dismiss: () => vo
             opts.onApply(0)
             return
         }
-        if (action === 'ignore') {
-            dismiss()
-            opts.onIgnore()
-            return
-        }
-        if (action === 'more') {
-            // reveal alternatives inline; render fresh children rather than
-            // toggling visibility so the panel can grow naturally.
-            const list = panel.ownerDocument.createElement('div')
-            list.className = 'gf-panel__alternatives'
-            for (let i = 1; i < opts.replacements.length; i++) {
-                const alt = panel.ownerDocument.createElement('button')
-                alt.type = 'button'
-                alt.className = 'gf-panel__alternative'
-                alt.dataset.action = 'apply-alt'
-                alt.dataset.index = String(i)
-                alt.textContent = opts.replacements[i] ?? ''
-                list.appendChild(alt)
-            }
-            // remove the "Show N more" trigger; the list now sits in its place
-            btn.remove()
-            panel.appendChild(list)
-            return
-        }
         if (action === 'apply-alt') {
             const idx = Number.parseInt(btn.dataset.index ?? '', 10)
             if (Number.isInteger(idx) && idx >= 0) {
@@ -323,9 +393,22 @@ function bindActions(panel: HTMLElement, opts: PopoverOptions, dismiss: () => vo
             }
             return
         }
+        if (action === 'dismiss') {
+            dismiss()
+            opts.onIgnore()
+            return
+        }
         if (action === 'dictionary' && opts.onAddToDictionary) {
             dismiss()
             opts.onAddToDictionary(opts.original ?? '')
+            return
+        }
+        if (action === 'nav-prev' && typeof opts.onNavPrev === 'function') {
+            opts.onNavPrev()
+            return
+        }
+        if (action === 'nav-next' && typeof opts.onNavNext === 'function') {
+            opts.onNavNext()
         }
     })
 }

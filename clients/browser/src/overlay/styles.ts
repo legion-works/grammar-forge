@@ -1205,15 +1205,79 @@ export const OVERLAY_CSS = `
   .gf-card__cat  { font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.05em; }
   .gf-card__msg  { font: 400 12.5px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin-bottom: var(--gf-sp-4); }
   .gf-card__conf { display: flex; align-items: center; gap: var(--gf-sp-3); margin-bottom: var(--gf-sp-5); }
+  .gf-card__conf-label { font: 500 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; opacity: 0.7; }
   .gf-card__confbar { flex: 1; max-width: 120px; height: 5px; border-radius: 3px; overflow: hidden;
                       background: rgba(127, 127, 140, 0.16); }
+  .gf-card__confbar-fill { display: block; height: 100%; border-radius: inherit; }
+  .gf-card__confbar-fill--high   { background: var(--gf-conf-high); }
+  .gf-card__confbar-fill--medium { background: var(--gf-conf-medium); }
+  .gf-card__confbar-fill--low    { background: var(--gf-conf-low); }
+  .gf-card__conf-color          { font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .gf-card__conf-color--high   { color: var(--gf-conf-high); }
+  .gf-card__conf-color--medium { color: var(--gf-conf-medium); }
+  .gf-card__conf-color--low    { color: var(--gf-conf-low); }
   .gf-card__actions { display: flex; gap: var(--gf-sp-2); }
   .gf-card__alts { display: flex; flex-wrap: wrap; gap: var(--gf-sp-2); margin-top: var(--gf-sp-4); }
+  .gf-card__alts-label { font: 500 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; opacity: 0.7; align-self: center; }
   .gf-card__dict { width: 100%; margin-top: var(--gf-sp-4); }
   .gf-card__nav  { display: flex; align-items: center; gap: var(--gf-sp-3); margin-top: var(--gf-sp-4);
                    padding-top: var(--gf-sp-3); border-top: 1px solid rgba(127, 127, 140, 0.18); }
+  .gf-card__nav-count { font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .gf-card__nav-hint  { font: 500 10.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; opacity: 0.6; }
   .gf-card__tail { position: absolute; top: 100%; transform: translateX(-50%);
                    width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; }
+
+  /* ----- Alternative replacement chip ----- */
+  .gf-chip-alt {
+    height: 26px;
+    padding: 0 var(--gf-sp-3);
+    border-radius: 13px;
+    border: 1px solid rgba(127, 127, 140, 0.22);
+    background: rgba(127, 127, 140, 0.06);
+    font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: inherit;
+    cursor: pointer;
+    transition: background 120ms ease-out, transform 120ms ease-out;
+  }
+  .gf-chip-alt:hover { background: rgba(127, 127, 140, 0.14); transform: translateY(-1px); }
+
+  /* ----- Round icon button (prev/next in card nav) ----- */
+  .gf-iconbtn {
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid rgba(127, 127, 140, 0.22);
+    background: transparent;
+    color: inherit;
+    font: 700 14px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    cursor: pointer;
+    transition: background 120ms ease-out, transform 120ms ease-out;
+  }
+  .gf-iconbtn:hover { background: rgba(127, 127, 140, 0.14); transform: translateY(-1px); }
+  .gf-iconbtn:active { transform: translateY(0); }
+
+  /* ----- Inline keyboard hint (rendered as a small monospace pill) ----- */
+  .gf-kbd {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(127, 127, 140, 0.18);
+    font: 600 10.5px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .gf-btn-primary .gf-kbd { background: rgba(255, 255, 255, 0.22); }
+
+  /* ----- Small color dot (category head, panel row head) ----- */
+  .gf-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
 
   /* ----- Source chip (model provenance) ----- */
   .gf-chip-source {
