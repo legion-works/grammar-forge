@@ -542,24 +542,50 @@ func (s *Service) runFast(ctx context.Context, req Request) []Suggestion {
 
 // CorrectStaged runs the staged pipeline for streaming transports (SSE):
 // it computes a fast-path-only PREVIEW (no logging, no edit IDs), hands it
-// to onFast, then runs the full Correct pipeline UNCHANGED and returns its
-// result. onFast is invoked at most once, synchronously, before any LLM
-// work; an empty preview still invokes it so clients can clear stale
-// state. A nil onFast degrades to plain Correct. The preview applies the
-// user-dictionary allowlist (dictionary words must not flash underlines)
-// but is NOT logged — /signal cannot reference preview suggestions (IDs
-// are zero; clients treat the frame as display-only). Cost: the fast
-// correctors run twice per staged request (~10-40ms), the deliberate
-// trade that keeps the eval-gated Correct pipeline untouched.
+// to onFast incrementally — once per fast corrector as each completes — then
+// runs the full Correct pipeline UNCHANGED and returns its result. Each
+// onFast call receives the accumulated suggestions from all correctors that
+// have completed so far, so the client sees progressively refined previews
+// (Harper results first, then Harper+GECToR combined). An empty accumulated
+// preview still invokes onFast after the last corrector so clients can clear
+// stale state. A nil onFast degrades to plain Correct. The preview applies
+// the user-dictionary allowlist (dictionary words must not flash underlines)
+// but is NOT logged — /signal cannot reference preview suggestions (IDs are
+// zero; clients treat each frame as display-only). Cost: the fast correctors
+// run twice per staged request (~10-40ms), the deliberate trade that keeps
+// the eval-gated Correct pipeline untouched.
 func (s *Service) CorrectStaged(ctx context.Context, req Request, onFast func(Correction)) (Correction, error) {
 	if onFast != nil {
-		fast := s.runFast(ctx, req)
-		if s.allowlist != nil && len(fast) > 0 {
-			fast = s.dropAllowlisted(req.Text, fast)
-		}
-		onFast(Correction{Original: req.Text, Suggestions: fast, Score: score(req.Text, fast)})
+		s.runFastIncremental(ctx, req, onFast)
 	}
 	return s.Correct(ctx, req)
+}
+
+// runFastIncremental invokes onFast once per fast corrector, passing the
+// accumulated suggestions from all correctors completed so far. When there
+// are no fast correctors, onFast is still called once with an empty preview
+// so clients can clear stale state. The allowlist is applied to the
+// accumulated set before each emission so dictionary words never flash.
+func (s *Service) runFastIncremental(ctx context.Context, req Request, onFast func(Correction)) {
+	if len(s.fast) == 0 {
+		// No fast correctors: emit one empty frame so clients clear stale state.
+		onFast(Correction{Original: req.Text, Score: score(req.Text, nil)})
+		return
+	}
+	var accumulated []Suggestion
+	for _, c := range s.fast {
+		sugs, err := c.Correct(ctx, req)
+		if err != nil {
+			s.log.Warn("fast corrector failed", "model", c.Name(), "err", err)
+			continue
+		}
+		accumulated = append(accumulated, sugs...)
+		preview := mergeSuggestions(accumulated)
+		if s.allowlist != nil && len(preview) > 0 {
+			preview = s.dropAllowlisted(req.Text, preview)
+		}
+		onFast(Correction{Original: req.Text, Suggestions: preview, Score: score(req.Text, preview)})
+	}
 }
 
 // Signal records a user reaction to a logged correction.

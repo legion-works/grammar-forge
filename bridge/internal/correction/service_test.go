@@ -1174,7 +1174,7 @@ func TestCorrectMergeDropsTouchingInsertion(t *testing.T) {
 
 // ---- staged correction (SSE fast-path preview) ----
 
-func TestCorrectStagedEmitsFastPreviewThenFinal(t *testing.T) {
+func TestCorrectStagedEmitsAtLeastOneFastPreviewThenFinal(t *testing.T) {
 	st := &fakeStore{}
 	fc := fakeCorrector{
 		name: string(ModelGECToR),
@@ -1187,13 +1187,41 @@ func TestCorrectStagedEmitsFastPreviewThenFinal(t *testing.T) {
 		require.Equal(t, int64(0), st.count, "fast preview must be emitted BEFORE any logging")
 	})
 	require.NoError(t, err)
-	require.Len(t, fastFrames, 1, "onFast called exactly once")
+	require.GreaterOrEqual(t, len(fastFrames), 1, "onFast called at least once")
 	require.NotEmpty(t, fastFrames[0].Suggestions)
 	for _, s := range fastFrames[0].Suggestions {
 		require.Zero(t, s.ID, "fast preview suggestions are unlogged -> no IDs")
 		require.Equal(t, ModelGECToR, s.Model)
 	}
 	require.NotEmpty(t, got.Suggestions, "final result comes from the normal pipeline")
+	require.Equal(t, int64(1), st.count, "final is logged exactly once")
+}
+
+func TestCorrectStagedEmitsIncrementalFastFrames(t *testing.T) {
+	st := &fakeStore{}
+	// Two independent fast correctors → expect 2 fast frames before final.
+	fc1 := fakeCorrector{name: "harper", sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: "harper"}}}
+	fc2 := fakeCorrector{name: "gector", sugs: []Suggestion{{Span: Span{6, 8}, Replacement: "a", Model: "gector"}}}
+	svc := NewService(fakePB{}, []Corrector{fc1, fc2}, fakeLLM{out: "I have a cat"}, st, "m", fastPolicy())
+	var fastFrames []Correction
+	_, err := svc.CorrectStaged(context.Background(), Request{Text: "I has a cat"}, func(c Correction) {
+		fastFrames = append(fastFrames, c)
+		// Fast frames must be emitted BEFORE any logging (Correct hasn't run yet).
+		require.Equal(t, int64(0), st.count, "fast preview must be emitted before any logging")
+	})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(fastFrames), 2, "multi-frame stream must emit at least 2 fast frames")
+	// All fast frames: no IDs (unlogged previews).
+	for _, f := range fastFrames {
+		for _, s := range f.Suggestions {
+			require.Zero(t, s.ID, "fast preview suggestions must have no IDs")
+		}
+	}
+	// First frame has only harper's suggestion; second frame accumulates both.
+	require.Len(t, fastFrames[0].Suggestions, 1, "first frame: only harper's suggestion")
+	require.Equal(t, Model("harper"), fastFrames[0].Suggestions[0].Model)
+	require.GreaterOrEqual(t, len(fastFrames[1].Suggestions), 1, "second frame: accumulated suggestions")
+	// After CorrectStaged returns, the final Correct call has logged exactly once.
 	require.Equal(t, int64(1), st.count, "final is logged exactly once")
 }
 

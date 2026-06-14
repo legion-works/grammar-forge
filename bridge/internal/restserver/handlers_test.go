@@ -14,20 +14,21 @@ import (
 )
 
 type fakeService struct {
-	correctOut   correction.Correction
-	correctErr   error
-	lastSignal   correction.Signal
-	lastID       int64
-	count        int64
-	signalCounts correction.SignalCounts
-	rephraseOut  correction.RephraseResult
-	rephraseErr  error
-	rephraseSeen correction.RephraseRequest
-	lastCorrect  correction.Request
-	fastSugs     []correction.Suggestion
-	toneEnabled  bool
-	toneOut      correction.ToneResult
-	toneErr      error
+	correctOut    correction.Correction
+	correctErr    error
+	lastSignal    correction.Signal
+	lastID        int64
+	count         int64
+	signalCounts  correction.SignalCounts
+	rephraseOut   correction.RephraseResult
+	rephraseErr   error
+	rephraseSeen  correction.RephraseRequest
+	lastCorrect   correction.Request
+	fastSugs      []correction.Suggestion
+	multiFastSugs [][]correction.Suggestion // when set, onFast is called once per entry
+	toneEnabled   bool
+	toneOut       correction.ToneResult
+	toneErr       error
 }
 
 func (f *fakeService) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
@@ -37,7 +38,13 @@ func (f *fakeService) Correct(_ context.Context, req correction.Request) (correc
 
 func (f *fakeService) CorrectStaged(ctx context.Context, req correction.Request, onFast func(correction.Correction)) (correction.Correction, error) {
 	if onFast != nil {
-		onFast(correction.Correction{Original: req.Text, Suggestions: f.fastSugs, Score: 90})
+		if len(f.multiFastSugs) > 0 {
+			for _, sugs := range f.multiFastSugs {
+				onFast(correction.Correction{Original: req.Text, Suggestions: sugs, Score: 90})
+			}
+		} else {
+			onFast(correction.Correction{Original: req.Text, Suggestions: f.fastSugs, Score: 90})
+		}
 	}
 	return f.Correct(ctx, req)
 }
@@ -501,6 +508,60 @@ func TestCorrectStreamErrorAfterFast(t *testing.T) {
 	require.Contains(t, body, "event: error\n")
 	require.NotContains(t, body, "event: final\n")
 	require.Contains(t, extractSSEEventData(t, body, "error"), "unavailable")
+}
+
+// TestHandleCorrectStreamEmitsMultipleFastEvents verifies that the SSE handler
+// writes one event: fast per onFast invocation when the service emits multiple
+// fast frames (incremental multi-frame streaming, T5a). The two fast frames
+// must precede the final frame and carry no suggestion IDs.
+func TestHandleCorrectStreamEmitsMultipleFastEvents(t *testing.T) {
+	svc := &fakeService{
+		correctOut: correction.Correction{
+			Original: "I has a cat",
+			Suggestions: []correction.Suggestion{{
+				ID: 7, Span: correction.Span{Start: 2, End: 5},
+				Replacement: "have", Model: correction.ModelLLM,
+			}},
+			Score: 95,
+		},
+		multiFastSugs: [][]correction.Suggestion{
+			// Frame 1: harper result only.
+			{{Span: correction.Span{Start: 2, End: 5}, Replacement: "have", Model: correction.ModelHarper}},
+			// Frame 2: harper + gector accumulated.
+			{
+				{Span: correction.Span{Start: 2, End: 5}, Replacement: "have", Model: correction.ModelHarper},
+				{Span: correction.Span{Start: 6, End: 8}, Replacement: "a", Model: correction.ModelGECToR},
+			},
+		},
+	}
+	srv := New(Config{}, svc)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/correct/stream",
+		strings.NewReader(`{"text":"I has a cat","source":"browser"}`))
+	srv.Handler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// Count fast events.
+	fastCount := strings.Count(body, "event: fast\n")
+	require.Equal(t, 2, fastCount, "handler must emit one event: fast per onFast invocation")
+
+	// Both fast frames precede the final frame.
+	lastFastIdx := strings.LastIndex(body, "event: fast\n")
+	finalIdx := strings.Index(body, "event: final\n")
+	require.Less(t, lastFastIdx, finalIdx, "all fast frames must precede final")
+
+	// Fast frames carry no suggestion IDs (unlogged previews).
+	require.NotContains(t, body[:finalIdx], `"id"`, "fast frame suggestions must carry no IDs")
+
+	// Final frame carries the logged suggestion ID.
+	finalData := extractSSEEventData(t, body, "final")
+	require.Contains(t, finalData, `"id":7`)
+
+	// Ordinal monotonicity: first fast event appears before second.
+	firstFastIdx := strings.Index(body, "event: fast\n")
+	require.Less(t, firstFastIdx, lastFastIdx, "fast frames must appear in emission order")
 }
 
 func TestCorrectStreamBadJSONIsPlainHTTP400(t *testing.T) {
