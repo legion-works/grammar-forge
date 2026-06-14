@@ -1381,3 +1381,65 @@ func TestCorrectMergeWordSameWordReplacementConflicts(t *testing.T) {
 		require.Equal(t, ModelLLM, s.Model, "same-word fast replacement dropped")
 	}
 }
+
+func TestServiceCorrectMultilineYieldsNoNewlineTouchingSuggestion(t *testing.T) {
+	// A fake LLM that "rewrites" the line break the bug report describes:
+	// collapses "line one\nline two" -> "Line one. Line two" (capitalize +
+	// period + '\n' -> ' '). The pre-fix pipeline would emit a single
+	// suggestion whose span contains the '\n'; the post-fix pipeline
+	// segments per line, so the LLM is called per line, the diff can't
+	// span the '\n', and no surviving suggestion touches the '\n' byte.
+	//
+	// The fake LLM is per-line by construction: each call is on a
+	// sentence-scoped req (see service.go:223 — `sentence := req.Text[seg.Start:seg.End]`).
+	// The LLM is given a fragment of text containing no '\n', so its
+	// "echo back a re-punctuated form" output produces a diff that lives
+	// entirely inside that fragment and never crosses a '\n' in the
+	// ORIGINAL text (the LLM has no idea the fragment came from a multi-
+	// line source).
+	st := &fakeStore{}
+	llm := llmFunc(func(_ context.Context, p Prompt) (string, error) {
+		// Pre-fix: the LLM was called once on the whole multi-line text and
+		// could return "Line one. Line two" — a diff whose span contained
+		// the '\n'. Post-fix: the LLM is called once per line, and the
+		// sentence fed in is "line one" or "line two" — neither has a '\n'
+		// to begin with, so the diff can't cross one.
+		// We return a benign "no edit" — a single trailing-space tidy that
+		// lives entirely inside the fragment.
+		return strings.TrimRight(p.User, " ") + " ", nil
+	})
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	svc.SetSentenceCache(64)
+	text := "line one\nline two"
+	got, err := svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	for i, s := range got.Suggestions {
+		sp := s.Span
+		require.GreaterOrEqual(t, sp.Start, 0)
+		require.LessOrEqual(t, sp.End, len(text))
+		require.Greater(t, sp.End, sp.Start, "suggestion %d has empty span", i)
+		for j := sp.Start; j < sp.End; j++ {
+			require.NotEqual(t, byte('\n'), text[j],
+				"suggestion %d span [%d,%d) contains '\\n' at byte %d — the bug",
+				i, sp.Start, sp.End, j)
+		}
+	}
+}
+
+func TestServiceCorrectMultilineKeepsSentenceCacheHits(t *testing.T) {
+	// Sanity: pre-splitting on '\n' must not poison the per-sentence cache.
+	// Each line is a separate cache entry; the SECOND call with the same
+	// text must not add any new LLM calls (cache hits on both lines).
+	st := &fakeStore{}
+	llm := &countingLLM{}
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	svc.SetSentenceCache(64)
+	text := "line one\nline two"
+	_, err := svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	first := llm.calls
+	require.Equal(t, 2, first, "two lines => two LLM calls cold")
+	_, err = svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	require.Equal(t, first, llm.calls, "warm: zero additional LLM calls (both lines cached)")
+}
