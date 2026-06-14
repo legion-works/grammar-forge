@@ -7,6 +7,7 @@ describe('resolveConfig', () => {
         expect(cfg.bridgeUrl).toBe('http://localhost:8000')
         expect(cfg.realtimeDelayMs).toBe(500)
         expect(cfg.acceptHotkey).toBe('ctrl+.')
+        expect(cfg.rephraseHotkey).toBe('ctrl+/')
         expect(cfg.checkPastedText).toBe(false)
         expect(cfg.allowRemoteBridge).toBe(false)
     })

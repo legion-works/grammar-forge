@@ -6,6 +6,7 @@ export interface GrammarForgeConfig {
     bridgeUrl: string
     realtimeDelayMs: number
     acceptHotkey: string
+    rephraseHotkey: string
     checkPastedText: boolean
     allowRemoteBridge: boolean
     debugLogging: boolean
@@ -22,6 +23,10 @@ export function resolveConfig(raw: Record<string, unknown>): GrammarForgeConfig 
             typeof raw.acceptHotkey === 'string' && raw.acceptHotkey.trim() !== ''
                 ? raw.acceptHotkey.trim().toLowerCase()
                 : 'ctrl+.',
+        rephraseHotkey:
+            typeof raw.rephraseHotkey === 'string' && raw.rephraseHotkey.trim() !== ''
+                ? raw.rephraseHotkey.trim().toLowerCase()
+                : 'ctrl+/',
         checkPastedText: raw.checkPastedText === true,
         allowRemoteBridge: common.allowRemoteBridge,
         debugLogging: raw.debugLogging === true,
