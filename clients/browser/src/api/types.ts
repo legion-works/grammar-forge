@@ -4,6 +4,10 @@
 
 export type Category = 'spelling' | 'grammar' | 'punctuation' | 'style' | 'typography' | 'unknown'
 
+/** Lifecycle status of a renderable item (drives the underline visibility and
+ *  the bulk-action skip-list in the panel). Defaults to `'open'` on the wire. */
+export type ItemStatus = 'open' | 'accepted' | 'dismissed'
+
 export interface ByteSpan {
     start: number
     end: number
