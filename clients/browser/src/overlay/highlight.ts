@@ -50,20 +50,24 @@ export interface HighlightLayer {
     /** Diff the flat spec list against the pooled nodes; update in place. */
     reconcile: (specs: readonly HighlightSpec[]) => void
     /**
-     * Restyle a SINGLE pooled node in place, by itemIndex. The other nodes
-     * are not touched (no rebuild, no remeasure). `partial` carries the new
-     * rect + category; itemIndex is read from the pool node's data-item
-     * (caller supplies the index it cares about; we look it up). No-op for
-     * an itemIndex past the end. Consumed by the P3/P4 performance plan
-     * (single-item reanchor without a full reconcile).
+     * Restyle EVERY rect-node of the targeted item in place, by itemIndex.
+     * The pool is indexed by RECT, not by item (a wrapped word produces
+     * multiple getClientRects() — multiple pool nodes sharing one data-item
+     * attribute), so we look up by `data-item` matching the existing
+     * `flashApplied` pattern. Nodes for other items are not touched (no
+     * rebuild, no remeasure). `partial` carries the new rect + category.
+     * No-op when no pool node has a matching data-item. Consumed by the
+     * P3/P4 performance plan (single-item reanchor without a full
+     * reconcile).
      */
     updateItem: (itemIndex: number, partial: Omit<HighlightSpec, 'itemIndex'>) => void
     /**
-     * Hide a SINGLE pooled node (display:none via a zero-area rect) without
-     * disturbing the others. The node is NOT removed from the pool — a
-     * subsequent reconcile with that itemIndex still maps to this node.
-     * No-op for an itemIndex past the end. Consumed by the per-item scoped
-     * clear + the P3/P4 perf reanchor.
+     * Hide EVERY rect-node of the targeted item (display:none via a
+     * zero-area rect), matching by `data-item`. The nodes are NOT removed
+     * from the pool — a subsequent reconcile with that itemIndex still
+     * maps to these nodes. No-op when no pool node has a matching
+     * data-item. Consumed by the per-item scoped clear + the P3/P4 perf
+     * reanchor.
      */
     clearItem: (itemIndex: number) => void
     /** Flip focus/hover intensity classes on every pooled node (no rebuild). */
@@ -116,24 +120,26 @@ export function createHighlightLayer(root: ShadowRoot): HighlightLayer {
             }
         },
         updateItem(itemIndex, partial) {
-            const node = pool[itemIndex]
-            if (!node) return
-            styleHighlightNode(node, { ...partial, itemIndex })
-            applyState(node, lastState)
+            for (const node of pool) {
+                if (Number(node.dataset.item) !== itemIndex) continue
+                styleHighlightNode(node, { ...partial, itemIndex })
+                applyState(node, lastState)
+            }
         },
         clearItem(itemIndex) {
-            const node = pool[itemIndex]
-            if (!node) return
-            // styleHighlightNode already handles width/height <= 0 by setting
-            // display:none — the cheapest "hide" without changing data-item
-            // (so a later reconcile / updateItem with the same itemIndex
-            // re-uses this exact node).
-            styleHighlightNode(node, {
-                rect: new DOMRect(0, 0, 0, 0),
-                category: 'spelling',
-                itemIndex,
-            })
-            applyState(node, lastState)
+            for (const node of pool) {
+                if (Number(node.dataset.item) !== itemIndex) continue
+                // styleHighlightNode already handles width/height <= 0 by
+                // setting display:none — the cheapest "hide" without
+                // changing data-item (so a later reconcile / updateItem
+                // with the same itemIndex re-uses this exact node).
+                styleHighlightNode(node, {
+                    rect: new DOMRect(0, 0, 0, 0),
+                    category: 'spelling',
+                    itemIndex,
+                })
+                applyState(node, lastState)
+            }
         },
         flashApplied(itemIndex) {
             for (const n of pool) {

@@ -289,4 +289,52 @@ describe('createHighlightLayer', () => {
         layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 }])
         expect(() => layer.clearItem(5)).not.toThrow()
     })
+
+    it('updateItem restyles every rect-node of a multi-rect item, leaves other items alone', () => {
+        // Multi-rect item (e.g. a wrapped word produced TWO getClientRects()).
+        // The pool is indexed by RECT, not by item, so item 0 owns pool[0] +
+        // pool[1] and item 1 owns pool[2]. The old `pool[itemIndex]` impl
+        // would only touch pool[0] — leaving the second item-0 rect stale
+        // and missing item 1 entirely. The fix looks up by data-item.
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 0 },
+            { rect: new DOMRect(0, 40, 50, 16), category: 'grammar', itemIndex: 1 },
+        ])
+        layer.updateItem(0, { rect: new DOMRect(5, 25, 60, 16), category: 'style' })
+        const nodes = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        // Both item-0 rect-nodes restyled.
+        expect(nodes[0]!.style.left).toBe('5px')
+        expect(nodes[0]!.style.top).toBe('25px')
+        expect(nodes[0]!.style.getPropertyValue('--gf-hl')).toBe('#7c3aed')
+        expect(nodes[1]!.style.left).toBe('5px')
+        expect(nodes[1]!.style.top).toBe('25px')
+        expect(nodes[1]!.style.getPropertyValue('--gf-hl')).toBe('#7c3aed')
+        // Item-1 node untouched.
+        expect(nodes[2]!.style.left).toBe('0px')
+        expect(nodes[2]!.style.top).toBe('40px')
+        expect(nodes[2]!.style.getPropertyValue('--gf-hl')).toBe('#ca8a04')
+    })
+
+    it('clearItem hides every rect-node of a multi-rect item, leaves other items alone', () => {
+        // Same multi-rect setup as the updateItem test above. The old
+        // `pool[itemIndex]` impl would only hide pool[0], leaking the
+        // second item-0 rect (still visible) and never touching item 1.
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 0 },
+            { rect: new DOMRect(0, 40, 50, 16), category: 'grammar', itemIndex: 1 },
+        ])
+        layer.clearItem(0)
+        const nodes = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        // Both item-0 rect-nodes hidden.
+        expect(nodes[0]!.style.display).toBe('none')
+        expect(nodes[1]!.style.display).toBe('none')
+        // Item-1 node still visible.
+        expect(nodes[2]!.style.display).toBe('')
+    })
 })
