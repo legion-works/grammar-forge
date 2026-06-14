@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
 import { nextCheckSeq } from '@/lib/check-seq'
 import type { RenderableItem } from '@/lib/pipeline'
+import * as rephraseCard from '@/overlay/rephrase-card'
+import type { BridgeClient } from '@/api/client'
+import { openRephraseFor, type RephraseDeps } from './rephrase'
 import { inputGate, resolveSelectionSpan } from './orchestrator'
 
 describe('inputGate', () => {
@@ -95,5 +98,56 @@ describe('scoped-clear wiring (vencord shape)', () => {
         for (let i = 1; i < seqs.length; i++) {
             expect(seqs[i]!).toBeGreaterThan(seqs[i - 1]!)
         }
+    })
+})
+
+describe('rephrase flow — pending → result is a single user-perceived transition', () => {
+    it('shows pending, awaits rephrase, hides pending, shows result card', async () => {
+        const pendingSpy = vi.spyOn(rephraseCard, 'showRephrasePending').mockReturnValue({
+            hide: vi.fn<() => void>(),
+        } as unknown as ReturnType<typeof rephraseCard.showRephrasePending>)
+        const cardSpy = vi.spyOn(rephraseCard, 'showRephraseCard').mockReturnValue({
+            hide: vi.fn<() => void>(),
+        } as unknown as ReturnType<typeof rephraseCard.showRephraseCard>)
+
+        const client = {
+            rephrase: vi.fn<(req: unknown) => Promise<unknown>>(async () => ({
+                original: 'hello world',
+                rephrased: 'hi there',
+                alternatives: [],
+            })),
+        } as unknown as BridgeClient
+        const deps: RephraseDeps = {
+            client: () => client,
+            overlayRoot: document.createElement('div') as unknown as ShadowRoot,
+            debugLog: vi.fn<(...args: unknown[]) => void>(),
+        }
+        const el = document.createElement('div')
+        document.body.appendChild(el)
+
+        await openRephraseFor(el, 'hello world', { start: 0, end: 11 }, deps, () => {})
+
+        // pending was shown exactly once
+        expect(pendingSpy.mock.calls.length).toBe(1)
+        // result card was shown exactly once
+        expect(cardSpy.mock.calls.length).toBe(1)
+        // Call ordering: pending before card
+        const pendingOrder = pendingSpy.mock.invocationCallOrder[0] ?? 0
+        const cardOrder = cardSpy.mock.invocationCallOrder[0] ?? 0
+        expect(pendingOrder).toBeLessThan(cardOrder)
+
+        // Anchor rect on the result card is derived from the same el — the
+        // user-perceived "in place" transition. The current code calls
+        // getBoundingClientRect twice (once for pending, once for card),
+        // so we assert EQUAL rects (same left/top/width/height) rather than
+        // identity. (Refactor opportunity: hoist the rect read.)
+        const pendingAnchor = pendingSpy.mock.calls[0]?.[1]?.anchorRect as DOMRect | undefined
+        const cardAnchor = cardSpy.mock.calls[0]?.[1]?.anchorRect as DOMRect | undefined
+        expect(pendingAnchor).toBeDefined()
+        expect(cardAnchor).toBeDefined()
+        expect(cardAnchor!.left).toBe(pendingAnchor!.left)
+        expect(cardAnchor!.top).toBe(pendingAnchor!.top)
+        expect(cardAnchor!.width).toBe(pendingAnchor!.width)
+        expect(cardAnchor!.height).toBe(pendingAnchor!.height)
     })
 })
