@@ -89,6 +89,56 @@ describe('setSettings', () => {
     })
 })
 
+describe('getSettings — common field normalization (4f-4)', () => {
+    it('normalises an invalid stored realtimeDelayMs (NaN) to the default', async () => {
+        await setSettings({ realtimeDelayMs: NaN as unknown as number })
+        const s = await getSettings()
+        expect(s.realtimeDelayMs).toBe(DEFAULT_SETTINGS.realtimeDelayMs)
+    })
+
+    it('normalises an invalid stored realtimeDelayMs (Infinity) to the default', async () => {
+        await setSettings({ realtimeDelayMs: Infinity as unknown as number })
+        const s = await getSettings()
+        expect(s.realtimeDelayMs).toBe(DEFAULT_SETTINGS.realtimeDelayMs)
+    })
+
+    it('passes through a valid stored realtimeDelayMs unchanged', async () => {
+        await setSettings({ realtimeDelayMs: 750 })
+        const s = await getSettings()
+        expect(s.realtimeDelayMs).toBe(750)
+    })
+
+    it('normalises a non-http bridgeBaseUrl to the default', async () => {
+        await setSettings({ bridgeBaseUrl: 'ftp://bad-url' as unknown as string })
+        const s = await getSettings()
+        expect(s.bridgeBaseUrl).toBe(DEFAULT_SETTINGS.bridgeBaseUrl)
+    })
+
+    it('passes through a valid stored bridgeBaseUrl unchanged', async () => {
+        await setSettings({ bridgeBaseUrl: 'http://bridge.local:9000' })
+        const s = await getSettings()
+        expect(s.bridgeBaseUrl).toBe('http://bridge.local:9000')
+    })
+
+    it('strips a trailing slash from a stored bridgeBaseUrl', async () => {
+        await setSettings({ bridgeBaseUrl: 'http://localhost:8000/' })
+        const s = await getSettings()
+        expect(s.bridgeBaseUrl).toBe('http://localhost:8000')
+    })
+
+    it('normalises a non-boolean allowRemoteBridge to false', async () => {
+        await setSettings({ allowRemoteBridge: 1 as unknown as boolean })
+        const s = await getSettings()
+        expect(s.allowRemoteBridge).toBe(false)
+    })
+
+    it('passes through allowRemoteBridge: true unchanged', async () => {
+        await setSettings({ allowRemoteBridge: true })
+        const s = await getSettings()
+        expect(s.allowRemoteBridge).toBe(true)
+    })
+})
+
 describe('isSiteBlocked', () => {
     const blocked = ['example.com', 'spam.test']
     it('is true for a host on the deny list', () => {

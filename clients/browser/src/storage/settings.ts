@@ -1,4 +1,5 @@
 import { storage } from '#imports'
+import { resolveCommonSettings } from './settings-core'
 
 /**
  * Persistent settings for the browser extension. Lives in `browser.storage.local`
@@ -100,7 +101,23 @@ export async function getSettings(): Promise<Settings> {
     // default (e.g. a bad patch permanently disabling a feature) — the merge
     // exists precisely so missing/undefined fields fall back to defaults.
     const defined = Object.fromEntries(Object.entries(stored).filter(([, v]) => v !== undefined))
-    return { ...DEFAULT_SETTINGS, ...defined } as Settings
+    // The common fields are validated by the shared resolver. The browser
+    // stores bridgeUrl as `bridgeBaseUrl`; remap for the resolver so it
+    // can validate the URL format and strip trailing slashes. Invalid stored
+    // values (e.g. garbage realtimeDelayMs) are normalised to defaults —
+    // this is a deliberate fix over the old pass-through behaviour.
+    const rawForResolver: Record<string, unknown> = {
+        ...defined,
+        bridgeUrl: defined.bridgeBaseUrl,
+    }
+    const { common } = resolveCommonSettings(rawForResolver)
+    return {
+        ...DEFAULT_SETTINGS,
+        ...defined,
+        bridgeBaseUrl: common.bridgeUrl,
+        realtimeDelayMs: common.realtimeDelayMs,
+        allowRemoteBridge: common.allowRemoteBridge,
+    } as Settings
 }
 
 /**
