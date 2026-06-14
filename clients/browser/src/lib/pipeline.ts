@@ -110,14 +110,13 @@ export function buildRenderableItems(
         // OpenCode part-filter pattern (clients/opencode/src/part-filter.ts)
         // — the spec calls this out by name.
         //
-        // Plan deviation: the plan text suggested a boundary-only check
-        // (`text[cu.start] === '\n' || text[cu.end] === '\n'`), but the
-        // "drops suggestions whose span crosses a newline" test demands we
-        // also catch spans that contain a newline INTERNALLY, and the
-        // "abuts end boundary" test demands a lookahead past cu.end. The
-        // contract is "abuts OR crosses", so the slice-with-lookahead check
-        // is the right one (catches all three: internal, start-abut, end-abut).
-        if (text.slice(cu.start, cu.end + 1).includes('\n')) {
+        // Contract: drop suggestions whose span CONTAINS a newline. A
+        // suggestion that merely ABUTS a newline (its end is right before a
+        // \n, or its start right after) is a legit in-line correction on a
+        // word that ends / starts a line — keep it. The earlier `+1`
+        // lookahead was too aggressive: it caught the "has→have" case in
+        // "I has\na apple" and dropped a correct correction.
+        if (text.slice(cu.start, cu.end).includes('\n')) {
             // oxlint-disable-next-line no-console
             console.warn('grammarforge: dropped suggestion crossing newline', cu, s)
             dropped += 1

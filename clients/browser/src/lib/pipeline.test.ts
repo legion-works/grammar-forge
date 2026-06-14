@@ -209,7 +209,8 @@ describe('buildRenderableItems', () => {
         expect(items[0]?.preview).toBeUndefined()
     })
 
-    it('drops suggestions whose span abuts a newline (start boundary)', () => {
+    it('drops suggestions whose span contains a newline (start position)', () => {
+        // span [1, 2) on "a\nb" = "\n" — the slice itself contains a \n.
         const res = {
             original: 'a\nb',
             suggestions: [
@@ -222,23 +223,28 @@ describe('buildRenderableItems', () => {
         expect(dropped).toBe(1)
     })
 
-    it('drops suggestions whose span abuts a newline (end boundary)', () => {
-        // The suggestion ends right before a \n — the rect will land on a
-        // wrapped line, not the joined token; the client belt drops it.
+    it('keeps a suggestion on a word that ends a line (newline AFTER the span)', () => {
+        // The legit in-line "has→have" case in "I has\na apple": span [2, 5)
+        // = "has"; the \n is at position 5 (immediately AFTER the span, NOT
+        // inside it). The earlier `slice(cu.start, cu.end + 1)` over-dropped
+        // this; the new contract drops ONLY suggestions whose span CONTAINS
+        // a \n. The bridge C2 fix is the root cause; this client belt is
+        // the regression guard.
         const res = {
-            original: 'a\nb',
+            original: 'I has\na apple',
             suggestions: [
-                { span: { start: 0, end: 1 }, replacement: 'A', model: 'gector' as const },
+                { span: { start: 2, end: 5 }, replacement: 'have', model: 'gector' as const },
             ],
             score: 90,
         }
-        const { items, dropped } = buildRenderableItems('a\nb', res, {})
-        expect(items).toEqual([])
-        expect(dropped).toBe(1)
+        const { items, dropped } = buildRenderableItems('I has\na apple', res, {})
+        expect(items).toHaveLength(1)
+        expect(items[0]?.original).toBe('has')
+        expect(dropped).toBe(0)
     })
 
-    it('drops suggestions whose span crosses a newline', () => {
-        // [0, 3) on "a\nbc" crosses the \n.
+    it('drops suggestions whose span contains a newline (crosses a \\n internally)', () => {
+        // [0, 3) on "a\nbc" = "a\nb" — the slice contains a \n.
         const res = {
             original: 'a\nbc',
             suggestions: [
