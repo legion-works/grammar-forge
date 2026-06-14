@@ -2,9 +2,8 @@
 # Provision GrammarForge model assets that are plain downloads:
 #   - slow-path GGUF (Gemma-4-E4B QAT)         -> models/llm/
 #   - hugot native libs (libonnxruntime, etc.) -> bridge/native/
-#   - GECToR support files + verb-form vocab   -> bridge/models/gector/
-# The GECToR model.onnx itself needs a custom export+INT8 quantize (NOT a plain
-# download); this script prints the instruction for that one manual step.
+#   - GECToR model + support files + verb-form vocab -> bridge/models/gector/
+# All assets are plain downloads — no custom export or quantize step required.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,6 +13,10 @@ GECTOR_DIR="$ROOT/bridge/models/gector"
 HUGOT_VER="v0.7.5"
 GGUF_REPO="unsloth/gemma-4-E4B-it-qat-GGUF"
 GGUF_FILE="gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
+# Meyssa/gector-large-2024 = Grammarly GECToR-2024, RoBERTa-large, Apache-2.0.
+# Pre-exported INT8 ONNX — plain download, no Optimum/custom-export step.
+# Labels are in config.json id2label (5002 entries); no separate labels.json.
+GECTOR_REPO="https://huggingface.co/Meyssa/gector-large-2024/resolve/main"
 
 mkdir -p "$LLM_DIR" "$NATIVE_DIR" "$GECTOR_DIR"
 
@@ -36,28 +39,25 @@ for tarball in libonnxruntime-linux-x64.tar.gz libtokenizers-linux-x64.tar.gz; d
     | tar -xz -C "$NATIVE_DIR"
 done
 
+echo "==> [3/4] GECToR model.onnx (~345 MB, INT8, resumable)"
+if [ -f "$GECTOR_DIR/model.onnx" ]; then
+  echo "    present, skipping (delete to re-fetch)"
+else
+  # Source path on HuggingFace is onnx/model_quantized.onnx; save as model.onnx.
+  curl -fL --retry 5 -C - -o "$GECTOR_DIR/model.onnx.partial" \
+    "$GECTOR_REPO/onnx/model_quantized.onnx"
+  mv "$GECTOR_DIR/model.onnx.partial" "$GECTOR_DIR/model.onnx"
+fi
+
 echo "==> [3/4] GECToR support files (tokenizer/config JSONs)"
-GECTOR_REPO="https://huggingface.co/gotutiyan/gector-deberta-large-5k/resolve/main"
-for f in tokenizer.json tokenizer_config.json special_tokens_map.json config.json; do
+for f in config.json tokenizer.json tokenizer_config.json vocab.json merges.txt special_tokens_map.json; do
   echo "    $f"
   curl -fL --retry 5 -o "$GECTOR_DIR/$f" "$GECTOR_REPO/$f"
 done
 
 echo "==> [4/4] verb-form vocabulary"
+# verb-form-vocab.txt is fetched from grammarly/gector — identical $TRANSFORM_VERB_* tags.
 curl -fL --retry 5 -o "$GECTOR_DIR/verb-form-vocab.txt" \
   "https://raw.githubusercontent.com/grammarly/gector/master/data/verb-form-vocab.txt"
-
-cat <<'NOTE'
-
-==> MANUAL STEP REMAINING: GECToR model.onnx
-    model.onnx (INT8, ~397 MB) is a custom ONNX export of
-    gotutiyan/gector-deberta-large-5k (DeBERTa-v1, custom heads) + optimum INT8
-    quantize. It is NOT a plain download. See the recipe in:
-      bridge/models/gector/README.md
-    Place the result at bridge/models/gector/model.onnx (+ labels.json).
-
-==> Native libs and GGUF are in place. After the GECToR export, the bridge can
-    build with -tags ORT and the stack can run via docker compose.
-NOTE
 
 echo "==> fetch-models.sh done."

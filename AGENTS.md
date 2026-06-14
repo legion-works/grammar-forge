@@ -169,9 +169,12 @@ GECToR + Harper have **no port** — they run inside the bridge process.
   (Gemma QAT chat template) needs `chat_template_kwargs:{enable_thinking:false}` for any
   reasoning-capable chat model (the bridge sends it) or the model emits chain-of-thought
   and returns empty content. See SPEC §5.4.
-- GECToR fast path: `gotutiyan/gector-deberta-large-5k` — **ship INT8** (~28 ms CPU, 397 MB;
-  FP32 ~95 ms misses budget) via `hugot`. Needs a **custom ONNX export** (not `optimum-cli`;
-  DeBERTa-v1, custom heads) + bundled `verb-form-vocab.txt` + 2–3 decode passes. Build `-tags ORT`.
+- GECToR fast path: `Meyssa/gector-large-2024` (Grammarly GECToR-2024, RoBERTa-large, **Apache-2.0**)
+  — **ship INT8** (~25 ms CPU, ~345 MB) via `hugot`: a **plain ONNX download** (`onnx/model_quantized.onnx`,
+  no custom export) + reused `verb-form-vocab.txt` (identical `$TRANSFORM_VERB_*` tags / 5002-label set)
+  + 2–3 decode passes. Build `-tags ORT`. Replaced the **non-commercial** `gotutiyan/gector-deberta-large-5k`
+  on 2026-06-14 for OSS license compliance — full warm golden 125/125 unchanged (fast-path-only 70 vs 71;
+  a license fix, not a quality change).
 - Harper pre-filter: `harper-core` via `hippietrail/harper-c` CGo (`libharper_c.so` ~16 MB,
   ~4 ms warm; cache one `LintGroup` per process).
 - **LLM idle behaviour (backend-specific):** the default llama.cpp keeps one ~3.3 GiB model
