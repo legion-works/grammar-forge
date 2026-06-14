@@ -20,15 +20,15 @@ export interface PauseDecision {
     mode: PauseMode
 }
 
-/** Pure: given a settings snapshot, the current mode, and the current
- *  hostname, decide what mode to be in next. The orchestrator's reconcile()
- *  loop calls this on every settings change and mounts/unmounts the paused
- *  runtime accordingly. */
-export function nextPauseMode(s: Settings, current: PauseMode, hostname: string): PauseDecision {
+/** Pure: given a settings snapshot and the current hostname, decide what
+ *  mode to be in next. The orchestrator's reconcile() loop calls this on
+ *  every settings change and mounts/unmounts the paused runtime accordingly.
+ *  Decision is a pure function of settings + hostname; the prior mode is not
+ *  needed (off → active on first call is the correct startup behaviour). */
+export function nextPauseMode(s: Settings, hostname: string): PauseDecision {
     if (!s.enabled) return { mode: 'off' }
     if (isSiteBlocked(s, hostname)) return { mode: 'site-paused' }
-    if (current === 'site-paused') return { mode: 'active' }
-    return { mode: current }
+    return { mode: 'active' }
 }
 
 export interface PauseModeDeps {

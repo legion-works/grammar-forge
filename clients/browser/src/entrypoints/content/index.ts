@@ -18,7 +18,7 @@ import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
 import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
 import { nextCheckSeq } from '@/lib/check-seq'
 import { mountRephraseFlow, resolveSelection as resolveRephraseSelectionFor } from './rephrase'
-import { mountPausedMode, nextPauseMode, type PauseMode } from './pause'
+import { mountPausedMode, nextPauseMode } from './pause'
 import { mountReanchor } from './reanchor'
 import { isFrameworkRichEditor } from '@/input/rich-editor-apply'
 import { requestMainWorldApply } from '@/input/main-world-apply'
@@ -224,11 +224,6 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     // eslint-disable-next-line no-console
     console.info('[gf] content script loaded')
     let currentSettings: Settings = await getSettings()
-    // Reducer state for the pause-mode decision (mount/unmount the paused
-    // runtime). Owned by the orchestrator; the pure nextPauseMode lives in
-    // ./pause.ts. Kept in lockstep with `runtime` (null = no active OR
-    // paused runtime mounted).
-    let currentPauseMode: PauseMode = 'off'
     // Drive the verbose logger from the setting (null = fall back to the
     // localStorage.gfDebug manual override).
     setDebugLoggingEnabled(currentSettings.debugLogging ? true : null)
@@ -424,8 +419,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     // mode='site-paused' → swap the full runtime for the minimal paused pill
     // mode='active' → (re)mount the full runtime
     const reconcile = (s: Settings): void => {
-        const next = nextPauseMode(s, currentPauseMode, hostname)
-        currentPauseMode = next.mode
+        const next = nextPauseMode(s, hostname)
         if (next.mode === 'off') {
             teardownRuntime()
             unmountPausedMode()
