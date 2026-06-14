@@ -5,7 +5,7 @@
 // render) lives in entrypoints/content; this file knows nothing about the page.
 
 import { deriveCategory, type CATEGORY_META } from '@/api/category'
-import { verifyByteSpan } from '@/api/offset'
+import { verifyByteSpan, verifyByteSpanWithCache } from '@/api/offset'
 import { wordLevelDiff } from '@/lib/word-diff'
 import type { BridgeSuggestion, Category, CorrectResponse } from '@/api/types'
 
@@ -90,6 +90,16 @@ export function buildRenderableItems(
 ): RunCheckResult {
     const verify = deps.verify ?? verifyByteSpan
     const derive = deps.derive ?? ((s: BridgeSuggestion) => deriveCategory(s))
+    // The plan's P1 fix: cache the per-suggestion byte→code-unit
+    // mapping keyed on (suggestionId, text). `verifyByteSpan` is
+    // O(N) per call; caching the result on cache hit turns the loop
+    // into O(K) verify calls. The text-hash defaults to the text
+    // itself — V8 hashes strings in O(1) on identity, O(length) on
+    // inequality (same as the existing `text.slice` round-trip but
+    // per-id). `verifyByteSpanWithCache` short-circuits to a direct
+    // `verify` call when `suggestionId === undefined` (the preview
+    // path — id-less fast frames).
+    const textHash = text
 
     const items: RenderableItem[] = []
     let dropped = 0
@@ -97,7 +107,7 @@ export function buildRenderableItems(
     // throw inside the orchestrator and kill the check; treat it as "no edits".
     const suggestions = Array.isArray(res?.suggestions) ? res.suggestions : []
     for (const s of suggestions) {
-        const cu = verify(text, s.span)
+        const cu = verifyByteSpanWithCache(text, s.span, s.id, textHash, verify)
         if (!cu) {
             // oxlint-disable-next-line no-console
             console.warn('grammarforge: dropped suggestion with unverifiable byte span', s.span, s)

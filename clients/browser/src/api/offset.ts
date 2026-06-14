@@ -54,3 +54,44 @@ export function verifyByteSpan(
         return null
     }
 }
+
+/**
+ * Verify a byte span with a per-suggestion-id memo. The plan's P1 fix:
+ * `verifyByteSpan` is O(N) (a from-index-0 walk over the text via
+ * `byteToCodeUnit`); on a 30k-char draft with K suggestions that's
+ * O(N×K) per check. For unchanged text the byte→code-unit mapping is
+ * stable, so we cache the result keyed on `(suggestionId, textHash)`
+ * and short-circuit subsequent calls. The cache is module-scoped
+ * (one entry per suggestion id); the bridge's per-sentence eviction
+ * handles long-term cleanup. (If the bridge ever recycles ids within
+ * a session, a hard cap of 4096 entries is a follow-up; the
+ * investigation showed it doesn't.)
+ *
+ * `suggestionId === undefined` short-circuits to a direct `verify`
+ * call (the preview path: id-less fast frames must bypass the cache
+ * so the existing `TestCorrectStagedEmitsFastPreviewThenFinal`
+ * contract — preview ids are zero — stays byte-identical).
+ */
+const verifyCache = new Map<
+    number,
+    { hash: string; result: { start: number; end: number } | null }
+>()
+
+export function verifyByteSpanWithCache(
+    text: string,
+    span: ByteSpan,
+    suggestionId: number | undefined,
+    textHash: string,
+    verify: (t: string, s: ByteSpan) => { start: number; end: number } | null = verifyByteSpan,
+): { start: number; end: number } | null {
+    if (suggestionId === undefined) return verify(text, span)
+    const cached = verifyCache.get(suggestionId)
+    if (cached && cached.hash === textHash) return cached.result
+    const result = verify(text, span)
+    verifyCache.set(suggestionId, { hash: textHash, result })
+    return result
+}
+
+export function clearVerifyCache(): void {
+    verifyCache.clear()
+}
