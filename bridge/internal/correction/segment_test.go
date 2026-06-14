@@ -163,6 +163,28 @@ func TestSegmentSentencesNewlineCoverageGapIsExactlyOneByte(t *testing.T) {
 	}
 }
 
+func TestSegmentSentencesCRLFCoverageGapIsBothCRAndLF(t *testing.T) {
+	// CRLF must leave BOTH the '\r' and the '\n' bytes uncovered by any
+	// segment. A "no segment touches a line break" invariant on plain '\n'
+	// extends to '\r': either could anchor a buggy suggestion that crosses
+	// the line break.
+	text := "a\r\nb"
+	segs := SegmentSentences(text)
+	covered := make([]bool, len(text))
+	for _, s := range segs {
+		for i := s.Start; i < s.End; i++ {
+			covered[i] = true
+		}
+	}
+	for i, c := range covered {
+		if text[i] == '\r' || text[i] == '\n' {
+			require.False(t, c, "byte %d is %q — must be uncovered (CRLF is one boundary)", i, text[i])
+		} else {
+			require.True(t, c, "byte %d (%q) must be covered by some segment", i, text[i])
+		}
+	}
+}
+
 func TestSegmentSentencesCRLFStripsCarriageReturn(t *testing.T) {
 	// "a\r\nb" must treat the '\r' as part of the line break and leave no
 	// '\r' at the end of a segment. Punkt sees "a" and "b" only.
