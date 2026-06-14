@@ -18,6 +18,7 @@ import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
 import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
 import { nextCheckSeq } from '@/lib/check-seq'
 import { mountRephraseFlow, resolveSelection as resolveRephraseSelectionFor } from './rephrase'
+import { mountPausedMode, nextPauseMode, type PauseMode } from './pause'
 import { isFrameworkRichEditor } from '@/input/rich-editor-apply'
 import { requestMainWorldApply } from '@/input/main-world-apply'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
@@ -228,6 +229,11 @@ interface Runtime {
 
 async function start(ctx: ContentScriptContext): Promise<void> {
     let currentSettings: Settings = await getSettings()
+    // Reducer state for the pause-mode decision (mount/unmount the paused
+    // runtime). Owned by the orchestrator; the pure nextPauseMode lives in
+    // ./pause.ts. Kept in lockstep with `runtime` (null = no active OR
+    // paused runtime mounted).
+    let currentPauseMode: PauseMode = 'off'
     // Drive the verbose logger from the setting (null = fall back to the
     // localStorage.gfDebug manual override).
     setDebugLoggingEnabled(currentSettings.debugLogging ? true : null)
@@ -372,97 +378,24 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     }
 
     // Paused-site mode: a MINIMAL runtime — field discovery + focus tracking
-    // only (no checking, no bridge, no highlights). The off-pill anchors to
-    // the FOCUSED field exactly like the active pill (focus-only, shared drag
-    // offset); no focused field => no pill.
-    const mountPausedMode = (): void => {
+    // only (no checking, no bridge, no highlights). Extracted to
+    // ./pause.ts (Task 4b-2). The orchestrator owns the pause lifecycle
+    // (mount / unmount / reducer state) and the module does the IO.
+    const mountPausedModeLocal = (): void => {
         if (pausedCleanups) return
-        const cleanups: Array<() => void> = (pausedCleanups = [])
-        const host = createOverlayHost()
-        cleanups.push(() => host.destroy())
-        const fields = new Set<HTMLElement>()
-        let pillHandle: StatusButtonHandle | null = null
-        let pillFor: HTMLElement | null = null
-        const hidePill = (): void => {
-            pillHandle?.destroy()
-            pillHandle = null
-            pillFor = null
-        }
-        const showPillFor = (el: HTMLElement): void => {
-            hidePill()
-            pillFor = el
-            pillHandle = renderStatusButton(host.root, {
-                count: 0,
-                anchorRect: el.getBoundingClientRect(),
-                disabled: true,
-                corrections: [],
-                onFocusField: () => el.focus(),
-                onTogglePower: () => void togglePower(),
-                onRecheck: () => {},
-                onApplyAll: () => {},
-                onApplyOne: () => {},
-                onUndo: () => {},
-                onRephrase: () => {},
-                undoAvailable: false,
-                dragOffset: pillPosition.dragOffset ?? undefined,
-                onDragMove: (offset) => {
-                    pillPosition.dragOffset = offset
-                },
-            })
-        }
-        const stopObserver = createFieldObserver({
-            root: document.body,
-            onFieldDiscovered: (el) => {
-                fields.add(el)
-                if (el.contains(document.activeElement)) showPillFor(el)
+        const flow = mountPausedMode({
+            hostname,
+            getLastFocusedField: () => lastFocusedField,
+            setLastFocusedField: (el) => {
+                lastFocusedField = el
             },
-            onFieldDetached: (el) => {
-                fields.delete(el)
-                if (lastFocusedField === el) lastFocusedField = null
-                if (pillFor === el) hidePill()
+            getDragOffset: () => pillPosition.dragOffset ?? undefined,
+            setDragOffset: (offset) => {
+                pillPosition.dragOffset = offset ?? null
             },
+            onTogglePower: () => togglePower(),
         })
-        // Seed the pill for the field the user was last editing. The field
-        // observer's initial sweep is deferred (rAF) and gated on
-        // document.activeElement, which is <body> right after the Power button
-        // that triggered the disable was destroyed — so without this seed no
-        // pill (hence no in-page Enable affordance) would appear until the user
-        // re-focuses a field. showPillFor only needs the element; the observer
-        // adds it to `fields` on its next tick (showPillFor is idempotent).
-        if (lastFocusedField?.isConnected) showPillFor(lastFocusedField)
-        cleanups.push(stopObserver)
-        const onFocusIn = (e: FocusEvent): void => {
-            const t = e.target
-            if (!(t instanceof HTMLElement)) return
-            for (const f of fields) {
-                if (f === t || f.contains(t)) {
-                    showPillFor(f)
-                    return
-                }
-            }
-        }
-        const onFocusOut = (): void => {
-            // Defer: focus may be moving INTO the pill (drag) or to a child.
-            setTimeout(() => {
-                if (pillFor && !pillFor.contains(document.activeElement)) hidePill()
-            }, 0)
-        }
-        document.addEventListener('focusin', onFocusIn)
-        document.addEventListener('focusout', onFocusOut)
-        cleanups.push(() => {
-            document.removeEventListener('focusin', onFocusIn)
-            document.removeEventListener('focusout', onFocusOut)
-        })
-        const reposition = (): void => {
-            if (pillFor && pillHandle) pillHandle.reposition(pillFor.getBoundingClientRect())
-        }
-        document.addEventListener('scroll', reposition, { capture: true, passive: true })
-        window.addEventListener('resize', reposition, { passive: true })
-        cleanups.push(() => {
-            document.removeEventListener('scroll', reposition, { capture: true })
-            window.removeEventListener('resize', reposition)
-        })
-        cleanups.push(hidePill)
+        pausedCleanups = [flow.stop]
     }
     const unmountPausedMode = (): void => {
         if (!pausedCleanups) return
@@ -489,17 +422,22 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     document.addEventListener('focusin', trackFocus)
     ctx.onInvalidated(() => document.removeEventListener('focusin', trackFocus))
 
-    // Reconcile the page state to the current settings: globally off -> nothing;
-    // site paused -> paused-mode runtime only; otherwise -> full checking runtime.
+    // Reconcile the page state to the current settings. Reducer-driven via
+    // nextPauseMode (./pause.ts): the same function the unit test pins.
+    // mode='off'  → tear down everything (globally disabled)
+    // mode='site-paused' → swap the full runtime for the minimal paused pill
+    // mode='active' → (re)mount the full runtime
     const reconcile = (s: Settings): void => {
-        if (!extensionOn(s)) {
+        const next = nextPauseMode(s, currentPauseMode, hostname)
+        currentPauseMode = next.mode
+        if (next.mode === 'off') {
             teardownRuntime()
             unmountPausedMode()
             return
         }
-        if (sitePaused(s)) {
+        if (next.mode === 'site-paused') {
             teardownRuntime()
-            mountPausedMode()
+            mountPausedModeLocal()
             return
         }
         unmountPausedMode()
