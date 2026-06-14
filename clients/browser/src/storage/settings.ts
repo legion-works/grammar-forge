@@ -28,6 +28,7 @@ export interface Settings {
     autocorrect: boolean
     acceptHotkey: string
     onDemandHotkey: string
+    rephraseHotkey: string
     /**
      * When true, set `spellcheck="false"` on every monitored field so the
      * browser's native red squiggles don't double up with GrammarForge
@@ -70,6 +71,7 @@ export const DEFAULT_SETTINGS: Settings = {
     autocorrect: false,
     acceptHotkey: 'Alt+Period',
     onDemandHotkey: 'Ctrl+Shift+Period',
+    rephraseHotkey: 'Ctrl+/',
     suppressNativeSpellcheck: false,
     debugLogging: false,
     rephraseTone: '',

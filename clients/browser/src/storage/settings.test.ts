@@ -35,12 +35,19 @@ describe('DEFAULT_SETTINGS', () => {
             autocorrect: false,
             acceptHotkey: 'Alt+Period',
             onDemandHotkey: 'Ctrl+Shift+Period',
+            rephraseHotkey: 'Ctrl+/',
             suppressNativeSpellcheck: false,
             debugLogging: false,
             rephraseTone: '',
             rephraseStyle: '',
             rephraseAlternatives: 1,
         })
+    })
+})
+
+describe('rephraseHotkey default', () => {
+    it('defaults to Ctrl+/', () => {
+        expect(DEFAULT_SETTINGS.rephraseHotkey).toBe('Ctrl+/')
     })
 })
 
