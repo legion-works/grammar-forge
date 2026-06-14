@@ -14,7 +14,7 @@ describe('resolveRephraseScope', () => {
 
     it('uses the selection text+span when the selection is in the target element', () => {
         const found = makeScope({ el, text: 'sel text', span: { start: 5, end: 14 } })
-        const getWhole = vi.fn(() => 'whole')
+        const getWhole = vi.fn<() => string>(() => 'whole')
         expect(resolveRephraseScope(el, found, getWhole)).toEqual({
             text: 'sel text',
             span: { start: 5, end: 14 },
@@ -23,7 +23,7 @@ describe('resolveRephraseScope', () => {
     })
 
     it('falls back to the whole field when no selection is found', () => {
-        const getWhole = vi.fn(() => 'whole text here')
+        const getWhole = vi.fn<() => string>(() => 'whole text here')
         expect(resolveRephraseScope(el, null, getWhole)).toEqual({
             text: 'whole text here',
             span: { start: 0, end: 15 },

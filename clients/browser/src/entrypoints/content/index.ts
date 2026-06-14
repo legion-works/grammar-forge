@@ -37,18 +37,8 @@ import { getNativeHighlighter, isNativeHighlightSupported } from '@/overlay/nati
 import { dismissPopoversIn, showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { showToast } from '@/overlay/toast'
-import {
-    showRephraseButton,
-    dismissRephraseButtonsIn,
-    type RephraseButtonHandle,
-} from '@/overlay/rephrase-button'
-import {
-    showRephraseCard,
-    showRephraseError,
-    showRephrasePending,
-    dismissRephraseCardsIn,
-    type RephraseCardHandle,
-} from '@/overlay/rephrase-card'
+import { dismissRephraseButtonsIn } from '@/overlay/rephrase-button'
+import { dismissRephraseCardsIn } from '@/overlay/rephrase-card'
 import {
     renderStatusButton,
     type StatusButtonHandle,
@@ -241,8 +231,9 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     const hostname = location.hostname
     // The extension is globally on/off via settings.enabled; per-site disable
     // ("power off on this site") lives in the blockedSites deny-list.
-    const extensionOn = (s: Settings): boolean => s.enabled
-    const sitePaused = (s: Settings): boolean => isSiteBlocked(s, hostname)
+    // (The `extensionOn` and `sitePaused` predicates that used to live here
+    // were absorbed into the pure `nextPauseMode` reducer in
+    // ./pause.ts; reconcile() now calls that directly.)
 
     // Full checking runtime (exists only when on + site not paused). When the
     // site is paused we instead show a small standalone "power" pill so the
