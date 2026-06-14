@@ -77,6 +77,15 @@ type Service struct {
 	// whole-text path; populated by SetSentenceCache to enable the sentence
 	// pipeline (segment + per-sentence cache lookup + span reassembly).
 	sentenceCache *sentenceCache
+	// tone analysis (mirrors the rephrase backend resolution; reuses
+	// rephraseFactory). toneDefaultBackend is the GF_TONE_* backend (nil =>
+	// fall back to the rephrase default, then s.llm). toneCache memoizes tags
+	// per text-unit. toneEnabled gates the feature; toneMinChars floors the
+	// field path.
+	toneDefaultBackend *RephraseBackend
+	toneCache          *toneCache
+	toneEnabled        bool
+	toneMinChars       int
 }
 
 // MergeFastEditsMode values for Service.mergeFastEditsMode
@@ -147,6 +156,23 @@ func (s *Service) SetMergeFastEditsMode(mode string) { s.mergeFastEditsMode = mo
 // stays consistent and a flag toggle does not invalidate the cache. The
 // empty/all-invalid hints branch is byte-identical to Build(req).
 func (s *Service) SetFastHintsEnabled(on bool) { s.fastHintsEnabled = on }
+
+// SetToneDefaultBackend sets the GF_TONE_* default backend (nil => fall back to
+// the rephrase default, then s.llm). Resolution reuses the rephrase factory.
+func (s *Service) SetToneDefaultBackend(b *RephraseBackend) { s.toneDefaultBackend = b }
+
+// SetToneCache enables the per-text-unit tone cache with the given capacity
+// (0 disables). Mirrors the sentence cache wiring.
+func (s *Service) SetToneCache(size int) { s.toneCache = newToneCache(size) }
+
+// SetToneConfig sets the enabled gate and the field-path min-chars floor.
+func (s *Service) SetToneConfig(enabled bool, minChars int) {
+	s.toneEnabled = enabled
+	s.toneMinChars = minChars
+}
+
+// ToneEnabled reports whether the /tone endpoint is enabled.
+func (s *Service) ToneEnabled() bool { return s.toneEnabled }
 
 // spellingHints filters fast-path suggestions down to the CategorySpelling
 // entries that the LLM should see as arbitration hints. Other categories
@@ -620,6 +646,116 @@ func (s *Service) Rephrase(ctx context.Context, req RephraseRequest) (RephraseRe
 		Rephrased:    variants[0],
 		Alternatives: variants[1:],
 	}, nil
+}
+
+// AnalyzeTone detects the tone of req.Text. LLM-only; backend resolution:
+// req.Override -> tone default (GF_TONE_*) -> rephrase default (GF_REPHRASE_*)
+// -> s.llm, all built via the rephrase factory. Tone is advisory: backend/parse
+// failures yield empty tags, never an error (unlike Rephrase). Results are
+// cached per text-unit. "field" analyzes the whole text (subject to
+// ToneMinChars); "sentence" segments via SegmentSentences and analyzes each
+// segment, returning per-sentence spans + the aggregated field-level tags.
+func (s *Service) AnalyzeTone(ctx context.Context, req ToneRequest) (ToneResult, error) {
+	if !s.toneEnabled {
+		return ToneResult{Tags: []ToneTag{}}, nil
+	}
+	client := s.llm
+	modelKey := s.baseModel
+	switch {
+	case req.Override != nil && s.rephraseFactory != nil:
+		c, err := s.rephraseFactory(*req.Override)
+		if err != nil {
+			return ToneResult{}, fmt.Errorf("tone: build override backend: %w", err)
+		}
+		client, modelKey = c, req.Override.Model
+	case s.toneDefaultBackend != nil && s.rephraseFactory != nil:
+		c, err := s.rephraseFactory(*s.toneDefaultBackend)
+		if err != nil {
+			return ToneResult{}, fmt.Errorf("tone: build tone backend: %w", err)
+		}
+		client, modelKey = c, s.toneDefaultBackend.Model
+	case s.rephraseDefaultBackend != nil && s.rephraseFactory != nil:
+		c, err := s.rephraseFactory(*s.rephraseDefaultBackend)
+		if err != nil {
+			return ToneResult{}, fmt.Errorf("tone: build rephrase backend: %w", err)
+		}
+		client, modelKey = c, s.rephraseDefaultBackend.Model
+	}
+	if client == nil {
+		return ToneResult{}, fmt.Errorf("tone requires an llm backend")
+	}
+	if req.Granularity == ToneGranularitySentence {
+		return s.analyzeToneSentences(ctx, client, modelKey, req.Text), nil
+	}
+	if s.toneMinChars > 0 && len(req.Text) < s.toneMinChars {
+		return ToneResult{Tags: []ToneTag{}}, nil
+	}
+	return ToneResult{Tags: s.toneTagsFor(ctx, client, modelKey, req.Text)}, nil
+}
+
+// toneTagsFor returns the tags for one text unit (cache + soft-error policy).
+func (s *Service) toneTagsFor(ctx context.Context, client LLMClient, modelKey, text string) []ToneTag {
+	if strings.TrimSpace(text) == "" {
+		return []ToneTag{}
+	}
+	key := toneCacheKey(modelKey, text)
+	if cached, ok := s.toneCache.get(key); ok {
+		return cached
+	}
+	prompt := s.pb.BuildTone(ToneRequest{Text: text})
+	if prompt.User == "" { // GRMR-native skip signal
+		return []ToneTag{}
+	}
+	out, err := client.Complete(ctx, prompt)
+	if err != nil {
+		s.log.Warn("tone: llm complete", "err", err)
+		return []ToneTag{}
+	}
+	tags, err := parseToneTags(out)
+	if err != nil {
+		s.log.Warn("tone: parse", "err", err)
+		return []ToneTag{}
+	}
+	if tags == nil {
+		tags = []ToneTag{}
+	}
+	s.toneCache.add(key, tags)
+	return tags
+}
+
+// analyzeToneSentences segments text and analyzes each sentence (cached),
+// returning per-sentence spans + the aggregated field-level tags.
+func (s *Service) analyzeToneSentences(ctx context.Context, client LLMClient, modelKey, text string) ToneResult {
+	segs := SegmentSentences(text)
+	sentences := make([]ToneSentence, 0, len(segs))
+	for _, seg := range segs {
+		tags := s.toneTagsFor(ctx, client, modelKey, text[seg.Start:seg.End])
+		sentences = append(sentences, ToneSentence{Start: seg.Start, End: seg.End, Tags: tags})
+	}
+	return ToneResult{Tags: aggregateToneTags(sentences), Sentences: sentences}
+}
+
+// aggregateToneTags unions per-sentence tags, keeping the max confidence per
+// tag (first-seen order), for the field-level readout on a sentence request.
+func aggregateToneTags(sentences []ToneSentence) []ToneTag {
+	best := make(map[string]float64)
+	order := make([]string, 0)
+	for _, sent := range sentences {
+		for _, t := range sent.Tags {
+			c, ok := best[t.Tag]
+			if !ok {
+				order = append(order, t.Tag)
+			}
+			if !ok || t.Confidence > c {
+				best[t.Tag] = t.Confidence
+			}
+		}
+	}
+	out := make([]ToneTag, 0, len(order))
+	for _, tag := range order {
+		out = append(out, ToneTag{Tag: tag, Confidence: best[tag]})
+	}
+	return out
 }
 
 // applyAll applies suggestions last-to-first so earlier byte offsets stay

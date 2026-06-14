@@ -1534,3 +1534,61 @@ func TestServiceCorrectMultilineCacheOffYieldsNoNewlineTouchingSuggestion(t *tes
 		}
 	}
 }
+
+// Task 6: AnalyzeTone (field granularity, cached). Uses pickyPB because
+// fakePB's BuildTone returns the GRMR-native skip signal (empty User) and we
+// need the LLM to actually be called to verify the result.
+func TestServiceAnalyzeToneField(t *testing.T) {
+	svc := NewService(pickyPB{}, nil, fakeLLM{out: `{"tags":[{"tag":"frustrated","confidence":0.8}]}`}, &fakeStore{}, "m", fastPolicy())
+	svc.SetToneConfig(true, 0)
+	svc.SetToneCache(8)
+	got, err := svc.AnalyzeTone(context.Background(), ToneRequest{Text: "ugh fine", Granularity: ToneGranularityField, Source: SourceVencord})
+	require.NoError(t, err)
+	require.Equal(t, []ToneTag{{"frustrated", 0.8}}, got.Tags)
+	require.Nil(t, got.Sentences)
+}
+
+// Disabled gate short-circuits before any prompt build / LLM call. fakePB is
+// fine here because the gate fires before BuildTone is consulted.
+func TestServiceAnalyzeToneDisabled(t *testing.T) {
+	svc := NewService(fakePB{}, nil, fakeLLM{out: `{"tags":[]}`}, &fakeStore{}, "m", fastPolicy())
+	got, err := svc.AnalyzeTone(context.Background(), ToneRequest{Text: "hi", Granularity: ToneGranularityField})
+	require.NoError(t, err)
+	require.Empty(t, got.Tags)
+}
+
+// MinChars floor returns empty without calling the LLM. Gate runs after
+// build (ToneEnabled must be true for the floor check to apply); the floor
+// is reached before LLM dispatch, so the GRMR-native skip signal in fakePB
+// never runs.
+func TestServiceAnalyzeToneMinChars(t *testing.T) {
+	svc := NewService(pickyPB{}, nil, fakeLLM{out: `{"tags":[{"tag":"friendly","confidence":1}]}`}, &fakeStore{}, "m", fastPolicy())
+	svc.SetToneConfig(true, 80)
+	got, err := svc.AnalyzeTone(context.Background(), ToneRequest{Text: "short", Granularity: ToneGranularityField})
+	require.NoError(t, err)
+	require.Empty(t, got.Tags, "below ToneMinChars => empty, no LLM call")
+}
+
+// Sentence granularity: per-sentence spans + aggregated field tags. pickyPB
+// is required so BuildTone returns a non-empty User.
+func TestServiceAnalyzeToneSentence(t *testing.T) {
+	svc := NewService(pickyPB{}, nil, fakeLLM{out: `{"tags":[{"tag":"direct","confidence":0.7}]}`}, &fakeStore{}, "m", fastPolicy())
+	svc.SetToneConfig(true, 0)
+	svc.SetToneCache(8)
+	got, err := svc.AnalyzeTone(context.Background(), ToneRequest{Text: "Stop that. Do this now.", Granularity: ToneGranularitySentence})
+	require.NoError(t, err)
+	require.NotEmpty(t, got.Sentences)
+	require.Equal(t, []ToneTag{{"direct", 0.7}}, got.Tags, "aggregate of sentence tags")
+	for _, s := range got.Sentences {
+		require.GreaterOrEqual(t, s.End, s.Start)
+	}
+}
+
+// Unparseable LLM output is a soft empty, never an error (tone is advisory).
+func TestServiceAnalyzeToneBadLLMSoftEmpty(t *testing.T) {
+	svc := NewService(pickyPB{}, nil, fakeLLM{out: "not json"}, &fakeStore{}, "m", fastPolicy())
+	svc.SetToneConfig(true, 0)
+	got, err := svc.AnalyzeTone(context.Background(), ToneRequest{Text: "hello there friend", Granularity: ToneGranularityField})
+	require.NoError(t, err, "unparseable LLM output => soft empty, never an error")
+	require.Empty(t, got.Tags)
+}
