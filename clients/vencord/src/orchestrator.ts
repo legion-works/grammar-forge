@@ -9,6 +9,8 @@ import { createFieldObserver } from '@/input/observer'
 import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { domPointToFlatOffset, getText } from '@/input/text'
+import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
+import { nextCheckSeq } from '@/lib/check-seq'
 import { applySlateFix } from '@/input/rich-editor-apply'
 import {
     buildRenderableItems,
@@ -245,11 +247,13 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             const measured = getSpanRectsBatch(el, spans)
             if (measured.length > 0) allRects = measured
         } catch {
-            // Measurement failed (detached node / odd layout) — leave the
-            // stale rects + highlights in place; the next remeasure fixes
-            // them. The pill/badge update below still runs: count data must
-            // never depend on rect measurability (a skipped update here left
-            // the pill one state behind).
+            // Spec §4 sibling: measurement-throw → clear itemRects + the
+            // highlight layer. Better no highlight than a stale one — the
+            // next remeasure (scroll/resize, or the next edit) re-populates
+            // from a clean slate. Pill update below still runs (count data
+            // must never depend on rect measurability).
+            st.itemRects = []
+            st.highlightLayer?.reconcile([])
         }
         if (allRects) {
             st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects![i] ?? [] }))
@@ -886,6 +890,25 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         }, PASTE_GRACE_MS)
     }
 
+    // Mirror of the browser orchestrator's applyScopedClearToField. The
+    // shared keep helper decides which items survive; we hide the dropped
+    // ones in place via the per-item primitive so the survivors don't
+    // flicker. (Vencord is contenteditable-only → no native path; the
+    // native branch from the browser helper is omitted here.)
+    const applyScopedClearToField = (
+        st: FieldState,
+        _el: HTMLElement,
+        kept: readonly RenderableItem[],
+    ): void => {
+        if (st.items.length === kept.length) return
+        const keptSet = new Set(kept)
+        for (let i = 0; i < st.items.length; i++) {
+            if (!keptSet.has(st.items[i]!)) {
+                st.highlightLayer?.clearItem(i)
+            }
+        }
+    }
+
     const attach = (el: HTMLElement): void => {
         if (fields.has(el)) return
         const rerun = rerunFor(el)
@@ -901,8 +924,22 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             })
             const st = fields.get(el)
             if (!st) return false
+            // Spec §4 sibling: popover closes on input edit. The popover
+            // points at a highlight we may be about to clear. Close it
+            // unconditionally on any input event (paste / typing / drop)
+            // — better no popover than a ghost-anchored one.
+            closePopoverFor(el)
             if (decision === 'check') {
+                // Spec §3: scoped-clear BEFORE the debounced check
+                // returns. Mirrors the browser orchestrator's
+                // onInputEventFor.
                 clearPasteGrace(st)
+                const editOffset = getCaretOffset(el)
+                const kept = keepHighlightsBeforeEdit(st.items, editOffset)
+                if (kept.length < st.items.length) {
+                    applyScopedClearToField(st, el, kept)
+                }
+                st.items = kept
                 return true
             }
             if (decision === 'grace') armPasteGrace(el, st, attachment)
@@ -927,7 +964,10 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             attachment,
             items: [],
             itemRects: [],
-            checkSeq: 0,
+            // Process-monotonic: a re-attached composer's first seq is
+            // strictly greater than any seq a torn-down composer ever
+            // produced. Mirrors the browser fix; see @/lib/check-seq.
+            checkSeq: nextCheckSeq(),
             pasteGraceTimer: null,
             highlightLayer: null,
             lastApplied: null,
@@ -1049,6 +1089,21 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         }
         el.addEventListener('focus', onFieldFocus)
         cleanups.push(() => el.removeEventListener('focus', onFieldFocus))
+
+        // Spec §4 sibling: blur → clear highlights + close popover. The
+        // browser orchestrator has this; the Vencord orchestrator only
+        // had the debug focus tracer (onFieldFocusOut above). Add the
+        // real one. Vencord is contenteditable-only (no native path).
+        const onFieldBlur = (): void => {
+            const s = fields.get(el)
+            if (!s) return
+            closePopoverFor(el)
+            s.items = []
+            s.itemRects = []
+            s.highlightLayer?.reconcile([])
+        }
+        el.addEventListener('blur', onFieldBlur)
+        cleanups.push(() => el.removeEventListener('blur', onFieldBlur))
 
         // Native `paste` fallback for rich editors (Discord/Lexical) that
         // apply the paste programmatically and fire NO input event with
