@@ -11,7 +11,7 @@ import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { domPointToFlatOffset, getText } from '@/input/text'
 import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
 import { nextCheckSeq } from '@/lib/check-seq'
-import { applySlateFix } from '@/input/rich-editor-apply'
+import { applySlateFix, type ApplyTraceLogger } from '@/input/rich-editor-apply'
 import {
     buildRenderableItems,
     isSpanStillValid,
@@ -23,6 +23,7 @@ import { BridgeClient } from '@/api/client'
 import { createSignalQueue } from '@/signal/queue'
 import { addWordToDictionary, type DictionaryDeps } from './dictionary'
 import { openRephraseFor, resolveRephraseScope, type RephraseDeps } from './rephrase'
+import { configureVencordDebug, debugLog } from './debug-log'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightLayer, type HighlightSpec } from '@/overlay/highlight'
@@ -153,13 +154,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     // client's gfDebug toggle is unusable here — the setting is the switch.
     // Millisecond timestamps (relative to orchestrator start) make event
     // ORDER and latency visible — essential for the async-apply traces.
-    const t0 = performance.now()
-    const debugLog = (...args: unknown[]): void => {
-        if (!getConfig().debugLogging) return
-        const t = (performance.now() - t0).toFixed(1)
-        // oxlint-disable-next-line no-console
-        console.log(`[GrammarForge +${t}ms]`, ...args)
-    }
+    // The actual write is delegated to ./debug-log.ts which wraps the
+    // shared Console backend with the per-call +Xms prefix.
+    configureVencordDebug({
+        startMs: performance.now(),
+        isEnabled: () => getConfig().debugLogging,
+    })
     // Client rebuilds when bridgeUrl/allowRemoteBridge change (settings are
     // live). All other config flags (realtimeDelayMs, checkPastedText,
     // acceptHotkey) are read live by reference.
@@ -340,7 +340,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             el,
             { start: item.cuStart, end: item.cuEnd },
             replacement,
-            debugLog,
+            debugLog as unknown as ApplyTraceLogger,
         )
         if (!applied) {
             void rerunFor(el)(getText(el))
@@ -394,7 +394,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 el,
                 { start: item.cuStart, end: item.cuEnd },
                 replacement,
-                debugLog,
+                debugLog as unknown as ApplyTraceLogger,
             )
             if (!applied) continue
             batch = appendInverseEdit(batch, {
@@ -434,7 +434,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         st.lastApplied = null
         for (const op of ops) {
             if (!el.isConnected) return
-            await applySlateFix(el, op.span, op.replacement, debugLog)
+            await applySlateFix(
+                el,
+                op.span,
+                op.replacement,
+                debugLog as unknown as ApplyTraceLogger,
+            )
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
         }
         debugLog('undo', { ops: ops.length })
@@ -493,7 +498,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     el,
                     { start: item.cuStart, end: item.cuEnd },
                     replacement,
-                    debugLog,
+                    debugLog as unknown as ApplyTraceLogger,
                 ).then((applied) => {
                     if (!applied) {
                         void rerunFor(el)(getText(el))

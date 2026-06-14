@@ -64,9 +64,16 @@ export function createFileBackend(opts: FileBackendOptions): DebugBackend {
         ((p, line) => {
             // node:fs is loaded lazily so the browser bundle never sees it.
             // OpenCode is the only caller; the browser/vendored code paths
-            // never reach createFileBackend.
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const fs = require('node:fs') as typeof import('node:fs')
+            // never reach createFileBackend. The `globalThis` lookup
+            // dodges tsc contexts without @types/node (e.g. vencord).
+            const nodeRequire = (globalThis as { require?: (id: string) => unknown }).require
+            if (typeof nodeRequire !== 'function') return
+            // Structural typing — only the one method we use. Avoids
+            // resolving 'node:fs' at type-check time in non-Node contexts.
+            type NodeFs = {
+                appendFileSync: (p: string, d: string, enc: string) => void
+            }
+            const fs = nodeRequire('node:fs') as NodeFs
             fs.appendFileSync(p, line, 'utf8')
         })
     const now = opts.nowIso ?? (() => new Date().toISOString())

@@ -9,7 +9,7 @@ import { getText } from '@/input/text'
 import type { BridgeClient } from '@/api/client'
 import type { SignalQueue } from '@/signal/queue'
 import { showToast } from '@/overlay/toast'
-import { debugLog } from '@/lib/debug-log'
+import { debugLog } from './debug-log'
 
 /** Pure: split a word into non-empty whitespace-separated tokens, deduped,
  *  preserve order. Returns [] for empty/whitespace input. */
