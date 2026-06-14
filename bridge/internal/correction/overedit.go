@@ -782,6 +782,129 @@ func RepairSingularThey(original, corrected string) string {
 	return out
 }
 
+// clauseTerminators is the set of byte values that, when immediately following
+// a bare modal in the original (after optional whitespace), mark the modal as
+// clause-final. An end-of-string position is also clause-final.
+var clauseTerminators = map[byte]bool{
+	'.': true,
+	'?': true,
+	'!': true,
+	',': true,
+	';': true,
+	':': true,
+}
+
+// bareModals is the set of bare modal words (lower-case) that the LLM
+// over-edits by appending "have" when the modal is clause-final.
+var bareModals = map[string]bool{
+	"could":  true,
+	"would":  true,
+	"should": true,
+	"might":  true,
+	"must":   true,
+	"can":    true,
+	"will":   true,
+	"shall":  true,
+}
+
+// RepairModalPerfectAddition reverts the LLM's phantom "have" insertion after
+// a clause-final bare modal (corpus-measured over-edit class). Examples:
+//
+//	"if I could"       -> "if I could have"       reverted to "if I could"
+//	"I did what I could, and left." -> "I did what I could have, and left." reverted
+//
+// Safety discriminator (CRITICAL): the rule fires ONLY when the modal in the
+// ORIGINAL is immediately followed by end-of-string or a clause terminator
+// (., ?, !, ,, ;, :) — possibly with intervening whitespace. A modal followed
+// by any other word (e.g. "would done", "should go") is NOT clause-final, so
+// the LLM's "have" insertion is a genuine perfect-aspect fix and is kept.
+//
+// Mechanism: scan corrected tokens for "have" immediately after a bare modal.
+// For each such pair, check whether the modal is clause-final in the original
+// (using the original's token list). If so, drop the "have" token from
+// corrected (splice it out). Preserve casing and punctuation exactly.
+func RepairModalPerfectAddition(original, corrected string) string {
+	if original == corrected {
+		return corrected
+	}
+	origTokens := tokenizeWords(original)
+	corrTokens := tokenizeWords(corrected)
+
+	// Build a set of clause-final modal positions in the original.
+	// A modal at origTokens[i] is clause-final when the byte immediately
+	// after the token (skipping whitespace) is a clause terminator or
+	// end-of-string.
+	clauseFinalModals := make(map[string]bool) // lower-case modal cores that are clause-final
+	for _, t := range origTokens {
+		core, tail := splitTrailingPunctuation(t.text)
+		lc := strings.ToLower(core)
+		if !bareModals[lc] {
+			continue
+		}
+		// If the token itself carries trailing punctuation, the modal is
+		// clause-final (e.g. "could." or "could,").
+		if tail != "" {
+			clauseFinalModals[lc] = true
+			continue
+		}
+		// Otherwise check what follows in the original string.
+		afterModal := original[t.start+len(t.text):]
+		// Skip whitespace.
+		rest := strings.TrimLeftFunc(afterModal, unicode.IsSpace)
+		// Clause-final: end-of-string or a clause terminator byte.
+		if len(rest) == 0 || clauseTerminators[rest[0]] {
+			clauseFinalModals[lc] = true
+		}
+	}
+
+	if len(clauseFinalModals) == 0 {
+		return corrected
+	}
+
+	// Scan corrected for "have" immediately after a clause-final bare modal.
+	// When found, splice out the "have" token (and its trailing space).
+	type splice struct {
+		start, end  int
+		replacement string
+	}
+	var splices []splice
+
+	for i := 0; i+1 < len(corrTokens); i++ {
+		modalTok := corrTokens[i]
+		haveTok := corrTokens[i+1]
+
+		modalCore, modalTail := splitTrailingPunctuation(modalTok.text)
+		if modalTail != "" {
+			continue // modal carries punctuation — not a clean insertion site
+		}
+		if !clauseFinalModals[strings.ToLower(modalCore)] {
+			continue
+		}
+
+		haveCore, haveTail := splitTrailingPunctuation(haveTok.text)
+		if strings.ToLower(haveCore) != "have" {
+			continue
+		}
+
+		// Splice out " have[tail]" and reattach haveTail to the modal token.
+		// Example: "could have." -> "could." (period migrates back to modal).
+		// The splice replaces from end-of-modal to end-of-have with haveTail.
+		splices = append(splices, splice{
+			start:       modalTok.start + len(modalTok.text),
+			end:         haveTok.start + len(haveTok.text),
+			replacement: haveTail,
+		})
+		i++ // skip haveTok
+	}
+
+	out := corrected
+	for k := len(splices) - 1; k >= 0; k-- {
+		sp := splices[k]
+		out = out[:sp.start] + sp.replacement + out[sp.end:]
+	}
+	return out
+}
+
 // DefaultOverEditRules returns the over-edit repair chain wired by main when
 // GF_OVEREDIT_FILTER is enabled (the default). Rules are registered
 // explicitly — one entry per measured over-edit class.
@@ -792,5 +915,6 @@ func DefaultOverEditRules() []OverEditRule {
 		RepairMidWordCaseFlip,
 		RepairContractionExpansion,
 		RepairSingularThey,
+		RepairModalPerfectAddition,
 	}
 }

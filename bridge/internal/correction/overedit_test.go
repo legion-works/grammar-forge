@@ -447,11 +447,114 @@ func TestRepairSingularTheyIdempotent(t *testing.T) {
 	require.Equal(t, once, RepairSingularThey(original, once))
 }
 
+// ---- Rule 6: modal-perfect addition revert ----
+
+// Positive: clause-final bare modal at sentence end — "have" inserted after it.
+func TestRepairModalPerfectAdditionRevertsCouldSentenceFinal(t *testing.T) {
+	original := "if I could"
+	corrected := "if I could have"
+	require.Equal(t, original, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionRevertsWouldSentenceFinal(t *testing.T) {
+	original := "I did everything I would"
+	corrected := "I did everything I would have"
+	require.Equal(t, original, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionRevertsShouldSentenceFinal(t *testing.T) {
+	original := "Yes I should"
+	corrected := "Yes I should have"
+	require.Equal(t, original, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionRevertsMightSentenceFinal(t *testing.T) {
+	original := "I thought I might"
+	corrected := "I thought I might have"
+	require.Equal(t, original, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionRevertsCanSentenceFinal(t *testing.T) {
+	original := "do it if you can"
+	corrected := "do it if you can have"
+	require.Equal(t, original, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionRevertsWillSentenceFinal(t *testing.T) {
+	original := "I know you will"
+	corrected := "I know you will have"
+	require.Equal(t, original, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionRevertsModalBeforePeriod(t *testing.T) {
+	// Clause-final modal followed by period in original.
+	original := "I did everything I could."
+	corrected := "I did everything I could have."
+	require.Equal(t, original, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionRevertsModalBeforeComma(t *testing.T) {
+	// Modal is clause-final before a comma (elliptical clause).
+	original := "I did what I could, and then left."
+	corrected := "I did what I could have, and then left."
+	require.Equal(t, original, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionRevertsModalBeforeQuestionMark(t *testing.T) {
+	original := "Do you think I could?"
+	corrected := "Do you think I could have?"
+	require.Equal(t, original, RepairModalPerfectAddition(original, corrected))
+}
+
+// Negative: modal followed by a verb in original — real perfect-aspect fix, KEEP.
+func TestRepairModalPerfectAdditionKeepsWouldHaveDoneWhenOriginalMissingHave(t *testing.T) {
+	// "I would done it" -> "I would have done it" is a REAL fix.
+	// The modal "would" is followed by "done" in the original (not clause-final).
+	original := "I would done it"
+	corrected := "I would have done it"
+	require.Equal(t, corrected, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionKeepsCouldHaveWhenOriginalAlreadyHadHave(t *testing.T) {
+	// Original already has "could have" — no over-edit, no-op.
+	original := "I could have done it"
+	corrected := "I could have done it"
+	require.Equal(t, corrected, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionKeepsMidClauseModalWithVerb(t *testing.T) {
+	// Modal mid-clause followed by a verb — not clause-final, keep.
+	original := "She should go now"
+	corrected := "She should have gone now"
+	require.Equal(t, corrected, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionNoOpOnNonModalSentence(t *testing.T) {
+	// No modal at all — pure no-op.
+	original := "The cat sat on the mat."
+	corrected := "The cat sat on the mat."
+	require.Equal(t, corrected, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionNoOpWhenPatternAbsent(t *testing.T) {
+	// Corrected differs but not by a modal-perfect insertion.
+	original := "She has a dog."
+	corrected := "She has a cat."
+	require.Equal(t, corrected, RepairModalPerfectAddition(original, corrected))
+}
+
+func TestRepairModalPerfectAdditionIdempotent(t *testing.T) {
+	original := "if I could"
+	corrected := "if I could have"
+	once := RepairModalPerfectAddition(original, corrected)
+	require.Equal(t, once, RepairModalPerfectAddition(original, once))
+}
+
 // ---- framework ----
 
 func TestDefaultOverEditRulesContainsAllMeasuredRules(t *testing.T) {
 	chain := DefaultOverEditRules()
-	require.Len(t, chain, 5)
+	require.Len(t, chain, 6)
 }
 
 func TestOverEditRuleChainComposesAndIsIdempotent(t *testing.T) {
@@ -501,5 +604,15 @@ func TestOverEditRuleChainComposesAndIsIdempotent(t *testing.T) {
 		once := apply(orig, corr)
 		require.Equal(t, want, once, "singular they")
 		require.Equal(t, once, apply(orig, once), "singular-they idempotent")
+	}
+
+	// Rule 6: modal-perfect addition
+	{
+		orig := "if I could"
+		corr := "if I could have"
+		want := "if I could"
+		once := apply(orig, corr)
+		require.Equal(t, want, once, "modal-perfect addition")
+		require.Equal(t, once, apply(orig, once), "modal-perfect idempotent")
 	}
 }
