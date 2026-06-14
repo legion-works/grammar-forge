@@ -31,7 +31,7 @@ import {
 } from '@/lib/pipeline'
 import { applyScopedOverlayClear } from '@/lib/scoped-clear'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
-import { createOverlayHost } from '@/overlay/shadow-host'
+import { createOverlayHost, isWithinOverlay } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightSpec } from '@/overlay/highlight'
 import { getNativeHighlighter, isNativeHighlightSupported } from '@/overlay/native-highlight'
@@ -940,7 +940,14 @@ function wireRuntime(
                 hoverItemIndex: state.hoverItemIndex,
             })
         }
-        const onFieldBlur = (): void => {
+        const onFieldBlur = (e: FocusEvent): void => {
+            // When the user clicks a suggestion in our popover, the browser
+            // fires a11y focus onto the Apply button (inside our shadow-DOM
+            // overlay). The composer's blur event fires with relatedTarget
+            // retargeted to the overlay host. Guard against this: if focus
+            // moved INTO our own overlay, keep all highlights and the popover
+            // — this is a focus STEAL we triggered, not a genuine field-exit.
+            if (isWithinOverlay(e.relatedTarget)) return
             // FOCUS-ONLY pill: hide this field's pill on blur so only the
             // focused field shows its pill.
             state.statusHandle?.setVisible(false)

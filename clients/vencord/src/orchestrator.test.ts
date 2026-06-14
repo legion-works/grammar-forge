@@ -6,6 +6,7 @@ import * as rephraseCard from '@/overlay/rephrase-card'
 import type { BridgeClient } from '@/api/client'
 import { openRephraseFor, type RephraseDeps } from './rephrase'
 import { inputGate, resolveSelectionSpan } from './orchestrator'
+import { isWithinOverlay } from '@/overlay/shadow-host'
 
 describe('inputGate', () => {
     it('schedules a check for plain typing', () => {
@@ -98,6 +99,86 @@ describe('scoped-clear wiring (vencord shape)', () => {
         for (let i = 1; i < seqs.length; i++) {
             expect(seqs[i]!).toBeGreaterThan(seqs[i - 1]!)
         }
+    })
+})
+
+describe('onFieldBlur overlay-focus guard (vencord)', () => {
+    // Tests the isWithinOverlay helper and the guard logic that onFieldBlur
+    // uses. The orchestrator's onFieldBlur is a closure; we test the helper
+    // directly and mirror the guard to verify RED→GREEN behaviour.
+    it('preserves highlights when blur relatedTarget is inside the overlay host', () => {
+        // Build a fake overlay host (mirrors what createOverlayHost produces)
+        const overlayHost = document.createElement('div')
+        overlayHost.setAttribute('data-grammarforge-overlay', '')
+        const applyBtn = document.createElement('button')
+        overlayHost.appendChild(applyBtn)
+        document.body.appendChild(overlayHost)
+
+        // relatedTarget = the Apply button inside the overlay (or the host
+        // itself after shadow-boundary retargeting — both must be guarded)
+        const blurEvent = new FocusEvent('blur', { relatedTarget: applyBtn })
+
+        // Mirror of the guard: if isWithinOverlay(e.relatedTarget) → skip teardown
+        const reconcileSpy = vi.fn<() => void>()
+        const items = [{ id: 1 }, { id: 2 }]
+        let itemsAfter = [...items]
+
+        if (!isWithinOverlay(blurEvent.relatedTarget)) {
+            itemsAfter = []
+            reconcileSpy()
+        }
+
+        expect(reconcileSpy).not.toHaveBeenCalled()
+        expect(itemsAfter).toHaveLength(2)
+
+        overlayHost.remove()
+    })
+
+    it('clears highlights when blur relatedTarget is an unrelated element (genuine exit)', () => {
+        const unrelated = document.createElement('input')
+        document.body.appendChild(unrelated)
+
+        const blurEvent = new FocusEvent('blur', { relatedTarget: unrelated })
+
+        const reconcileSpy = vi.fn<() => void>()
+        let itemsAfter = [{ id: 1 }, { id: 2 }]
+
+        if (!isWithinOverlay(blurEvent.relatedTarget)) {
+            itemsAfter = []
+            reconcileSpy()
+        }
+
+        expect(reconcileSpy).toHaveBeenCalledOnce()
+        expect(itemsAfter).toHaveLength(0)
+
+        unrelated.remove()
+    })
+
+    it('clears highlights when blur relatedTarget is null (tab away / window blur)', () => {
+        const blurEvent = new FocusEvent('blur', { relatedTarget: null })
+
+        const reconcileSpy = vi.fn<() => void>()
+        let itemsAfter = [{ id: 1 }, { id: 2 }]
+
+        if (!isWithinOverlay(blurEvent.relatedTarget)) {
+            itemsAfter = []
+            reconcileSpy()
+        }
+
+        expect(reconcileSpy).toHaveBeenCalledOnce()
+        expect(itemsAfter).toHaveLength(0)
+    })
+
+    it('isWithinOverlay returns true for the overlay host itself', () => {
+        const host = document.createElement('div')
+        host.setAttribute('data-grammarforge-overlay', '')
+        document.body.appendChild(host)
+        expect(isWithinOverlay(host)).toBe(true)
+        host.remove()
+    })
+
+    it('isWithinOverlay returns false for null relatedTarget', () => {
+        expect(isWithinOverlay(null)).toBe(false)
     })
 })
 

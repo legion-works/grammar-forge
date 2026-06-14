@@ -35,6 +35,17 @@ export interface OverlayHost {
  * the content script is expected to keep one host per content-script
  * lifetime and call `destroy()` from `ctx.onInvalidated`.
  */
+/**
+ * True when an element is inside (or is) our shadow-DOM overlay host.
+ * Used to distinguish "focus moved into our own popover" (a focus STEAL we
+ * trigger for a11y) from a genuine field-exit, so onFieldBlur doesn't wipe
+ * highlights when the user merely opened the suggestion panel.
+ */
+export function isWithinOverlay(node: EventTarget | null): boolean {
+    if (!(node instanceof Element)) return false
+    return node.closest('[data-grammarforge-overlay]') != null
+}
+
 export function createOverlayHost(doc: Document = document): OverlayHost {
     const host = doc.createElement('div')
     host.setAttribute('data-grammarforge-overlay', '')

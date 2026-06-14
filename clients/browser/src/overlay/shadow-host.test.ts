@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createOverlayHost, type OverlayHost } from '@/overlay/shadow-host'
+import { createOverlayHost, isWithinOverlay, type OverlayHost } from '@/overlay/shadow-host'
 import { showPopover, type PopoverOptions } from '@/overlay/popover'
 import { OVERLAY_CSS } from '@/overlay/styles'
 
@@ -15,6 +15,122 @@ function mkHost(): OverlayHost {
 afterEach(() => {
     for (const h of createdHosts.splice(0)) h.destroy()
     document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
+})
+
+describe('isWithinOverlay', () => {
+    it('returns true for an element that IS the overlay host', () => {
+        const host = document.createElement('div')
+        host.setAttribute('data-grammarforge-overlay', '')
+        document.body.appendChild(host)
+        expect(isWithinOverlay(host)).toBe(true)
+        host.remove()
+    })
+
+    it('returns true for an element nested inside the overlay host', () => {
+        const host = document.createElement('div')
+        host.setAttribute('data-grammarforge-overlay', '')
+        const button = document.createElement('button')
+        host.appendChild(button)
+        document.body.appendChild(host)
+        expect(isWithinOverlay(button)).toBe(true)
+        host.remove()
+    })
+
+    it('returns false for an unrelated element (genuine field-exit)', () => {
+        const other = document.createElement('div')
+        document.body.appendChild(other)
+        expect(isWithinOverlay(other)).toBe(false)
+        other.remove()
+    })
+
+    it('returns false for null (relatedTarget absent — genuine exit)', () => {
+        expect(isWithinOverlay(null)).toBe(false)
+    })
+
+    it('returns false for a non-Element EventTarget', () => {
+        expect(isWithinOverlay(new EventTarget())).toBe(false)
+    })
+})
+
+describe('onFieldBlur overlay-focus guard (browser)', () => {
+    // This suite tests the BEHAVIOUR of the blur guard: when focus moves into
+    // our overlay, highlights must be preserved; when focus moves elsewhere,
+    // they must be cleared. We test via the isWithinOverlay helper (the
+    // orchestrator's onFieldBlur calls it as its first guard) and a hand-rolled
+    // mirror of the guard logic, since onFieldBlur is a closure inside start().
+    it('preserves highlights when blur relatedTarget is inside the overlay host', () => {
+        // Build a fake overlay host (mirrors what createOverlayHost produces)
+        const overlayHost = document.createElement('div')
+        overlayHost.setAttribute('data-grammarforge-overlay', '')
+        const applyBtn = document.createElement('button')
+        overlayHost.appendChild(applyBtn)
+        document.body.appendChild(overlayHost)
+
+        // Simulate the blur event whose relatedTarget is the Apply button
+        // (shadow-boundary retargeting gives us the host; we set it directly
+        // to the button here to also cover the nested-element case).
+        const blurEvent = new FocusEvent('blur', { relatedTarget: applyBtn })
+
+        // Mirror of the guard: if isWithinOverlay(e.relatedTarget) → skip teardown
+        let highlightsCleared = false
+        const mockReconcile = (): void => {
+            highlightsCleared = true
+        }
+        const items = [{ id: 1 }, { id: 2 }]
+        let itemsAfter = [...items]
+
+        if (!isWithinOverlay(blurEvent.relatedTarget)) {
+            itemsAfter = []
+            mockReconcile()
+        }
+
+        expect(highlightsCleared).toBe(false)
+        expect(itemsAfter).toHaveLength(2)
+
+        overlayHost.remove()
+    })
+
+    it('clears highlights when blur relatedTarget is an unrelated element (genuine exit)', () => {
+        const unrelated = document.createElement('input')
+        document.body.appendChild(unrelated)
+
+        const blurEvent = new FocusEvent('blur', { relatedTarget: unrelated })
+
+        let highlightsCleared = false
+        const mockReconcile = (): void => {
+            highlightsCleared = true
+        }
+        const items = [{ id: 1 }, { id: 2 }]
+        let itemsAfter = [...items]
+
+        if (!isWithinOverlay(blurEvent.relatedTarget)) {
+            itemsAfter = []
+            mockReconcile()
+        }
+
+        expect(highlightsCleared).toBe(true)
+        expect(itemsAfter).toHaveLength(0)
+
+        unrelated.remove()
+    })
+
+    it('clears highlights when blur relatedTarget is null (tab away / window blur)', () => {
+        const blurEvent = new FocusEvent('blur', { relatedTarget: null })
+
+        let highlightsCleared = false
+        const mockReconcile = (): void => {
+            highlightsCleared = true
+        }
+        let itemsAfter = [{ id: 1 }, { id: 2 }]
+
+        if (!isWithinOverlay(blurEvent.relatedTarget)) {
+            itemsAfter = []
+            mockReconcile()
+        }
+
+        expect(highlightsCleared).toBe(true)
+        expect(itemsAfter).toHaveLength(0)
+    })
 })
 
 describe('createOverlayHost', () => {

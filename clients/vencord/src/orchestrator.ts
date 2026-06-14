@@ -25,7 +25,7 @@ import { createSignalQueue } from '@/signal/queue'
 import { addWordToDictionary, type DictionaryDeps } from './dictionary'
 import { openRephraseFor, resolveRephraseScope, type RephraseDeps } from './rephrase'
 import { configureVencordDebug, debugLog } from './debug-log'
-import { createOverlayHost } from '@/overlay/shadow-host'
+import { createOverlayHost, isWithinOverlay } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightLayer, type HighlightSpec } from '@/overlay/highlight'
 import { showPopover, dismissPopoversIn, type PopoverHandle } from '@/overlay/popover'
@@ -1028,7 +1028,14 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // browser orchestrator has this; the Vencord orchestrator only
         // had the debug focus tracer (onFieldFocusOut above). Add the
         // real one. Vencord is contenteditable-only (no native path).
-        const onFieldBlur = (): void => {
+        const onFieldBlur = (e: FocusEvent): void => {
+            // When the user clicks a suggestion in our popover, the browser
+            // fires a11y focus onto the Apply button (inside our shadow-DOM
+            // overlay). The composer's blur event fires with relatedTarget
+            // retargeted to the overlay host. Guard against this: if focus
+            // moved INTO our own overlay, keep all highlights and the popover
+            // — this is a focus STEAL we triggered, not a genuine field-exit.
+            if (isWithinOverlay(e.relatedTarget)) return
             const s = fields.get(el)
             if (!s) return
             closePopoverFor(el)
