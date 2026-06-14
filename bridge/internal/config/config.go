@@ -46,7 +46,7 @@ type Config struct {
 	// (0 disables; default 512).
 	ToneCacheSize int
 	DBPath        string
-	LogLevel         string
+	LogLevel      string
 
 	// Fast path (Plan 1C): Harper + GECToR run in-process; the LLM is
 	// escalation-only (see correction.EscalationPolicy).
