@@ -279,7 +279,46 @@ describe('BridgeClient.correctStream', () => {
         const final = await client.correctStream({ text: 'I has a cat', source: 'browser' }, (f) =>
             fastFrames.push(f),
         )
-        expect(fastFrames).toHaveLength(1)
+        // T5b client side: bridge T5a now emits ≥1 fast frames
+        // (one per fast corrector). The parser iterates every SSE
+        // event; the assertion is "at least one" — the parser was
+        // already correct for N frames.
+        expect(fastFrames.length).toBeGreaterThanOrEqual(1)
+        expect(final).toEqual(FINAL)
+    })
+
+    it('delivers N fast frames in order, then final (T5b multi-frame)', async () => {
+        // Bridge T5a emits one fast event per fast corrector. The
+        // client must render each incrementally (the user's preview
+        // refines as later fast correctors complete). Build a stream
+        // with 2 distinct fast frames + final and assert the order.
+        const FAST_A = {
+            ...FAST,
+            suggestions: [
+                { span: { start: 2, end: 5 }, replacement: 'have', model: 'gector' as const },
+            ],
+        }
+        const FAST_B = {
+            ...FAST,
+            suggestions: [
+                { span: { start: 2, end: 5 }, replacement: 'have', model: 'harper' as const },
+                { span: { start: 6, end: 7 }, replacement: 'a', model: 'harper' as const },
+            ],
+        }
+        const stream =
+            `event: fast\ndata: ${JSON.stringify(FAST_A)}\n\n` +
+            `event: fast\ndata: ${JSON.stringify(FAST_B)}\n\n` +
+            `event: final\ndata: ${JSON.stringify(FINAL)}\n\n`
+        vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(sseResponse(stream)))
+        const client = new BridgeClient('http://localhost:8000', false)
+        const fastFrames: unknown[] = []
+        const final = await client.correctStream({ text: 'I has a cat', source: 'browser' }, (f) =>
+            fastFrames.push(f),
+        )
+        expect(fastFrames).toHaveLength(2)
+        // Order preserved: FAST_A first, FAST_B second.
+        expect(fastFrames[0]).toEqual(FAST_A)
+        expect(fastFrames[1]).toEqual(FAST_B)
         expect(final).toEqual(FINAL)
     })
 

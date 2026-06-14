@@ -22,6 +22,7 @@
     "../browser/src/signal/**/*",
     "../browser/src/hotkeys/**/*",
     "../browser/src/input/**/*",
-    "../browser/src/overlay/**/*"
+    "../browser/src/overlay/**/*",
+    "../browser/src/storage/settings-core.ts"
   ]
 }

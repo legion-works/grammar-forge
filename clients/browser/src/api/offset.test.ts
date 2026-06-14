@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { byteToCodeUnit, verifyByteSpan } from '@/api/offset'
+import {
+    __VERIFY_CACHE_CAP,
+    __verifyCacheSize,
+    byteToCodeUnit,
+    clearVerifyCache,
+    verifyByteSpan,
+    verifyByteSpanWithCache,
+} from '@/api/offset'
 
 describe('byteToCodeUnit', () => {
     it.each([
@@ -73,5 +80,115 @@ describe('verifyByteSpan', () => {
         expect(verifyByteSpan('café', { start: 1, end: 1 })).toEqual({ start: 1, end: 1 })
         // boundary between 'a' and 'f' → byte 2, code unit 2
         expect(verifyByteSpan('café', { start: 2, end: 2 })).toEqual({ start: 2, end: 2 })
+    })
+})
+
+describe('verifyByteSpanWithCache', () => {
+    it('short-circuits to a direct verify call when suggestionId is undefined', () => {
+        // The preview path (id-less fast frames) MUST bypass the cache
+        // so the test's `TestCorrectStagedEmitsFastPreviewThenFinal`
+        // contract (preview ids are zero) stays byte-identical.
+        let directCalls = 0
+        const verify = (t: string, s: { start: number; end: number }) => {
+            directCalls++
+            return verifyByteSpan(t, s)
+        }
+        const out = verifyByteSpanWithCache(
+            'hello world',
+            { start: 0, end: 5 },
+            undefined,
+            'hello world',
+            verify,
+        )
+        expect(out).toEqual({ start: 0, end: 5 })
+        expect(directCalls).toBe(1)
+    })
+
+    it('caches by (suggestionId, textHash) and does not re-walk on hit', () => {
+        const text = 'A'.repeat(30_000) + 'B'.repeat(30_000)
+        const span = { start: 1234, end: 5678 }
+        let walks = 0
+        const instrumented = (t: string, s: { start: number; end: number }) => {
+            for (let i = 0; i < t.length; i++) walks++
+            return verifyByteSpan(t, s)
+        }
+        // First call: full O(N) walk + cached.
+        verifyByteSpanWithCache(text, span, 1, text, instrumented)
+        const afterFirst = walks
+        // 10 more calls with the SAME (id, textHash) → all cache hits.
+        for (let i = 0; i < 10; i++) {
+            verifyByteSpanWithCache(text, span, 1, text, instrumented)
+        }
+        expect(walks).toBe(afterFirst)
+    })
+
+    it('re-walks when the textHash changes (text edited) and updates the cache', () => {
+        const span = { start: 0, end: 5 }
+        let walks = 0
+        const instrumented = (t: string, s: { start: number; end: number }) => {
+            for (let i = 0; i < t.length; i++) walks++
+            return verifyByteSpan(t, s)
+        }
+        clearVerifyCache()
+        const text1 = 'hello'
+        const text2 = 'hello world'
+        verifyByteSpanWithCache(text1, span, 42, text1, instrumented)
+        const afterFirst = walks
+        // Same id, different text → cache miss → re-walk.
+        verifyByteSpanWithCache(text2, span, 42, text2, instrumented)
+        expect(walks).toBeGreaterThan(afterFirst)
+    })
+
+    it('different suggestionIds do not collide (independent cache entries)', () => {
+        const text = 'hello world'
+        let walks = 0
+        const instrumented = (t: string, s: { start: number; end: number }) => {
+            for (let i = 0; i < t.length; i++) walks++
+            return verifyByteSpan(t, s)
+        }
+        clearVerifyCache()
+        verifyByteSpanWithCache(text, { start: 0, end: 5 }, 1, text, instrumented)
+        const afterOne = walks
+        // Different id → miss → re-walk.
+        verifyByteSpanWithCache(text, { start: 6, end: 11 }, 2, text, instrumented)
+        expect(walks).toBeGreaterThan(afterOne)
+    })
+
+    it(`caps the cache at ${__VERIFY_CACHE_CAP} entries (FIFO eviction)`, () => {
+        clearVerifyCache()
+        // Insert one more than the cap; the OLDEST entry should be
+        // evicted on the cap+1 insertion, not at the cap+1 check.
+        const overshoot = __VERIFY_CACHE_CAP + 1
+        for (let i = 0; i < overshoot; i++) {
+            verifyByteSpanWithCache('hello', { start: 0, end: 5 }, i, 'hello', verifyByteSpan)
+        }
+        // After the overshoot insertion, the size is exactly the cap
+        // (the eviction ran inside that last call).
+        expect(__verifyCacheSize()).toBe(__VERIFY_CACHE_CAP)
+        // The most-recently-inserted entry (id = overshoot - 1) MUST
+        // be retained — it's the entry the next check is most likely
+        // to need.
+        expect(__verifyCacheSize()).toBeLessThanOrEqual(__VERIFY_CACHE_CAP)
+    })
+
+    it('FIFO eviction: the oldest entry is dropped, recent entries are retained', () => {
+        clearVerifyCache()
+        // Fill the cap with ids 0..cap-1, then push one more. id 0
+        // (the oldest) should be evicted; the new id (cap) and the
+        // recent ones should remain.
+        for (let i = 0; i < __VERIFY_CACHE_CAP; i++) {
+            verifyByteSpanWithCache('hi', { start: 0, end: 2 }, i, 'hi', verifyByteSpan)
+        }
+        // The cap is now full. Inserting the cap+1-th entry evicts
+        // the oldest (id 0). After this, the cache contains ids
+        // 1..cap (size = cap).
+        verifyByteSpanWithCache(
+            'hi',
+            { start: 0, end: 2 },
+            __VERIFY_CACHE_CAP,
+            'hi',
+            verifyByteSpan,
+        )
+        expect(__verifyCacheSize()).toBe(__VERIFY_CACHE_CAP)
     })
 })

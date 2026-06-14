@@ -9,7 +9,9 @@ import { createFieldObserver } from '@/input/observer'
 import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { domPointToFlatOffset, getText } from '@/input/text'
-import { applySlateFix } from '@/input/rich-editor-apply'
+import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
+import { nextCheckSeq } from '@/lib/check-seq'
+import { applySlateFix, type ApplyTraceLogger } from '@/input/rich-editor-apply'
 import {
     buildRenderableItems,
     isSpanStillValid,
@@ -17,8 +19,12 @@ import {
     type RenderableItem,
 } from '@/lib/pipeline'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
+import { applyScopedOverlayClear } from '@/lib/scoped-clear'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue } from '@/signal/queue'
+import { addWordToDictionary, type DictionaryDeps } from './dictionary'
+import { openRephraseFor, resolveRephraseScope, type RephraseDeps } from './rephrase'
+import { configureVencordDebug, debugLog } from './debug-log'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightLayer, type HighlightSpec } from '@/overlay/highlight'
@@ -29,14 +35,9 @@ import {
     type StatusButtonHandle,
     type StatusButtonOptions,
 } from '@/overlay/status-button'
-import {
-    dismissRephraseCardsIn,
-    showRephraseCard,
-    showRephraseError,
-    showRephrasePending,
-} from '@/overlay/rephrase-card'
-import { showToast } from '@/overlay/toast'
+import { dismissRephraseCardsIn } from '@/overlay/rephrase-card'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
+import { shouldRephraseHotkey } from '@/hotkeys/rephrase-target'
 import { isDiscordComposer } from './composer'
 import type { GrammarForgeConfig } from './settings'
 
@@ -155,13 +156,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     // client's gfDebug toggle is unusable here — the setting is the switch.
     // Millisecond timestamps (relative to orchestrator start) make event
     // ORDER and latency visible — essential for the async-apply traces.
-    const t0 = performance.now()
-    const debugLog = (...args: unknown[]): void => {
-        if (!getConfig().debugLogging) return
-        const t = (performance.now() - t0).toFixed(1)
-        // oxlint-disable-next-line no-console
-        console.log(`[GrammarForge +${t}ms]`, ...args)
-    }
+    // The actual write is delegated to ./debug-log.ts which wraps the
+    // shared Console backend with the per-call +Xms prefix.
+    configureVencordDebug({
+        startMs: performance.now(),
+        isEnabled: () => getConfig().debugLogging,
+    })
     // Client rebuilds when bridgeUrl/allowRemoteBridge change (settings are
     // live). All other config flags (realtimeDelayMs, checkPastedText,
     // acceptHotkey) are read live by reference.
@@ -181,6 +181,21 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         send: (events) => refreshClient().signal(events),
     })
     const overlay = createOverlayHost()
+    // Deps bundle for the extracted addWordToDictionary (./dictionary.ts).
+    // Built here so the deps reference the live closures (refreshClient,
+    // rerunFor, signalQueue, overlay.root) instead of being passed in.
+    const dictionaryDeps: DictionaryDeps = {
+        client: () => refreshClient(),
+        signalQueue,
+        rerun: (el) => (text) => rerunFor(el)(text),
+        overlayRoot: overlay.root,
+    }
+    // Deps bundle for the extracted openRephraseFor (./rephrase.ts).
+    const rephraseDeps: RephraseDeps = {
+        client: () => refreshClient(),
+        overlayRoot: overlay.root,
+        debugLog,
+    }
     const fields = new Map<HTMLElement, FieldState>()
     const trackedFields = new Set<HTMLElement>()
     const openPopovers = new WeakMap<HTMLElement, PopoverHandle>()
@@ -245,11 +260,13 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             const measured = getSpanRectsBatch(el, spans)
             if (measured.length > 0) allRects = measured
         } catch {
-            // Measurement failed (detached node / odd layout) — leave the
-            // stale rects + highlights in place; the next remeasure fixes
-            // them. The pill/badge update below still runs: count data must
-            // never depend on rect measurability (a skipped update here left
-            // the pill one state behind).
+            // Spec §4 sibling: measurement-throw → clear itemRects + the
+            // highlight layer. Better no highlight than a stale one — the
+            // next remeasure (scroll/resize, or the next edit) re-populates
+            // from a clean slate. Pill update below still runs (count data
+            // must never depend on rect measurability).
+            st.itemRects = []
+            st.highlightLayer?.reconcile([])
         }
         if (allRects) {
             st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects![i] ?? [] }))
@@ -325,7 +342,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             el,
             { start: item.cuStart, end: item.cuEnd },
             replacement,
-            debugLog,
+            debugLog as unknown as ApplyTraceLogger,
         )
         if (!applied) {
             void rerunFor(el)(getText(el))
@@ -358,48 +375,6 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         void applyItem(el, item)
     }
 
-    // Add the flagged word(s) to the user dictionary: persist on the bridge,
-    // log a rejected signal for the edit, re-check (the suggestion
-    // disappears), and offer Undo. The LLM can merge two adjacent unknown
-    // words into ONE edit, so a multi-token original is split and each
-    // token added. Bridge-unreachable failures are debugLog'd only.
-    const addWordToDictionary = async (
-        el: HTMLElement,
-        item: RenderableItem,
-        word: string,
-    ): Promise<void> => {
-        const tokens = [...new Set(word.split(/\s+/).filter((t) => t.length > 0))]
-        if (tokens.length === 0) return
-        const c = refreshClient()
-        try {
-            await Promise.all(tokens.map((t) => c.dictionaryAdd(t)))
-        } catch (e) {
-            debugLog('dictionary add failed', e)
-            return
-        }
-        signalQueue.enqueue({
-            id: item.id,
-            action: 'rejected',
-            category: item.category,
-            source: 'vencord',
-        })
-        debugLog('dictionary add', { tokens, itemId: item.id })
-        void rerunFor(el)(getText(el))
-        const label =
-            tokens.length === 1
-                ? `Added "${tokens[0]}" to dictionary`
-                : `Added ${tokens.length} words to dictionary`
-        showToast(overlay.root, {
-            message: label,
-            actionLabel: 'Undo',
-            onAction: () => {
-                Promise.all(tokens.map((t) => c.dictionaryRemove(t)))
-                    .then(() => rerunFor(el)(getText(el)))
-                    .catch((e) => debugLog('dictionary undo remove failed', e))
-            },
-        })
-    }
-
     // Pill panel: apply ALL corrections. Apply them ONE AT A TIME, last-to-
     // first so earlier offsets stay valid — but YIELD A FRAME between edits
     // so Discord's Slate reconciler syncs before the next applyFix reads the
@@ -421,7 +396,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 el,
                 { start: item.cuStart, end: item.cuEnd },
                 replacement,
-                debugLog,
+                debugLog as unknown as ApplyTraceLogger,
             )
             if (!applied) continue
             batch = appendInverseEdit(batch, {
@@ -461,7 +436,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         st.lastApplied = null
         for (const op of ops) {
             if (!el.isConnected) return
-            await applySlateFix(el, op.span, op.replacement, debugLog)
+            await applySlateFix(
+                el,
+                op.span,
+                op.replacement,
+                debugLog as unknown as ApplyTraceLogger,
+            )
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
         }
         debugLog('undo', { ops: ops.length })
@@ -501,7 +481,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             original: item.diffOriginal,
             onAddToDictionary:
                 item.category === 'spelling' && item.diffOriginal.trim().length > 0
-                    ? (word: string) => void addWordToDictionary(el, item, word)
+                    ? (word: string) => void addWordToDictionary(el, item, word, dictionaryDeps)
                     : undefined,
             onApply: (replacementIndex: number) => {
                 const live = getText(el)
@@ -520,7 +500,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     el,
                     { start: item.cuStart, end: item.cuEnd },
                     replacement,
-                    debugLog,
+                    debugLog as unknown as ApplyTraceLogger,
                 ).then((applied) => {
                     if (!applied) {
                         void rerunFor(el)(getText(el))
@@ -589,68 +569,6 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         return { el, text, span }
     }
 
-    // Rephrase the focused composer's current selection (when usable), else
-    // the WHOLE field. No selection → use whole text as the span.
-    const rephraseFor = (el: HTMLElement): void => {
-        const found = resolveSelection()
-        if (found && found.el === el) {
-            void openRephraseFor(el, found.text, found.span)
-            return
-        }
-        const text = getText(el)
-        if (!text.trim()) return
-        void openRephraseFor(el, text, { start: 0, end: text.length })
-    }
-
-    // Rephrase the given selection: call the bridge (slow LLM path), show a
-    // pending state, then a result card. Apply replaces the SELECTION span.
-    const openRephraseFor = async (
-        el: HTMLElement,
-        text: string,
-        span: { start: number; end: number },
-    ): Promise<void> => {
-        debugLog('rephrase start', { textLen: text.length, span })
-        const pending = showRephrasePending(overlay.root, {
-            anchorRect: el.getBoundingClientRect(),
-            onClose: () => {},
-        })
-        try {
-            const res = await refreshClient().rephrase({ text, source: 'vencord' })
-            pending.hide()
-            showRephraseCard(overlay.root, {
-                anchorRect: el.getBoundingClientRect(),
-                original: res.original,
-                rephrased: res.rephrased,
-                alternatives: res.alternatives,
-                onApply: (chosen: string) => {
-                    // Re-validate the span against live text: if the field
-                    // changed since selection, the offsets may be stale.
-                    // Only apply when the slice still equals the original
-                    // selection.
-                    const live = getText(el)
-                    if (live.slice(span.start, span.end) !== text) {
-                        debugLog('rephrase stale span; not applying')
-                        return
-                    }
-                    void applySlateFix(el, span, chosen, debugLog).then(() => {
-                        void rerunFor(el)(getText(el))
-                    })
-                },
-                onClose: () => {},
-            })
-            debugLog('rephrase done', { alternatives: res.alternatives.length })
-        } catch (e) {
-            debugLog('rephrase failed', e)
-            pending.hide()
-            showRephraseError(overlay.root, {
-                anchorRect: el.getBoundingClientRect(),
-                message: 'Rephrase failed',
-                onRetry: () => void openRephraseFor(el, text, span),
-                onClose: () => {},
-            })
-        }
-    }
-
     const focusedTrackedField = (): HTMLElement | null => {
         const active = document.activeElement
         if (!(active instanceof HTMLElement)) return null
@@ -659,6 +577,23 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             if (el.contains(active)) return el
         }
         return null
+    }
+
+    // Rephrase the focused field. Shared by the pill's onRephrase button
+    // and the capture-phase rephrase hotkey. Selection-in-el → use it;
+    // otherwise → whole field (whitespace-only fields short-circuit to
+    // a no-op). Mirrors the browser's `rephraseFor` in
+    // clients/browser/src/entrypoints/content/rephrase.ts.
+    const rephraseFor = (el: HTMLElement): void => {
+        const found = resolveSelection()
+        const scope = resolveRephraseScope(
+            el,
+            found ? { el: found.el, text: found.text, span: found.span } : null,
+        )
+        if (!scope) return
+        void openRephraseFor(scope.el, scope.text, scope.span, rephraseDeps, () => {
+            void rerunFor(el)(getText(el))
+        })
     }
 
     // ---- Pill surface ----
@@ -886,6 +821,28 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         }, PASTE_GRACE_MS)
     }
 
+    // Mirror of the browser orchestrator's applyScopedClearToField. The
+    // shared keep helper decides which items survive; we hide the dropped
+    // ones in place via the per-item primitive so the survivors don't
+    // flicker. (Vencord is contenteditable-only → no native path; the
+    // native branch from the browser helper is omitted here.)
+    const applyScopedClearToField = (
+        st: FieldState,
+        _el: HTMLElement,
+        kept: readonly RenderableItem[],
+    ): void => {
+        if (st.items.length === kept.length) return
+        // Mirror of the browser orchestrator's wire-up. The per-item
+        // clearItem loop + the null-caret short-circuit live in
+        // @/lib/scoped-clear so the Finding 5 fast path is testable
+        // in isolation. (Vencord is contenteditable-only → no native
+        // path; the browser helper's native branch is omitted here.)
+        const layer = st.highlightLayer as unknown as
+            | { clearItem(i: number): void; reconcile(s: readonly never[]): void }
+            | undefined
+        if (layer) applyScopedOverlayClear(layer, st.items, kept)
+    }
+
     const attach = (el: HTMLElement): void => {
         if (fields.has(el)) return
         const rerun = rerunFor(el)
@@ -901,8 +858,22 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             })
             const st = fields.get(el)
             if (!st) return false
+            // Spec §4 sibling: popover closes on input edit. The popover
+            // points at a highlight we may be about to clear. Close it
+            // unconditionally on any input event (paste / typing / drop)
+            // — better no popover than a ghost-anchored one.
+            closePopoverFor(el)
             if (decision === 'check') {
+                // Spec §3: scoped-clear BEFORE the debounced check
+                // returns. Mirrors the browser orchestrator's
+                // onInputEventFor.
                 clearPasteGrace(st)
+                const editOffset = getCaretOffset(el)
+                const kept = keepHighlightsBeforeEdit(st.items, editOffset)
+                if (kept.length < st.items.length) {
+                    applyScopedClearToField(st, el, kept)
+                }
+                st.items = kept
                 return true
             }
             if (decision === 'grace') armPasteGrace(el, st, attachment)
@@ -927,7 +898,10 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             attachment,
             items: [],
             itemRects: [],
-            checkSeq: 0,
+            // Process-monotonic: a re-attached composer's first seq is
+            // strictly greater than any seq a torn-down composer ever
+            // produced. Mirrors the browser fix; see @/lib/check-seq.
+            checkSeq: nextCheckSeq(),
             pasteGraceTimer: null,
             highlightLayer: null,
             lastApplied: null,
@@ -1050,6 +1024,21 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         el.addEventListener('focus', onFieldFocus)
         cleanups.push(() => el.removeEventListener('focus', onFieldFocus))
 
+        // Spec §4 sibling: blur → clear highlights + close popover. The
+        // browser orchestrator has this; the Vencord orchestrator only
+        // had the debug focus tracer (onFieldFocusOut above). Add the
+        // real one. Vencord is contenteditable-only (no native path).
+        const onFieldBlur = (): void => {
+            const s = fields.get(el)
+            if (!s) return
+            closePopoverFor(el)
+            s.items = []
+            s.itemRects = []
+            s.highlightLayer?.reconcile([])
+        }
+        el.addEventListener('blur', onFieldBlur)
+        cleanups.push(() => el.removeEventListener('blur', onFieldBlur))
+
         // Native `paste` fallback for rich editors (Discord/Lexical) that
         // apply the paste programmatically and fire NO input event with
         // inputType=insertFromPaste. Capture phase so we see it even if
@@ -1121,6 +1110,27 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     const onKeydown = (e: KeyboardEvent): void => {
         const field = focusedTrackedField()
         if (!field) return
+        // Rephrase hotkey (capture phase). Runs BEFORE the items.length
+        // gate — the rephrase hotkey must fire on a focused tracked field
+        // even when there are no active suggestions (selection-in-el or
+        // whole-field). The matchers are distinct by default (Ctrl+/ vs
+        // Ctrl+.) so order is documentation, not a tie-breaker.
+        try {
+            if (
+                shouldRephraseHotkey(e, {
+                    hotkey: getConfig().rephraseHotkey,
+                })
+            ) {
+                e.preventDefault()
+                e.stopPropagation()
+                rephraseFor(field)
+                return
+            }
+        } catch (err) {
+            // parseHotkey throws on a malformed configured string; a broken
+            // setting must not turn every keystroke into an uncaught error.
+            debugLog('rephrase hotkey parse failed', getConfig().rephraseHotkey, err)
+        }
         const st = fields.get(field)
         if (!st || st.items.length === 0) return
         // Only log chorded keys (a modifier held) so plain typing stays quiet.

@@ -1,16 +1,16 @@
-// Tiny append-only logger for live-smoke instrumentation. Activated
+// Thin wrapper around the shared File debug-log backend. Activated
 // only when GF_TUI_DEBUG=1; zero overhead when unset (env read is
 // the only check; no I/O if the flag is missing). Used by the
 // tui-entry + orchestrator to emit one-line breadcrumbs to
 // /tmp/grammarforge-tui-debug.log so the next live run produces
 // evidence no matter what.
 //
-// Output format: ISO-8601 timestamp + "|" + level + "|" + message +
-// JSON-encoded args. Pure append — does not rotate, does not fsync.
-// On write error, swallow silently (we never want the debug path
-// to throw into a render fn).
+// Output format: ISO-8601 timestamp + "|" + level + "|" +
+// scope:message + "|" + JSON-encoded args. Pure append — does not
+// rotate, does not fsync. On write error, swallow silently (we never
+// want the debug path to throw into a render fn).
 
-import { appendFileSync } from "node:fs";
+import { createFileBackend } from "@/lib/debug-backends";
 
 let enabled = false;
 let path = "/tmp/grammarforge-tui-debug.log";
@@ -30,26 +30,18 @@ try {
     enabled = false;
 }
 
+const backend = createFileBackend({ path, isEnabled: () => enabled });
+
 export function logDebug(message: string, args?: unknown): void {
     if (!enabled) return;
-    try {
-        const line = `${new Date().toISOString()}|info|${message}|${JSON.stringify(args ?? null)}\n`;
-        appendFileSync(path, line, "utf8");
-    } catch {
-        // Swallow — debug instrumentation must never break the host.
-    }
+    backend.log("info", "", message, args);
 }
 
 export function logDebugError(message: string, err: unknown): void {
     if (!enabled) return;
-    try {
-        const e =
-            err instanceof Error
-                ? { name: err.name, message: err.message, stack: err.stack ?? "" }
-                : { value: String(err) };
-        const line = `${new Date().toISOString()}|error|${message}|${JSON.stringify(e)}\n`;
-        appendFileSync(path, line, "utf8");
-    } catch {
-        // Swallow.
-    }
+    const e =
+        err instanceof Error
+            ? { name: err.name, message: err.message, stack: err.stack ?? "" }
+            : { value: String(err) };
+    backend.log("error", "", message, e);
 }

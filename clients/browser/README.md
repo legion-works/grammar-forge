@@ -29,6 +29,13 @@ The bridge endpoint defaults to `http://localhost:8000` (see `.env.example`). No
 endpoints are refused unless explicitly enabled in the extension's options (privacy
 invariant — see the design spec).
 
+## Hotkeys
+
+- **Accept suggestion** (default `Alt + .`) — applies the first suggestion in the
+  focused field.
+- **Rephrase** (default `Ctrl + /`) — rephrases the focused field's selection, or
+  the whole field if nothing is selected.
+
 ## Attribution
 
 DOM techniques adapted (MIT) from [`codextde/textchecker`](https://github.com/codextde/textchecker);

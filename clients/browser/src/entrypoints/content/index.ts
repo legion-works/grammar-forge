@@ -15,6 +15,11 @@ import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { isUndoRedoKeydown } from '@/input/undo-redo'
 import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
+import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
+import { nextCheckSeq } from '@/lib/check-seq'
+import { mountRephraseFlow, resolveSelection as resolveRephraseSelectionFor } from './rephrase'
+import { mountPausedMode, nextPauseMode, type PauseMode } from './pause'
+import { mountReanchor } from './reanchor'
 import { isFrameworkRichEditor } from '@/input/rich-editor-apply'
 import { requestMainWorldApply } from '@/input/main-world-apply'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
@@ -24,6 +29,7 @@ import {
     tallyByCategory,
     type RenderableItem,
 } from '@/lib/pipeline'
+import { applyScopedOverlayClear } from '@/lib/scoped-clear'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
@@ -32,18 +38,8 @@ import { getNativeHighlighter, isNativeHighlightSupported } from '@/overlay/nati
 import { dismissPopoversIn, showPopover, type PopoverHandle } from '@/overlay/popover'
 import { showTooltip, type TooltipHandle } from '@/overlay/tooltip'
 import { showToast } from '@/overlay/toast'
-import {
-    showRephraseButton,
-    dismissRephraseButtonsIn,
-    type RephraseButtonHandle,
-} from '@/overlay/rephrase-button'
-import {
-    showRephraseCard,
-    showRephraseError,
-    showRephrasePending,
-    dismissRephraseCardsIn,
-    type RephraseCardHandle,
-} from '@/overlay/rephrase-card'
+import { dismissRephraseButtonsIn } from '@/overlay/rephrase-button'
+import { dismissRephraseCardsIn } from '@/overlay/rephrase-card'
 import {
     renderStatusButton,
     type StatusButtonHandle,
@@ -59,6 +55,7 @@ import {
     type Settings,
 } from '@/storage/settings'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
+import { handleRephraseHotkey } from './keydown-rephrase'
 import { debugLog, debugWarn, setDebugLoggingEnabled } from '@/lib/debug-log'
 import type { ContentScriptContext } from 'wxt/utils/content-script-context'
 import type { Category, CorrectResponse } from '@/api/types'
@@ -77,7 +74,10 @@ export default defineContentScript({
  *  omits the virtual newlines at block boundaries and would disagree with
  *  the flat model on any multi-line selection. Unresolvable endpoints yield
  *  a collapsed {0,0} span, which every caller discards as empty. */
-function selectionToCodeUnitSpan(el: HTMLElement, range: Range): { start: number; end: number } {
+export function selectionToCodeUnitSpan(
+    el: HTMLElement,
+    range: Range,
+): { start: number; end: number } {
     const start = domPointToFlatOffset(el, range.startContainer, range.startOffset)
     const end = domPointToFlatOffset(el, range.endContainer, range.endOffset)
     if (start == null || end == null || end < start) return { start: 0, end: 0 }
@@ -222,14 +222,20 @@ interface Runtime {
 
 async function start(ctx: ContentScriptContext): Promise<void> {
     let currentSettings: Settings = await getSettings()
+    // Reducer state for the pause-mode decision (mount/unmount the paused
+    // runtime). Owned by the orchestrator; the pure nextPauseMode lives in
+    // ./pause.ts. Kept in lockstep with `runtime` (null = no active OR
+    // paused runtime mounted).
+    let currentPauseMode: PauseMode = 'off'
     // Drive the verbose logger from the setting (null = fall back to the
     // localStorage.gfDebug manual override).
     setDebugLoggingEnabled(currentSettings.debugLogging ? true : null)
     const hostname = location.hostname
     // The extension is globally on/off via settings.enabled; per-site disable
     // ("power off on this site") lives in the blockedSites deny-list.
-    const extensionOn = (s: Settings): boolean => s.enabled
-    const sitePaused = (s: Settings): boolean => isSiteBlocked(s, hostname)
+    // (The `extensionOn` and `sitePaused` predicates that used to live here
+    // were absorbed into the pure `nextPauseMode` reducer in
+    // ./pause.ts; reconcile() now calls that directly.)
 
     // Full checking runtime (exists only when on + site not paused). When the
     // site is paused we instead show a small standalone "power" pill so the
@@ -366,97 +372,24 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     }
 
     // Paused-site mode: a MINIMAL runtime — field discovery + focus tracking
-    // only (no checking, no bridge, no highlights). The off-pill anchors to
-    // the FOCUSED field exactly like the active pill (focus-only, shared drag
-    // offset); no focused field => no pill.
-    const mountPausedMode = (): void => {
+    // only (no checking, no bridge, no highlights). Extracted to
+    // ./pause.ts (Task 4b-2). The orchestrator owns the pause lifecycle
+    // (mount / unmount / reducer state) and the module does the IO.
+    const mountPausedModeLocal = (): void => {
         if (pausedCleanups) return
-        const cleanups: Array<() => void> = (pausedCleanups = [])
-        const host = createOverlayHost()
-        cleanups.push(() => host.destroy())
-        const fields = new Set<HTMLElement>()
-        let pillHandle: StatusButtonHandle | null = null
-        let pillFor: HTMLElement | null = null
-        const hidePill = (): void => {
-            pillHandle?.destroy()
-            pillHandle = null
-            pillFor = null
-        }
-        const showPillFor = (el: HTMLElement): void => {
-            hidePill()
-            pillFor = el
-            pillHandle = renderStatusButton(host.root, {
-                count: 0,
-                anchorRect: el.getBoundingClientRect(),
-                disabled: true,
-                corrections: [],
-                onFocusField: () => el.focus(),
-                onTogglePower: () => void togglePower(),
-                onRecheck: () => {},
-                onApplyAll: () => {},
-                onApplyOne: () => {},
-                onUndo: () => {},
-                onRephrase: () => {},
-                undoAvailable: false,
-                dragOffset: pillPosition.dragOffset ?? undefined,
-                onDragMove: (offset) => {
-                    pillPosition.dragOffset = offset
-                },
-            })
-        }
-        const stopObserver = createFieldObserver({
-            root: document.body,
-            onFieldDiscovered: (el) => {
-                fields.add(el)
-                if (el.contains(document.activeElement)) showPillFor(el)
+        const flow = mountPausedMode({
+            hostname,
+            getLastFocusedField: () => lastFocusedField,
+            setLastFocusedField: (el) => {
+                lastFocusedField = el
             },
-            onFieldDetached: (el) => {
-                fields.delete(el)
-                if (lastFocusedField === el) lastFocusedField = null
-                if (pillFor === el) hidePill()
+            getDragOffset: () => pillPosition.dragOffset ?? undefined,
+            setDragOffset: (offset) => {
+                pillPosition.dragOffset = offset ?? null
             },
+            onTogglePower: () => togglePower(),
         })
-        // Seed the pill for the field the user was last editing. The field
-        // observer's initial sweep is deferred (rAF) and gated on
-        // document.activeElement, which is <body> right after the Power button
-        // that triggered the disable was destroyed — so without this seed no
-        // pill (hence no in-page Enable affordance) would appear until the user
-        // re-focuses a field. showPillFor only needs the element; the observer
-        // adds it to `fields` on its next tick (showPillFor is idempotent).
-        if (lastFocusedField?.isConnected) showPillFor(lastFocusedField)
-        cleanups.push(stopObserver)
-        const onFocusIn = (e: FocusEvent): void => {
-            const t = e.target
-            if (!(t instanceof HTMLElement)) return
-            for (const f of fields) {
-                if (f === t || f.contains(t)) {
-                    showPillFor(f)
-                    return
-                }
-            }
-        }
-        const onFocusOut = (): void => {
-            // Defer: focus may be moving INTO the pill (drag) or to a child.
-            setTimeout(() => {
-                if (pillFor && !pillFor.contains(document.activeElement)) hidePill()
-            }, 0)
-        }
-        document.addEventListener('focusin', onFocusIn)
-        document.addEventListener('focusout', onFocusOut)
-        cleanups.push(() => {
-            document.removeEventListener('focusin', onFocusIn)
-            document.removeEventListener('focusout', onFocusOut)
-        })
-        const reposition = (): void => {
-            if (pillFor && pillHandle) pillHandle.reposition(pillFor.getBoundingClientRect())
-        }
-        document.addEventListener('scroll', reposition, { capture: true, passive: true })
-        window.addEventListener('resize', reposition, { passive: true })
-        cleanups.push(() => {
-            document.removeEventListener('scroll', reposition, { capture: true })
-            window.removeEventListener('resize', reposition)
-        })
-        cleanups.push(hidePill)
+        pausedCleanups = [flow.stop]
     }
     const unmountPausedMode = (): void => {
         if (!pausedCleanups) return
@@ -483,17 +416,22 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     document.addEventListener('focusin', trackFocus)
     ctx.onInvalidated(() => document.removeEventListener('focusin', trackFocus))
 
-    // Reconcile the page state to the current settings: globally off -> nothing;
-    // site paused -> paused-mode runtime only; otherwise -> full checking runtime.
+    // Reconcile the page state to the current settings. Reducer-driven via
+    // nextPauseMode (./pause.ts): the same function the unit test pins.
+    // mode='off'  → tear down everything (globally disabled)
+    // mode='site-paused' → swap the full runtime for the minimal paused pill
+    // mode='active' → (re)mount the full runtime
     const reconcile = (s: Settings): void => {
-        if (!extensionOn(s)) {
+        const next = nextPauseMode(s, currentPauseMode, hostname)
+        currentPauseMode = next.mode
+        if (next.mode === 'off') {
             teardownRuntime()
             unmountPausedMode()
             return
         }
-        if (sitePaused(s)) {
+        if (next.mode === 'site-paused') {
             teardownRuntime()
-            mountPausedMode()
+            mountPausedModeLocal()
             return
         }
         unmountPausedMode()
@@ -753,6 +691,37 @@ function wireRuntime(
     // paste-skip toggles take effect immediately. The actual text read happens
     // at debounce FIRE time inside the attachment (Fix 2), not here.
     //
+    // Apply the scoped-clear to a field's highlight layer. The shared
+    // `keep` helper decides which items survive; for every DROPPED item we
+    // hide its pooled node (overlay) or rebuild the native buckets from
+    // the kept list (native) so the stale display is gone, without
+    // rebuilding the survivors. (Native uses setFieldHighlights rather
+    // than per-item primitives because the surviving set may now span
+    // different category buckets than the old one — e.g. 2 spelling
+    // items, 1 dropped, 1 grammar item survives untouched; the only safe
+    // thing is a full bucket rebuild from the kept set.)
+    const applyScopedClearToField = (
+        state: FieldState,
+        el: HTMLElement,
+        kept: readonly RenderableItem[],
+    ): void => {
+        if (state.items.length === kept.length) return
+        if (state.useNativeHighlight) {
+            getNativeHighlighter().setFieldHighlights(
+                el,
+                kept.map((it) => ({ cuStart: it.hlStart, cuEnd: it.hlEnd, category: it.category })),
+            )
+        } else {
+            // Overlay path — the per-item clearItem loop + the
+            // null-caret short-circuit live in @/lib/scoped-clear so
+            // the Finding 5 fast path is testable in isolation.
+            const layer = state.highlightLayer as unknown as
+                | { clearItem(i: number): void; reconcile(s: readonly never[]): void }
+                | undefined
+            if (layer) applyScopedOverlayClear(layer, state.items, kept)
+        }
+    }
+
     // Paste-grace: on a paste/drop (when checkPastedText is on and
     // pasteGraceMs > 0) we DON'T check yet — we arm a per-field timer so the
     // user can edit the pasted text first. The check fires when that window
@@ -766,6 +735,11 @@ function wireRuntime(
             if (!shouldCheckInput(inputType, { checkPastedText: s.checkPastedText })) return false
             const state = runtime.fields.get(el)
             if (!state) return false
+            // Popover stale anchor: the popover points at a highlight we
+            // may be about to clear by the scoped-clear below. Close it
+            // first so it doesn't ghost-anchor over a dropped item. Done
+            // unconditionally on any input event (paste / typing / drop).
+            if (openPopovers.has(el)) closePopoverFor(el)
             if (isPasteInput(inputType)) {
                 // Plain field paste (fires inputType='insertFromPaste'): arm the
                 // grace window instead of checking now, then suppress the
@@ -773,82 +747,55 @@ function wireRuntime(
                 armPasteGrace(el, state)
                 return false
             }
-            // Non-paste edit: ends any pending grace (whichever comes first) and
-            // schedules the normal debounced check.
+            // Non-paste edit: scoped-clear the stale highlights BEFORE the
+            // debounced check fires (300–700 ms round-trip). Without this
+            // the old underline sits at its old pixel position during the
+            // window (Bug 1: sticky after Enter, newline mis-render,
+            // halfway through the word). Spec §3: editOffset == null →
+            // clear-all (keep returns []); else keep only spans that end
+            // at or before the caret.
             clearPasteGrace(state)
+            const editOffset = getCaretOffset(el)
+            const kept = keepHighlightsBeforeEdit(state.items, editOffset)
+            // Clear dropped items FIRST (while we still have the old
+            // indices), then replace the list.
+            if (kept.length < state.items.length) {
+                applyScopedClearToField(state, el, kept)
+            }
+            state.items = kept
             return true
         }
 
-    // Shared, rAF-coalesced loop that re-processes every tracked field on
-    // scroll/resize. One document scroll (capture) + window resize listener
-    // drives it (installed in wireRuntime, not per field), so an N-field page
-    // incurs N field updates per frame IN TOTAL, not N × (scroll-fires-per-
-    // frame). The per-field ResizeObserver (which observes THIS element's box,
-    // not the viewport) still routes here so a single-element resize also
-    // coalesces.
-    let remeasureScheduled = false
-    const scheduleRemeasureAll = (): void => {
-        if (remeasureScheduled) return
-        remeasureScheduled = true
-        requestAnimationFrame(() => {
-            remeasureScheduled = false
-            for (const el of runtime.trackedFields) remeasureField(el)
-        })
-    }
-    // Re-measure a field's hit-test rects (+ reconcile its OVERLAY highlights)
-    // and re-anchor its status pill, on scroll/resize. Runs for BOTH native and
-    // overlay fields:
-    //   - itemRects is rebuilt for every field — the hover/click hit-test reads
-    //     it, and on a native field it would otherwise go stale on scroll
-    //     (breaking the hover popup + click popover after scrolling).
-    //   - The overlay highlight layer is reconciled ONLY for overlay fields
-    //     (native CSS Custom Highlight visuals self-track reflow).
-    //   - The pill is re-anchored to the field's live rect (with the drag
-    //     offset) so it tracks the field instead of staying pinned.
-    // Defensive: getSpanRectsBatch is wrapped so a measurement throw can't kill
-    // the loop (or the pill reposition) for the rest of the fields.
-    const remeasureField = (el: HTMLElement): void => {
-        const st = runtime.fields.get(el)
-        if (!st) return
-        if (st.items.length > 0) {
-            // Highlight/hit-test the WORD range (hlStart/hlEnd), not the raw edit
-            // span — a zero-width insertion (e.g. "sw"->"saw") has no rect.
-            const spans = st.items.map((it) => ({ start: it.hlStart, end: it.hlEnd }))
-            let allRects: DOMRect[][]
-            try {
-                allRects = getSpanRectsBatch(el, spans)
-            } catch {
-                // Measurement failed (detached node / odd layout) — leave the
-                // prior rects in place and still reposition the pill below.
-                allRects = []
+    // Shared, rAF-coalesced scroll/resize re-anchor loop. Extracted to
+    // ./reanchor.ts (Task 4b-3) as a byte-equivalent shell; the perf plan
+    // rewrites the per-field body in-place. We stitch the orchestrator's
+    // `item` references back into the reanchor's itemRects patch via
+    // setFieldState (reanchor never sees the items).
+    const reanchor = mountReanchor({
+        getTrackedFields: () => runtime.trackedFields,
+        getFieldState: (el) => {
+            const st = runtime.fields.get(el)
+            if (!st) return undefined
+            return {
+                items: st.items,
+                useNativeHighlight: st.useNativeHighlight,
+                highlightLayer: st.highlightLayer,
+                hoverItemIndex: st.hoverItemIndex,
+                statusHandle: st.statusHandle
+                    ? { reposition: (r) => st.statusHandle!.reposition(r) }
+                    : null,
             }
-            if (allRects.length > 0) {
-                st.itemRects = st.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
-                if (!st.useNativeHighlight && st.highlightLayer) {
-                    const specs: HighlightSpec[] = []
-                    for (let i = 0; i < st.items.length; i++) {
-                        for (const rect of allRects[i] ?? [])
-                            specs.push({ rect, category: st.items[i]!.category, itemIndex: i })
-                    }
-                    st.highlightLayer.reconcile(specs)
-                    st.highlightLayer.setState({
-                        focused: document.activeElement === el,
-                        hoverItemIndex: st.hoverItemIndex,
-                    })
-                }
-            }
-        }
-        // Re-anchor the pill to the field's current position (with the live
-        // drag offset). Cheap; runs even when there are no items so the pill
-        // tracks the field whether or not it has suggestions.
-        st.statusHandle?.reposition(el.getBoundingClientRect())
-    }
-    document.addEventListener('scroll', scheduleRemeasureAll, { capture: true, passive: true })
-    window.addEventListener('resize', scheduleRemeasureAll, { passive: true })
-    runtime.cleanups.push(() => {
-        document.removeEventListener('scroll', scheduleRemeasureAll, { capture: true })
-        window.removeEventListener('resize', scheduleRemeasureAll)
+        },
+        setFieldState: (el, patch) => {
+            const st = runtime.fields.get(el)
+            if (!st) return
+            st.itemRects = st.items.map((it, i) => ({
+                item: it,
+                rects: patch.itemRects[i]?.rects ?? [],
+            }))
+        },
     })
+    runtime.cleanups.push(reanchor.stop)
 
     const attach = (el: HTMLElement): void => {
         if (runtime.fields.has(el)) return
@@ -885,7 +832,11 @@ function wireRuntime(
             attachment,
             items: [],
             itemRects: [],
-            checkSeq: 0,
+            // Process-monotonic: a re-attached field's first seq is strictly
+            // greater than any seq a torn-down field ever produced. Kills
+            // the "detached field's pending check aliases a re-attached
+            // field's seq" race (Spec §4 sibling). See @/lib/check-seq.
+            checkSeq: nextCheckSeq(),
             pasteGraceTimer: null,
             highlightLayer: null,
             hoverItemIndex: null,
@@ -999,12 +950,25 @@ function wireRuntime(
                 // document, but only one field can have focus at a time
                 // anyway, so this matches reality.
                 getNativeHighlighter().setFocusedField(null)
-                return
+            } else {
+                state.highlightLayer?.setState({
+                    focused: false,
+                    hoverItemIndex: state.hoverItemIndex,
+                })
             }
-            state.highlightLayer?.setState({
-                focused: false,
-                hoverItemIndex: state.hoverItemIndex,
-            })
+            // Spec §4 sibling: blur → clear highlights + close popover.
+            // The user is leaving the field; the display state and the
+            // popover would otherwise ghost-anchor over text the user
+            // can no longer see in the same context. The next attach /
+            // focus restarts fresh.
+            if (openPopovers.has(el)) closePopoverFor(el)
+            state.items = []
+            state.itemRects = []
+            if (state.useNativeHighlight) {
+                getNativeHighlighter().setFieldHighlights(el, [])
+            } else {
+                state.highlightLayer?.reconcile([])
+            }
         }
         el.addEventListener('focus', onFieldFocus)
         el.addEventListener('blur', onFieldBlur)
@@ -1117,7 +1081,7 @@ function wireRuntime(
         // hover/click hit-test rects would go stale on scroll), and both
         // re-anchor their status pill.
         runtime.trackedFields.add(el)
-        const ro = new ResizeObserver(() => scheduleRemeasureAll())
+        const ro = new ResizeObserver(() => reanchor.schedule())
         ro.observe(el)
         runtime.cleanups.push(() => ro.disconnect())
 
@@ -1193,8 +1157,12 @@ function wireRuntime(
             return undefined
         }
         if (isMessage(raw, 'REPHRASE_SELECTION')) {
-            const found = resolveSelection()
-            if (found) void openRephraseFor(found.el, found.text, found.span)
+            // Trigger the rephrase flow for the currently focused field —
+            // same shape as the user clicking the Rephrase button on the
+            // pill. The flow's rephraseFor() uses the selection when in-el,
+            // else the whole field, then the same async path.
+            const el = focusedTrackedField()
+            if (el) rephraseFlow.rephraseFor(el)
             return undefined
         }
         if (isMessage(raw, 'GET_TAB_STATUS')) {
@@ -1227,7 +1195,7 @@ function wireRuntime(
         dismissPopoversIn(overlay.root)
         dismissRephraseButtonsIn(overlay.root)
         dismissRephraseCardsIn(overlay.root)
-        rephraseButtonHandle = null
+        rephraseFlow.dismissButton()
         runtime.active = null
         // dismissPopoversIn removes the popover DOM directly (not via
         // closePopoverFor), so clear the active-field back-reference too.
@@ -1259,153 +1227,28 @@ function wireRuntime(
     }
 
     // ---- Rephrase selection (slow LLM path) ----
-    // The Rephrase button is one-per-root (showRephraseButton dismisses any
-    // prior), so we only need to track the latest handle to hide on dismiss.
-    let rephraseButtonHandle: RephraseButtonHandle | null = null
-    const hideRephraseButton = (): void => {
-        rephraseButtonHandle?.hide()
-        rephraseButtonHandle = null
-    }
-
-    // Resolve the focused tracked field's CURRENT non-empty selection into the
-    // text, its code-unit span, and a viewport rect to anchor UI. Returns null
-    // when there is no usable selection (collapsed, empty, or not in a field).
-    const resolveSelection = (): {
-        el: HTMLElement
-        text: string
-        span: { start: number; end: number }
-        rect: DOMRect
-    } | null => {
-        const el = focusedTrackedField()
-        if (!el) return null
-        if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-            const start = el.selectionStart ?? 0
-            const end = el.selectionEnd ?? 0
-            if (end <= start) return null
-            const text = el.value.slice(start, end)
-            if (!text.trim()) return null
-            const rects = getSpanRectsBatch(el, [{ start, end }])
-            const rect = rects[0]?.[0] ?? el.getBoundingClientRect()
-            return { el, text, span: { start, end }, rect }
-        }
-        // contenteditable
-        const sel = el.ownerDocument.getSelection()
-        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
-        const range = sel.getRangeAt(0)
-        if (!el.contains(range.commonAncestorContainer)) return null
-        const span = selectionToCodeUnitSpan(el, range)
-        // Slice the FLAT model (not range.toString(), which omits the virtual
-        // newlines) so the rephrase stale-guard `live.slice(...) === text`
-        // compares like with like on multi-line selections.
-        const text = getText(el).slice(span.start, span.end)
-        if (!text.trim()) return null
-        const r = range.getBoundingClientRect()
-        const rect = r.width || r.height ? r : el.getBoundingClientRect()
-        return { el, text, span, rect }
-    }
-
-    // Panel Rephrase: the current selection when usable, else the WHOLE field.
-    function rephraseFor(el: HTMLElement): void {
-        const found = resolveSelection()
-        if (found && found.el === el) {
-            void openRephraseFor(el, found.text, found.span)
-            return
-        }
-        const text = getText(el)
-        if (!text.trim()) return
-        void openRephraseFor(el, text, { start: 0, end: text.length })
-    }
-
-    // Rephrase the given selection: call the bridge (slow LLM path), show a
-    // pending state, then a result card. Apply replaces the SELECTION span.
-    async function openRephraseFor(
-        el: HTMLElement,
-        text: string,
-        span: { start: number; end: number },
-    ): Promise<void> {
-        const s = getSettings()
-        hideRephraseButton()
-        // Lightweight pending card on the rephrase layer (was: empty-action
-        // toast hack; the new card carries the round-trip status and updates
-        // in place with the result or an inline error).
-        const pending: RephraseCardHandle = showRephrasePending(overlay.root, {
-            anchorRect: el.getBoundingClientRect(),
-            onClose: () => {},
-        })
-        try {
-            const res = await runtime.client.rephrase({
-                text,
-                tone: s.rephraseTone || undefined,
-                style: s.rephraseStyle || undefined,
-                alternatives: s.rephraseAlternatives,
-                source: 'browser',
-                override: s.rephraseOverride,
-            })
-            if (!ctx.isValid) return
-            pending.hide()
-            showRephraseCard(overlay.root, {
-                anchorRect: el.getBoundingClientRect(),
-                original: res.original,
-                rephrased: res.rephrased,
-                alternatives: res.alternatives,
-                onApply: (chosen: string) => {
-                    // Re-validate the span against live text: if the field
-                    // changed since selection, the offsets may be stale. Only
-                    // apply when the slice still equals the original selection.
-                    const live = getText(el)
-                    if (live.slice(span.start, span.end) !== text) {
-                        debugWarn('rephrase', 'selection span went stale; not applying')
-                        return
-                    }
-                    void applyEdit(el, span, chosen).then(() => {
-                        void rerunFor(el)(getText(el))
-                    })
-                },
-                onClose: () => {},
-            })
-        } catch (e) {
-            debugWarn('rephrase', 'rephrase failed', e)
-            if (!ctx.isValid) return
-            pending.hide()
-            showRephraseError(overlay.root, {
-                anchorRect: el.getBoundingClientRect(),
-                message: 'Rephrase failed',
-                onRetry: () => void openRephraseFor(el, text, span),
-                onClose: () => {},
-            })
-        }
-    }
-
-    // Debounced selection listener: shows/hides the Rephrase button as the
-    // user drags a selection. 150ms debounce so a dragging selection doesn't
-    // thrash. showRephraseButton is one-per-root (dismisses the prior), so
-    // re-showing on every settled change is fine. `found` is captured by
-    // value in the onClick closure (fresh const each tick).
-    let selectionDebounce: ReturnType<typeof setTimeout> | null = null
-    const onSelectionChange = (): void => {
-        if (selectionDebounce) clearTimeout(selectionDebounce)
-        selectionDebounce = setTimeout(() => {
-            selectionDebounce = null
-            const found = resolveSelection()
-            if (!found) {
-                hideRephraseButton()
-                return
+    // Extracted to ./rephrase.ts (Task 4b-1). The orchestrator passes the
+    // active-field resolver as a dep; the module owns the selection
+    // debouncer, the scope decision, the bridge call, and the
+    // apply/stale-guard. The returned `rephraseFor` is wired to the pill's
+    // onRephrase below. The module's stop() is pushed to runtime.cleanups
+    // so a script-invalidation teardown releases the selectionchange
+    // listener and the Rephrase button.
+    const rephraseFlow = mountRephraseFlow({
+        client: runtime.client,
+        overlayRoot: overlay.root,
+        rerun: (el, text) => void rerunFor(el)(text),
+        ctxIsValid: () => ctx.isValid,
+        resolveActiveSelection: () => {
+            for (const tel of runtime.trackedFields) {
+                const f = resolveRephraseSelectionFor(tel)
+                if (f) return f
             }
-            rephraseButtonHandle = showRephraseButton(overlay.root, {
-                anchorRect: found.rect,
-                onClick: () => {
-                    hideRephraseButton()
-                    void openRephraseFor(found.el, found.text, found.span)
-                },
-            })
-        }, 150)
-    }
-    document.addEventListener('selectionchange', onSelectionChange)
-    runtime.cleanups.push(() => {
-        document.removeEventListener('selectionchange', onSelectionChange)
-        if (selectionDebounce) clearTimeout(selectionDebounce)
-        hideRephraseButton()
+            return null
+        },
+        applyEdit,
     })
+    runtime.cleanups.push(rephraseFlow.stop)
 
     // Accept hotkey (in-content keydown, NOT browser.commands — the commands
     // API is unreliable for arbitrary chords cross-OS). Pressing the configured
@@ -1416,6 +1259,20 @@ function wireRuntime(
     const onKeydown = (e: KeyboardEvent): void => {
         const s = getSettings()
         const field = focusedTrackedField()
+        // Rephrase hotkey runs BEFORE the accept branch (handles Rephrase on
+        // a focused tracked field, with or without active suggestions). The
+        // matchers are distinct by default (Ctrl+/ vs Ctrl+.) so order is
+        // documentation, not a tie-breaker — but if a user rebinds the
+        // accept hotkey to Ctrl+/ the rephrase branch wins.
+        if (
+            handleRephraseHotkey(e, {
+                hotkey: s.rephraseHotkey,
+                rephraseFor: (el) => rephraseFlow.rephraseFor(el),
+                field,
+            })
+        ) {
+            return
+        }
         const hasSuggestions = field != null && (runtime.fields.get(field)?.items.length ?? 0) > 0
         if (
             !shouldAcceptHotkey(e, {
@@ -1765,7 +1622,7 @@ function wireRuntime(
             onApplyAll: () => void applyAllFor(el),
             onApplyOne: (i) => applyOneFor(el, i),
             onUndo: () => void undoFor(el),
-            onRephrase: () => rephraseFor(el),
+            onRephrase: () => rephraseFlow.rephraseFor(el),
             undoAvailable: (state.lastApplied?.length ?? 0) > 0,
             // Persisted (session) pill drag offset — a dragged spot survives
             // re-renders and the enabled↔disabled swap (state in start() scope),
@@ -1845,57 +1702,71 @@ function wireRuntime(
         try {
             allRects = getSpanRectsBatch(el, spans)
         } catch {
-            allRects = spans.map(() => [])
+            // Spec §4 sibling: measurement-throw → clear itemRects + the
+            // highlight layer. Better no highlight than a stale one — the
+            // next remeasure (scroll/resize, or the next edit) re-populates
+            // from a clean slate. Pill update below still runs (count data
+            // must never depend on rect measurability).
+            state.itemRects = []
+            if (state.useNativeHighlight) {
+                getNativeHighlighter().setFieldHighlights(el, [])
+            } else {
+                state.highlightLayer?.reconcile([])
+            }
+            allRects = [] // keep the rest of the function safe (no re-render below)
+            // Fall through to pill update + attachment handle registration.
         }
         // Cache the rects for the field-level hover/click hit-test (parallel to
         // items; an item with no rects still occupies a slot but never matches).
-        state.itemRects = state.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
+        if (allRects.length > 0) {
+            state.itemRects = state.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
 
-        if (state.useNativeHighlight) {
-            // Push code-unit spans into the document-global registry. The
-            // browser draws `::highlight()` for us; reflow/scroll tracking
-            // is native. Any previous overlay layer (left over from a
-            // renderer switch — shouldn't happen, but defensive) is
-            // destroyed so we don't leave a stale shadow-root node behind.
-            if (state.highlightLayer) {
-                state.highlightLayer.destroy()
-                state.highlightLayer = null
-            }
-            getNativeHighlighter().setFieldHighlights(
-                el,
-                // Highlight the WORD range (hlStart/hlEnd) so zero-width
-                // insertions still get a visible ::highlight() Range.
-                state.items.map((it) => ({
-                    cuStart: it.hlStart,
-                    cuEnd: it.hlEnd,
-                    category: it.category,
-                })),
-            )
-            debugLog('highlight', 'native setFieldHighlights', { count: state.items.length })
-        } else {
-            // Flatten (item, rect) → specs and reconcile the persistent
-            // overlay layer.
-            const specs: HighlightSpec[] = []
-            for (let i = 0; i < state.items.length; i++) {
-                const item = state.items[i]!
-                for (const rect of allRects[i] ?? []) {
-                    specs.push({ rect, category: item.category, itemIndex: i })
+            if (state.useNativeHighlight) {
+                // Push code-unit spans into the document-global registry. The
+                // browser draws `::highlight()` for us; reflow/scroll tracking
+                // is native. Any previous overlay layer (left over from a
+                // renderer switch — shouldn't happen, but defensive) is
+                // destroyed so we don't leave a stale shadow-root node behind.
+                if (state.highlightLayer) {
+                    state.highlightLayer.destroy()
+                    state.highlightLayer = null
                 }
+                getNativeHighlighter().setFieldHighlights(
+                    el,
+                    // Highlight the WORD range (hlStart/hlEnd) so zero-width
+                    // insertions still get a visible ::highlight() Range.
+                    state.items.map((it) => ({
+                        cuStart: it.hlStart,
+                        cuEnd: it.hlEnd,
+                        category: it.category,
+                    })),
+                )
+                debugLog('highlight', 'native setFieldHighlights', { count: state.items.length })
+            } else {
+                // Flatten (item, rect) → specs and reconcile the persistent
+                // overlay layer.
+                const specs: HighlightSpec[] = []
+                for (let i = 0; i < state.items.length; i++) {
+                    const item = state.items[i]!
+                    for (const rect of allRects[i] ?? []) {
+                        specs.push({ rect, category: item.category, itemIndex: i })
+                    }
+                }
+                if (!state.highlightLayer) state.highlightLayer = createHighlightLayer(root)
+                state.highlightLayer.reconcile(specs)
+                debugLog('highlight', 'overlay reconcile', {
+                    items: state.items.length,
+                    rects: specs.length,
+                })
+                // Push current intensity (focus + hover) onto the
+                // freshly-reconciled layer; reconcile reuses nodes, so the
+                // latest state must be re-applied to keep the visual
+                // consistent.
+                state.highlightLayer.setState({
+                    focused: document.activeElement === el,
+                    hoverItemIndex: state.hoverItemIndex,
+                })
             }
-            if (!state.highlightLayer) state.highlightLayer = createHighlightLayer(root)
-            state.highlightLayer.reconcile(specs)
-            debugLog('highlight', 'overlay reconcile', {
-                items: state.items.length,
-                rects: specs.length,
-            })
-            // Push current intensity (focus + hover) onto the
-            // freshly-reconciled layer; reconcile reuses nodes, so the
-            // latest state must be re-applied to keep the visual
-            // consistent.
-            state.highlightLayer.setState({
-                focused: document.activeElement === el,
-                hoverItemIndex: state.hoverItemIndex,
-            })
         }
 
         // The status pill is still rendered fresh each time (cheap); only the

@@ -1,0 +1,7 @@
+{
+    "_comment": "Populated by tests/perf/capture.mjs after a profile run. Read by the gating vitest to assert the harness is wired (placeholder assertion: warmup frames consumed ≥ 3 suggestions on f2).",
+    "label": "pending",
+    "gesture": "type",
+    "field": "f2",
+    "profileFile": "tests/perf/profiles/pending/type-f2.cpuprofile"
+}

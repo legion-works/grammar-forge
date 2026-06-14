@@ -19,6 +19,7 @@
 import { BridgeClient, type SignalEvent } from "@/api/client";
 import { buildRenderableItems, isSpanStillValid, type RenderableItem } from "@/lib/pipeline";
 import { createSignalQueue } from "@/signal/queue";
+import { resolveCommonSettings } from "@/storage/settings-core";
 import type {
     CorrectRequest,
     CorrectResponse,
@@ -36,27 +37,12 @@ import { maskPastePlaceholders } from "./paste-mask";
 import { createDetailsState, type DetailsState } from "./details-state";
 import { detectPromptPinSupport } from "./feature-detect";
 import { logDebug } from "./debug";
+import { CATEGORY_FG } from "./category-palette";
 import type { PromptRef, TuiApi } from "./opencode-types";
 import type { PanelController, PanelView } from "./details-panel-view";
 
 const SIGNAL_SOURCE = "opencode";
 
-// Display color per category. Mirrors CATEGORY_META.badge in
-// clients/browser/src/api/category.ts — keep in sync if the browser
-// palette changes. `badge` is the brighter of the two swatches per
-// category and reads well as a terminal underline foreground on both
-// light and dark backgrounds.
-const CATEGORY_FG: Record<string, string> = {
-    spelling: "#ef4444",
-    grammar: "#eab308",
-    punctuation: "#06b6d4",
-    style: "#8b5cf6",
-    typography: "#6b7280",
-    unknown: "#9ca3af",
-};
-
-const DEFAULT_BRIDGE_URL = "http://localhost:8000";
-const DEFAULT_REALTIME_DELAY_MS = 500;
 const DEFAULT_APPLY_ALL_HOTKEY = "ctrl+.";
 const DEFAULT_CYCLE_NEXT_HOTKEY = "/";
 const DEFAULT_CYCLE_PREV_HOTKEY = ".";
@@ -76,14 +62,7 @@ export function resolveSettings(
     options: Record<string, unknown> | undefined,
 ): GrammarForgeSettings {
     const raw = options ?? {};
-    const bridgeUrl =
-        typeof raw.bridgeUrl === "string" && /^https?:\/\//.test(raw.bridgeUrl)
-            ? raw.bridgeUrl.replace(/\/+$/, "")
-            : DEFAULT_BRIDGE_URL;
-    const realtimeDelayMs =
-        typeof raw.realtimeDelayMs === "number" && Number.isFinite(raw.realtimeDelayMs)
-            ? raw.realtimeDelayMs
-            : DEFAULT_REALTIME_DELAY_MS;
+    const { common } = resolveCommonSettings(raw);
     const applyAllHotkeyRaw =
         typeof raw.applyAllHotkey === "string" ? raw.applyAllHotkey.trim().toLowerCase() : "";
     const applyAllHotkey = applyAllHotkeyRaw === "" ? DEFAULT_APPLY_ALL_HOTKEY : applyAllHotkeyRaw;
@@ -98,15 +77,14 @@ export function resolveSettings(
     const rephraseHotkeyRaw =
         typeof raw.rephraseHotkey === "string" ? raw.rephraseHotkey.trim().toLowerCase() : "";
     const rephraseHotkey = rephraseHotkeyRaw === "" ? DEFAULT_REPHRASE_HOTKEY : rephraseHotkeyRaw;
-    const allowRemoteBridge = raw.allowRemoteBridge === true;
     return {
-        bridgeUrl,
-        realtimeDelayMs,
+        bridgeUrl: common.bridgeUrl,
+        realtimeDelayMs: common.realtimeDelayMs,
         applyAllHotkey,
         cycleNextHotkey,
         cyclePrevHotkey,
         rephraseHotkey,
-        allowRemoteBridge,
+        allowRemoteBridge: common.allowRemoteBridge,
     };
 }
 
@@ -255,7 +233,7 @@ export function startOrchestrator(
         if (!syntax) return null;
         const id = syntax.registerStyle(`extmark.grammarforge.${category}`, {
             underline: true,
-            fg: CATEGORY_FG[category] ?? CATEGORY_FG.unknown,
+            fg: (CATEGORY_FG as Record<string, string>)[category] ?? CATEGORY_FG.unknown,
         });
         styleIds.set(category, id);
         return id;

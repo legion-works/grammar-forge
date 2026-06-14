@@ -48,6 +48,12 @@ const settings = definePluginSettings({
         description: 'Hotkey that applies the first suggestion (e.g. ctrl+.)',
         default: 'ctrl+.',
     },
+    rephraseHotkey: {
+        type: OptionType.STRING,
+        description:
+            "Hotkey that rephrases the focused composer's selection (or the whole composer if nothing is selected)",
+        default: 'ctrl+/',
+    },
     checkPastedText: {
         type: OptionType.BOOLEAN,
         description: 'Also check pasted text (after a grace period)',

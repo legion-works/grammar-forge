@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { BridgeSuggestion, Category, CorrectResponse } from '@/api/types'
+import { clearVerifyCache, verifyByteSpan } from '@/api/offset'
 import { buildRenderableItems, isSpanStillValid, runCheck, tallyByCategory } from '@/lib/pipeline'
 
 function suggestion(over: Partial<BridgeSuggestion>): BridgeSuggestion {
@@ -208,6 +209,67 @@ describe('buildRenderableItems', () => {
         expect(items).toHaveLength(1)
         expect(items[0]?.preview).toBeUndefined()
     })
+
+    it('drops suggestions whose span contains a newline (start position)', () => {
+        // span [1, 2) on "a\nb" = "\n" — the slice itself contains a \n.
+        const res = {
+            original: 'a\nb',
+            suggestions: [
+                { span: { start: 1, end: 2 }, replacement: 'B', model: 'gector' as const },
+            ],
+            score: 90,
+        }
+        const { items, dropped } = buildRenderableItems('a\nb', res, {})
+        expect(items).toEqual([])
+        expect(dropped).toBe(1)
+    })
+
+    it('keeps a suggestion on a word that ends a line (newline AFTER the span)', () => {
+        // The legit in-line "has→have" case in "I has\na apple": span [2, 5)
+        // = "has"; the \n is at position 5 (immediately AFTER the span, NOT
+        // inside it). The earlier `slice(cu.start, cu.end + 1)` over-dropped
+        // this; the new contract drops ONLY suggestions whose span CONTAINS
+        // a \n. The bridge C2 fix is the root cause; this client belt is
+        // the regression guard.
+        const res = {
+            original: 'I has\na apple',
+            suggestions: [
+                { span: { start: 2, end: 5 }, replacement: 'have', model: 'gector' as const },
+            ],
+            score: 90,
+        }
+        const { items, dropped } = buildRenderableItems('I has\na apple', res, {})
+        expect(items).toHaveLength(1)
+        expect(items[0]?.original).toBe('has')
+        expect(dropped).toBe(0)
+    })
+
+    it('drops suggestions whose span contains a newline (crosses a \\n internally)', () => {
+        // [0, 3) on "a\nbc" = "a\nb" — the slice contains a \n.
+        const res = {
+            original: 'a\nbc',
+            suggestions: [
+                { span: { start: 0, end: 3 }, replacement: 'A BC', model: 'gector' as const },
+            ],
+            score: 90,
+        }
+        const { items, dropped } = buildRenderableItems('a\nbc', res, {})
+        expect(items).toEqual([])
+        expect(dropped).toBe(1)
+    })
+
+    it('keeps suggestions whose span is fully on one line (no-newline control)', () => {
+        const res = {
+            original: 'teh quick',
+            suggestions: [
+                { span: { start: 0, end: 3 }, replacement: 'the', model: 'gector' as const },
+            ],
+            score: 90,
+        }
+        const { items, dropped } = buildRenderableItems('teh quick', res, {})
+        expect(items).toHaveLength(1)
+        expect(dropped).toBe(0)
+    })
 })
 
 describe('isSpanStillValid', () => {
@@ -247,5 +309,88 @@ describe('isSpanStillValid', () => {
         const text = 'hello world'
         const item = { cuStart: 5, cuEnd: 5, original: '' }
         expect(isSpanStillValid(text, item)).toBe(true)
+    })
+})
+
+describe('buildRenderableItems — P1 verifyByteSpanWithCache', () => {
+    it('O(K) verify calls on second run of identical text + suggestions', () => {
+        // Same text + same suggestion ids → second run is a full cache
+        // hit for every suggestion. The verify mock is the only way
+        // to count calls; the production code path is opaque.
+        const text = 'I has a cat and I has a dog too'
+        const res: CorrectResponse = {
+            original: text,
+            suggestions: [
+                {
+                    id: 1,
+                    span: { start: 2, end: 5 },
+                    replacement: 'have',
+                    model: 'gector',
+                },
+                {
+                    id: 2,
+                    span: { start: 17, end: 20 },
+                    replacement: 'have',
+                    model: 'gector',
+                },
+            ],
+            score: 90,
+        }
+        clearVerifyCache()
+        let verifyCalls = 0
+        const verify = (t: string, s: { start: number; end: number }) => {
+            verifyCalls++
+            return verifyByteSpan(t, s)
+        }
+        // First run: 2 verify calls (cache populated, one entry per id).
+        buildRenderableItems(text, res, { verify })
+        expect(verifyCalls).toBe(2)
+        // Second run: same text + same ids → 0 additional verify calls.
+        buildRenderableItems(text, res, { verify })
+        expect(verifyCalls).toBe(2)
+    })
+
+    it('re-verifies when the text changes (cache miss on hash mismatch)', () => {
+        const res: CorrectResponse = {
+            original: 'I has a cat',
+            suggestions: [
+                { id: 7, span: { start: 2, end: 5 }, replacement: 'have', model: 'gector' },
+            ],
+            score: 90,
+        }
+        clearVerifyCache()
+        let verifyCalls = 0
+        const verify = (t: string, s: { start: number; end: number }) => {
+            verifyCalls++
+            return verifyByteSpan(t, s)
+        }
+        buildRenderableItems('I has a cat', res, { verify })
+        const afterFirst = verifyCalls
+        // Different text → cache miss → re-verify.
+        buildRenderableItems('I has a dog', res, { verify })
+        expect(verifyCalls).toBe(afterFirst + 1)
+    })
+
+    it('preview path (id-less fast frames) bypasses the cache', () => {
+        // The bridge's preview frames carry no id (s.id is undefined).
+        // The cache short-circuits to a direct verify call so the
+        // existing "fast preview then final" contract stays
+        // byte-identical and no leaked entries pollute the cache.
+        const res: CorrectResponse = {
+            original: 'I has a cat',
+            suggestions: [{ span: { start: 2, end: 5 }, replacement: 'have', model: 'gector' }],
+            score: 90,
+        }
+        clearVerifyCache()
+        let verifyCalls = 0
+        const verify = (t: string, s: { start: number; end: number }) => {
+            verifyCalls++
+            return verifyByteSpan(t, s)
+        }
+        buildRenderableItems('I has a cat', res, { verify })
+        buildRenderableItems('I has a cat', res, { verify })
+        // No id → every call goes through verify directly. 2 runs ×
+        // 1 suggestion = 2 calls (not 1, like the id-keyed case).
+        expect(verifyCalls).toBe(2)
     })
 })

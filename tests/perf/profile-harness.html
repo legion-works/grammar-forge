@@ -1,0 +1,50 @@
+<!doctype html>
+<!--
+  Profile harness page (perf T1). Three tracked fields mounted on a
+  single page so a single profile run covers all three client hot
+  paths:
+
+    f1 — textarea, 5-paragraph Lorem fixture (~600 chars). Debounced
+         check path; the per-keystroke work is the dominant self-time
+         here.
+    f2 — <div contenteditable>, 1000 lines of "line N". The
+         flatSegments walk has real work (Gmail-style editor pattern).
+         This is the field the P2 memo targets.
+    f3 — 30-char contenteditable that streams 5 fast frames + final
+         from a local stub. This is the field the P4 client cache
+         targets (single-frame today, multi-frame after T5a).
+
+  The page attaches GrammarForge the same way the production
+  entrypoint does (a single-track field, same overlay root). The
+  ?profile query param flips on the console.profile hooks; without
+  it, the page is a no-op (no GrammarForge attach, no instrumentation).
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>GrammarForge profile harness</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 0; padding: 24px; }
+        .field { display: block; margin: 16px 0; width: 480px; }
+        #f1 { height: 8em; }
+        #f2 { height: 240px; overflow: auto; }
+        #f3 { height: 2em; }
+        .status { font-family: monospace; color: #555; }
+    </style>
+</head>
+<body>
+    <h1>GrammarForge profile harness</h1>
+    <p class="status" id="status">idle — append <code>?profile</code> to the URL to enable instrumentation.</p>
+
+    <label for="f1">f1 — textarea (5-paragraph Lorem)</label>
+    <textarea id="f1" class="field" spellcheck="false"></textarea>
+
+    <label for="f2">f2 — contenteditable (1000 lines)</label>
+    <div id="f2" class="field" contenteditable="true" spellcheck="false"></div>
+
+    <label for="f3">f3 — contenteditable (streaming fixture)</label>
+    <div id="f3" class="field" contenteditable="true" spellcheck="false"></div>
+
+    <script type="module" src="./profile-harness.ts"></script>
+</body>
+</html>

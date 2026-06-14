@@ -11,8 +11,12 @@ describe("CATEGORY_FG / categoryColor", () => {
             "typography",
             "unknown",
         ]) {
-            expect(typeof CATEGORY_FG[cat]).toBe("string");
-            expect(CATEGORY_FG[cat]).toMatch(/^#[0-9a-fA-F]{6}$/);
+            // CATEGORY_FG is now typed as Record<Category, string>; the test
+            // iterates string literals, so we cast at the lookup (mirrors the
+            // categoryColor() pattern).
+            const v = (CATEGORY_FG as Record<string, string>)[cat];
+            expect(typeof v).toBe("string");
+            expect(v).toMatch(/^#[0-9a-fA-F]{6}$/);
         }
     });
 

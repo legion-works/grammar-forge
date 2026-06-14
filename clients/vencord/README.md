@@ -26,6 +26,7 @@ Self-hosted grammar checking in Discord's message composer, backed by a
 | Allow remote bridge | off                     | Privacy guard — your message drafts are sent to the bridge URL.                                                                                                         |
 | Idle delay          | 500 ms                  | Debounce before checking.                                                                                                                                               |
 | Accept hotkey       | `ctrl+.`                | Applies the first suggestion. Tab is deliberately not used (Discord autocomplete).                                                                                      |
+| Rephrase hotkey     | `ctrl+/`                | Rephrases the focused composer's selection, or the whole composer if nothing is selected.                                                                               |
 | Check pasted text   | off                     | When off, pasted text is never checked (typed input only).                                                                                                              |
 
 ## Chat-bar button

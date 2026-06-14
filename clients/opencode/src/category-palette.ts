@@ -1,26 +1,19 @@
-// Single source of truth for the category → display-color map.
-// Mirrors CATEGORY_META.badge in clients/browser/src/api/category.ts;
-// keep the two in sync if the browser palette changes. The badge
-// color is the brighter of the two swatches per category and reads
-// well as a terminal underline foreground AND a bordered-card
-// border foreground on both light and dark backgrounds.
+// Derived from the shared CATEGORY_META.badge in clients/browser/src/api/category.ts —
+// the canonical source of truth. This module is the THIN adapter that re-shapes
+// the shared record into the per-category foreground color that the orchestrator
+// passes to extmark.registerStyle and the panel passes to bordered-card border.
 //
-// Used by:
-//   - orchestrator.ts (extmark underline foreground for the prompt)
-//   - tui-entry.tsx (bordered-card border color in the details panel)
-//
-// New categories must be added here and in the browser's
-// CATEGORY_META in lockstep.
+// If a new category is added, add it to CATEGORY_META in clients/browser/src/api/category.ts;
+// the type union (Category) update propagates here automatically and the sync test
+// (category-palette-sync.test.ts) catches any drift.
 
-export const CATEGORY_FG: Record<string, string> = {
-    spelling: "#ef4444",
-    grammar: "#eab308",
-    punctuation: "#06b6d4",
-    style: "#8b5cf6",
-    typography: "#6b7280",
-    unknown: "#9ca3af",
-};
+import { CATEGORY_META } from "@/api/category";
+import type { Category } from "@/api/types";
+
+export const CATEGORY_FG: Record<Category, string> = Object.fromEntries(
+    Object.entries(CATEGORY_META).map(([k, v]) => [k, v.badge]),
+) as Record<Category, string>;
 
 export function categoryColor(category: string): string {
-    return CATEGORY_FG[category] ?? CATEGORY_FG.unknown ?? "#9ca3af";
+    return (CATEGORY_FG as Record<string, string>)[category] ?? CATEGORY_FG.unknown ?? "#9ca3af";
 }

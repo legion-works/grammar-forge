@@ -25,6 +25,14 @@ const HOTKEYS: { value: Settings['acceptHotkey']; label: string }[] = [
     { value: 'Ctrl+Shift+Enter', label: 'Ctrl + Shift + Enter' },
 ]
 
+// Rephrase bindings — chord-only, no overlap with the accept hotkey list.
+const REPHRASE_HOTKEYS: { value: Settings['rephraseHotkey']; label: string }[] = [
+    { value: 'Ctrl+/', label: 'Ctrl + /  (default)' },
+    { value: 'Ctrl+Shift+/', label: 'Ctrl + Shift + /' },
+    { value: 'Alt+/', label: 'Alt + /' },
+    { value: 'Ctrl+0', label: 'Ctrl + 0' },
+]
+
 export function SettingsForm() {
     const [settings, setSettingsState] = useState<Settings | null>(null)
     const [health, setHealth] = useState<HealthState>({ status: 'idle' })
@@ -286,6 +294,24 @@ export function SettingsForm() {
                         }
                     >
                         {HOTKEYS.map((h) => (
+                            <option key={h.value} value={h.value}>
+                                {h.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div className="gf-options__row">
+                    <label htmlFor="gf-rephrase-hotkey">Rephrase</label>
+                    <select
+                        id="gf-rephrase-hotkey"
+                        value={settings.rephraseHotkey}
+                        onChange={(e) =>
+                            void patch({
+                                rephraseHotkey: e.currentTarget.value as Settings['rephraseHotkey'],
+                            })
+                        }
+                    >
+                        {REPHRASE_HOTKEYS.map((h) => (
                             <option key={h.value} value={h.value}>
                                 {h.label}
                             </option>
