@@ -242,26 +242,264 @@ func TestRepairMidWordCaseFlipSkipsInsertedFoldDuplicate(t *testing.T) {
 	require.Equal(t, corrected, RepairMidWordCaseFlip(original, corrected))
 }
 
+// ---- Rule 4: contraction-expansion revert ----
+
+func TestRepairContractionExpansionRevertsTheyRe(t *testing.T) {
+	// Measured FP: "They're going to the park" -> "They are going to the park"
+	original := "They're going to the park."
+	corrected := "They are going to the park."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsTheyReWithBooks(t *testing.T) {
+	// Measured FP: second contraction-expansion instance.
+	original := "They're going to bring their books over there."
+	corrected := "They are going to bring their books over there."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsWhosToWhoIs(t *testing.T) {
+	// Measured FP: "Who's coming to accept..." -> "Who is coming..."
+	original := "Who's coming to accept the award?"
+	corrected := "Who is coming to accept the award?"
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsItsToItIs(t *testing.T) {
+	original := "It's a beautiful day."
+	corrected := "It is a beautiful day."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsLetsToLetUs(t *testing.T) {
+	original := "Let's eat before the food gets cold."
+	corrected := "Let us eat before the food gets cold."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsDontToDoNot(t *testing.T) {
+	original := "I don't want to go."
+	corrected := "I do not want to go."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsCannotToCant(t *testing.T) {
+	original := "I can't do that."
+	corrected := "I cannot do that."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsImToIAm(t *testing.T) {
+	original := "I'm going to the store."
+	corrected := "I am going to the store."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsWeRe(t *testing.T) {
+	original := "We're ready to go."
+	corrected := "We are ready to go."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsWell(t *testing.T) {
+	original := "We'll be there soon."
+	corrected := "We will be there soon."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsItsHas(t *testing.T) {
+	// "it's" as "it has" expansion
+	original := "It's been a long day."
+	corrected := "It has been a long day."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionRevertsYoureToYouAre(t *testing.T) {
+	original := "You're the best."
+	corrected := "You are the best."
+	require.Equal(t, original, RepairContractionExpansion(original, corrected))
+}
+
+// NEGATIVE safety tests — must NOT revert (these are real corrections)
+
+func TestRepairContractionExpansionKeepsDontFixedToDoesnt(t *testing.T) {
+	// "dont" (missing apostrophe) -> "doesn't" is a REAL FIX, not an expansion.
+	// The original has no valid contraction at that position.
+	original := "She dont like it." //nolint:misspell
+	corrected := "She doesn't like it."
+	require.Equal(t, corrected, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionKeepsCantFixedToCannotOrCant(t *testing.T) {
+	// "cant" (missing apostrophe) -> "can't" is a REAL FIX.
+	original := "I cant do that." //nolint:misspell
+	corrected := "I can't do that."
+	require.Equal(t, corrected, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionKeepsYourToYoureCorrection(t *testing.T) {
+	// "your" -> "you're" is a REAL FIX (wrong word, not expansion).
+	original := "Your going to love this."
+	corrected := "You're going to love this."
+	require.Equal(t, corrected, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionKeepsItsToItsCorrection(t *testing.T) {
+	// "its" -> "it's" is a REAL FIX (possessive vs contraction).
+	original := "The dog wagged its tail."
+	corrected := "The dog wagged it's tail."
+	// This is actually a wrong "fix" by LLM, but the point is: original "its"
+	// is NOT a contraction, so the rule must not revert.
+	require.Equal(t, corrected, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionKeepsWhosToWhoseCorrection(t *testing.T) {
+	// "whos" (missing apostrophe) -> "who's" is a REAL FIX.
+	original := "The person whos car was stolen." //nolint:misspell
+	corrected := "The person who's car was stolen."
+	require.Equal(t, corrected, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionNoOpWhenNoContractionInOriginal(t *testing.T) {
+	// No contraction in original at all — pure no-op.
+	original := "The quick brown fox jumps over the lazy dog."
+	corrected := "The quick brown fox jumps over the lazy dog."
+	require.Equal(t, corrected, RepairContractionExpansion(original, corrected))
+}
+
+func TestRepairContractionExpansionIdempotent(t *testing.T) {
+	original := "They're going to the park."
+	corrected := "They are going to the park."
+	once := RepairContractionExpansion(original, corrected)
+	require.Equal(t, once, RepairContractionExpansion(original, once))
+}
+
+func TestRepairContractionExpansionNoOpWhenPatternAbsent(t *testing.T) {
+	// Completely unrelated edit — rule must be a strict no-op.
+	original := "The cat sat on the mat."
+	corrected := "The cat sat on the rug."
+	require.Equal(t, corrected, RepairContractionExpansion(original, corrected))
+}
+
+// ---- Rule 5: singular-they revert ----
+
+func TestRepairSingularTheyRevertsTheirToHisOrHer(t *testing.T) {
+	// Measured FP: "Everybody has their own opinion" -> "Everybody has his or her own opinion"
+	original := "Everybody has their own opinion."
+	corrected := "Everybody has his or her own opinion."
+	require.Equal(t, original, RepairSingularThey(original, corrected))
+}
+
+func TestRepairSingularTheyRevertsTheyToHeOrShe(t *testing.T) {
+	original := "Everyone should do what they think is right."
+	corrected := "Everyone should do what he or she thinks is right."
+	// The rule reverts "he or she" -> "they" but "thinks" -> "think" is a
+	// separate edit; the rule only handles the pronoun substitution.
+	want := "Everyone should do what they thinks is right."
+	require.Equal(t, want, RepairSingularThey(original, corrected))
+}
+
+func TestRepairSingularTheyRevertsThemToHimOrHer(t *testing.T) {
+	original := "Ask them to come in."
+	corrected := "Ask him or her to come in."
+	require.Equal(t, original, RepairSingularThey(original, corrected))
+}
+
+func TestRepairSingularTheyRevertsThemselvesToHimselfOrHerself(t *testing.T) {
+	original := "They hurt themselves."
+	corrected := "They hurt himself or herself."
+	require.Equal(t, original, RepairSingularThey(original, corrected))
+}
+
+func TestRepairSingularTheyRevertsVariousCase(t *testing.T) {
+	// Sentence-initial "Their" (capitalized)
+	original := "Their opinion matters."
+	corrected := "His or her opinion matters."
+	require.Equal(t, original, RepairSingularThey(original, corrected))
+}
+
+// NEGATIVE safety tests for singular-they
+
+func TestRepairSingularTheyNoOpWhenOriginalHadHeOrShe(t *testing.T) {
+	// "he or she" was ALREADY in the original — not an LLM expansion.
+	original := "Everyone should do what he or she thinks is right."
+	corrected := "Everyone should do what he or she thinks is right."
+	require.Equal(t, corrected, RepairSingularThey(original, corrected))
+}
+
+func TestRepairSingularTheyNoOpWhenTheyNotInOriginal(t *testing.T) {
+	// "he or she" introduced but original had "one", not "they/their/them".
+	original := "Everyone should do what one thinks is right."
+	corrected := "Everyone should do what he or she thinks is right."
+	require.Equal(t, corrected, RepairSingularThey(original, corrected))
+}
+
+func TestRepairSingularTheyNoOpWhenPatternAbsent(t *testing.T) {
+	original := "The cat sat on the mat."
+	corrected := "The cat sat on the rug."
+	require.Equal(t, corrected, RepairSingularThey(original, corrected))
+}
+
+func TestRepairSingularTheyIdempotent(t *testing.T) {
+	original := "Everybody has their own opinion."
+	corrected := "Everybody has his or her own opinion."
+	once := RepairSingularThey(original, corrected)
+	require.Equal(t, once, RepairSingularThey(original, once))
+}
+
 // ---- framework ----
 
 func TestDefaultOverEditRulesContainsAllMeasuredRules(t *testing.T) {
 	chain := DefaultOverEditRules()
-	require.Len(t, chain, 3)
+	require.Len(t, chain, 5)
 }
 
 func TestOverEditRuleChainComposesAndIsIdempotent(t *testing.T) {
-	// All three measured rule classes in one input: the chain repairs all,
-	// and applying the chain to its own output changes nothing (idempotent).
-	original := "neither the manager nor the employees were in paris in france. it auto-detects."
-	corrected := "Neither the manager nor the employees was in Paris, France. It auto-detectS."
+	// Each rule class tested in isolation for idempotence via the chain.
 	apply := func(orig, corr string) string {
 		for _, rule := range DefaultOverEditRules() {
 			corr = rule(orig, corr)
 		}
 		return corr
 	}
-	want := "Neither the manager nor the employees were in Paris in France. It auto-detects."
-	once := apply(original, corrected)
-	require.Equal(t, want, once)
-	require.Equal(t, once, apply(original, once), "repair must be idempotent")
+
+	// Rule 1: proximity-agreement flip
+	{
+		orig := "neither the manager nor the employees were aware of the change."
+		corr := "Neither the manager nor the employees was aware of the change."
+		want := "Neither the manager nor the employees were aware of the change."
+		once := apply(orig, corr)
+		require.Equal(t, want, once, "proximity-agreement")
+		require.Equal(t, once, apply(orig, once), "proximity-agreement idempotent")
+	}
+
+	// Rule 2+3: proper-noun comma + mid-word case flip
+	{
+		orig := "we flew to paris in france. it auto-detects."
+		corr := "We flew to Paris, France. It auto-detectS."
+		want := "We flew to Paris in France. It auto-detects."
+		once := apply(orig, corr)
+		require.Equal(t, want, once, "comma-restructure + mid-word case")
+		require.Equal(t, once, apply(orig, once), "comma+case idempotent")
+	}
+
+	// Rule 4: contraction expansion
+	{
+		orig := "they're going."
+		corr := "They are going."
+		want := "They're going."
+		once := apply(orig, corr)
+		require.Equal(t, want, once, "contraction expansion")
+		require.Equal(t, once, apply(orig, once), "contraction idempotent")
+	}
+
+	// Rule 5: singular they
+	{
+		orig := "everybody has their own opinion."
+		corr := "Everybody has his or her own opinion."
+		want := "Everybody has their own opinion."
+		once := apply(orig, corr)
+		require.Equal(t, want, once, "singular they")
+		require.Equal(t, once, apply(orig, once), "singular-they idempotent")
+	}
 }

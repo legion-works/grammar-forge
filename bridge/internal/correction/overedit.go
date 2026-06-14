@@ -457,6 +457,331 @@ func alignTokensFold(orig, corr []wordToken) [][2]int {
 	return pairs
 }
 
+// contractionTwoWordExpansions maps each contraction (lower-case) to its
+// canonical TWO-WORD expansion. The map is keyed by the lower-case contraction
+// token (apostrophe included). Pairs where the contraction is ambiguous (e.g.
+// "it's" = "it is" OR "it has") are listed with a disambiguation suffix on the
+// key (_has, _had) — the suffix is stripped when building the reverse map.
+var contractionTwoWordExpansions = map[string]string{
+	// X're
+	"they're": "they are",
+	"we're":   "we are",
+	"you're":  "you are",
+	"who're":  "who are",
+	// X's -> is
+	"who's":   "who is",
+	"it's":    "it is",
+	"he's":    "he is",
+	"she's":   "she is",
+	"that's":  "that is",
+	"there's": "there is",
+	// X's -> has (same contraction, different expansion)
+	"it's_has":    "it has",
+	"he's_has":    "he has",
+	"she's_has":   "she has",
+	"that's_has":  "that has",
+	"there's_has": "there has",
+	// let's
+	"let's": "let us",
+	// I'm
+	"i'm": "i am",
+	// X'll
+	"i'll":    "i will",
+	"we'll":   "we will",
+	"you'll":  "you will",
+	"they'll": "they will",
+	"he'll":   "he will",
+	"she'll":  "she will",
+	"it'll":   "it will",
+	// X'd -> would
+	"i'd":    "i would",
+	"we'd":   "we would",
+	"you'd":  "you would",
+	"they'd": "they would",
+	"he'd":   "he would",
+	"she'd":  "she would",
+	// X'd -> had (same contraction)
+	"i'd_had":    "i had",
+	"we'd_had":   "we had",
+	"you'd_had":  "you had",
+	"they'd_had": "they had",
+	"he'd_had":   "he had",
+	"she'd_had":  "she had",
+	// X've
+	"i've":    "i have",
+	"we've":   "we have",
+	"you've":  "you have",
+	"they've": "they have",
+	// n't contractions (two-word expansions)
+	"don't":     "do not",
+	"doesn't":   "does not",
+	"didn't":    "did not",
+	"won't":     "will not",
+	"isn't":     "is not",
+	"aren't":    "are not",
+	"wasn't":    "was not",
+	"weren't":   "were not",
+	"hasn't":    "has not",
+	"haven't":   "have not",
+	"wouldn't":  "would not",
+	"couldn't":  "could not",
+	"shouldn't": "should not",
+}
+
+// contractionOneWordExpansions maps contractions whose LLM expansion is a
+// SINGLE word (not two tokens). Currently only "can't" -> "cannot".
+var contractionOneWordExpansions = map[string]string{
+	"can't": "cannot",
+}
+
+// expansionToContractions is the reverse map: given a lower-case two-word
+// expansion, return all contractions that could produce it. Built once at
+// init time from contractionTwoWordExpansions (stripping the _has/_had suffix keys).
+var expansionToContractions map[string][]string
+
+// oneWordExpansionToContraction is the reverse of contractionOneWordExpansions.
+var oneWordExpansionToContraction map[string]string
+
+func init() {
+	expansionToContractions = make(map[string][]string, len(contractionTwoWordExpansions))
+	for contraction, expansion := range contractionTwoWordExpansions {
+		// Strip disambiguation suffix (_has, _had) — the contraction token
+		// itself is the part before the underscore.
+		key := contraction
+		if i := strings.Index(key, "_"); i >= 0 {
+			key = key[:i]
+		}
+		expansionToContractions[expansion] = append(expansionToContractions[expansion], key)
+	}
+
+	oneWordExpansionToContraction = make(map[string]string, len(contractionOneWordExpansions))
+	for contraction, expansion := range contractionOneWordExpansions {
+		oneWordExpansionToContraction[expansion] = contraction
+	}
+}
+
+// RepairContractionExpansion reverts an LLM contraction-expansion over-edit:
+// when the LLM expanded a contraction that was VERBATIM in the original to its
+// meaning-identical expansion (one or two words), the expansion in the
+// corrected text is replaced with the original contraction.
+//
+// Safety discriminator: the rule fires ONLY when the contraction token (with
+// apostrophe) appears verbatim in the original at the corresponding position.
+// This prevents reverting real fixes:
+//   - "dont" (missing apostrophe) -> "doesn't" is kept (no apostrophe in orig).
+//   - "your" -> "you're" is kept ("your" ≠ "you're").
+//   - "its" -> "it's" is kept ("its" has no apostrophe).
+//
+// Casing: the reverted contraction inherits the capitalisation of the first
+// token of the expansion in the corrected text (sentence-initial "They are"
+// reverts to "They're", not "they're").
+func RepairContractionExpansion(original, corrected string) string {
+	if original == corrected {
+		return corrected
+	}
+	origTokens := tokenizeWords(original)
+	corrTokens := tokenizeWords(corrected)
+
+	// Build a lower-case lookup set of original tokens for fast membership check.
+	origLower := make(map[string]bool, len(origTokens))
+	for _, t := range origTokens {
+		core, _ := splitTrailingPunctuation(t.text)
+		origLower[strings.ToLower(core)] = true
+	}
+
+	type splice struct {
+		start, end int
+		text       string
+	}
+	var splices []splice
+
+	for i := 0; i < len(corrTokens); i++ {
+		t1 := corrTokens[i]
+		core1, tail1 := splitTrailingPunctuation(t1.text)
+
+		// --- Single-word expansion (e.g. "cannot" <- "can't") ---
+		// Check single-word expansion regardless of tail (e.g. "cannot.")
+		if c, ok := oneWordExpansionToContraction[strings.ToLower(core1)]; ok {
+			if origLower[c] {
+				reverted := applyContractionCase(c, core1) + tail1
+				splices = append(splices, splice{
+					start: t1.start,
+					end:   t1.start + len(t1.text),
+					text:  reverted,
+				})
+				continue
+			}
+		}
+
+		// --- Two-word expansion (e.g. "they are" <- "they're") ---
+		if i+1 >= len(corrTokens) {
+			continue
+		}
+		if tail1 != "" {
+			continue // first token has trailing punctuation — not a clean two-word expansion
+		}
+		t2 := corrTokens[i+1]
+		core2, tail2 := splitTrailingPunctuation(t2.text)
+
+		expansion := strings.ToLower(core1) + " " + strings.ToLower(core2)
+		contractions, ok := expansionToContractions[expansion]
+		if !ok {
+			continue
+		}
+
+		// Find which contraction was verbatim in the original.
+		var matchedContraction string
+		for _, c := range contractions {
+			if origLower[c] {
+				matchedContraction = c
+				break
+			}
+		}
+		if matchedContraction == "" {
+			continue // no verbatim contraction in original — keep the LLM edit
+		}
+
+		reverted := applyContractionCase(matchedContraction, core1) + tail2
+
+		// Replace the two-token span with the contraction.
+		splices = append(splices, splice{
+			start: t1.start,
+			end:   t2.start + len(t2.text),
+			text:  reverted,
+		})
+		i++ // skip t2 — it's consumed by this splice
+	}
+
+	// Apply last-to-first so earlier byte offsets stay valid.
+	out := corrected
+	for k := len(splices) - 1; k >= 0; k-- {
+		sp := splices[k]
+		out = out[:sp.start] + sp.text + out[sp.end:]
+	}
+	return out
+}
+
+// applyContractionCase returns the contraction with the capitalisation of the
+// first rune of firstToken applied (sentence-initial "They" -> "They're").
+func applyContractionCase(contraction, firstToken string) string {
+	if len(firstToken) == 0 || len(contraction) == 0 {
+		return contraction
+	}
+	firstRune, _ := utf8.DecodeRuneInString(firstToken)
+	if unicode.IsUpper(firstRune) {
+		revertedRune, revertedSize := utf8.DecodeRuneInString(contraction)
+		return string(unicode.ToUpper(revertedRune)) + contraction[revertedSize:]
+	}
+	return contraction
+}
+
+// prescriptivistExpansions maps each singular-they pronoun (lower-case) to
+// the prescriptivist multi-word form the LLM substitutes.
+var prescriptivistExpansions = map[string]string{
+	"they":       "he or she",
+	"their":      "his or her",
+	"them":       "him or her",
+	"themselves": "himself or herself",
+}
+
+// RepairSingularThey reverts an LLM singular-they over-edit: when the LLM
+// replaced a singular they/their/them/themselves (present verbatim in the
+// original) with the prescriptivist "he or she"/"his or her"/"him or her"/
+// "himself or herself" (any case), the prescriptivist form is replaced with
+// the original singular-they token.
+//
+// Safety discriminator: the rule fires ONLY when the singular-they token
+// appears verbatim in the original at the corresponding position. If the
+// original already contained "he or she", the rule is a no-op.
+//
+// Casing: the reverted pronoun inherits the capitalisation of the first token
+// of the prescriptivist form in the corrected text.
+func RepairSingularThey(original, corrected string) string {
+	if original == corrected {
+		return corrected
+	}
+	origTokens := tokenizeWords(original)
+	corrTokens := tokenizeWords(corrected)
+
+	// Build lower-case set of original tokens for membership check.
+	origLowerSet := make(map[string]bool, len(origTokens))
+	for _, t := range origTokens {
+		core, _ := splitTrailingPunctuation(t.text)
+		origLowerSet[strings.ToLower(core)] = true
+	}
+
+	type splice struct {
+		start, end int
+		text       string
+	}
+	var splices []splice
+
+	// Scan corrected tokens for multi-word prescriptivist expansions.
+	// The longest is "himself or herself" (3 tokens), shortest is "he or she" (3 tokens).
+	// All prescriptivist forms are exactly 3 tokens: <pronoun> or <pronoun>.
+	for i := 0; i+2 < len(corrTokens); i++ {
+		t1 := corrTokens[i]
+		t2 := corrTokens[i+1]
+		t3 := corrTokens[i+2]
+
+		core1, tail1 := splitTrailingPunctuation(t1.text)
+		core2, _ := splitTrailingPunctuation(t2.text)
+		core3, tail3 := splitTrailingPunctuation(t3.text)
+
+		// Middle token must be "or" (no trailing punctuation on t1 or t2).
+		if tail1 != "" || strings.ToLower(core2) != "or" {
+			continue
+		}
+
+		// Build the lower-case 3-word form and check against known expansions.
+		threeWord := strings.ToLower(core1) + " or " + strings.ToLower(core3)
+
+		// Find which singular-they pronoun maps to this expansion.
+		var singularPronoun string
+		for pronoun, expansion := range prescriptivistExpansions {
+			if expansion == threeWord {
+				singularPronoun = pronoun
+				break
+			}
+		}
+		if singularPronoun == "" {
+			continue
+		}
+
+		// The singular-they pronoun must be verbatim in the original.
+		if !origLowerSet[singularPronoun] {
+			continue
+		}
+
+		// Preserve capitalisation of the first corrected token.
+		reverted := singularPronoun
+		if len(core1) > 0 && len(reverted) > 0 {
+			firstRune, _ := utf8.DecodeRuneInString(core1)
+			if unicode.IsUpper(firstRune) {
+				revertedRune, revertedSize := utf8.DecodeRuneInString(reverted)
+				reverted = string(unicode.ToUpper(revertedRune)) + reverted[revertedSize:]
+			}
+		}
+		// Reattach the third token's trailing punctuation.
+		reverted += tail3
+
+		splices = append(splices, splice{
+			start: t1.start,
+			end:   t3.start + len(t3.text),
+			text:  reverted,
+		})
+		i += 2 // skip t2 and t3 — consumed by this splice
+	}
+
+	// Apply last-to-first so earlier byte offsets stay valid.
+	out := corrected
+	for k := len(splices) - 1; k >= 0; k-- {
+		sp := splices[k]
+		out = out[:sp.start] + sp.text + out[sp.end:]
+	}
+	return out
+}
+
 // DefaultOverEditRules returns the over-edit repair chain wired by main when
 // GF_OVEREDIT_FILTER is enabled (the default). Rules are registered
 // explicitly — one entry per measured over-edit class.
@@ -465,5 +790,7 @@ func DefaultOverEditRules() []OverEditRule {
 		RepairProximityAgreementFlip,
 		RepairProperNounCommaRestructure,
 		RepairMidWordCaseFlip,
+		RepairContractionExpansion,
+		RepairSingularThey,
 	}
 }
