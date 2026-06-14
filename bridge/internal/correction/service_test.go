@@ -75,6 +75,8 @@ func (f *fakeStore) LogSignal(_ context.Context, id int64, s Signal) error {
 	f.lastID, f.lastSignal = id, s
 	return nil
 }
+
+func (f *fakeStore) LogTone(_ context.Context, _ ToneEvent) error    { return nil }
 func (f *fakeStore) CountCorrections(context.Context) (int64, error) { return f.count, nil }
 func (f *fakeStore) CountSignals(context.Context) (SignalCounts, error) {
 	return SignalCounts{}, nil

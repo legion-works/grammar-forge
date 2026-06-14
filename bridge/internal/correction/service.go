@@ -685,12 +685,33 @@ func (s *Service) AnalyzeTone(ctx context.Context, req ToneRequest) (ToneResult,
 		return ToneResult{}, fmt.Errorf("tone requires an llm backend")
 	}
 	if req.Granularity == ToneGranularitySentence {
-		return s.analyzeToneSentences(ctx, client, modelKey, req.Text), nil
+		res := s.analyzeToneSentences(ctx, client, modelKey, req.Text)
+		s.logTone(ctx, req.Text, res.Tags, req.Source)
+		return res, nil
 	}
 	if s.toneMinChars > 0 && len(req.Text) < s.toneMinChars {
 		return ToneResult{Tags: []ToneTag{}}, nil
 	}
-	return ToneResult{Tags: s.toneTagsFor(ctx, client, modelKey, req.Text)}, nil
+	tags := s.toneTagsFor(ctx, client, modelKey, req.Text)
+	s.logTone(ctx, req.Text, tags, req.Source)
+	return ToneResult{Tags: tags}, nil
+}
+
+// logTone best-effort records a tone event (never fails the request). The
+// store is optional in tests; when nil, the call is a no-op. Errors are
+// logged at Warn so a transient store hiccup degrades to "no signal" rather
+// than failing the /tone response.
+func (s *Service) logTone(ctx context.Context, text string, tags []ToneTag, src Source) {
+	if s.store == nil {
+		return
+	}
+	if err := s.store.LogTone(ctx, ToneEvent{
+		TextHash: toneCacheKey("", text), // hash of text only (model-agnostic id)
+		Tags:     tags,
+		Source:   src,
+	}); err != nil {
+		s.log.Warn("tone: log signal", "err", err)
+	}
 }
 
 // toneTagsFor returns the tags for one text unit (cache + soft-error policy).

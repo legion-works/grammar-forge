@@ -44,6 +44,34 @@ func TestLogSignalUpdatesRow(t *testing.T) {
 	require.NoError(t, s.LogSignal(ctx, 99999, correction.SignalRejected)) // missing id: no error, no-op
 }
 
+// TestLogTone: tone_signals table exists, inserts a row with the JSON tag
+// array, and round-trips Source. Best-effort signal log: errors must surface
+// to the caller (the service swallows them so /tone never fails).
+func TestLogTone(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	require.NoError(t, s.LogTone(ctx, correction.ToneEvent{
+		TextHash: "abc123",
+		Tags: []correction.ToneTag{
+			{Tag: "frustrated", Confidence: 0.8},
+			{Tag: "direct", Confidence: 0.5},
+		},
+		Target: "polite",
+		Source: correction.SourceVencord,
+	}))
+	var n int
+	require.NoError(t, s.db.QueryRow(`SELECT COUNT(*) FROM tone_signals`).Scan(&n))
+	require.Equal(t, 1, n)
+	var textHash, tagsJSON, source string
+	require.NoError(t, s.db.QueryRow(
+		`SELECT text_hash, tags_json, source FROM tone_signals ORDER BY id DESC LIMIT 1`,
+	).Scan(&textHash, &tagsJSON, &source))
+	require.Equal(t, "abc123", textHash)
+	require.Contains(t, tagsJSON, `"frustrated"`)
+	require.Contains(t, tagsJSON, `"direct"`)
+	require.Equal(t, string(correction.SourceVencord), source)
+}
+
 func mustCount(t *testing.T, s *SQLite) int64 {
 	t.Helper()
 	n, err := s.CountCorrections(context.Background())

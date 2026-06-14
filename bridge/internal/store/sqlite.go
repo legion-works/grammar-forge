@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -43,6 +44,15 @@ CREATE TABLE IF NOT EXISTS edits (
 );
 CREATE INDEX IF NOT EXISTS idx_edits_correction ON edits(correction_id);
 CREATE INDEX IF NOT EXISTS idx_edits_signal ON edits(signal);
+CREATE TABLE IF NOT EXISTS tone_signals (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    text_hash  TEXT NOT NULL,
+    tags_json  TEXT NOT NULL,
+    target     TEXT NOT NULL DEFAULT '',
+    source     TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_tone_signals_text_hash ON tone_signals(text_hash);
 `
 
 // SQLite is the correction.Store implementation.
@@ -125,6 +135,25 @@ func (s *SQLite) LogSignal(ctx context.Context, editID int64, signal correction.
 	)
 	if err != nil {
 		return fmt.Errorf("update signal: %w", err)
+	}
+	return nil
+}
+
+// LogTone inserts a tone-analysis event into the tone_signals table. Best-
+// effort signal log: tags are stored as a JSON array (lowercase, fixed
+// vocabulary enforced by the parser before we get here). Errors surface to
+// the caller; the service layer swallows them so /tone never fails on log
+// problems.
+func (s *SQLite) LogTone(ctx context.Context, ev correction.ToneEvent) error {
+	tagsJSON, err := json.Marshal(ev.Tags)
+	if err != nil {
+		return fmt.Errorf("log tone: marshal tags: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO tone_signals (text_hash, tags_json, target, source) VALUES (?, ?, ?, ?)`,
+		ev.TextHash, string(tagsJSON), ev.Target, string(ev.Source))
+	if err != nil {
+		return fmt.Errorf("log tone: insert: %w", err)
 	}
 	return nil
 }

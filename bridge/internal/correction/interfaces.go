@@ -139,7 +139,20 @@ type Store interface {
 	// cap the result (e.g. 20 accepted / 20 rejected) and drop rejected
 	// pairs with Count < 3.
 	PersonalizationExamples(ctx context.Context) (PersonalizationData, error)
+	// LogTone records a tone-analysis event for the Phase-3 signal log.
+	// Best-effort: the service swallows errors so /tone never fails on log
+	// problems. Target is reserved (client-supplied desired tone, empty in v1).
+	LogTone(ctx context.Context, ev ToneEvent) error
 	Close() error
+}
+
+// ToneEvent is one tone-analysis record for the Phase-3 signal log. Target is
+// reserved (client-supplied desired tone, empty in v1).
+type ToneEvent struct {
+	TextHash string
+	Tags     []ToneTag
+	Target   string
+	Source   Source
 }
 
 // Signal is a user reaction to a suggestion.
