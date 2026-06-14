@@ -305,4 +305,101 @@ describe('getNativeHighlighter (with stub)', () => {
         decoy.remove()
         styles.forEach((s) => s.remove())
     })
+
+    it('updateItem changes only the targeted item, leaves the other item untouched', () => {
+        const el = field()
+        const h = getNativeHighlighter()
+        h.setFieldHighlights(el, [
+            { cuStart: 0, cuEnd: 3, category: 'spelling' },
+            { cuStart: 4, cuEnd: 7, category: 'grammar' },
+        ])
+        const reg = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights
+        const spellingBefore = reg.get('gf-spelling')
+        const grammarBefore = reg.get('gf-grammar')
+        h.updateItem(el, 0, { cuStart: 0, cuEnd: 2, category: 'spelling' })
+        // Spelling bucket: new Highlight object (range changed).
+        expect(reg.get('gf-spelling')).not.toBe(spellingBefore)
+        // Grammar bucket: SAME object identity (untouched).
+        expect(reg.get('gf-grammar')).toBe(grammarBefore)
+        expect(rangeCount(reg.get('gf-spelling')!)).toBe(1)
+        expect(rangeCount(reg.get('gf-grammar')!)).toBe(1)
+    })
+
+    it('updateItem moves an item between categories by rebuilding both buckets', () => {
+        const el = field()
+        const h = getNativeHighlighter()
+        h.setFieldHighlights(el, [
+            { cuStart: 0, cuEnd: 3, category: 'spelling' },
+            { cuStart: 4, cuEnd: 7, category: 'grammar' },
+        ])
+        h.updateItem(el, 0, { cuStart: 0, cuEnd: 3, category: 'grammar' })
+        const reg = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights
+        // Spelling bucket: empty → entry removed.
+        expect(reg.has('gf-spelling')).toBe(false)
+        // Grammar bucket: now has 2 ranges.
+        expect(rangeCount(reg.get('gf-grammar')!)).toBe(2)
+    })
+
+    it('updateItem is a no-op for an itemIndex past the end', () => {
+        const el = field()
+        const h = getNativeHighlighter()
+        h.setFieldHighlights(el, [{ cuStart: 0, cuEnd: 3, category: 'spelling' }])
+        const reg = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights
+        const before = reg.get('gf-spelling')
+        expect(() =>
+            h.updateItem(el, 5, { cuStart: 0, cuEnd: 3, category: 'spelling' }),
+        ).not.toThrow()
+        expect(reg.get('gf-spelling')).toBe(before)
+    })
+
+    it('clearItem removes the targeted range from its bucket, leaves others alone', () => {
+        const el = field()
+        const h = getNativeHighlighter()
+        h.setFieldHighlights(el, [
+            { cuStart: 0, cuEnd: 3, category: 'spelling' },
+            { cuStart: 4, cuEnd: 7, category: 'spelling' },
+        ])
+        const reg = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights
+        expect(rangeCount(reg.get('gf-spelling')!)).toBe(2)
+        h.clearItem(el, 0)
+        // Spelling bucket rebuilt with one fewer range; bucket entry is
+        // present (still has one item).
+        expect(rangeCount(reg.get('gf-spelling')!)).toBe(1)
+    })
+
+    it('clearItem drops the bucket entry when it removes the last range', () => {
+        const el = field()
+        const h = getNativeHighlighter()
+        h.setFieldHighlights(el, [{ cuStart: 0, cuEnd: 3, category: 'spelling' }])
+        const reg = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights
+        expect(reg.has('gf-spelling')).toBe(true)
+        h.clearItem(el, 0)
+        expect(reg.has('gf-spelling')).toBe(false)
+    })
+
+    it('clearItem is a no-op for an itemIndex past the end', () => {
+        const el = field()
+        const h = getNativeHighlighter()
+        h.setFieldHighlights(el, [{ cuStart: 0, cuEnd: 3, category: 'spelling' }])
+        const reg = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights
+        const before = reg.get('gf-spelling')
+        expect(() => h.clearItem(el, 5)).not.toThrow()
+        expect(reg.get('gf-spelling')).toBe(before)
+    })
+
+    it('updateItem does not affect a focused-field range in -strong (rebuild respects focus)', () => {
+        const el = field()
+        const h = getNativeHighlighter()
+        h.setFieldHighlights(el, [
+            { cuStart: 0, cuEnd: 3, category: 'spelling' },
+            { cuStart: 4, cuEnd: 7, category: 'spelling' },
+        ])
+        h.setFocusedField(el)
+        const reg = (CSS as unknown as { highlights: Map<string, Highlight> }).highlights
+        const strongBefore = reg.get('gf-spelling-strong')
+        h.updateItem(el, 0, { cuStart: 0, cuEnd: 2, category: 'spelling' })
+        // The -strong bucket rebuilt (range changed).
+        expect(reg.get('gf-spelling-strong')).not.toBe(strongBefore)
+        expect(rangeCount(reg.get('gf-spelling-strong')!)).toBe(2)
+    })
 })

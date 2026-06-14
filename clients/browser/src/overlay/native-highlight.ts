@@ -45,15 +45,25 @@ interface FieldEntry {
 }
 
 export interface NativeHighlighter {
-    /** Replace this field's items; rebuilds category buckets + reapplies hover. Skips null ranges. */
     setFieldHighlights: (el: HTMLElement, items: readonly NativeHighlightItem[]) => void
-    /** Mark one field as focused — its ranges go into the `-strong` bucket. */
+    /**
+     * Restyle ONE item in `el`'s items list, in place. Mutates the field's
+     * items map entry for `itemIndex` and rebuilds ONLY the affected
+     * category buckets (a category's Highlight object identity is preserved
+     * when its set of ranges is unchanged — the P3/P4 perf plan relies on
+     * this for cheap subsequent setHoverItem). No-op for an itemIndex past
+     * the end.
+     */
+    updateItem: (el: HTMLElement, itemIndex: number, partial: NativeHighlightItem) => void
+    /**
+     * Remove ONE item from `el`'s items list, in place. Sets the entry's
+     * range to null and rebuilds the affected category bucket. No-op for
+     * an itemIndex past the end.
+     */
+    clearItem: (el: HTMLElement, itemIndex: number) => void
     setFocusedField: (el: HTMLElement | null) => void
-    /** Highlight the single item at `itemIndex` in `el` (or clear with null). */
     setHoverItem: (el: HTMLElement, itemIndex: number | null) => void
-    /** Remove this field's ranges from the registry. */
     clearField: (el: HTMLElement) => void
-    /** Remove all entries + the injected style. Idempotent. */
     destroy: () => void
 }
 
@@ -124,18 +134,36 @@ function makeHighlighter(doc: Document): NativeHighlighter {
     let hoverRange: Range | null = null
 
     // Rebuild ONLY the per-category buckets (gf-<cat> / gf-<cat>-strong).
-    // Called on field/focus changes — NOT on hover.
-    const rebuildCategories = (): void => {
+    // Called on field/focus changes — NOT on hover. When `touched` is given,
+    // buckets for categories NOT in the set keep their existing Highlight
+    // object identity (P3/P4 perf plan consumes this — a single-item update
+    // must not churn every other category's Highlight).
+    const rebuildCategories = (touched?: ReadonlySet<Category>): void => {
         if (!isNativeHighlightSupported()) return
         ensureStyleInjected(doc)
         const reg = registry()
         if (!reg) return
-        // Clear our category entries only. Leave `gf-hover` and any other
-        // consumer's entries alone.
-        for (const key of Array.from(reg.keys())) {
-            if (key.startsWith('gf-') && key !== 'gf-hover') reg.delete(key)
+        if (fields.size === 0) {
+            // No fields → clear our category entries.
+            for (const key of Array.from(reg.keys())) {
+                if (key.startsWith('gf-') && key !== 'gf-hover') reg.delete(key)
+            }
+            return
         }
-        if (fields.size === 0) return
+
+        // Full rebuild: delete every gf-* (except hover) entry. Partial
+        // rebuild: only delete the touched categories' entries so untouched
+        // categories keep their existing Highlight object identity.
+        if (touched) {
+            for (const cat of touched) {
+                reg.delete(`gf-${cat}`)
+                reg.delete(`gf-${cat}-strong`)
+            }
+        } else {
+            for (const key of Array.from(reg.keys())) {
+                if (key.startsWith('gf-') && key !== 'gf-hover') reg.delete(key)
+            }
+        }
 
         // Bucket ranges by (category, isFocused). A field's ranges go into the
         // idle bucket (or -strong if it IS the focused field).
@@ -145,6 +173,7 @@ function makeHighlighter(doc: Document): NativeHighlighter {
             const isFoc = el === focused
             for (const { item, range } of entry.items) {
                 if (!range) continue
+                if (touched && !touched.has(item.category)) continue
                 const bucket = isFoc ? strongByCat : idleByCat
                 let arr = bucket.get(item.category)
                 if (!arr) {
@@ -228,6 +257,49 @@ function makeHighlighter(doc: Document): NativeHighlighter {
             rebuildCategories()
             applyHover()
         },
+        updateItem(el, itemIndex, partial) {
+            if (!isNativeHighlightSupported()) return
+            const entry = fields.get(el)
+            if (!entry) return
+            const existing = entry.items[itemIndex]
+            if (!existing) return
+            const oldCat = existing.item.category
+            // Build the new range; if it resolves to null, treat as a clear
+            // (mirrors the null range path setFieldHighlights already handles).
+            const newRange = codeUnitSpanToRange(el, { start: partial.cuStart, end: partial.cuEnd })
+            existing.item = {
+                cuStart: partial.cuStart,
+                cuEnd: partial.cuEnd,
+                category: partial.category,
+            }
+            existing.range = newRange
+            // Touched set: the old bucket (to drop) and the new bucket (to
+            // add) — when the category didn't change, only the one.
+            const touched = new Set<Category>([oldCat, partial.category])
+            rebuildCategories(touched)
+            // Hover re-validate (an update could have moved the hovered range).
+            if (hover && hover.el === el && hover.index === itemIndex) {
+                hoverRange = newRange
+                if (!newRange) hover = null
+            }
+            applyHover()
+        },
+        clearItem(el, itemIndex) {
+            if (!isNativeHighlightSupported()) return
+            const entry = fields.get(el)
+            if (!entry) return
+            const existing = entry.items[itemIndex]
+            if (!existing) return
+            const cat = existing.item.category
+            existing.range = null
+            const touched = new Set<Category>([cat])
+            rebuildCategories(touched)
+            if (hover && hover.el === el && hover.index === itemIndex) {
+                hoverRange = null
+                hover = null
+            }
+            applyHover()
+        },
         destroy() {
             fields.clear()
             focused = null
@@ -257,6 +329,8 @@ function makeNoopHighlighter(): NativeHighlighter {
     const noop = (): void => {}
     return {
         setFieldHighlights: noop,
+        updateItem: noop,
+        clearItem: noop,
         setFocusedField: noop,
         setHoverItem: noop,
         clearField: noop,
