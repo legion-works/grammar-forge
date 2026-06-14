@@ -101,6 +101,16 @@ type Service struct {
 	// SetIrregularPluralFix(true) / GF_IRREGULAR_PLURAL_FIX=true (default
 	// true in config).
 	irregularPluralFix bool
+	// capitalizationFix enables the Harper mid-sentence capitalization
+	// misfire filter (see capitalization.go). When true,
+	// dropMidSentenceCapitalization is applied to the fast-path suggestions
+	// per-corrector, dropping capitalization-only edits of unambiguous
+	// function words at non-sentence-start positions (e.g. on→On, he→He
+	// after a comma). Proper nouns (taipei→Taipei), "i"→"I", and true
+	// sentence-start capitalizations are always preserved. Default false
+	// (zero value); enabled by SetCapitalizationFix(true) /
+	// GF_CAPITALIZATION_FIX=true (default true in config).
+	capitalizationFix bool
 }
 
 // MergeFastEditsMode values for Service.mergeFastEditsMode
@@ -173,6 +183,16 @@ func (s *Service) SetArticleFix(enabled bool) { s.articleFix = enabled }
 // with the correct plural (teeth, women, luggage). Default false (zero value);
 // set true in main when GF_IRREGULAR_PLURAL_FIX is enabled (default true).
 func (s *Service) SetIrregularPluralFix(enabled bool) { s.irregularPluralFix = enabled }
+
+// SetCapitalizationFix enables or disables the Harper mid-sentence
+// capitalization misfire filter (GF_CAPITALIZATION_FIX). When enabled,
+// dropMidSentenceCapitalization is applied to the raw fast-path suggestions
+// per-corrector, dropping capitalization-only edits of unambiguous function
+// words (e.g. on→On, he→He) at non-sentence-start positions. Proper nouns,
+// "i"→"I", and true sentence-start capitalizations are always preserved.
+// Default false (zero value); set true in main when GF_CAPITALIZATION_FIX is
+// enabled (default true).
+func (s *Service) SetCapitalizationFix(enabled bool) { s.capitalizationFix = enabled }
 
 // SetMergeFastEditsMode selects the escalation result composition (see the
 // MergeFastEdits* constants). Optional; zero value = legacy replace semantics.
@@ -580,6 +600,11 @@ func (s *Service) runFast(ctx context.Context, req Request) []Suggestion {
 		// GECToR suggestions are appended (safe: GECToR never emits
 		// CategorySpelling, so the filter is a no-op for GECToR output).
 		sugs = repairIrregularPluralPossessive(s.irregularPluralFix, sugs)
+		// Drop Harper's mid-sentence capitalization misfires (e.g. on→On,
+		// he→He after a comma). Proper nouns (taipei→Taipei), "i"→"I", and
+		// true sentence-start capitalizations are always preserved. Applied
+		// per-corrector for the same reason as repairIrregularPluralPossessive.
+		sugs = dropMidSentenceCapitalization(s.capitalizationFix, req.Text, sugs)
 		raw = append(raw, sugs...)
 	}
 	return mergeSuggestions(raw)

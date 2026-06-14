@@ -147,6 +147,14 @@ type Config struct {
 	// luggages→luggage's) with the correct plural (teeth, women, luggage).
 	// Default true; opt out with GF_IRREGULAR_PLURAL_FIX=false.
 	IrregularPluralFixEnabled bool
+	// CapitalizationFixEnabled wires the Harper mid-sentence capitalization
+	// misfire filter (correction.dropMidSentenceCapitalization) applied to
+	// fast-path suggestions per-corrector. Drops capitalization-only edits
+	// of unambiguous function words (e.g. on→On, he→He) at non-sentence-start
+	// positions. Proper nouns (taipei→Taipei), "i"→"I", and true
+	// sentence-start capitalizations are always preserved. Default true;
+	// opt out with GF_CAPITALIZATION_FIX=false.
+	CapitalizationFixEnabled bool
 
 	// Phase-2 P4 prompt-cache personalisation. On by default. The cache is
 	// TTL-bounded (no background goroutine) and the snapshot is read
@@ -266,6 +274,7 @@ func Load(getenv Getenv) Config {
 		OverEditFilterEnabled:      getBool("GF_OVEREDIT_FILTER", true),
 		ArticleFixEnabled:          getBool("GF_ARTICLE_FIX", true),
 		IrregularPluralFixEnabled:  getBool("GF_IRREGULAR_PLURAL_FIX", true),
+		CapitalizationFixEnabled:   getBool("GF_CAPITALIZATION_FIX", true),
 		FastHintsEnabled:           getBool("GF_FAST_HINTS", false),
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),
