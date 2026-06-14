@@ -741,7 +741,13 @@ func TestCorrectPickyStyleBeforeGrammarLogsCorrectCombinedText(t *testing.T) {
 
 func TestServiceEscalationDiscardsSuspiciouslyShortLLMOutput(t *testing.T) {
 	st := &fakeStore{}
-	long := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 10)
+	// Single long sentence (no internal period) so the per-segment guard
+	// exercises correctOnce exactly once and the truncation check applies
+	// to the whole-text call. A 10-sentence variant would segment per
+	// sentence and each per-segment LLM call sees a 46-char input, below
+	// the 200-byte truncation guard threshold.
+	long := strings.Repeat("The quick brown fox jumps over the lazy dog and the lazy cat and the lazy mouse and the lazy horse ", 4)
+	require.GreaterOrEqual(t, len(long), minOriginalLenForTruncationGuard, "fixture must clear the truncation-guard threshold")
 	fc := fakeCorrector{
 		name: string(ModelGECToR),
 		sugs: []Suggestion{{Span: Span{0, 3}, Replacement: "A", Model: ModelGECToR, Confidence: 0.3}},
@@ -757,7 +763,8 @@ func TestServiceEscalationDiscardsSuspiciouslyShortLLMOutput(t *testing.T) {
 }
 
 func TestServiceLLMOnlyErrorsOnSuspiciouslyShortOutput(t *testing.T) {
-	long := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 10)
+	long := strings.Repeat("The quick brown fox jumps over the lazy dog and the lazy cat and the lazy mouse and the lazy horse ", 4)
+	require.GreaterOrEqual(t, len(long), minOriginalLenForTruncationGuard, "fixture must clear the truncation-guard threshold")
 	svc := NewService(fakePB{}, nil, fakeLLM{out: "The quick."}, &fakeStore{}, "m", fastPolicy())
 	_, err := svc.Correct(context.Background(), Request{Text: long})
 	require.Error(t, err, "LLM-only path must surface a truncated output as an error, not as mass deletions")
@@ -765,11 +772,10 @@ func TestServiceLLMOnlyErrorsOnSuspiciouslyShortOutput(t *testing.T) {
 
 func TestCorrectPickyStyleDiscardsSuspiciouslyShortOutput(t *testing.T) {
 	st := &fakeStore{}
-	// TrimSpace so the grammar pass (which trims its output) sees the input
-	// as already-correct and emits NO grammar edits — otherwise a trailing-
-	// space grammar edit would swallow the style edits via the overlap rule
-	// and this test would pass without the truncation guard.
-	long := strings.TrimSpace(strings.Repeat("The quick brown fox jumps over the lazy dog. ", 10))
+	// Single long sentence (no internal period) so the truncation check
+	// applies to the whole-text style call.
+	long := strings.Repeat("The quick brown fox jumps over the lazy dog and the lazy cat and the lazy mouse and the lazy horse ", 4)
+	require.GreaterOrEqual(t, len(long), minOriginalLenForTruncationGuard, "fixture must clear the truncation-guard threshold")
 	llm := &scriptedLLM{grammarOut: long, styleOut: "Short."}
 	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
 	got, err := svc.Correct(context.Background(), Request{Text: long, Picky: true})
@@ -840,10 +846,30 @@ func TestSentencePipelineDisabledWithoutCache(t *testing.T) {
 	st := &fakeStore{}
 	llm := &countingLLM{}
 	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
-	// No SetSentenceCache -> legacy whole-text path: ONE LLM call.
+	// No SetSentenceCache: cache stays nil. Multi-segment input STILL
+	// goes through the per-segment path (the guard is now len(segs)<2,
+	// not the cache); the per-segment loop no-ops the cache (nil
+	// receiver), so each segment is recomputed. 2 sentences -> 2 LLM
+	// calls. Single-segment input (len(segs)<2) takes the legacy
+	// whole-text path; see TestSentencePipelineSingleSegmentCacheOff.
 	_, err := svc.Correct(context.Background(), Request{Text: "One sentence. Two sentences."})
 	require.NoError(t, err)
-	require.Equal(t, 1, llm.calls)
+	require.Equal(t, 2, llm.calls, "multi-segment input always goes through per-segment path, cache or not")
+}
+
+func TestSentencePipelineSingleSegmentCacheOffTakesWholeTextPath(t *testing.T) {
+	// Single-segment input (no sentence terminator) takes the legacy
+	// whole-text path regardless of cache state. The guard is now
+	// `len(segs) < 2`, not the cache, so a single-segment input with the
+	// cache disabled still hits correctOnce exactly once. This pins the
+	// "do NOT change single-segment behavior" invariant.
+	st := &fakeStore{}
+	llm := &countingLLM{}
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	// No SetSentenceCache.
+	_, err := svc.Correct(context.Background(), Request{Text: "Just one fragment with no terminator"})
+	require.NoError(t, err)
+	require.Equal(t, 1, llm.calls, "single-segment -> whole-text, cache or not")
 }
 
 func TestFinalizeTagsEachSuggestionWithItsOwnEditID(t *testing.T) {
@@ -1442,4 +1468,50 @@ func TestServiceCorrectMultilineKeepsSentenceCacheHits(t *testing.T) {
 	_, err = svc.Correct(context.Background(), Request{Text: text})
 	require.NoError(t, err)
 	require.Equal(t, first, llm.calls, "warm: zero additional LLM calls (both lines cached)")
+}
+
+func TestServiceCorrectMultilineCacheOffYieldsNoNewlineTouchingSuggestion(t *testing.T) {
+	// The newline fix must hold even when the per-sentence cache is
+	// disabled (GF_SENTENCE_CACHE_SIZE=0). Pre-fix, the guard
+	// `s.sentenceCache == nil || len(segs) < 2` routed multi-line input
+	// through the whole-text path when the cache was nil, so a single
+	// '\n'-crossing suggestion could be emitted. Post-fix, the per-segment
+	// path runs regardless of the cache (sentenceCache.get/add are nil-
+	// safe; the per-segment loop simply recomputes each segment).
+	//
+	// The LLM deliberately emulates the bug-report rewrite ONLY when it
+	// sees the whole multi-line text (the pre-fix code path). When it's
+	// called per-line (no '\n' in the input), it returns a benign
+	// fragment-local edit, so no suggestion crosses a '\n' in the
+	// original.
+	st := &fakeStore{}
+	llm := llmFunc(func(_ context.Context, p Prompt) (string, error) {
+		if strings.Contains(p.User, "\n") {
+			// Pre-fix: LLM is called once on the whole multi-line text
+			// and returns the bug-report rewrite — a diff that, vs the
+			// ORIGINAL "line one\nline two", contains a suggestion whose
+			// span crosses the '\n' at byte 8 (the "\n" -> " " edit).
+			return "Line one. Line two", nil
+		}
+		// Post-fix: per-segment call, fragment has no '\n'. Return a
+		// benign trailing-space tidy that lives entirely inside the
+		// fragment.
+		return strings.TrimRight(p.User, " ") + " ", nil
+	})
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	// Intentionally do NOT call SetSentenceCache — sentenceCache stays nil.
+	text := "line one\nline two"
+	got, err := svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	for i, s := range got.Suggestions {
+		sp := s.Span
+		require.GreaterOrEqual(t, sp.Start, 0)
+		require.LessOrEqual(t, sp.End, len(text))
+		require.Greater(t, sp.End, sp.Start, "suggestion %d has empty span", i)
+		for j := sp.Start; j < sp.End; j++ {
+			require.NotEqual(t, byte('\n'), text[j],
+				"suggestion %d span [%d,%d) contains '\\n' at byte %d — the bug (cache-off path)",
+				i, sp.Start, sp.End, j)
+		}
+	}
 }

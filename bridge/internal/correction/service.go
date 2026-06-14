@@ -204,7 +204,13 @@ func (s *Service) escalationPrompt(req Request, fast []Suggestion) Prompt {
 // preserves the LLM-only mode's behaviour at the request boundary.
 func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) {
 	segs := SegmentSentences(req.Text)
-	if s.sentenceCache == nil || len(segs) < 2 {
+	// The per-segment dispatch is decoupled from the cache. The per-segment
+	// loop below no-ops the cache when it is nil (sentenceCache.get/add both
+	// guard on a nil receiver), so it is safe to run with the cache disabled
+	// — each segment is just recomputed. The whole-text fallback is reserved
+	// for the single-segment case (len(segs) < 2), where segmenting would
+	// not save any work and the legacy whole-text path is faster.
+	if len(segs) < 2 {
 		all, err := s.correctOnce(ctx, req)
 		if err != nil {
 			return Correction{}, err
