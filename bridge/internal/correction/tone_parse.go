@@ -48,14 +48,48 @@ func parseToneTags(raw string) ([]ToneTag, error) {
 	return out, nil
 }
 
+// tryBalancedSpanFrom walks forward from s[i] counting '{' / '}' depth and
+// returns (span, valid) where span is the balanced '{..}' substring (when the
+// depth returns to 0) and valid is true iff json.Valid accepts it. Returns
+// ("", false) on an unbalanced '{' (depth never returns to 0 within s). The
+// depth counter is naive — it does not understand JSON string quoting — so a
+// '}' inside a string value closes the candidate early and the resulting
+// span is almost certainly not valid JSON; the caller (extractJSONObject)
+// skips it and tries the next '{'.
+func tryBalancedSpanFrom(s string, i int) (string, bool) {
+	depth := 0
+	for j := i; j < len(s); j++ {
+		switch s[j] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				span := s[i : j+1]
+				return span, json.Valid([]byte(span))
+			}
+		}
+	}
+	return "", false
+}
+
 // extractJSONObject returns the substring of the first JSON-valid balanced
 // '{' .. '}' span (inclusive), after stripping a leading ```json / trailing ```
 // fence. Returns "" if no candidate parses. The balanced scan tolerates a
 // stray '{' in surrounding prose (e.g. `Result {score}: {"tags":[]}`) that a
 // naive first-'{'/last-'}' grab would mistranslate; the json.Valid check
-// backtracks past a balanced-but-non-JSON candidate (a `{x}` in prose) to the
-// next '{'. The double-parse cost (this + parseToneTags) is negligible for
-// tone response sizes.
+// backtracks past a balanced-but-non-JSON candidate (a `{x}` in prose, or a
+// naive span that closes on a '}' inside a string value) to the next '{'.
+// Finding-2 behaviour: when the LLM returns multiple valid JSON objects, the
+// FIRST wins; if the first is the empty-tagging shape and we want tags, the
+// second is not consulted. The double-parse cost (this + parseToneTags) is
+// negligible for tone response sizes.
+//
+// Termination: each outer-loop iteration strictly advances `s` to `s[i+1:]`,
+// so the string shrinks every iteration. Provably no infinite loop, even on
+// pathological inputs like `"a}b"` (a '}' inside a string value that closes
+// the naive depth counter early) or `"prose { with no close"` (an unbalanced
+// '{' with no matching '}').
 func extractJSONObject(raw string) string {
 	s := strings.TrimSpace(raw)
 	if i := strings.Index(s, "```"); i >= 0 {
@@ -65,26 +99,15 @@ func extractJSONObject(raw string) string {
 		}
 		s = strings.TrimPrefix(strings.TrimSpace(s), "json")
 	}
-scan:
-	for i := strings.Index(s, "{"); i >= 0; i = strings.Index(s[i+1:], "{") + i + 1 {
-		depth := 0
-		for j := i; j < len(s); j++ {
-			switch s[j] {
-			case '{':
-				depth++
-			case '}':
-				depth--
-				if depth == 0 {
-					span := s[i : j+1]
-					if json.Valid([]byte(span)) {
-						return span
-					}
-					// Balanced but not JSON (a `{x}` in prose) — advance the
-					// outer loop to the next '{' candidate.
-					continue scan
-				}
-			}
+	for {
+		i := strings.Index(s, "{")
+		if i < 0 {
+			return ""
 		}
+		span, valid := tryBalancedSpanFrom(s, i)
+		if valid {
+			return span
+		}
+		s = s[i+1:]
 	}
-	return ""
 }
