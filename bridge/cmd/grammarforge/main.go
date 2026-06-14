@@ -23,6 +23,7 @@ import (
 	"github.com/grammarforge/bridge/internal/prompt"
 	"github.com/grammarforge/bridge/internal/restserver"
 	"github.com/grammarforge/bridge/internal/store"
+	"github.com/grammarforge/bridge/internal/thesaurus"
 	"google.golang.org/grpc"
 )
 
@@ -187,6 +188,21 @@ func main() {
 			APIKey:   cfg.ToneAPIKey,
 		})
 	}
+
+	// Offline /synonyms (Moby Thesaurus II, public domain). Loaded once
+	// at startup; a missing file is a no-op, not a crash — the route
+	// stays on the wire and returns empty arrays until the operator
+	// runs bridge/scripts/fetch-thesaurus.sh. Mirrors the user
+	// dictionary's "best-effort, log on failure" wiring.
+	th, thErr := thesaurus.Load(cfg.ThesaurusPath)
+	if thErr != nil {
+		slog.Warn("thesaurus load failed; /synonyms returns empty", "path", cfg.ThesaurusPath, "err", thErr)
+		th = nil
+	} else {
+		slog.Info("thesaurus loaded", "path", cfg.ThesaurusPath, "headwords", th.Size())
+	}
+	svc.SetThesaurus(th)
+	svc.SetSynonymsConfig(cfg.SynonymsEnabled)
 
 	go func() {
 		lis, err := net.Listen("tcp", cfg.GRPCAddr)

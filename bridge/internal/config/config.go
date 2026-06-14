@@ -176,6 +176,18 @@ type Config struct {
 	// independently, and serves unchanged sentences from the cache, collapsing
 	// steady-state typing latency to ~one sentence's cost.
 	SentenceCacheSize int
+
+	// SynonymsEnabled gates the /synonyms payload (default true). The route
+	// is always on the wire regardless — disabled just means the response
+	// is `{word, synonyms:[]}`. Matches the SPEC §1 "informational endpoint
+	// on by default" posture so a misconfigured deploy never hides the
+	// route from clients.
+	SynonymsEnabled bool
+	// ThesaurusPath is the on-disk path to the Moby Thesaurus II dataset
+	// (fetched at deploy via bridge/scripts/fetch-thesaurus.sh, gitignored).
+	// The file is read once at startup; a missing file is a no-op, not an
+	// error — the bridge still boots and /synonyms returns empty.
+	ThesaurusPath string
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -283,6 +295,9 @@ func Load(getenv Getenv) Config {
 		RetentionDays: getInt("GF_RETENTION_DAYS", 90),
 
 		SentenceCacheSize: getInt("GF_SENTENCE_CACHE_SIZE", 2048),
+
+		SynonymsEnabled: getBool("GF_SYNONYMS_ENABLED", true),
+		ThesaurusPath:   get("GF_THESAURUS_PATH", "/data/mthesaur.txt"),
 	}
 }
 

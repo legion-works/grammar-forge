@@ -404,6 +404,43 @@ func toToneResponse(r correction.ToneResult) toneResponse {
 	return out
 }
 
+// synonymsResponse is the GET /synonyms payload. Synonyms is always a
+// non-nil array (empty when the word is unknown, the thesaurus is
+// disabled, or ?word= is absent) so clients iterate without a nil
+// check. Word is the echoed query value — preserved as the user sent
+// it (no lowercasing) so client-side rendering of the original
+// casing matches the request.
+type synonymsResponse struct {
+	Word     string   `json:"word"`
+	Synonyms []string `json:"synonyms"`
+}
+
+// handleSynonyms is GET /synonyms?word=X. Always responds 200 with the
+// {word, synonyms} shape — never 404, even when the feature is
+// disabled or the thesaurus dataset is missing on disk. The route is
+// always on the wire so clients can render a uniform "no synonyms"
+// affordance; an empty array IS the disabled / unknown / no-data
+// response, distinguished only by which server-side condition fired
+// (which the client does not need to know).
+func (s *Server) handleSynonyms(w http.ResponseWriter, r *http.Request) {
+	word := r.URL.Query().Get("word")
+	if word == "" {
+		// Absent ?word= is "no data" — same response shape as unknown.
+		writeJSON(w, http.StatusOK, synonymsResponse{Word: "", Synonyms: []string{}})
+		return
+	}
+	syns, err := s.svc.Synonyms(r.Context(), word)
+	if err != nil {
+		s.log.Error("synonyms lookup failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "synonyms unavailable"})
+		return
+	}
+	if syns == nil {
+		syns = []string{}
+	}
+	writeJSON(w, http.StatusOK, synonymsResponse{Word: word, Synonyms: syns})
+}
+
 func toToneTags(tags []correction.ToneTag) []toneTagJSON {
 	out := make([]toneTagJSON, 0, len(tags))
 	for _, t := range tags {

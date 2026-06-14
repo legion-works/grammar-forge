@@ -33,6 +33,12 @@ type CorrectionService interface {
 	// clients opt in via GF_TONE_ENABLED.
 	AnalyzeTone(ctx context.Context, req correction.ToneRequest) (correction.ToneResult, error)
 	ToneEnabled() bool
+	// Synonyms is the offline thesaurus lookup backing GET /synonyms. The
+	// endpoint stays on the wire regardless of SynonymsEnabled — the flag
+	// only controls whether a non-empty result is possible. Unknown words
+	// return nil; the handler maps that to [] for the JSON shape.
+	Synonyms(ctx context.Context, word string) ([]string, error)
+	SynonymsEnabled() bool
 }
 
 // Config is the subset of settings the REST server needs.
@@ -78,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /tone", s.handleTone)
 	mux.HandleFunc("POST /signal", s.handleSignal)
 	mux.HandleFunc("GET /stats", s.handleStats)
+	mux.HandleFunc("GET /synonyms", s.handleSynonyms)
 	mux.HandleFunc("GET /dictionary", s.handleDictionaryList)
 	mux.HandleFunc("POST /dictionary", s.handleDictionaryAdd)
 	mux.HandleFunc("DELETE /dictionary/{word}", s.handleDictionaryRemove)

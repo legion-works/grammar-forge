@@ -29,6 +29,12 @@ type fakeService struct {
 	toneEnabled   bool
 	toneOut       correction.ToneResult
 	toneErr       error
+	// Synonyms stub: enabled flag + canned synonym list. lastWord records
+	// the most recent lookup target for assertions.
+	synonymsEnabled bool
+	synonymsOut     []string
+	synonymsErr     error
+	lastSynWord     string
 }
 
 func (f *fakeService) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
@@ -68,6 +74,12 @@ func (f *fakeService) AnalyzeTone(_ context.Context, _ correction.ToneRequest) (
 }
 
 func (f *fakeService) ToneEnabled() bool { return f.toneEnabled }
+
+func (f *fakeService) Synonyms(_ context.Context, word string) ([]string, error) {
+	f.lastSynWord = word
+	return f.synonymsOut, f.synonymsErr
+}
+func (f *fakeService) SynonymsEnabled() bool { return f.synonymsEnabled }
 
 func serve(svc CorrectionService) http.Handler { return New(Config{}, svc).Handler() }
 
@@ -431,6 +443,76 @@ func TestDictionaryRoutes(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/dictionary/al%20pha", nil))
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.Equal(t, "al pha", fd.del, "DELETE path value must be URL-decoded by net/http")
+}
+
+// /synonyms contract: returns {word, synonyms:[...]} with HTTP 200. The
+// route is always on the wire — unknown words, missing/empty ?word=,
+// and a disabled feature all return 200 with an empty array, not 404.
+// Clients can iterate `synonyms` without a nil/null check.
+func TestSynonymsOK(t *testing.T) {
+	svc := &fakeService{synonymsEnabled: true, synonymsOut: []string{"glad", "joyful"}}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/synonyms?word=happy", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		Word     string   `json:"word"`
+		Synonyms []string `json:"synonyms"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, "happy", got.Word)
+	require.Equal(t, []string{"glad", "joyful"}, got.Synonyms)
+	require.Equal(t, "happy", svc.lastSynWord, "service must receive the requested word")
+}
+
+// Unknown word: the handler must NOT 404 — the route stays on the wire
+// with 200 + {word, synonyms:[]} so clients can render a "no synonyms"
+// affordance without a special-case for missing entries. This is the
+// opposite of /tone's disabled=404 contract because the /synonyms
+// feature is informational and on by default.
+func TestSynonymsUnknownWordEmptyArray(t *testing.T) {
+	svc := &fakeService{synonymsEnabled: true, synonymsOut: nil}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/synonyms?word=xyzzy", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		Synonyms []string `json:"synonyms"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.NotNil(t, got.Synonyms, "synonyms must serialise as [] not null")
+	require.Empty(t, got.Synonyms)
+}
+
+// Disabled feature (GF_SYNONYMS_ENABLED=false) is still 200 + empty —
+// the route is on the wire; the field just has no payload. This keeps
+// client rendering logic uniform across the "no data" and "off"
+// states.
+func TestSynonymsDisabledEmptyArray(t *testing.T) {
+	svc := &fakeService{synonymsEnabled: false}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/synonyms?word=happy", nil))
+	require.Equal(t, http.StatusOK, rr.Code, "disabled synonyms still 200, never 404")
+	var got struct {
+		Synonyms []string `json:"synonyms"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.NotNil(t, got.Synonyms)
+	require.Empty(t, got.Synonyms)
+}
+
+// Missing ?word= is the "absent" case — 200 + empty rather than 400, for
+// the same reason: the route always responds with a uniform shape.
+func TestSynonymsMissingWordEmptyArray(t *testing.T) {
+	svc := &fakeService{synonymsEnabled: true}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/synonyms", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		Word     string   `json:"word"`
+		Synonyms []string `json:"synonyms"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, "", got.Word, "absent word round-trips as the empty string")
+	require.Empty(t, got.Synonyms)
 }
 
 // When the dictionary store is not injected (no SetDictionary call, e.g. an
