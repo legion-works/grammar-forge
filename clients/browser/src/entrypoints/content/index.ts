@@ -221,6 +221,8 @@ interface Runtime {
 }
 
 async function start(ctx: ContentScriptContext): Promise<void> {
+    // eslint-disable-next-line no-console
+    console.info('[gf] content script loaded')
     let currentSettings: Settings = await getSettings()
     // Reducer state for the pause-mode decision (mount/unmount the paused
     // runtime). Owned by the orchestrator; the pure nextPauseMode lives in
