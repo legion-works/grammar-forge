@@ -16,17 +16,34 @@
      near-invisible on dark setups (the popup looked flat / tabs unstyled). */
   --gf-bg: light-dark(rgba(245, 245, 245, 0.92), rgba(28, 28, 30, 0.92));
   --gf-border: light-dark(rgba(0, 0, 0, 0.14), rgba(255, 255, 255, 0.14));
-  --gf-text: light-dark(#0f172a, #f1f5f9);
+  --gf-text: light-dark(#0f172a, #f1f3f6);
   --gf-text-dim: light-dark(rgba(15, 23, 42, 0.7), rgba(241, 245, 249, 0.7));
   /* Surface fills for nested controls (tab group, inputs, chips). */
   --gf-surface: light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.06));
   --gf-surface-strong: light-dark(rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.14));
   --gf-scrim: rgba(0, 0, 0, 0.4);
   --gf-radius: 14px;
+  --gf-r-panel: 16px;
   --gf-radius-pill: 9999px;
   --gf-blur: blur(16px) saturate(180%);
   --gf-blur-pill: blur(10px) saturate(160%);
   --gf-font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  /* Shared design tokens (mirrors clients/browser/src/overlay/styles.ts
+     -> :host([data-gf-theme]). Kept in sync with the in-page OVERLAY_CSS
+     so popup swatches + legend dots + status dots agree with the
+     composer. Single source of truth is .opencode/specs/2026-06-15-
+     client-redesign/handoff/scss/_tokens.scss. */
+  --gf-accent: #2563eb;
+  --gf-accent-hover: #1d4ed8;
+  --gf-cat-spelling: #ef4444;
+  --gf-cat-grammar: #eab308;
+  --gf-cat-punctuation: #06b6d4;
+  --gf-cat-style: #8b5cf6;
+  --gf-cat-typography: #6b7280;
+  --gf-band-excellent: #16a34a;
+  --gf-band-good: #0891b2;
+  --gf-band-fair: #d97706;
+  --gf-band-needswork: #dc2626;
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -165,7 +182,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #16a34a;
+  color: var(--gf-band-excellent);
   font-size: 13px;
 }
 /* The "no issues" empty state reads calm, not a loud success banner: a softer,
@@ -250,9 +267,9 @@ textarea {
 }
 
 .gf-popup__btn--primary {
-  background: linear-gradient(180deg, #3b82f6, #2563eb);
+  background: var(--gf-accent);
   color: white;
-  border-color: color-mix(in oklab, #3b82f6 50%, transparent);
+  border-color: var(--gf-accent-hover);
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
 }
 
