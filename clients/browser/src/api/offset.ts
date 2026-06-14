@@ -55,6 +55,16 @@ export function verifyByteSpan(
     }
 }
 
+/** Hard cap on the verify cache size. The bridge issues
+ *  monotonically-increasing suggestion ids within a session and the
+ *  investigation showed it never recycles them; once the cache hits
+ *  this many entries the OLDEST is evicted (FIFO — Map iteration
+ *  order is insertion order). The evicted entry's id is almost
+ *  certainly not going to be re-verified (the next check uses a new
+ *  span), so the loss is safe. 4096 ≈ 30min of dense correction
+ *  traffic at 1 suggestion/sec — well past the typical session. */
+const VERIFY_CACHE_CAP = 4096
+
 /**
  * Verify a byte span with a per-suggestion-id memo. The plan's P1 fix:
  * `verifyByteSpan` is O(N) (a from-index-0 walk over the text via
@@ -62,10 +72,8 @@ export function verifyByteSpan(
  * O(N×K) per check. For unchanged text the byte→code-unit mapping is
  * stable, so we cache the result keyed on `(suggestionId, textHash)`
  * and short-circuit subsequent calls. The cache is module-scoped
- * (one entry per suggestion id); the bridge's per-sentence eviction
- * handles long-term cleanup. (If the bridge ever recycles ids within
- * a session, a hard cap of 4096 entries is a follow-up; the
- * investigation showed it doesn't.)
+ * (one entry per suggestion id, bounded by `VERIFY_CACHE_CAP`); the
+ * bridge's per-sentence eviction handles long-term cleanup.
  *
  * `suggestionId === undefined` short-circuits to a direct `verify`
  * call (the preview path: id-less fast frames must bypass the cache
@@ -89,9 +97,24 @@ export function verifyByteSpanWithCache(
     if (cached && cached.hash === textHash) return cached.result
     const result = verify(text, span)
     verifyCache.set(suggestionId, { hash: textHash, result })
+    if (verifyCache.size > VERIFY_CACHE_CAP) {
+        // FIFO eviction: Map preserves insertion order, so the first
+        // key is the oldest. Safe because the bridge id is monotonic
+        // (older ids won't be re-verified — the next check generates
+        // a new id range).
+        const oldest = verifyCache.keys().next().value
+        if (oldest !== undefined) verifyCache.delete(oldest)
+    }
     return result
 }
 
 export function clearVerifyCache(): void {
     verifyCache.clear()
+}
+
+/** Exposed for tests; not part of the public API. */
+export const __VERIFY_CACHE_CAP = VERIFY_CACHE_CAP
+/** Exposed for tests; not part of the public API. */
+export function __verifyCacheSize(): number {
+    return verifyCache.size
 }

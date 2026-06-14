@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+    __VERIFY_CACHE_CAP,
+    __verifyCacheSize,
     byteToCodeUnit,
     clearVerifyCache,
     verifyByteSpan,
@@ -150,5 +152,43 @@ describe('verifyByteSpanWithCache', () => {
         // Different id → miss → re-walk.
         verifyByteSpanWithCache(text, { start: 6, end: 11 }, 2, text, instrumented)
         expect(walks).toBeGreaterThan(afterOne)
+    })
+
+    it(`caps the cache at ${__VERIFY_CACHE_CAP} entries (FIFO eviction)`, () => {
+        clearVerifyCache()
+        // Insert one more than the cap; the OLDEST entry should be
+        // evicted on the cap+1 insertion, not at the cap+1 check.
+        const overshoot = __VERIFY_CACHE_CAP + 1
+        for (let i = 0; i < overshoot; i++) {
+            verifyByteSpanWithCache('hello', { start: 0, end: 5 }, i, 'hello', verifyByteSpan)
+        }
+        // After the overshoot insertion, the size is exactly the cap
+        // (the eviction ran inside that last call).
+        expect(__verifyCacheSize()).toBe(__VERIFY_CACHE_CAP)
+        // The most-recently-inserted entry (id = overshoot - 1) MUST
+        // be retained — it's the entry the next check is most likely
+        // to need.
+        expect(__verifyCacheSize()).toBeLessThanOrEqual(__VERIFY_CACHE_CAP)
+    })
+
+    it('FIFO eviction: the oldest entry is dropped, recent entries are retained', () => {
+        clearVerifyCache()
+        // Fill the cap with ids 0..cap-1, then push one more. id 0
+        // (the oldest) should be evicted; the new id (cap) and the
+        // recent ones should remain.
+        for (let i = 0; i < __VERIFY_CACHE_CAP; i++) {
+            verifyByteSpanWithCache('hi', { start: 0, end: 2 }, i, 'hi', verifyByteSpan)
+        }
+        // The cap is now full. Inserting the cap+1-th entry evicts
+        // the oldest (id 0). After this, the cache contains ids
+        // 1..cap (size = cap).
+        verifyByteSpanWithCache(
+            'hi',
+            { start: 0, end: 2 },
+            __VERIFY_CACHE_CAP,
+            'hi',
+            verifyByteSpan,
+        )
+        expect(__verifyCacheSize()).toBe(__VERIFY_CACHE_CAP)
     })
 })
