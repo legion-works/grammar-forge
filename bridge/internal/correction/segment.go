@@ -67,41 +67,117 @@ func looksLikeCode(text string) bool {
 // segment when the input looks like code (see looksLikeCode), when the
 // tokenizer is unavailable, or when a sentence cannot be relocated (never
 // returns wrong offsets). Whitespace-only input -> empty.
+//
+// Newline behaviour: '\n' is a HARD sentence boundary. The text is
+// pre-split on '\n' into line byte ranges; each non-empty line is fed to
+// the punkt pipeline independently; recovered spans are shifted by the
+// line's start offset and concatenated. The '\n' bytes stay uncovered
+// (they sit BETWEEN line ranges, never inside a returned segment) so a
+// fast path or the LLM can never emit an edit whose byte span contains
+// or abuts a '\n'. Trailing '\r' on a line is stripped (CRLF = one
+// boundary). Single-line input (no '\n') is byte-identical to the
+// pre-change behaviour; the whole-line fallbacks (looksLikeCode,
+// tokenizer unavailable, relocation failure) apply per line.
 func SegmentSentences(text string) []SentenceSegment {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	if looksLikeCode(text) {
-		return []SentenceSegment{{Start: 0, End: len(text)}}
-	}
+
 	tok := getTokenizer()
 	if tok == nil {
-		return []SentenceSegment{{Start: 0, End: len(text)}}
+		// Tokenizer unavailable — fall back to whole-text, but the '\n'
+		// boundary must still hold: split per line and yield one segment
+		// per non-empty line. Same offset contract as the punkt path.
+		return segmentLinesWithoutTokenizer(text)
 	}
-	sents := tok.Tokenize(text)
+
+	var segs []SentenceSegment
+	cursor := 0
+	for cursor < len(text) {
+		// Find the next '\n' from `cursor`; line = text[cursor:lineEnd] (may
+		// be empty if the input starts with '\n' or has consecutive '\n's).
+		lineEnd := strings.IndexByte(text[cursor:], '\n')
+		var line string
+		var lineNext int // index in `text` of the byte AFTER this line's '\n' (or len(text))
+		if lineEnd < 0 {
+			line = text[cursor:]
+			lineNext = len(text)
+		} else {
+			line = text[cursor : cursor+lineEnd]
+			lineNext = cursor + lineEnd + 1
+		}
+		// CRLF: strip a trailing '\r' so the line has no '\r' at its end.
+		line = strings.TrimSuffix(line, "\r")
+		if line != "" {
+			segs = appendLineSegments(segs, line, cursor, tok)
+		}
+		cursor = lineNext
+	}
+	if len(segs) == 0 {
+		// Every line was blank; treat as whitespace-only.
+		return nil
+	}
+	return segs
+}
+
+// appendLineSegments runs the punkt pipeline on one line (which has had any
+// trailing '\r' stripped), shifts each recovered span by lineStart, and
+// appends to segs. Per-line fallbacks (looksLikeCode, relocation failure)
+// apply here so a codey line bypasses punkt the same way the whole-text
+// path does today. Returns the (possibly grown) segs slice.
+func appendLineSegments(segs []SentenceSegment, line string, lineStart int, tok *sentences.DefaultSentenceTokenizer) []SentenceSegment {
+	if looksLikeCode(line) {
+		return append(segs, SentenceSegment{Start: lineStart, End: lineStart + len(line)})
+	}
+	sents := tok.Tokenize(line)
 	if len(sents) == 0 {
-		return []SentenceSegment{{Start: 0, End: len(text)}}
+		return append(segs, SentenceSegment{Start: lineStart, End: lineStart + len(line)})
 	}
-	segs := make([]SentenceSegment, 0, len(sents))
 	cursor := 0
 	for _, s := range sents {
 		t := strings.TrimSpace(s.Text)
 		if t == "" {
 			continue
 		}
-		idx := strings.Index(text[cursor:], t)
+		idx := strings.Index(line[cursor:], t)
 		if idx < 0 {
-			// Tokenizer text does not align with the source (should not
-			// happen — punkt preserves the input). Bail to whole-text rather
-			// than emit wrong offsets.
-			return []SentenceSegment{{Start: 0, End: len(text)}}
+			// Tokenizer output does not align with the source (should not
+			// happen — punkt preserves the input). Bail to whole-line
+			// rather than emit wrong offsets.
+			return append(segs, SentenceSegment{Start: lineStart, End: lineStart + len(line)})
 		}
 		start := cursor + idx
-		segs = append(segs, SentenceSegment{Start: start, End: start + len(t)})
+		segs = append(segs, SentenceSegment{Start: lineStart + start, End: lineStart + start + len(t)})
 		cursor = start + len(t)
 	}
+	return segs
+}
+
+// segmentLinesWithoutTokenizer is the no-punkt fallback: yield one segment
+// per non-empty line (after stripping a trailing '\r' for CRLF). Preserves
+// the '\n'-as-hard-boundary invariant and the half-open byte-range contract.
+func segmentLinesWithoutTokenizer(text string) []SentenceSegment {
+	var segs []SentenceSegment
+	cursor := 0
+	for cursor < len(text) {
+		lineEnd := strings.IndexByte(text[cursor:], '\n')
+		var line string
+		var lineNext int
+		if lineEnd < 0 {
+			line = text[cursor:]
+			lineNext = len(text)
+		} else {
+			line = text[cursor : cursor+lineEnd]
+			lineNext = cursor + lineEnd + 1
+		}
+		line = strings.TrimSuffix(line, "\r")
+		if line != "" {
+			segs = append(segs, SentenceSegment{Start: cursor, End: cursor + len(line)})
+		}
+		cursor = lineNext
+	}
 	if len(segs) == 0 {
-		return []SentenceSegment{{Start: 0, End: len(text)}}
+		return nil
 	}
 	return segs
 }
