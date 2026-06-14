@@ -132,6 +132,14 @@ type Config struct {
 	// output before diffing. Default true; opt out with
 	// GF_OVEREDIT_FILTER=false for byte-identical pre-filter behaviour.
 	OverEditFilterEnabled bool
+	// ArticleFixEnabled wires the deterministic a/an article repair
+	// (correction.applyArticleFixes) applied to LLM output after the
+	// over-edit chain and before diffing. Fixes silent-h words ("a
+	// honest"→"an honest", "a hour"→"an hour", etc.) that Harper's
+	// letter-based AnA rule misses. Default true; opt out with
+	// GF_ARTICLE_FIX=false. The full cold golden eval is the FP gate before
+	// expanding the silent-h stem list beyond v1's 5 unambiguous stems.
+	ArticleFixEnabled bool
 
 	// Phase-2 P4 prompt-cache personalisation. On by default. The cache is
 	// TTL-bounded (no background goroutine) and the snapshot is read
@@ -249,6 +257,7 @@ func Load(getenv Getenv) Config {
 		SkipLLMForSpellingOnly: getBool("GF_SKIP_LLM_FOR_SPELLING_ONLY", false),
 		MergeFastEditsMode:     get("GF_MERGE_FAST_EDITS", ""),
 		OverEditFilterEnabled:  getBool("GF_OVEREDIT_FILTER", true),
+		ArticleFixEnabled:      getBool("GF_ARTICLE_FIX", true),
 		FastHintsEnabled:       getBool("GF_FAST_HINTS", false),
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),

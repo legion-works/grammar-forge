@@ -118,6 +118,12 @@ func main() {
 	if cfg.OverEditFilterEnabled {
 		svc.SetOverEditRules(correction.DefaultOverEditRules())
 	}
+	// Deterministic a/an article fix: applied after the over-edit chain and
+	// before diffing. Fixes silent-h words Harper's letter-based AnA rule
+	// misses ("a honest"→"an honest", "a hour"→"an hour", etc.). Default on;
+	// GF_ARTICLE_FIX=false disables. The full cold golden eval is the FP gate
+	// before expanding the silent-h stem list (see internal/correction/article.go).
+	svc.SetArticleFix(cfg.ArticleFixEnabled)
 	// Merge-not-replace escalation composition (experimental spike; default
 	// "" keeps the measured replace semantics). See correction.MergeFastEdits*.
 	if cfg.MergeFastEditsMode != "" {

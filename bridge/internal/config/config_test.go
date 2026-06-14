@@ -277,6 +277,19 @@ func TestOverEditFilterDefaultsTrueAndCanBeDisabled(t *testing.T) {
 	require.False(t, Load(off).OverEditFilterEnabled)
 }
 
+func TestArticleFixDefaultsTrueAndCanBeDisabled(t *testing.T) {
+	empty := func(string) (string, bool) { return "", false }
+	require.True(t, Load(empty).ArticleFixEnabled, "GF_ARTICLE_FIX must default to true")
+
+	off := func(k string) (string, bool) {
+		if k == "GF_ARTICLE_FIX" {
+			return "false", true
+		}
+		return "", false
+	}
+	require.False(t, Load(off).ArticleFixEnabled)
+}
+
 func TestMergeFastEditsDefaultsOffAndReadsEnv(t *testing.T) {
 	empty := func(string) (string, bool) { return "", false }
 	require.Equal(t, "", Load(empty).MergeFastEditsMode, "default must be replace semantics")

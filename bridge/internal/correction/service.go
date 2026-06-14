@@ -86,6 +86,12 @@ type Service struct {
 	toneCache          *toneCache
 	toneEnabled        bool
 	toneMinChars       int
+	// articleFix enables the deterministic a/an article repair applied to
+	// LLM output before diffing (see article.go). Default false (zero value);
+	// enabled by SetArticleFix(true) / GF_ARTICLE_FIX=true. Mirrors the
+	// overEditRules pattern: text-level repair before diffToSuggestions so
+	// the fix fires even when the LLM misses it.
+	articleFix bool
 }
 
 // MergeFastEditsMode values for Service.mergeFastEditsMode
@@ -141,6 +147,14 @@ func (s *Service) SetWordAllowlist(a WordAllowlist) { s.allowlist = a }
 // SetOverEditRules injects the LLM over-edit repair chain applied to LLM
 // grammar output before diffing (see overedit.go). Optional; nil = no repair.
 func (s *Service) SetOverEditRules(rules []OverEditRule) { s.overEditRules = rules }
+
+// SetArticleFix enables or disables the deterministic a/an article repair
+// (GF_ARTICLE_FIX). When enabled, applyArticleFixes is applied to the LLM
+// output after repairOverEdits and before diffToSuggestions on the escalation
+// path, so silent-h corrections ("a honest"→"an honest") fire even when the
+// LLM misses them. Default false (zero value); set true in main when
+// GF_ARTICLE_FIX is enabled (default true).
+func (s *Service) SetArticleFix(enabled bool) { s.articleFix = enabled }
 
 // SetMergeFastEditsMode selects the escalation result composition (see the
 // MergeFastEdits* constants). Optional; zero value = legacy replace semantics.
@@ -326,6 +340,14 @@ func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, e
 			// overedit.go) so a fused wanted+unwanted edit is fixed before
 			// the diff splits it into suggestions.
 			repaired := s.repairOverEdits(req.Text, strings.TrimSpace(llmText))
+			// Deterministic a/an article fix: applied after over-edit repair
+			// and before diffing so silent-h corrections ("a honest"→"an
+			// honest") are emitted even when the LLM misses them. Text-level
+			// on purpose — mirrors the overedit chain pattern. Gated on
+			// GF_ARTICLE_FIX (default true; see article.go).
+			if s.articleFix {
+				repaired = applyArticleFixes(repaired)
+			}
 			all = propagateFastCategories(diffToSuggestions(req.Text, repaired), fast)
 			// Merge-not-replace spike (GF_MERGE_FAST_EDITS): append fast
 			// edits the LLM did not contradict. Off by default — replace
