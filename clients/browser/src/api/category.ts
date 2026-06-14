@@ -1,5 +1,35 @@
 import type { BridgeSuggestion, Category } from '@/api/types'
 
+/**
+ * Per-category display metadata.
+ *
+ * The single source of truth for GrammarForge's category palette is
+ * `.opencode/specs/2026-06-15-client-redesign/handoff/scss/_tokens.scss`
+ * (the `$gf-cat-*` Sass map). The two colour fields here play
+ * distinct roles:
+ *
+ * - `badge` is the canonical token colour (`#ef4444` / `#eab308` /
+ *   `#06b6d4` / `#8b5cf6` / `#6b7280`). The in-page overlay CSS
+ *   (`overlay/styles.ts` → :host([data-gf-theme]) → `--gf-cat-*`)
+ *   exposes the same values, and the popup/options page mirrors
+ *   them via `popup.css` :root custom properties — keep all three
+ *   in sync when the SCSS changes.
+ *
+ * - `tint` is a darker shade of the same hue, used in SOLID-bg
+ *   contexts where the overlay's translucent `color-mix(in srgb,
+ *   var(--gf-cat-X) 22%, transparent)` would not composite
+ *   correctly. The popup summary swatches + legend swatches
+ *   (`popup/App.tsx` → `style={{ background: CATEGORY_META[c].tint }}`)
+ *   read from this field. The overlay itself does NOT use `tint` —
+ *   it always resolves the badge colour through CSS `color-mix` so
+ *   the 22% alpha tint is theme-aware (light vs dark glass swap the
+ *   underlying surface, not the marker hue).
+ *
+ * The `unknown` category intentionally stays neutral grey — there
+ * is no SCSS token for it; the bridge never emits it as a wire
+ * `category`, it only appears as the fallback when
+ * `deriveCategory()` cannot resolve from `model` either.
+ */
 export const CATEGORY_META: Record<
     Category,
     {
