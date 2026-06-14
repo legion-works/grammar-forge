@@ -36,21 +36,18 @@ func TestParseToneTags(t *testing.T) {
 	require.Error(t, err)
 }
 
-// LOCK: extractJSONObject uses first-'{'-to-last-'}' extraction. A stray '{'
-// in prose BEFORE the JSON, or a stray '}' in prose AFTER, makes it grab the
-// wrong span and the parse fails. The service handles this with a soft-empty
-// degradation, but the parser behaviour is the limiting factor — lock it here
-// so a future "harden the parser" change is a deliberate, test-visible decision.
+// Stray braces in surrounding prose must not derail extraction. extractJSONObject
+// uses a balanced brace scan, so a '{' that never closes (e.g. `{score}` in
+// "Result {score}: {...}") is skipped, and a '}' tail after the JSON is
+// ignored (the first balanced span ends at the JSON's own '}').
 func TestParseToneStrayOpenBraceBeforeJSON(t *testing.T) {
-	// "Result {score}" is a stray open-brace in prose BEFORE the real JSON.
-	// extractJSONObject grabs "{score}: {" which is unbalanced -> parse fails.
-	_, err := parseToneTags(`Result {score}: {"tags":[]}`)
-	require.Error(t, err, "first-'{'-to-last-'}' grabs the wrong span")
+	tags, err := parseToneTags(`Result {score}: {"tags":[{"tag":"direct","confidence":0.5}]}`)
+	require.NoError(t, err)
+	require.Equal(t, []ToneTag{{"direct", 0.5}}, tags, "stray '{' in prose is tolerated; balanced scan lands on the real JSON")
 }
 
 func TestParseToneStrayCloseBraceAfterJSON(t *testing.T) {
-	// "} see {appendix}" has a stray close-brace AFTER the JSON. The last '}'
-	// is in the prose tail, so the grab is unbalanced and parse fails.
-	_, err := parseToneTags(`{"tags":[]} see {appendix}`)
-	require.Error(t, err, "first-'{'-to-last-'}' grabs the wrong span")
+	tags, err := parseToneTags(`{"tags":[{"tag":"polite","confidence":0.9}]} see {appendix}`)
+	require.NoError(t, err)
+	require.Equal(t, []ToneTag{{"polite", 0.9}}, tags, "stray '}' in prose tail is tolerated; first balanced span wins")
 }

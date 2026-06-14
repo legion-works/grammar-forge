@@ -48,9 +48,14 @@ func parseToneTags(raw string) ([]ToneTag, error) {
 	return out, nil
 }
 
-// extractJSONObject returns the substring from the first '{' to the last '}'
-// (inclusive), after stripping a leading ```json / trailing ``` fence. Returns
-// "" if no braces are found.
+// extractJSONObject returns the substring of the first JSON-valid balanced
+// '{' .. '}' span (inclusive), after stripping a leading ```json / trailing ```
+// fence. Returns "" if no candidate parses. The balanced scan tolerates a
+// stray '{' in surrounding prose (e.g. `Result {score}: {"tags":[]}`) that a
+// naive first-'{'/last-'}' grab would mistranslate; the json.Valid check
+// backtracks past a balanced-but-non-JSON candidate (a `{x}` in prose) to the
+// next '{'. The double-parse cost (this + parseToneTags) is negligible for
+// tone response sizes.
 func extractJSONObject(raw string) string {
 	s := strings.TrimSpace(raw)
 	if i := strings.Index(s, "```"); i >= 0 {
@@ -60,10 +65,26 @@ func extractJSONObject(raw string) string {
 		}
 		s = strings.TrimPrefix(strings.TrimSpace(s), "json")
 	}
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start < 0 || end < 0 || end < start {
-		return ""
+scan:
+	for i := strings.Index(s, "{"); i >= 0; i = strings.Index(s[i+1:], "{") + i + 1 {
+		depth := 0
+		for j := i; j < len(s); j++ {
+			switch s[j] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					span := s[i : j+1]
+					if json.Valid([]byte(span)) {
+						return span
+					}
+					// Balanced but not JSON (a `{x}` in prose) — advance the
+					// outer loop to the next '{' candidate.
+					continue scan
+				}
+			}
+		}
 	}
-	return s[start : end+1]
+	return ""
 }
