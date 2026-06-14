@@ -921,7 +921,7 @@ function wireRuntime(
         // Focus/blur → drive the highlight intensity for this field. For
         // native-highlight fields, swap which bucket (idle vs `-strong`)
         // the field's ranges live in; for overlay fields, flip the
-        // existing `.gf-highlight--focus` class via setState. Uses simple
+        // existing `.is-on` class via setState. Uses simple
         // bubbling listeners; capture isn't needed since no other listener
         // preventDefault's these.
         const onFieldFocus = (): void => {

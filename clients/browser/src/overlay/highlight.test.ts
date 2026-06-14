@@ -9,14 +9,14 @@ function mkRoot(): ShadowRoot {
 }
 
 describe('createHighlightLayer', () => {
-    it('creates one .gf-highlight node per spec, sized as full rects', () => {
+    it('creates one .gf-u node per spec, sized as full rects, with category modifier', () => {
         const root = mkRoot()
         const layer = createHighlightLayer(root)
         layer.reconcile([
             { rect: new DOMRect(10, 20, 100, 16), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(10, 40, 80, 16), category: 'grammar', itemIndex: 1 },
         ])
-        const nodes = root.querySelectorAll('.gf-highlight')
+        const nodes = root.querySelectorAll('.gf-u')
         expect(nodes).toHaveLength(2)
         const a = nodes[0] as HTMLElement
         const b = nodes[1] as HTMLElement
@@ -35,7 +35,7 @@ describe('createHighlightLayer', () => {
         const root = mkRoot()
         const layer = createHighlightLayer(root)
         layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 7 }])
-        const node = root.querySelector('.gf-highlight') as HTMLElement
+        const node = root.querySelector('.gf-u') as HTMLElement
         // spelling tint colour from CATEGORY_META
         expect(node.style.getPropertyValue('--gf-hl')).toBe('#dc2626')
         expect(node.dataset.item).toBe('7')
@@ -48,7 +48,7 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 0, 0, 0), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 0 },
         ])
-        const nodes = root.querySelectorAll('.gf-highlight')
+        const nodes = root.querySelectorAll('.gf-u')
         expect(nodes).toHaveLength(2)
         expect((nodes[0] as HTMLElement).style.display).toBe('none')
         expect((nodes[1] as HTMLElement).style.display).toBe('')
@@ -61,12 +61,12 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(10, 20, 100, 16), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(10, 40, 80, 16), category: 'grammar', itemIndex: 1 },
         ])
-        const first = Array.from(root.querySelectorAll('.gf-highlight'))
+        const first = Array.from(root.querySelectorAll('.gf-u'))
         layer.reconcile([
             { rect: new DOMRect(15, 20, 90, 16), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(10, 40, 80, 16), category: 'grammar', itemIndex: 1 },
         ])
-        const second = Array.from(root.querySelectorAll('.gf-highlight'))
+        const second = Array.from(root.querySelectorAll('.gf-u'))
         expect(second).toHaveLength(2)
         expect(second[0]).toBe(first[0])
         expect((second[0] as HTMLElement).style.left).toBe('15px')
@@ -80,16 +80,16 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(0, 40, 50, 16), category: 'spelling', itemIndex: 0 },
         ])
-        expect(root.querySelectorAll('.gf-highlight')).toHaveLength(3)
+        expect(root.querySelectorAll('.gf-u')).toHaveLength(3)
         layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 }])
-        expect(root.querySelectorAll('.gf-highlight')).toHaveLength(1)
+        expect(root.querySelectorAll('.gf-u')).toHaveLength(1)
     })
 
     it('repositions in place and re-tints when a node changes category', () => {
         const root = mkRoot()
         const layer = createHighlightLayer(root)
         layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 }])
-        const node = root.querySelector('.gf-highlight') as HTMLElement
+        const node = root.querySelector('.gf-u') as HTMLElement
         expect(node.style.getPropertyValue('--gf-hl')).toBe('#dc2626')
         layer.reconcile([
             { rect: new DOMRect(5, 10, 50, 16), category: 'typography', itemIndex: 0 },
@@ -107,13 +107,13 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 1 },
         ])
-        const nodes = root.querySelectorAll('.gf-highlight')
+        const nodes = root.querySelectorAll('.gf-u')
         for (const n of nodes) {
-            expect((n as HTMLElement).classList.contains('gf-highlight--focus')).toBe(true)
+            expect((n as HTMLElement).classList.contains('is-on')).toBe(true)
         }
     })
 
-    it('setState({focused:true}) adds gf-highlight--focus to every node', () => {
+    it('setState({focused:true}) adds is-on to every node', () => {
         const root = mkRoot()
         const layer = createHighlightLayer(root)
         layer.reconcile([
@@ -121,17 +121,17 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 1 },
         ])
         layer.setState({ focused: true, hoverItemIndex: null })
-        const nodes = root.querySelectorAll('.gf-highlight')
+        const nodes = root.querySelectorAll('.gf-u')
         for (const n of nodes) {
-            expect((n as HTMLElement).classList.contains('gf-highlight--focus')).toBe(true)
+            expect((n as HTMLElement).classList.contains('is-on')).toBe(true)
         }
         layer.setState({ focused: false, hoverItemIndex: null })
         for (const n of nodes) {
-            expect((n as HTMLElement).classList.contains('gf-highlight--focus')).toBe(false)
+            expect((n as HTMLElement).classList.contains('is-on')).toBe(false)
         }
     })
 
-    it('setState({hoverItemIndex:i}) adds gf-highlight--hover only to the matching data-item', () => {
+    it('setState({hoverItemIndex:i}) adds is-on only to the matching data-item', () => {
         const root = mkRoot()
         const layer = createHighlightLayer(root)
         layer.reconcile([
@@ -140,10 +140,10 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 40, 50, 16), category: 'spelling', itemIndex: 2 },
         ])
         layer.setState({ focused: false, hoverItemIndex: 1 })
-        const nodes = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
-        expect(nodes[0]!.classList.contains('gf-highlight--hover')).toBe(false)
-        expect(nodes[1]!.classList.contains('gf-highlight--hover')).toBe(true)
-        expect(nodes[2]!.classList.contains('gf-highlight--hover')).toBe(false)
+        const nodes = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
+        expect(nodes[0]!.classList.contains('is-on')).toBe(false)
+        expect(nodes[1]!.classList.contains('is-on')).toBe(true)
+        expect(nodes[2]!.classList.contains('is-on')).toBe(false)
     })
 
     it('setState hover change only re-toggles the changed nodes', () => {
@@ -154,13 +154,13 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 1 },
         ])
         layer.setState({ focused: false, hoverItemIndex: 0 })
-        const n0 = root.querySelectorAll('.gf-highlight')[0] as HTMLElement
-        const n1 = root.querySelectorAll('.gf-highlight')[1] as HTMLElement
-        expect(n0.classList.contains('gf-highlight--hover')).toBe(true)
-        expect(n1.classList.contains('gf-highlight--hover')).toBe(false)
+        const n0 = root.querySelectorAll('.gf-u')[0] as HTMLElement
+        const n1 = root.querySelectorAll('.gf-u')[1] as HTMLElement
+        expect(n0.classList.contains('is-on')).toBe(true)
+        expect(n1.classList.contains('is-on')).toBe(false)
         layer.setState({ focused: false, hoverItemIndex: 1 })
-        expect(n0.classList.contains('gf-highlight--hover')).toBe(false)
-        expect(n1.classList.contains('gf-highlight--hover')).toBe(true)
+        expect(n0.classList.contains('is-on')).toBe(false)
+        expect(n1.classList.contains('is-on')).toBe(true)
     })
 
     it('destroy() removes every pooled node', () => {
@@ -170,16 +170,16 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(0, 20, 50, 16), category: 'grammar', itemIndex: 1 },
         ])
-        expect(root.querySelectorAll('.gf-highlight')).toHaveLength(2)
+        expect(root.querySelectorAll('.gf-u')).toHaveLength(2)
         layer.destroy()
-        expect(root.querySelectorAll('.gf-highlight')).toHaveLength(0)
+        expect(root.querySelectorAll('.gf-u')).toHaveLength(0)
     })
 
     it('nodes are decorative only (aria-hidden, no role or tabindex)', () => {
         const root = mkRoot()
         const layer = createHighlightLayer(root)
         layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 }])
-        const node = root.querySelector('.gf-highlight') as HTMLElement
+        const node = root.querySelector('.gf-u') as HTMLElement
         expect(node.getAttribute('aria-hidden')).toBe('true')
         expect(node.getAttribute('role')).toBeNull()
         expect(node.getAttribute('tabindex')).toBeNull()
@@ -193,9 +193,9 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 20, 50, 16), category: 'grammar', itemIndex: 1 },
         ])
         layer.flashApplied(0)
-        const nodes = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
-        expect(nodes[0]!.classList.contains('gf-highlight--applied')).toBe(true)
-        expect(nodes[1]!.classList.contains('gf-highlight--applied')).toBe(false)
+        const nodes = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
+        expect(nodes[0]!.classList.contains('gf-u--applied')).toBe(true)
+        expect(nodes[1]!.classList.contains('gf-u--applied')).toBe(false)
     })
 
     it('flashApplied is a no-op for an index with no node', () => {
@@ -213,10 +213,10 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 20, 50, 16), category: 'grammar', itemIndex: 1 },
             { rect: new DOMRect(0, 40, 50, 16), category: 'typography', itemIndex: 2 },
         ])
-        const before = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        const before = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
         const originalB = before[1]!.getAttribute('aria-hidden')
         layer.updateItem(1, { rect: new DOMRect(5, 25, 60, 16), category: 'style' })
-        const after = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        const after = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
         // Same pooled nodes (no rebuild).
         expect(after).toEqual(before)
         // Item 0 untouched.
@@ -234,6 +234,12 @@ describe('createHighlightLayer', () => {
     })
 
     it('updateItem applies the last state to the touched node (no flicker)', () => {
+        // The new design collapses focus + hover into a single `.is-on`
+        // class — there is no separate `.gf-highlight--focus` anymore.
+        // focused=true means EVERY node gets .is-on; a specific hover
+        // additionally forces the hovered node to .is-on (which it
+        // already has under focused). Move the hover from 0 to 1; the
+        // touched node (1) must keep .is-on after the rect update.
         const root = mkRoot()
         const layer = createHighlightLayer(root)
         layer.setState({ focused: true, hoverItemIndex: 0 })
@@ -241,15 +247,14 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 1 },
         ])
-        // Move the hover to item 1; the hover class must persist on item 1
-        // after updateItem changes its rect.
         layer.setState({ focused: true, hoverItemIndex: 1 })
         layer.updateItem(1, { rect: new DOMRect(0, 25, 50, 16), category: 'spelling' })
-        const nodes = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
-        expect(nodes[0]!.classList.contains('gf-highlight--hover')).toBe(false)
-        expect(nodes[0]!.classList.contains('gf-highlight--focus')).toBe(true)
-        expect(nodes[1]!.classList.contains('gf-highlight--hover')).toBe(true)
-        expect(nodes[1]!.classList.contains('gf-highlight--focus')).toBe(true)
+        const nodes = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
+        // Both nodes are focused → both have .is-on.
+        expect(nodes[0]!.classList.contains('is-on')).toBe(true)
+        expect(nodes[1]!.classList.contains('is-on')).toBe(true)
+        // The hovered item (1) must still have .is-on after the rect update.
+        expect(nodes[1]!.classList.contains('is-on')).toBe(true)
     })
 
     it('updateItem is a no-op for an itemIndex past the end', () => {
@@ -272,9 +277,9 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(0, 20, 50, 16), category: 'grammar', itemIndex: 1 },
         ])
-        const before = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        const before = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
         layer.clearItem(1)
-        const after = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        const after = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
         // Same pooled nodes (no rebuild / no removal).
         expect(after).toEqual(before)
         // Item 1 hidden.
@@ -304,7 +309,7 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 40, 50, 16), category: 'grammar', itemIndex: 1 },
         ])
         layer.updateItem(0, { rect: new DOMRect(5, 25, 60, 16), category: 'style' })
-        const nodes = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        const nodes = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
         // Both item-0 rect-nodes restyled.
         expect(nodes[0]!.style.left).toBe('5px')
         expect(nodes[0]!.style.top).toBe('25px')
@@ -330,7 +335,7 @@ describe('createHighlightLayer', () => {
             { rect: new DOMRect(0, 40, 50, 16), category: 'grammar', itemIndex: 1 },
         ])
         layer.clearItem(0)
-        const nodes = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        const nodes = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
         // Both item-0 rect-nodes hidden.
         expect(nodes[0]!.style.display).toBe('none')
         expect(nodes[1]!.style.display).toBe('none')

@@ -42,12 +42,12 @@ export const OVERLAY_CSS = `
   }
 
   /* ============================================================
-   * Highlight (translucent, NOT glass) — one full-rect node per
-   * getClientRects() rect. The category colour is set per-node via the
-   * --gf-hl custom property; visible alpha is driven by intensity
-   * modifier classes (default 20% / --focus 24% / --hover 42%).
+   * Highlight (the "issue" marker drawn over each flagged word).
+   *
+   * Migrated from the legacy .gf-highlight (full-rect permanent tint)
+   * to the design-system .gf-u per the W1-1 task.
    * ============================================================ */
-  .gf-highlight {
+  .gf-u {
     position: fixed;
     /* Purely visual: hover/click interaction is detected on the FIELD itself
        (content orchestrator hit-tests the pointer against the edit rects), so
@@ -55,18 +55,30 @@ export const OVERLAY_CSS = `
        the field fully editable and selectable under the overlay. */
     pointer-events: none;
     z-index: ${Z_OVERLAY};
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--gf-hl, #888) 20%, transparent);
+    border-radius: 2px;
+    background: transparent;
+    border-bottom: 1.7px wavy var(--gf-hl, #888);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
     transition: background 140ms ease-out;
   }
-  .gf-highlight--focus { background: color-mix(in srgb, var(--gf-hl, #888) 24%, transparent); }
-  .gf-highlight--hover { background: color-mix(in srgb, var(--gf-hl, #888) 42%, transparent); }
+  .gf-u--spelling    { border-bottom-color: var(--gf-cat-spelling); }
+  .gf-u--grammar     { border-bottom-color: var(--gf-cat-grammar); }
+  .gf-u--punctuation { border-bottom-color: var(--gf-cat-punctuation); }
+  .gf-u--style       { border-bottom-color: var(--gf-cat-style); }
+  .gf-u--typography  { border-bottom-color: var(--gf-cat-typography); }
+  .gf-u.is-on         { background: color-mix(in srgb, var(--gf-hl, #888) 22%, transparent); }
+  .gf-u--spelling.is-on    { background: color-mix(in srgb, var(--gf-cat-spelling) 22%, transparent); }
+  .gf-u--grammar.is-on     { background: color-mix(in srgb, var(--gf-cat-grammar) 22%, transparent); }
+  .gf-u--punctuation.is-on { background: color-mix(in srgb, var(--gf-cat-punctuation) 22%, transparent); }
+  .gf-u--style.is-on       { background: color-mix(in srgb, var(--gf-cat-style) 22%, transparent); }
+  .gf-u--typography.is-on  { background: color-mix(in srgb, var(--gf-cat-typography) 22%, transparent); }
 
   /* Transient applied flourish: a quick fade and lift the moment a fix is
      applied, before the highlight reconciles away. Animation-only on a
      transient class removed on animationend, so it never sticks to a reused
      pooled node and never overrides the idle/focus/hover background. */
-  .gf-highlight--applied {
+  .gf-u--applied {
     animation: gf-highlight-applied 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   @keyframes gf-highlight-applied {
@@ -76,7 +88,8 @@ export const OVERLAY_CSS = `
   }
 
   @media (prefers-contrast: more) {
-    .gf-highlight { background: color-mix(in srgb, var(--gf-hl, #888) 40%, transparent); outline: 1px solid var(--gf-hl, #888); }
+    .gf-u { border-bottom-width: 2.2px; }
+    .gf-u.is-on { background: color-mix(in srgb, var(--gf-hl, #888) 40%, transparent); }
   }
 
   /* ============================================================
@@ -942,8 +955,8 @@ export const OVERLAY_CSS = `
       animation-duration: 1ms;
       animation-name: gf-no-motion;
     }
-    .gf-highlight { transition: none; }
-    .gf-highlight--applied { animation: none; }
+    .gf-u { transition: none; }
+    .gf-u--applied { animation: none; }
     /* Spinner spin is gratuitous motion — kill it. */
     .gf-rephrase-card__spinner { animation: none; }
   }
