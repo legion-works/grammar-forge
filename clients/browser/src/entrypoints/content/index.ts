@@ -15,6 +15,8 @@ import { createFieldAttachment, type FieldAttachment } from '@/input/attachment'
 import { isPasteInput, shouldCheckInput } from '@/input/paste-guard'
 import { isUndoRedoKeydown } from '@/input/undo-redo'
 import { applyFix, domPointToFlatOffset, getText } from '@/input/text'
+import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
+import { nextCheckSeq } from '@/lib/check-seq'
 import { isFrameworkRichEditor } from '@/input/rich-editor-apply'
 import { requestMainWorldApply } from '@/input/main-world-apply'
 import { appendInverseEdit, planUndo, type InverseEdit } from '@/lib/undo'
@@ -753,6 +755,43 @@ function wireRuntime(
     // paste-skip toggles take effect immediately. The actual text read happens
     // at debounce FIRE time inside the attachment (Fix 2), not here.
     //
+    // Apply the scoped-clear to a field's highlight layer. The shared
+    // `keep` helper decides which items survive; for every DROPPED item we
+    // hide its pooled node (overlay) or rebuild the native buckets from
+    // the kept list (native) so the stale display is gone, without
+    // rebuilding the survivors. (Native uses setFieldHighlights rather
+    // than per-item primitives because the surviving set may now span
+    // different category buckets than the old one — e.g. 2 spelling
+    // items, 1 dropped, 1 grammar item survives untouched; the only safe
+    // thing is a full bucket rebuild from the kept set.)
+    const applyScopedClearToField = (
+        state: FieldState,
+        el: HTMLElement,
+        kept: readonly RenderableItem[],
+    ): void => {
+        if (state.items.length === kept.length) return
+        if (state.useNativeHighlight) {
+            getNativeHighlighter().setFieldHighlights(
+                el,
+                kept.map((it) => ({ cuStart: it.hlStart, cuEnd: it.hlEnd, category: it.category })),
+            )
+        } else {
+            // Overlay: for each DROPPED index, hide the pooled node. We
+            // can't call clearItem for indices that have SHIFTED (because
+            // removing item 0 would hide the wrong pool node) — so
+            // iterate the OLD state.items and clear by data-item when the
+            // item is no longer in `kept`. (clearItem looks up by
+            // data-item, so the old index → node mapping is irrelevant;
+            // it hides EVERY rect-node of the dropped item.)
+            const keptSet = new Set(kept)
+            for (let i = 0; i < state.items.length; i++) {
+                if (!keptSet.has(state.items[i]!)) {
+                    state.highlightLayer?.clearItem(i)
+                }
+            }
+        }
+    }
+
     // Paste-grace: on a paste/drop (when checkPastedText is on and
     // pasteGraceMs > 0) we DON'T check yet — we arm a per-field timer so the
     // user can edit the pasted text first. The check fires when that window
@@ -766,6 +805,11 @@ function wireRuntime(
             if (!shouldCheckInput(inputType, { checkPastedText: s.checkPastedText })) return false
             const state = runtime.fields.get(el)
             if (!state) return false
+            // Popover stale anchor: the popover points at a highlight we
+            // may be about to clear by the scoped-clear below. Close it
+            // first so it doesn't ghost-anchor over a dropped item. Done
+            // unconditionally on any input event (paste / typing / drop).
+            if (openPopovers.has(el)) closePopoverFor(el)
             if (isPasteInput(inputType)) {
                 // Plain field paste (fires inputType='insertFromPaste'): arm the
                 // grace window instead of checking now, then suppress the
@@ -773,9 +817,22 @@ function wireRuntime(
                 armPasteGrace(el, state)
                 return false
             }
-            // Non-paste edit: ends any pending grace (whichever comes first) and
-            // schedules the normal debounced check.
+            // Non-paste edit: scoped-clear the stale highlights BEFORE the
+            // debounced check fires (300–700 ms round-trip). Without this
+            // the old underline sits at its old pixel position during the
+            // window (Bug 1: sticky after Enter, newline mis-render,
+            // halfway through the word). Spec §3: editOffset == null →
+            // clear-all (keep returns []); else keep only spans that end
+            // at or before the caret.
             clearPasteGrace(state)
+            const editOffset = getCaretOffset(el)
+            const kept = keepHighlightsBeforeEdit(state.items, editOffset)
+            // Clear dropped items FIRST (while we still have the old
+            // indices), then replace the list.
+            if (kept.length < state.items.length) {
+                applyScopedClearToField(state, el, kept)
+            }
+            state.items = kept
             return true
         }
 
@@ -885,7 +942,11 @@ function wireRuntime(
             attachment,
             items: [],
             itemRects: [],
-            checkSeq: 0,
+            // Process-monotonic: a re-attached field's first seq is strictly
+            // greater than any seq a torn-down field ever produced. Kills
+            // the "detached field's pending check aliases a re-attached
+            // field's seq" race (Spec §4 sibling). See @/lib/check-seq.
+            checkSeq: nextCheckSeq(),
             pasteGraceTimer: null,
             highlightLayer: null,
             hoverItemIndex: null,
@@ -999,12 +1060,25 @@ function wireRuntime(
                 // document, but only one field can have focus at a time
                 // anyway, so this matches reality.
                 getNativeHighlighter().setFocusedField(null)
-                return
+            } else {
+                state.highlightLayer?.setState({
+                    focused: false,
+                    hoverItemIndex: state.hoverItemIndex,
+                })
             }
-            state.highlightLayer?.setState({
-                focused: false,
-                hoverItemIndex: state.hoverItemIndex,
-            })
+            // Spec §4 sibling: blur → clear highlights + close popover.
+            // The user is leaving the field; the display state and the
+            // popover would otherwise ghost-anchor over text the user
+            // can no longer see in the same context. The next attach /
+            // focus restarts fresh.
+            if (openPopovers.has(el)) closePopoverFor(el)
+            state.items = []
+            state.itemRects = []
+            if (state.useNativeHighlight) {
+                getNativeHighlighter().setFieldHighlights(el, [])
+            } else {
+                state.highlightLayer?.reconcile([])
+            }
         }
         el.addEventListener('focus', onFieldFocus)
         el.addEventListener('blur', onFieldBlur)
@@ -1845,57 +1919,71 @@ function wireRuntime(
         try {
             allRects = getSpanRectsBatch(el, spans)
         } catch {
-            allRects = spans.map(() => [])
+            // Spec §4 sibling: measurement-throw → clear itemRects + the
+            // highlight layer. Better no highlight than a stale one — the
+            // next remeasure (scroll/resize, or the next edit) re-populates
+            // from a clean slate. Pill update below still runs (count data
+            // must never depend on rect measurability).
+            state.itemRects = []
+            if (state.useNativeHighlight) {
+                getNativeHighlighter().setFieldHighlights(el, [])
+            } else {
+                state.highlightLayer?.reconcile([])
+            }
+            allRects = [] // keep the rest of the function safe (no re-render below)
+            // Fall through to pill update + attachment handle registration.
         }
         // Cache the rects for the field-level hover/click hit-test (parallel to
         // items; an item with no rects still occupies a slot but never matches).
-        state.itemRects = state.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
+        if (allRects.length > 0) {
+            state.itemRects = state.items.map((it, i) => ({ item: it, rects: allRects[i] ?? [] }))
 
-        if (state.useNativeHighlight) {
-            // Push code-unit spans into the document-global registry. The
-            // browser draws `::highlight()` for us; reflow/scroll tracking
-            // is native. Any previous overlay layer (left over from a
-            // renderer switch — shouldn't happen, but defensive) is
-            // destroyed so we don't leave a stale shadow-root node behind.
-            if (state.highlightLayer) {
-                state.highlightLayer.destroy()
-                state.highlightLayer = null
-            }
-            getNativeHighlighter().setFieldHighlights(
-                el,
-                // Highlight the WORD range (hlStart/hlEnd) so zero-width
-                // insertions still get a visible ::highlight() Range.
-                state.items.map((it) => ({
-                    cuStart: it.hlStart,
-                    cuEnd: it.hlEnd,
-                    category: it.category,
-                })),
-            )
-            debugLog('highlight', 'native setFieldHighlights', { count: state.items.length })
-        } else {
-            // Flatten (item, rect) → specs and reconcile the persistent
-            // overlay layer.
-            const specs: HighlightSpec[] = []
-            for (let i = 0; i < state.items.length; i++) {
-                const item = state.items[i]!
-                for (const rect of allRects[i] ?? []) {
-                    specs.push({ rect, category: item.category, itemIndex: i })
+            if (state.useNativeHighlight) {
+                // Push code-unit spans into the document-global registry. The
+                // browser draws `::highlight()` for us; reflow/scroll tracking
+                // is native. Any previous overlay layer (left over from a
+                // renderer switch — shouldn't happen, but defensive) is
+                // destroyed so we don't leave a stale shadow-root node behind.
+                if (state.highlightLayer) {
+                    state.highlightLayer.destroy()
+                    state.highlightLayer = null
                 }
+                getNativeHighlighter().setFieldHighlights(
+                    el,
+                    // Highlight the WORD range (hlStart/hlEnd) so zero-width
+                    // insertions still get a visible ::highlight() Range.
+                    state.items.map((it) => ({
+                        cuStart: it.hlStart,
+                        cuEnd: it.hlEnd,
+                        category: it.category,
+                    })),
+                )
+                debugLog('highlight', 'native setFieldHighlights', { count: state.items.length })
+            } else {
+                // Flatten (item, rect) → specs and reconcile the persistent
+                // overlay layer.
+                const specs: HighlightSpec[] = []
+                for (let i = 0; i < state.items.length; i++) {
+                    const item = state.items[i]!
+                    for (const rect of allRects[i] ?? []) {
+                        specs.push({ rect, category: item.category, itemIndex: i })
+                    }
+                }
+                if (!state.highlightLayer) state.highlightLayer = createHighlightLayer(root)
+                state.highlightLayer.reconcile(specs)
+                debugLog('highlight', 'overlay reconcile', {
+                    items: state.items.length,
+                    rects: specs.length,
+                })
+                // Push current intensity (focus + hover) onto the
+                // freshly-reconciled layer; reconcile reuses nodes, so the
+                // latest state must be re-applied to keep the visual
+                // consistent.
+                state.highlightLayer.setState({
+                    focused: document.activeElement === el,
+                    hoverItemIndex: state.hoverItemIndex,
+                })
             }
-            if (!state.highlightLayer) state.highlightLayer = createHighlightLayer(root)
-            state.highlightLayer.reconcile(specs)
-            debugLog('highlight', 'overlay reconcile', {
-                items: state.items.length,
-                rects: specs.length,
-            })
-            // Push current intensity (focus + hover) onto the
-            // freshly-reconciled layer; reconcile reuses nodes, so the
-            // latest state must be re-applied to keep the visual
-            // consistent.
-            state.highlightLayer.setState({
-                focused: document.activeElement === el,
-                hoverItemIndex: state.hoverItemIndex,
-            })
         }
 
         // The status pill is still rendered fresh each time (cheap); only the
