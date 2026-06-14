@@ -19,6 +19,7 @@
 import { BridgeClient, type SignalEvent } from "@/api/client";
 import { buildRenderableItems, isSpanStillValid, type RenderableItem } from "@/lib/pipeline";
 import { createSignalQueue } from "@/signal/queue";
+import { resolveCommonSettings } from "@/storage/settings-core";
 import type {
     CorrectRequest,
     CorrectResponse,
@@ -42,8 +43,6 @@ import type { PanelController, PanelView } from "./details-panel-view";
 
 const SIGNAL_SOURCE = "opencode";
 
-const DEFAULT_BRIDGE_URL = "http://localhost:8000";
-const DEFAULT_REALTIME_DELAY_MS = 500;
 const DEFAULT_APPLY_ALL_HOTKEY = "ctrl+.";
 const DEFAULT_CYCLE_NEXT_HOTKEY = "/";
 const DEFAULT_CYCLE_PREV_HOTKEY = ".";
@@ -63,14 +62,7 @@ export function resolveSettings(
     options: Record<string, unknown> | undefined,
 ): GrammarForgeSettings {
     const raw = options ?? {};
-    const bridgeUrl =
-        typeof raw.bridgeUrl === "string" && /^https?:\/\//.test(raw.bridgeUrl)
-            ? raw.bridgeUrl.replace(/\/+$/, "")
-            : DEFAULT_BRIDGE_URL;
-    const realtimeDelayMs =
-        typeof raw.realtimeDelayMs === "number" && Number.isFinite(raw.realtimeDelayMs)
-            ? raw.realtimeDelayMs
-            : DEFAULT_REALTIME_DELAY_MS;
+    const { common } = resolveCommonSettings(raw);
     const applyAllHotkeyRaw =
         typeof raw.applyAllHotkey === "string" ? raw.applyAllHotkey.trim().toLowerCase() : "";
     const applyAllHotkey = applyAllHotkeyRaw === "" ? DEFAULT_APPLY_ALL_HOTKEY : applyAllHotkeyRaw;
@@ -85,15 +77,14 @@ export function resolveSettings(
     const rephraseHotkeyRaw =
         typeof raw.rephraseHotkey === "string" ? raw.rephraseHotkey.trim().toLowerCase() : "";
     const rephraseHotkey = rephraseHotkeyRaw === "" ? DEFAULT_REPHRASE_HOTKEY : rephraseHotkeyRaw;
-    const allowRemoteBridge = raw.allowRemoteBridge === true;
     return {
-        bridgeUrl,
-        realtimeDelayMs,
+        bridgeUrl: common.bridgeUrl,
+        realtimeDelayMs: common.realtimeDelayMs,
         applyAllHotkey,
         cycleNextHotkey,
         cyclePrevHotkey,
         rephraseHotkey,
-        allowRemoteBridge,
+        allowRemoteBridge: common.allowRemoteBridge,
     };
 }
 

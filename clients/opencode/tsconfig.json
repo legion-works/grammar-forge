@@ -20,7 +20,8 @@
     "src/**/*",
     "../browser/src/api/**/*",
     "../browser/src/lib/**/*",
-    "../browser/src/signal/**/*"
+    "../browser/src/signal/**/*",
+    "../browser/src/storage/settings-core.ts"
   ],
   "exclude": []
 }
