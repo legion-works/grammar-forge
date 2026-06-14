@@ -36,6 +36,7 @@ import {
 } from '@/overlay/status-button'
 import { dismissRephraseCardsIn } from '@/overlay/rephrase-card'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
+import { shouldRephraseHotkey } from '@/hotkeys/rephrase-target'
 import { isDiscordComposer } from './composer'
 import type { GrammarForgeConfig } from './settings'
 
@@ -577,6 +578,23 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         return null
     }
 
+    // Rephrase the focused field. Shared by the pill's onRephrase button
+    // and the capture-phase rephrase hotkey. Selection-in-el → use it;
+    // otherwise → whole field (whitespace-only fields short-circuit to
+    // a no-op). Mirrors the browser's `rephraseFor` in
+    // clients/browser/src/entrypoints/content/rephrase.ts.
+    const rephraseFor = (el: HTMLElement): void => {
+        const found = resolveSelection()
+        const scope = resolveRephraseScope(
+            el,
+            found ? { el: found.el, text: found.text, span: found.span } : null,
+        )
+        if (!scope) return
+        void openRephraseFor(scope.el, scope.text, scope.span, rephraseDeps, () => {
+            void rerunFor(el)(getText(el))
+        })
+    }
+
     // ---- Pill surface ----
     // Mount/update/teardown the status pill anchored to the active composer.
     // The pill tracks its field across scroll/resize (reposition). panelOpen
@@ -604,17 +622,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             onApplyAll: () => void applyAllFor(el),
             onApplyOne: (i) => applyOneFor(el, i),
             onUndo: () => void undoFor(el),
-            onRephrase: () => {
-                const found = resolveSelection()
-                const scope = resolveRephraseScope(
-                    el,
-                    found ? { el: found.el, text: found.text, span: found.span } : null,
-                )
-                if (!scope) return
-                void openRephraseFor(scope.el, scope.text, scope.span, rephraseDeps, () => {
-                    void rerunFor(el)(getText(el))
-                })
-            },
+            onRephrase: () => rephraseFor(el),
             undoAvailable: (st.lastApplied?.length ?? 0) > 0,
             initiallyVisible: true,
         }
@@ -1098,6 +1106,27 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     const onKeydown = (e: KeyboardEvent): void => {
         const field = focusedTrackedField()
         if (!field) return
+        // Rephrase hotkey (capture phase). Runs BEFORE the items.length
+        // gate — the rephrase hotkey must fire on a focused tracked field
+        // even when there are no active suggestions (selection-in-el or
+        // whole-field). The matchers are distinct by default (Ctrl+/ vs
+        // Ctrl+.) so order is documentation, not a tie-breaker.
+        try {
+            if (
+                shouldRephraseHotkey(e, {
+                    hotkey: getConfig().rephraseHotkey,
+                })
+            ) {
+                e.preventDefault()
+                e.stopPropagation()
+                rephraseFor(field)
+                return
+            }
+        } catch (err) {
+            // parseHotkey throws on a malformed configured string; a broken
+            // setting must not turn every keystroke into an uncaught error.
+            debugLog('rephrase hotkey parse failed', getConfig().rephraseHotkey, err)
+        }
         const st = fields.get(field)
         if (!st || st.items.length === 0) return
         // Only log chorded keys (a modifier held) so plain typing stays quiet.
