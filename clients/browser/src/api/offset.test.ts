@@ -139,6 +139,29 @@ describe('verifyByteSpanWithCache', () => {
         expect(walks).toBeGreaterThan(afterFirst)
     })
 
+    it('re-walks when the same id+text is reused with a DIFFERENT span (span is part of the key)', () => {
+        // Regression: the cache keyed only on (id, textHash) returned a
+        // stale result when the same bridge id was reused with a different
+        // span for the same text — this poisoned cross-check/cross-test
+        // results (e.g. the opencode orchestrator cycle tests dropped the
+        // 2nd suggestion). The span MUST be part of the cache key.
+        const text = 'I has a apple'
+        let walks = 0
+        const instrumented = (t: string, s: { start: number; end: number }) => {
+            for (let i = 0; i < t.length; i++) walks++
+            return verifyByteSpan(t, s)
+        }
+        clearVerifyCache()
+        const first = verifyByteSpanWithCache(text, { start: 2, end: 5 }, 7, text, instrumented)
+        const afterFirst = walks
+        // Same id, same text, DIFFERENT span → must miss (re-walk) and
+        // return the new span's result, not the cached first one.
+        const second = verifyByteSpanWithCache(text, { start: 8, end: 13 }, 7, text, instrumented)
+        expect(walks).toBeGreaterThan(afterFirst)
+        expect(second).not.toEqual(first)
+        expect(second).toEqual(verifyByteSpan(text, { start: 8, end: 13 }))
+    })
+
     it('different suggestionIds do not collide (independent cache entries)', () => {
         const text = 'hello world'
         let walks = 0

@@ -82,7 +82,12 @@ const VERIFY_CACHE_CAP = 4096
  */
 const verifyCache = new Map<
     number,
-    { hash: string; result: { start: number; end: number } | null }
+    {
+        hash: string
+        spanStart: number
+        spanEnd: number
+        result: { start: number; end: number } | null
+    }
 >()
 
 export function verifyByteSpanWithCache(
@@ -94,9 +99,27 @@ export function verifyByteSpanWithCache(
 ): { start: number; end: number } | null {
     if (suggestionId === undefined) return verify(text, span)
     const cached = verifyCache.get(suggestionId)
-    if (cached && cached.hash === textHash) return cached.result
+    // Key on (id, textHash, span): the id alone is NOT a complete key —
+    // the same bridge id can be reused with a DIFFERENT span (e.g. across
+    // checks, or across tests sharing the module-scoped cache). Validating
+    // the span on hit keeps the result provably correct under id reuse;
+    // for production traffic (same id ⇒ same span per text) the hit rate
+    // is unchanged.
+    if (
+        cached &&
+        cached.hash === textHash &&
+        cached.spanStart === span.start &&
+        cached.spanEnd === span.end
+    ) {
+        return cached.result
+    }
     const result = verify(text, span)
-    verifyCache.set(suggestionId, { hash: textHash, result })
+    verifyCache.set(suggestionId, {
+        hash: textHash,
+        spanStart: span.start,
+        spanEnd: span.end,
+        result,
+    })
     if (verifyCache.size > VERIFY_CACHE_CAP) {
         // FIFO eviction: Map preserves insertion order, so the first
         // key is the oldest. Safe because the bridge id is monotonic
