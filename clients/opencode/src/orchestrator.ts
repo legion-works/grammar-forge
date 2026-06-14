@@ -36,24 +36,11 @@ import { maskPastePlaceholders } from "./paste-mask";
 import { createDetailsState, type DetailsState } from "./details-state";
 import { detectPromptPinSupport } from "./feature-detect";
 import { logDebug } from "./debug";
+import { CATEGORY_FG } from "./category-palette";
 import type { PromptRef, TuiApi } from "./opencode-types";
 import type { PanelController, PanelView } from "./details-panel-view";
 
 const SIGNAL_SOURCE = "opencode";
-
-// Display color per category. Mirrors CATEGORY_META.badge in
-// clients/browser/src/api/category.ts — keep in sync if the browser
-// palette changes. `badge` is the brighter of the two swatches per
-// category and reads well as a terminal underline foreground on both
-// light and dark backgrounds.
-const CATEGORY_FG: Record<string, string> = {
-    spelling: "#ef4444",
-    grammar: "#eab308",
-    punctuation: "#06b6d4",
-    style: "#8b5cf6",
-    typography: "#6b7280",
-    unknown: "#9ca3af",
-};
 
 const DEFAULT_BRIDGE_URL = "http://localhost:8000";
 const DEFAULT_REALTIME_DELAY_MS = 500;
@@ -255,7 +242,7 @@ export function startOrchestrator(
         if (!syntax) return null;
         const id = syntax.registerStyle(`extmark.grammarforge.${category}`, {
             underline: true,
-            fg: CATEGORY_FG[category] ?? CATEGORY_FG.unknown,
+            fg: (CATEGORY_FG as Record<string, string>)[category] ?? CATEGORY_FG.unknown,
         });
         styleIds.set(category, id);
         return id;
