@@ -204,4 +204,89 @@ describe('createHighlightLayer', () => {
         layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 }])
         expect(() => layer.flashApplied(5)).not.toThrow()
     })
+
+    it('updateItem changes only the targeted pooled node', () => {
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'grammar', itemIndex: 1 },
+            { rect: new DOMRect(0, 40, 50, 16), category: 'typography', itemIndex: 2 },
+        ])
+        const before = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        const originalB = before[1]!.getAttribute('aria-hidden')
+        layer.updateItem(1, { rect: new DOMRect(5, 25, 60, 16), category: 'style' })
+        const after = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        // Same pooled nodes (no rebuild).
+        expect(after).toEqual(before)
+        // Item 0 untouched.
+        expect((after[0] as HTMLElement).style.left).toBe('0px')
+        expect((after[0] as HTMLElement).style.getPropertyValue('--gf-hl')).toBe('#dc2626')
+        // Item 1 restyled in place.
+        expect((after[1] as HTMLElement).style.left).toBe('5px')
+        expect((after[1] as HTMLElement).style.top).toBe('25px')
+        expect((after[1] as HTMLElement).style.width).toBe('60px')
+        expect((after[1] as HTMLElement).style.getPropertyValue('--gf-hl')).toBe('#7c3aed')
+        expect(after[1]!.getAttribute('aria-hidden')).toBe(originalB)
+        // Item 2 untouched.
+        expect((after[2] as HTMLElement).style.left).toBe('0px')
+        expect((after[2] as HTMLElement).style.top).toBe('40px')
+    })
+
+    it('updateItem applies the last state to the touched node (no flicker)', () => {
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.setState({ focused: true, hoverItemIndex: 0 })
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 1 },
+        ])
+        // Move the hover to item 1; the hover class must persist on item 1
+        // after updateItem changes its rect.
+        layer.setState({ focused: true, hoverItemIndex: 1 })
+        layer.updateItem(1, { rect: new DOMRect(0, 25, 50, 16), category: 'spelling' })
+        const nodes = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        expect(nodes[0]!.classList.contains('gf-highlight--hover')).toBe(false)
+        expect(nodes[0]!.classList.contains('gf-highlight--focus')).toBe(true)
+        expect(nodes[1]!.classList.contains('gf-highlight--hover')).toBe(true)
+        expect(nodes[1]!.classList.contains('gf-highlight--focus')).toBe(true)
+    })
+
+    it('updateItem is a no-op for an itemIndex past the end', () => {
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 }])
+        // Plan deviation: the plan's literal omitted `category` from the args,
+        // which is a type error (Omit<HighlightSpec, 'itemIndex'> requires both
+        // rect + category). The contract is still "no-op" — the test asserts
+        // the call doesn't throw.
+        expect(() =>
+            layer.updateItem(5, { rect: new DOMRect(0, 0, 10, 10), category: 'spelling' }),
+        ).not.toThrow()
+    })
+
+    it('clearItem hides only the targeted pooled node (display:none)', () => {
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.reconcile([
+            { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
+            { rect: new DOMRect(0, 20, 50, 16), category: 'grammar', itemIndex: 1 },
+        ])
+        const before = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        layer.clearItem(1)
+        const after = Array.from(root.querySelectorAll('.gf-highlight')) as HTMLElement[]
+        // Same pooled nodes (no rebuild / no removal).
+        expect(after).toEqual(before)
+        // Item 1 hidden.
+        expect((after[1] as HTMLElement).style.display).toBe('none')
+        // Item 0 still visible.
+        expect((after[0] as HTMLElement).style.display).toBe('')
+    })
+
+    it('clearItem is a no-op for an itemIndex past the end', () => {
+        const root = mkRoot()
+        const layer = createHighlightLayer(root)
+        layer.reconcile([{ rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 }])
+        expect(() => layer.clearItem(5)).not.toThrow()
+    })
 })
