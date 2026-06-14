@@ -53,6 +53,12 @@ type PromptBuilder interface {
 	// return Build(req) byte-identical. See prompt.Builder for the
 	// contract.
 	BuildWithSpellingHints(req Request, hints []Suggestion) Prompt
+	// BuildTone renders a tone-analysis prompt. On chat_instruct it returns a
+	// system prompt fixing the tone vocabulary + a strict-JSON instruction with
+	// User=text. On GRMR-native (no system slot, correction-tuned) it returns
+	// an empty User as the skip signal (the service short-circuits, like
+	// BuildStyle) since GRMR cannot do tone tagging.
+	BuildTone(req ToneRequest) Prompt
 }
 
 // Prompt is a backend-agnostic prompt; the LLMClient renders it to the wire.

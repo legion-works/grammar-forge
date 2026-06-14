@@ -93,6 +93,15 @@ const styleSystemPrompt = "You are a writing style assistant. Suggest STYLE and 
 	"café, naïve, résumé exactly). Return ONLY the improved text — no explanation, " +
 	"quotes, or preamble."
 
+// toneSystemPrompt is the chat_instruct instruction for tone analysis. Keep the
+// tag list in sync with correction.ToneTags.
+const toneSystemPrompt = "You are a tone analysis assistant. Analyze the tone of the user's text. " +
+	"Respond with ONLY a JSON object and nothing else — no prose, no markdown fences. " +
+	`Format: {"tags":[{"tag":"<tag>","confidence":<number between 0 and 1>}]}. ` +
+	"Use only these tags: neutral, formal, casual, friendly, polite, confident, direct, " +
+	"frustrated, aggressive, anxious, sarcastic, passive-aggressive, optimistic, urgent, sincere. " +
+	`Return every tag that applies with its confidence; if none apply, return {"tags":[]}.`
+
 // Builder implements correction.PromptBuilder for one configured format.
 type Builder struct {
 	chat         bool // true => chat_instruct, false => grmr_native
@@ -473,6 +482,22 @@ func (b *Builder) BuildStyle(req correction.Request) correction.Prompt {
 	// GRMR-native: no-op. Picky-mode is a chat-model feature; the native
 	// format is correction-tuned. Return the empty-User skip signal so the
 	// service can short-circuit the LLM call.
+	return correction.Prompt{
+		User:     "",
+		Template: correction.TemplateGRMRNative,
+	}
+}
+
+// BuildTone renders a tone-analysis prompt. See the PromptBuilder interface doc.
+func (b *Builder) BuildTone(req correction.ToneRequest) correction.Prompt {
+	if b.chat {
+		return correction.Prompt{
+			System:   toneSystemPrompt,
+			User:     req.Text,
+			Template: correction.TemplateChatInstruct,
+		}
+	}
+	// GRMR-native: correction-tuned, no instruction slot. Empty User = skip.
 	return correction.Prompt{
 		User:     "",
 		Template: correction.TemplateGRMRNative,

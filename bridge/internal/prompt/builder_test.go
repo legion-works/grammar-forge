@@ -623,3 +623,19 @@ func TestBuildWithSpellingHintsEscapesEmbeddedQuoteAndNewline(t *testing.T) {
 	require.NotRegexp(t, `[^\\]"(Ignore)`, got.System,
 		"unescaped quote followed by an instruction word would be a break-out")
 }
+
+func TestBuildToneChat(t *testing.T) {
+	b := New("chat_instruct")
+	p := b.BuildTone(correction.ToneRequest{Text: "ugh fine whatever"})
+	require.Equal(t, correction.TemplateChatInstruct, p.Template)
+	require.Equal(t, "ugh fine whatever", p.User)
+	require.Contains(t, p.System, "frustrated")
+	require.Contains(t, p.System, "passive-aggressive")
+	require.Contains(t, p.System, `"tags"`)
+}
+
+func TestBuildToneGRMRNativeSkips(t *testing.T) {
+	b := New("grmr_native")
+	p := b.BuildTone(correction.ToneRequest{Text: "ugh fine whatever"})
+	require.Empty(t, p.User, "GRMR-native is the skip signal (empty User)")
+}
