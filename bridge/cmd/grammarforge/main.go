@@ -130,6 +130,13 @@ func main() {
 	// luggages→luggage's) with the correct plural (teeth, women, luggage).
 	// Default on; GF_IRREGULAR_PLURAL_FIX=false disables.
 	svc.SetIrregularPluralFix(cfg.IrregularPluralFixEnabled)
+	// Harper mid-sentence capitalization misfire filter: applied to fast-path
+	// suggestions per-corrector. Drops capitalization-only edits of
+	// unambiguous function words (e.g. on→On, he→He) at non-sentence-start
+	// positions. Proper nouns (taipei→Taipei), "i"→"I", and true
+	// sentence-start capitalizations are always preserved. Default on;
+	// GF_CAPITALIZATION_FIX=false disables.
+	svc.SetCapitalizationFix(cfg.CapitalizationFixEnabled)
 	// Merge-not-replace escalation composition (experimental spike; default
 	// "" keeps the measured replace semantics). See correction.MergeFastEdits*.
 	if cfg.MergeFastEditsMode != "" {
