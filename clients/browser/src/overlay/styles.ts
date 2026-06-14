@@ -951,4 +951,406 @@ export const OVERLAY_CSS = `
     from { opacity: 0; }
     to   { opacity: 1; }
   }
+
+  /* ============================================================
+   * SHARED DESIGN SYSTEM (ported from
+   * .opencode/specs/2026-06-15-client-redesign/handoff/scss/).
+   * The [data-gf-theme="light|dark"] attribute on the host picks
+   * the palette; Vencord always renders data-gf-theme="dark", the
+   * browser extension should set it from page/OS theme. No-attribute
+   * default is the existing light-dark() behaviour in the rules
+   * above (the new tokens/classes below only apply when the
+   * attribute is set).
+   *
+   * ENTRANCE ANIMATION RULE: surface entrance keyframes
+   * (gf-pop, gf-panel-in, gf-celebrate) animate TRANSFORM ONLY —
+   * never opacity. Surfaces default to opacity:1 so a reduced-
+   * motion or non-animating context never strands a popover
+   * invisible. Toasts, scan lines, and pips may animate opacity
+   * (they are not surface popovers).
+   * ============================================================ */
+
+  /* ----- Design tokens: light theme ----- */
+  :host([data-gf-theme="light"]) {
+    --gf-accent: #2563eb;
+    --gf-accent-hover: #1d4ed8;
+    --gf-accent-soft: rgba(37, 99, 235, 0.18);
+    --gf-cat-spelling: #ef4444;
+    --gf-cat-grammar: #eab308;
+    --gf-cat-punctuation: #06b6d4;
+    --gf-cat-style: #8b5cf6;
+    --gf-cat-typography: #6b7280;
+    --gf-band-excellent: #16a34a;
+    --gf-band-good: #0891b2;
+    --gf-band-fair: #d97706;
+    --gf-band-needswork: #dc2626;
+    --gf-conf-high: #16a34a;
+    --gf-conf-medium: #d97706;
+    --gf-conf-low: #64748b;
+    --gf-diff-old: #b91c1c;
+    --gf-diff-new: #15803d;
+    --gf-ai-violet: #8b5cf6;
+    --gf-ai-text: #7c3aed;
+    --gf-success: #22c55e;
+    --gf-ui: #0f172a;
+    --gf-muted: #64748b;
+    --gf-faint: #94a3b8;
+    --gf-ink: #21242b;
+    --gf-r-pill: 9999px;
+    --gf-r-panel: 16px;
+    --gf-r-card: 14px;
+    --gf-r-chip: 8px;
+    --gf-sp-1: 4px;
+    --gf-sp-2: 6px;
+    --gf-sp-3: 8px;
+    --gf-sp-4: 11px;
+    --gf-sp-5: 14px;
+    --gf-dur-fast: 120ms;
+    --gf-dur-pop: 180ms;
+    --gf-dur-panel: 240ms;
+    --gf-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* ----- Design tokens: dark theme ----- */
+  :host([data-gf-theme="dark"]) {
+    --gf-accent: #2563eb;
+    --gf-accent-hover: #1d4ed8;
+    --gf-accent-soft: rgba(37, 99, 235, 0.18);
+    --gf-cat-spelling: #ef4444;
+    --gf-cat-grammar: #eab308;
+    --gf-cat-punctuation: #06b6d4;
+    --gf-cat-style: #8b5cf6;
+    --gf-cat-typography: #6b7280;
+    --gf-band-excellent: #16a34a;
+    --gf-band-good: #0891b2;
+    --gf-band-fair: #d97706;
+    --gf-band-needswork: #dc2626;
+    --gf-conf-high: #16a34a;
+    --gf-conf-medium: #d97706;
+    --gf-conf-low: #6d7079;
+    --gf-diff-old: #fca5a5;
+    --gf-diff-new: #86efac;
+    --gf-ai-violet: #8b5cf6;
+    --gf-ai-text: #c4b5fd;
+    --gf-success: #22c55e;
+    --gf-ui: #f1f3f6;
+    --gf-muted: #b5bac1;
+    --gf-faint: #6d7079;
+    --gf-ink: #dfe2e8;
+    --gf-r-pill: 9999px;
+    --gf-r-panel: 16px;
+    --gf-r-card: 14px;
+    --gf-r-chip: 8px;
+    --gf-sp-1: 4px;
+    --gf-sp-2: 6px;
+    --gf-sp-3: 8px;
+    --gf-sp-4: 11px;
+    --gf-sp-5: 14px;
+    --gf-dur-fast: 120ms;
+    --gf-dur-pop: 180ms;
+    --gf-dur-panel: 240ms;
+    --gf-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* ----- Glass surface (light + dark variants) -----
+   * Apply to any floating GF surface by adding both .gf-surface
+   * and the per-host data-gf-theme attribute. Position/inset/width
+   * are component-specific (set on .gf-card / .gf-panel / .gf-orb
+   * etc); the glass material here is the shared recipe. */
+  :host([data-gf-theme="light"]) .gf-surface {
+    position: relative;
+    isolation: isolate;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.80) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.70);
+    backdrop-filter: blur(34px) saturate(195%) brightness(1.04);
+    -webkit-backdrop-filter: blur(34px) saturate(195%) brightness(1.04);
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08), 0 18px 50px rgba(15, 23, 42, 0.16);
+    color: var(--gf-ui);
+    border-radius: var(--gf-r-card);
+  }
+  :host([data-gf-theme="light"]) .gf-surface::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      inset 0 2px 1.5px rgba(255, 255, 255, 0.95),
+      inset 1px 0 1px rgba(255, 255, 255, 0.50),
+      inset -1px 0 1px rgba(255, 255, 255, 0.50),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.50),
+      inset 0 -1.5px 1.5px rgba(15, 23, 42, 0.06);
+  }
+  :host([data-gf-theme="dark"]) .gf-surface {
+    position: relative;
+    isolation: isolate;
+    background: linear-gradient(180deg, rgba(54, 58, 68, 0.84) 0%, rgba(33, 36, 43, 0.80) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+    -webkit-backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.46), 0 22px 56px rgba(0, 0, 0, 0.56);
+    color: var(--gf-ink);
+    border-radius: var(--gf-r-card);
+  }
+  :host([data-gf-theme="dark"]) .gf-surface::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      inset 0 2px 2px rgba(255, 255, 255, 0.22),
+      inset 1px 0 1px rgba(255, 255, 255, 0.10),
+      inset -1px 0 1px rgba(255, 255, 255, 0.10),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.11),
+      inset 0 -2px 2px rgba(0, 0, 0, 0.42);
+  }
+
+  /* ----- Issue underline (in-composer marker) -----
+   * Underline ALWAYS shows. Background tint appears ONLY on
+   * hover or when the issue's card is open (.is-on). */
+  .gf-u {
+    text-decoration: underline wavy;
+    text-decoration-thickness: 1.7px;
+    text-underline-offset: 3px;
+    border-radius: 2px;
+    transition: background 120ms ease-out;
+    text-decoration-skip-ink: none;
+  }
+  .gf-u--spelling    { text-decoration-color: var(--gf-cat-spelling); }
+  .gf-u--spelling.is-on    { background: color-mix(in srgb, var(--gf-cat-spelling) 22%, transparent); }
+  .gf-u--grammar     { text-decoration-color: var(--gf-cat-grammar); }
+  .gf-u--grammar.is-on     { background: color-mix(in srgb, var(--gf-cat-grammar) 22%, transparent); }
+  .gf-u--punctuation { text-decoration-color: var(--gf-cat-punctuation); }
+  .gf-u--punctuation.is-on { background: color-mix(in srgb, var(--gf-cat-punctuation) 22%, transparent); }
+  .gf-u--style       { text-decoration-color: var(--gf-cat-style); }
+  .gf-u--style.is-on       { background: color-mix(in srgb, var(--gf-cat-style) 22%, transparent); }
+  .gf-u--typography  { text-decoration-color: var(--gf-cat-typography); }
+  .gf-u--typography.is-on  { background: color-mix(in srgb, var(--gf-cat-typography) 22%, transparent); }
+
+  /* ----- Hover preview pill (diff only) ----- */
+  .gf-tip {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gf-sp-2);
+    white-space: nowrap;
+    padding: 5px 11px;
+    border-radius: var(--gf-r-pill);
+    font: 500 12.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    pointer-events: none;
+    z-index: 30;
+  }
+  .gf-tip__dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .gf-tip__old { text-decoration: line-through; }
+  .gf-tip__new { font-weight: 700; }
+  .gf-tip__tail {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+  }
+  :host([data-gf-theme="dark"]) .gf-tip {
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    background: rgba(28, 30, 36, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--gf-ink);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.50);
+  }
+  :host([data-gf-theme="dark"]) .gf-tip__old { color: var(--gf-diff-old); }
+  :host([data-gf-theme="dark"]) .gf-tip__new { color: var(--gf-diff-new); }
+  :host([data-gf-theme="dark"]) .gf-tip__tail { border-top: 5px solid rgba(28, 30, 36, 0.94); }
+  :host([data-gf-theme="light"]) .gf-tip {
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    background: rgba(252, 252, 254, 0.96);
+    border: 1px solid rgba(15, 23, 42, 0.10);
+    color: #1f2937;
+    box-shadow: 0 6px 22px rgba(15, 23, 42, 0.18);
+  }
+  :host([data-gf-theme="light"]) .gf-tip__old { color: var(--gf-diff-old); }
+  :host([data-gf-theme="light"]) .gf-tip__new { color: var(--gf-diff-new); }
+  :host([data-gf-theme="light"]) .gf-tip__tail { border-top: 5px solid rgba(252, 252, 254, 0.96); }
+
+  /* ----- Correction card (the popover when wrapped in .gf-surface
+   *       + data-gf-theme on the host). The existing .gf-panel rules
+   *       above are the live correction popover; .gf-card is the
+   *       design-system canonical correction card for future use. */
+  .gf-card {
+    position: absolute;
+    width: 320px;
+    padding: var(--gf-sp-5);
+    z-index: 40;
+    animation: gf-pop var(--gf-dur-pop) var(--gf-ease);
+  }
+  .gf-card__head { display: flex; align-items: center; gap: var(--gf-sp-3); margin-bottom: 9px; }
+  .gf-card__cat  { font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.05em; }
+  .gf-card__msg  { font: 400 12.5px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin-bottom: var(--gf-sp-4); }
+  .gf-card__conf { display: flex; align-items: center; gap: var(--gf-sp-3); margin-bottom: var(--gf-sp-5); }
+  .gf-card__confbar { flex: 1; max-width: 120px; height: 5px; border-radius: 3px; overflow: hidden;
+                      background: rgba(127, 127, 140, 0.16); }
+  .gf-card__actions { display: flex; gap: var(--gf-sp-2); }
+  .gf-card__alts { display: flex; flex-wrap: wrap; gap: var(--gf-sp-2); margin-top: var(--gf-sp-4); }
+  .gf-card__dict { width: 100%; margin-top: var(--gf-sp-4); }
+  .gf-card__nav  { display: flex; align-items: center; gap: var(--gf-sp-3); margin-top: var(--gf-sp-4);
+                   padding-top: var(--gf-sp-3); border-top: 1px solid rgba(127, 127, 140, 0.18); }
+  .gf-card__tail { position: absolute; top: 100%; transform: translateX(-50%);
+                   width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; }
+
+  /* ----- Source chip (model provenance) ----- */
+  .gf-chip-source {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gf-sp-1);
+    height: 20px;
+    padding: 0 var(--gf-sp-3);
+    border-radius: var(--gf-r-pill);
+    font: 600 10.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    letter-spacing: 0.02em;
+    background: rgba(127, 127, 140, 0.10);
+    border: 1px solid rgba(127, 127, 140, 0.18);
+  }
+  .gf-chip-source--ai {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.22), rgba(37, 99, 235, 0.22));
+    border-color: rgba(139, 92, 246, 0.40);
+    color: var(--gf-ai-text);
+  }
+  .gf-chip-source__hint { opacity: 0.6; font-weight: 500; }
+
+  /* ----- Buttons ----- */
+  .gf-btn-primary {
+    height: 34px;
+    border: none;
+    border-radius: 9px;
+    cursor: pointer;
+    background: var(--gf-accent);
+    color: #fff;
+    font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    transition: background 120ms ease-out, transform 120ms ease-out, box-shadow 150ms ease-out;
+  }
+  .gf-btn-primary:hover { background: var(--gf-accent-hover); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(37, 99, 235, 0.42); }
+  .gf-btn-primary:active { transform: translateY(0); }
+  .gf-btn-soft {
+    height: 34px;
+    border: 1px solid rgba(127, 127, 140, 0.22);
+    border-radius: 9px;
+    cursor: pointer;
+    background: transparent;
+    font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    transition: background 120ms ease-out, transform 120ms ease-out;
+  }
+  .gf-btn-soft:hover { background: rgba(127, 127, 140, 0.14); transform: translateY(-1px); }
+
+  /* ----- Status pill / orb (entry point) ----- */
+  .gf-orb {
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 200ms var(--gf-ease);
+  }
+  .gf-orb:hover  { transform: scale(1.06); }
+  .gf-orb:active { transform: scale(0.97); }
+
+  /* ----- Grouped correction row in the assistant panel list ----- */
+  .gf-row {
+    display: flex;
+    align-items: center;
+    gap: var(--gf-sp-3);
+    width: 100%;
+    text-align: left;
+    padding: 8px 9px;
+    border: none;
+    border-radius: 9px;
+    cursor: pointer;
+    background: rgba(127, 127, 140, 0.06);
+    transition: background 120ms ease-out, transform 120ms ease-out;
+  }
+  .gf-row:hover { background: rgba(127, 127, 140, 0.14); transform: translateX(3px); }
+
+  /* ----- Rephrase / goals / synonyms popovers (new design).
+   *       Existing .gf-rephrase-btn / .gf-rephrase-card above are the
+   *       live in-page rephrase flow; the .gf-rephrase / .gf-goals /
+   *       .gf-syn classes here are the design-system canonical
+   *       popovers. */
+  .gf-rephrase { width: 360px; padding: 15px; border-radius: var(--gf-r-panel); z-index: 50; }
+  .gf-goals    { width: 300px; padding: 15px; border-radius: var(--gf-r-panel); z-index: 55; }
+  .gf-syn      { width: 190px; padding: 8px;  border-radius: 13px; z-index: 42; }
+
+  /* ----- Skeleton shimmer (LLM generating rephrase) ----- */
+  .gf-skel {
+    border-radius: 11px;
+    background: linear-gradient(90deg, rgba(127, 127, 140, 0.10) 25%, rgba(37, 99, 235, 0.18) 50%, rgba(127, 127, 140, 0.10) 75%);
+    background-size: 200% 100%;
+    animation: gf-shimmer 1.5s linear infinite;
+  }
+
+  /* ----- Segmented control (tabs / rephrase scope / goals / tone) ----- */
+  .gf-seg {
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: transparent;
+    transition: background 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out;
+  }
+  .gf-seg.is-active { background: rgba(127, 127, 140, 0.18); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
+
+  /* ----- Streaming scan line (fast-pass visual) ----- */
+  .gf-scanline {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 64px;
+    pointer-events: none;
+    z-index: 8;
+    background: linear-gradient(180deg, rgba(37, 99, 235, 0) 0%, rgba(37, 99, 235, 0.12) 50%, rgba(37, 99, 235, 0) 100%);
+    border-top: 1px solid rgba(37, 99, 235, 0.40);
+    animation: gf-scan 1100ms ease-in-out;
+  }
+
+  /* ----- Score ring (SVG arc; color = band, offset = 1 - score/100) ----- */
+  .gf-ring__arc { transition: stroke-dashoffset 600ms var(--gf-ease), stroke 400ms ease-out; }
+
+  /* ============================================================
+   * ENTRANCE KEYFRAMES (transform-only discipline).
+   * gf-pop, gf-panel-in, gf-celebrate animate transform ONLY so a
+   * reduced-motion / non-animating context never strands a surface
+   * at opacity:0. gf-toast-in / gf-scan / gf-pip / gf-shimmer are
+   * visual effects (not surface entrances) and may animate opacity.
+   * ============================================================ */
+  @keyframes gf-pop {
+    from { transform: scale(0.985) translateY(2px); }
+    to   { transform: none; }
+  }
+  @keyframes gf-panel-in {
+    from { transform: scale(0.965) translateY(8px); }
+    to   { transform: none; }
+  }
+  @keyframes gf-toast-in {
+    from { opacity: 0; transform: translate(-50%, 8px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+  }
+  @keyframes gf-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  @keyframes gf-scan {
+    0%        { top: -2%; opacity: 0; }
+    12%, 88%  { opacity: 1; }
+    100%      { top: 102%; opacity: 0; }
+  }
+  @keyframes gf-pip {
+    0%, 100% { transform: scale(1);    opacity: 1; }
+    50%      { transform: scale(1.16); opacity: 0.78; }
+  }
+  @keyframes gf-celebrate {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.16); }
+    70%  { transform: scale(0.96); }
+    100% { transform: scale(1); }
+  }
 `
