@@ -38,6 +38,7 @@ import {
     visibleItems,
 } from '@/lib/view-model'
 import { createOverlayHost, isWithinOverlay } from '@/overlay/shadow-host'
+import { mountScanline, removeScanline, type ScanlineHandle } from '@/overlay/scanline'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightSpec } from '@/overlay/highlight'
 import { getNativeHighlighter, isNativeHighlightSupported } from '@/overlay/native-highlight'
@@ -195,6 +196,17 @@ interface FieldState {
      * or on a clear-all (no items).
      */
     phase: import('@/api/types').Phase
+    /**
+     * W3-3 follow-up: per-field scan-line handle. Mounted when this
+     * field enters `phase === 'fast'` (the streaming fast→slow window,
+     * which the orb pip + panel banner already key on) and removed
+     * on `phase === 'done'` / detach / teardown. Per-field so two
+     * fields with overlapping phase windows don't share a sweep.
+     * The wrapper is anchored to the field's pre-measured rect
+     * (the flows.md §3 measure-before-rerender gotcha — measured
+     * BEFORE the render that would re-flow the underlay).
+     */
+    scanlineHandle: ScanlineHandle | null
 }
 
 interface ActiveSuggestion {
@@ -1011,6 +1023,8 @@ function wireRuntime(
             // first render (after attach) is the post-LLM steady state.
             // The 'fast' phase is set per-frame by renderStage().
             phase: 'done',
+            // W3-3 follow-up: scan-line is mounted on first `phase === 'fast'`.
+            scanlineHandle: null,
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -2235,6 +2249,12 @@ function wireRuntime(
         // are suggestions. Cleared first so the count===0 early-return leaves
         // no stale rects for the hover/click hit-test to match.
         state.itemRects = []
+        // W3-3 follow-up: measure the field rect BEFORE any rerender of the
+        // underlay. This is the flows.md §3 gotcha — a detached / post-
+        // mutation rect is all zeros, the scan-line would anchor to 0,0
+        // and the user sees a sweep across the top of the viewport. The
+        // status pill's anchor reads from the same `anchor` value, so the
+        // two surfaces always agree on the field's box.
         const anchor = el.getBoundingClientRect()
         const count = state.items.length
         debugLog('render', 'renderField', {
@@ -2243,6 +2263,23 @@ function wireRuntime(
             count,
             focused: document.activeElement === el,
         })
+        // W3-3 follow-up: scan-line mount/remove keyed on the SAME phase
+        // signal as the orb pip + panel banner. `phase === 'fast'` → mount
+        // (or re-anchor the live handle if the field grew during typing);
+        // `phase === 'done'` → detach. Runs BEFORE the count===0 early
+        // return so a phase-flipped catch path (items cleared, phase='done')
+        // still tears down a stale scan-line. Per-field via state.scanlineHandle
+        // — a second field's mount doesn't share a sweep with this one.
+        if (state.phase === 'fast') {
+            if (state.scanlineHandle && state.scanlineHandle.isMounted()) {
+                state.scanlineHandle.update(anchor)
+            } else {
+                state.scanlineHandle = mountScanline(runtime.overlay, anchor)
+            }
+        } else if (state.scanlineHandle) {
+            removeScanline(state.scanlineHandle)
+            state.scanlineHandle = null
+        }
         // W3-1: compute score + band via the view-model helpers. The
         // visible items run through `visibleItems` (LLM items dropped
         // on 'fast', style items dropped on 'informal') so the orb's
@@ -2333,6 +2370,15 @@ function wireRuntime(
                     const h = openPopovers.get(el)
                     h?.hide()
                     openPopovers.delete(el)
+                },
+                // W3-3 follow-up: scan-line destroyer so the attachment
+                // tears it down on detach/teardown. Mirrors the highlight
+                // + pill pattern.
+                scanlineDestroy: () => {
+                    if (state.scanlineHandle) {
+                        removeScanline(state.scanlineHandle)
+                        state.scanlineHandle = null
+                    }
                 },
             })
             return
@@ -2447,6 +2493,16 @@ function wireRuntime(
                 const h = openPopovers.get(el)
                 h?.hide()
                 openPopovers.delete(el)
+            },
+            // W3-3 follow-up: scan-line destroyer so the attachment tears
+            // it down on detach/teardown. The scan-line itself was
+            // mounted/updated in place at the top of this function; the
+            // destroyer just nulls the handle and removes the wrapper.
+            scanlineDestroy: () => {
+                if (state.scanlineHandle) {
+                    removeScanline(state.scanlineHandle)
+                    state.scanlineHandle = null
+                }
             },
         })
     }

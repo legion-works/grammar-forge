@@ -32,6 +32,14 @@ export interface FieldHandles {
     popoverHide?: () => void
     /** Called once on detach. Omitted when the status pill is not rendered. */
     statusDestroy?: () => void
+    /**
+     * Called once on detach. Omitted when no scan-line is mounted. The
+     * scan-line is the streaming-fast visual (mountScanline /
+     * removeScanline in @/overlay/scanline); it lives only during
+     * `phase === 'fast'`, so most renders pass undefined here and the
+     * attachment has nothing to clean up.
+     */
+    scanlineDestroy?: () => void
 }
 
 export interface FieldAttachmentOptions {
@@ -172,14 +180,18 @@ export function createFieldAttachment(
         }
     }
 
-    // Run the PERSISTENT destroy hooks (highlight + status pill). Both are
-    // UPDATED IN PLACE on each render — the highlight layer via reconcile /
-    // setFieldHighlights, the pill via statusHandle.update (perf 67a3192) —
-    // not destroyed+recreated. So these must run ONLY on detach / field-gone,
-    // never on a per-render swap. Running them on a swap was the "highlights
-    // die on the first edit" bug, and (same class) the "pill dies when the
-    // SSE final frame lands" bug: the prior render's destroyer pointed at the
-    // SAME kept layer/handle the new render had just updated.
+    // Run the PERSISTENT destroy hooks (highlight + status pill + scan-line).
+    // The highlight and pill are UPDATED IN PLACE on each render — the
+    // highlight layer via reconcile / setFieldHighlights, the pill via
+    // statusHandle.update (perf 67a3192) — not destroyed+recreated. The
+    // scan-line is the same shape: when `phase === 'fast'` is held across
+    // a render, the orchestrator calls `handle.update(rect)` in place
+    // rather than re-mounting (the keyframe timeline keeps sweeping).
+    // So these must run ONLY on detach / field-gone, never on a per-
+    // render swap. Running them on a swap was the "highlights die on
+    // the first edit" bug, and (same class) the "pill dies when the SSE
+    // final frame lands" bug: the prior render's destroyer pointed at
+    // the SAME kept layer/handle the new render had just updated.
     const runPersistentDestroyers = (h: FieldHandles): void => {
         try {
             h.highlightDestroy?.()
@@ -191,26 +203,33 @@ export function createFieldAttachment(
         } catch {
             // ignore
         }
+        try {
+            h.scanlineDestroy?.()
+        } catch {
+            // ignore
+        }
     }
 
     const setHandles = (next: FieldHandles): void => {
         if (detached) return
         // Tear down only the PREVIOUS render's TRANSIENT overlay (the popover)
         // before adopting the new handles — the swap stays atomic for it. The
-        // highlight AND the status pill are persistent (updated in place by
-        // the new render), so their destroyers are carried forward, NOT run
-        // here; running them would wipe the highlights / kill the pill the
-        // new render just updated.
+        // highlight AND the status pill AND the scan-line are persistent
+        // (updated in place by the new render), so their destroyers are
+        // carried forward, NOT run here; running them would wipe the
+        // highlights / kill the pill / kill the sweep the new render just
+        // updated.
         runTransientDestroyers(handles)
-        // Carry forward highlightDestroy/statusDestroy when the caller didn't
-        // supply new ones, so detach can still clear the persistent highlight
-        // + pill. renderField always supplies both (pointing at the same
-        // persistent layer/handle), so in practice this just replaces
-        // like-for-like.
+        // Carry forward highlightDestroy/statusDestroy/scanlineDestroy when
+        // the caller didn't supply new ones, so detach can still clear the
+        // persistent highlight + pill + scan-line. renderField always
+        // supplies all three (pointing at the same persistent layer/handle),
+        // so in practice this just replaces like-for-like.
         handles = {
             ...next,
             highlightDestroy: next.highlightDestroy ?? handles.highlightDestroy,
             statusDestroy: next.statusDestroy ?? handles.statusDestroy,
+            scanlineDestroy: next.scanlineDestroy ?? handles.scanlineDestroy,
         }
     }
 

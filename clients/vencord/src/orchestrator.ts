@@ -27,6 +27,7 @@ import { addWordToDictionary, type DictionaryDeps } from './dictionary'
 import { openRephraseFor, resolveRephraseScope, type RephraseDeps } from './rephrase'
 import { configureVencordDebug, debugLog } from './debug-log'
 import { createOverlayHost, isWithinOverlay } from '@/overlay/shadow-host'
+import { mountScanline, removeScanline, type ScanlineHandle } from '@/overlay/scanline'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightLayer, type HighlightSpec } from '@/overlay/highlight'
 import { showPopover, dismissPopoversIn, type PopoverHandle } from '@/overlay/popover'
@@ -152,6 +153,12 @@ interface FieldState {
      *  while in 'fast'. Per-field so a re-check on one composer doesn't
      *  leak phase into another. */
     phase: Phase
+    /** W3-3 follow-up: per-field scan-line handle. Mounted when this field
+     *  enters `phase === 'fast'` (the streaming fast→slow window, which
+     *  the orb pip + panel banner already key on) and removed on
+     *  `phase === 'done'` / teardown. Per-field so two composers with
+     *  overlapping phase windows don't share a sweep. */
+    scanlineHandle: ScanlineHandle | null
 }
 
 export interface OrchestratorApi {
@@ -326,6 +333,30 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
 
     const renderField = (el: HTMLElement, st: FieldState): void => {
         st.itemRects = []
+        // W3-3 follow-up: measure the composer rect BEFORE any rerender of
+        // the underlay (flows.md §3 gotcha — a post-mutation rect is all
+        // zeros and the scan-line would anchor to 0,0). The pill's anchor
+        // reads from the same value when no pill is mounted yet, so the
+        // two surfaces always agree on the field's box.
+        const anchor = el.getBoundingClientRect()
+        // W3-3 follow-up: scan-line mount/remove keyed on the SAME phase
+        // signal as the orb pip + panel banner. `phase === 'fast'` →
+        // mount (or re-anchor the live handle if the composer grew during
+        // typing); `phase === 'done'` → detach. Runs BEFORE the
+        // items===0 early return so a phase-flipped catch path
+        // (items cleared, phase='done' — see rerunFor's catch arm) still
+        // tears down a stale scan-line. Per-field via st.scanlineHandle —
+        // a second composer's mount doesn't share a sweep with this one.
+        if (st.phase === 'fast') {
+            if (st.scanlineHandle && st.scanlineHandle.isMounted()) {
+                st.scanlineHandle.update(anchor)
+            } else {
+                st.scanlineHandle = mountScanline(overlay, anchor)
+            }
+        } else if (st.scanlineHandle) {
+            removeScanline(st.scanlineHandle)
+            st.scanlineHandle = null
+        }
         if (st.items.length === 0) {
             st.highlightLayer?.reconcile([])
             // A cleared field is no longer "last-active" unless the user is
@@ -405,6 +436,11 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             if (paused) return
             if (!el.isConnected) {
                 st.items = []
+                // W3-3 follow-up: a detached field can't host a scan-line.
+                // Reset phase so the gate tears it down (a stale 'fast'
+                // from a mid-check fast frame would otherwise leave a
+                // sweep pinned to 0,0 in the overlay host).
+                st.phase = 'done'
                 renderField(el, st)
                 return
             }
@@ -1217,6 +1253,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             st.items = []
             st.itemRects = []
             st.lastApplied = null
+            // W3-3 follow-up: a paused composer must not show a stale
+            // streaming scan-line. Reset phase so renderField's scan-line
+            // gate (mount on 'fast' / remove on 'done') tears it down.
+            // Mirrors the browser's catch path which sets both items=[]
+            // AND phase='done' atomically.
+            st.phase = 'done'
             renderField(el, st)
         }
         // Refresh the pill (disabled: paused) so the surface reflects the
@@ -1402,6 +1444,8 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // no check yet renders an empty pill cleanly; the first
             // check transitions fast → done and the orb updates.
             phase: 'done',
+            // W3-3 follow-up: scan-line is mounted on first `phase === 'fast'`.
+            scanlineHandle: null,
         }
         fields.set(el, st)
         trackedFields.add(el)
