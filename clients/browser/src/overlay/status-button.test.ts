@@ -245,24 +245,23 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
         // The orb is position:fixed; its authoritative position is style.left/
         // top (what we set), NOT offsetLeft (layout-derived, may differ → a
         // visual jump at drag start). The drag must start from style.left/top.
-        // The W2 orb is 60×60 (the W1 pill was 110×28 — these numbers follow
-        // the new ORB_SIZE fallback; if ORB_SIZE changes, update the math).
+        // The W2 orb is 44×44 (DC: orbSize = z(46,40); if ORB_SIZE changes, update the math).
         const root = mkRoot()
-        // ANCHOR 400×200 → default bottom-right style.left = 500-60-8 = 432,
-        // style.top = 300-60-8 = 232.
+        // ANCHOR 400×200 → default bottom-right style.left = 500-44-8 = 448,
+        // style.top = 300-44-8 = 248.
         renderStatusButton(root, mkOptions())
         const orb = root.querySelector('.gf-orb') as HTMLElement
-        expect(positionOf(orb).x).toBe(432)
-        expect(positionOf(orb).y).toBe(232)
+        expect(positionOf(orb).x).toBe(448)
+        expect(positionOf(orb).y).toBe(248)
         orb.dispatchEvent(
             new PointerEvent('pointerdown', { clientX: 200, clientY: 200, bubbles: true }),
         )
         orb.dispatchEvent(
             new PointerEvent('pointermove', { clientX: 230, clientY: 250, bubbles: true }),
         )
-        // Moved +30,+50 from the style start (432,232) → 462, 282.
-        expect(positionOf(orb).x).toBe(462)
-        expect(positionOf(orb).y).toBe(282)
+        // Moved +30,+50 from the style start (448,248) → 478, 298.
+        expect(positionOf(orb).x).toBe(478)
+        expect(positionOf(orb).y).toBe(298)
         orb.dispatchEvent(
             new PointerEvent('pointerup', { clientX: 230, clientY: 250, bubbles: true }),
         )
@@ -293,11 +292,11 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
         const orb = root.querySelector('.gf-orb') as HTMLElement
         // Re-anchor to a field that has scrolled up by 100px.
         handle.reposition(new DOMRect(100, 0, 400, 200))
-        // right=500, bottom=200 → 500-60-8+10 = 442 ; 200-60-8+20 = 152
-        // (left 442 > maxLeft 432 → clamped to 432; top 152 > maxTop 132 →
-        // clamped to 132).
-        expect(positionOf(orb).x).toBe(432)
-        expect(positionOf(orb).y).toBe(132)
+        // right=500, bottom=200 → 500-44-8+10 = 458 ; 200-44-8+20 = 168
+        // (left 458 > maxLeft 448 → clamped to 448; top 168 > maxTop 148 →
+        // clamped to 148).
+        expect(positionOf(orb).x).toBe(448)
+        expect(positionOf(orb).y).toBe(148)
     })
 
     it('dragging the orb past the threshold reports a new accumulated offset', () => {
@@ -419,9 +418,9 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
         const root = mkRoot()
         renderStatusButton(root, mkOptions({ count: 1 }))
         const orb = root.querySelector('.gf-orb') as HTMLElement
-        // Default bottom-right of the ANCHOR (100,100,400,200) = (432, 232).
-        expect(orb.style.left).toBe('432px')
-        expect(orb.style.top).toBe('232px')
+        // Default bottom-right of the ANCHOR (100,100,400,200) = (448, 248).
+        expect(orb.style.left).toBe('448px')
+        expect(orb.style.top).toBe('248px')
         // No transform translate — the transform property is free for the
         // W2 :hover/:active scale to own.
         expect(orb.style.transform).toBe('')
@@ -430,23 +429,23 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
     it('a drag offset within the field shifts the orb (bound to the field)', () => {
         const root = mkRoot()
         // ANCHOR is 400×200 (right=500,bottom=300). A small offset keeps the
-        // 60×60 orb inside the field box. Default bottom-right = (432, 232);
+        // 44×44 orb inside the field box. Default bottom-right = (448, 248);
         // a (-50,-40) offset moves it up/left, still within the field.
         renderStatusButton(root, mkOptions({ dragOffset: { dx: -50, dy: -40 } }))
         const orb = root.querySelector('.gf-orb') as HTMLElement
-        expect(positionOf(orb).x).toBe(382)
-        expect(positionOf(orb).y).toBe(192)
+        expect(positionOf(orb).x).toBe(398)
+        expect(positionOf(orb).y).toBe(208)
     })
 
     it('a drag offset cannot push the orb outside the field box (clamped to field)', () => {
         const root = mkRoot()
-        // A big positive offset would put the 60×60 orb past the field's
+        // A big positive offset would put the 44×44 orb past the field's
         // bottom-right; the field-clamp pins it to the field's far edge.
-        // maxLeft = 500-60-8 = 432 ; maxTop = 300-60-8 = 232.
+        // maxLeft = 500-44-8 = 448 ; maxTop = 300-44-8 = 248.
         renderStatusButton(root, mkOptions({ dragOffset: { dx: 500, dy: 500 } }))
         const orb = root.querySelector('.gf-orb') as HTMLElement
-        expect(positionOf(orb).x).toBe(432)
-        expect(positionOf(orb).y).toBe(232)
+        expect(positionOf(orb).x).toBe(448)
+        expect(positionOf(orb).y).toBe(248)
     })
 
     it('W2b: the orb does NOT render a .gf-pill-panel on click (the W1 hover panel is retired)', () => {

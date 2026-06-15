@@ -151,8 +151,8 @@ export const OVERLAY_CSS = `
   .gf-orb {
     position: fixed;
     display: block;
-    width: 60px;
-    height: 60px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     isolation: isolate;
     contain: layout paint;

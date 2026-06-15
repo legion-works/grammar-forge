@@ -36,7 +36,7 @@ describe('DEFAULT_SETTINGS', () => {
             acceptHotkey: 'Alt+Period',
             onDemandHotkey: 'Ctrl+Shift+Period',
             rephraseHotkey: 'Ctrl+/',
-            suppressNativeSpellcheck: false,
+            suppressNativeSpellcheck: true,
             debugLogging: false,
             rephraseTone: '',
             rephraseStyle: '',

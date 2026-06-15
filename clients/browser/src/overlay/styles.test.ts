@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // CSS-string assertions for OVERLAY_CSS. Visual layout can't be jsdom-tested
 // (no real layout engine), but the load-bearing CSS invariants — the .gf-orb
-// 60×60 sizing, the .gf-card Popover-API override, the .gf-panel-aside fixed
+// 44×44 sizing (DC: orbSize = z(46,40)), the .gf-card Popover-API override, the .gf-panel-aside fixed
 // positioning, the .gf-u is-on tint — CAN be asserted against the string.
 // These tests would have caught all three W2 live bugs.
 import { describe, expect, it } from 'vitest'
@@ -9,15 +9,12 @@ import { OVERLAY_CSS } from '@/overlay/styles'
 
 describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
     describe('.gf-orb (score orb)', () => {
-        it('constrains the orb to 60×60 (W1 sizing carried into W2)', () => {
-            // Bug-fix: the W1 .gf-orb sets width: 60px; height: 60px. The W2
-            // redesign added a second .gf-orb rule (border-radius, hover
-            // scale) but did NOT re-constrain the size. The 60×60 must stay
-            // — the W2 .gf-orb rule is additive only. If someone removes the
-            // W1 width/height, the orb falls back to its intrinsic size
-            // (a 60px SVG + padding = ~76px) and renders HUGE + clipped.
-            const rule = /\.gf-orb\s*\{[^}]*width:\s*60px[^}]*height:\s*60px/s.exec(OVERLAY_CSS)
-            expect(rule, 'W1 .gf-orb must set width:60px + height:60px').not.toBeNull()
+        it('constrains the orb to 44×44 (DC: orbSize = z(46,40); reduced from 60 in round 6)', () => {
+            // The DC specifies orbSize = z(46, 40) — 46px desktop, 40px mobile.
+            // We use 44px as the fixed size. The explicit size must be set so
+            // the orb doesn't grow to fit its SVG child.
+            const rule = /\.gf-orb\s*\{[^}]*width:\s*44px[^}]*height:\s*44px/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-orb must set width:44px + height:44px').not.toBeNull()
         })
 
         it('is position: fixed (not absolute) so the orb anchors to the viewport', () => {

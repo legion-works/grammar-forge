@@ -14,7 +14,7 @@
 import type { Band, Category, Phase } from '@/api/types'
 import { orbState } from '@/lib/view-model'
 
-const ORB_SIZE = 60
+const ORB_SIZE = 44
 const PILL_WIDTH_FALLBACK = ORB_SIZE
 const PILL_HEIGHT_FALLBACK = ORB_SIZE
 const VIEWPORT_GUTTER = 8
