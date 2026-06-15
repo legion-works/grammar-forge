@@ -56,6 +56,13 @@ export interface PopoverOptions {
     navTotal?: number
     onApply: (replacementIndex: number) => void
     onIgnore: () => void
+    /**
+     * W1a review nit: the BUTTON label is "Dismiss" (already since W1)
+     * but the callback was called `onIgnore` (stale W1 surface name).
+     * Renamed to `onDismiss` for parity with the visible label. The old
+     * `onIgnore` is kept for back-compat with W1 callers that haven't
+     * migrated; when both are supplied, `onDismiss` wins. */
+    onDismiss?: () => void
     /** Spelling-only callback; the button is hidden for other categories. */
     onAddToDictionary?: (word: string) => void
     /** Move focus to the previous open issue (← key). */
@@ -395,7 +402,8 @@ function bindActions(panel: HTMLElement, opts: PopoverOptions, dismiss: () => vo
         }
         if (action === 'dismiss') {
             dismiss()
-            opts.onIgnore()
+            if (opts.onDismiss) opts.onDismiss()
+            else opts.onIgnore()
             return
         }
         if (action === 'dictionary' && opts.onAddToDictionary) {

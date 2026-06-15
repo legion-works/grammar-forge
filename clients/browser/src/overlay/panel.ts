@@ -77,6 +77,14 @@ export interface PanelOptions {
     onRecheck: () => void
     /** Footer "Disable on this site" — flips the runtime-wide pause. */
     onDisableSite: () => void
+    /** W3-3b: when true, the panel renders the paused empty-state
+     *  (a centered message + a "Turn on for this site" button) INSTEAD
+     *  of the score→list body. Head + tabs + footer stay mounted so the
+     *  user can still close / re-enable without a second mount. The
+     *  "Turn on for this site" button wires through `onDisableSite` —
+     *  pausing is symmetric, so re-enabling uses the same flip callback
+     *  the footer uses to disable. */
+    disabled?: boolean
     /** "×" close in the head — the orchestrator tears down the panel. */
     onClose: () => void
 }
@@ -131,7 +139,23 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
         phase: options.phase,
     })
     const goalsLabel = formatFormality(options.goals.formality)
-    const body = renderInto(aside, model, goalsLabel, options.onRephrase !== undefined)
+    // W3-3b: when disabled (site paused), the body renders the paused
+    // empty-state instead of the score→list review. The head + tabs +
+    // footer stay mounted (so the user can close / re-enable without
+    // a second mount); only the body changes. Both render paths share
+    // the chrome via `renderChrome()`.
+    const body = options.disabled
+        ? renderChrome(aside, goalsLabel, (bodyEl) =>
+              renderDisabledBodyContent(bodyEl, options.onDisableSite),
+          )
+        : renderChrome(aside, goalsLabel, (bodyEl) =>
+              renderReviewBodyContent(
+                  bodyEl,
+                  model,
+                  options.onRephrase !== undefined,
+                  goalsLabel,
+              ),
+          )
 
     root.appendChild(aside)
     positionPanel(aside, options.anchorRect, view)
@@ -261,11 +285,18 @@ function positionPanel(panel: HTMLElement, anchor: DOMRect, view: Window): void 
     panel.style.top = `${top}px`
 }
 
-function renderInto(
+/** Render the shared panel chrome (head + tabs + body slot + footer) and
+ *  call `renderBody` to fill the body slot. The body slot is the same
+ *  element `getBodyContainer()` returns (so the W2-4 Stats view can
+ *  mount into it later by replacing children). Head + tabs + footer are
+ *  outside the slot, so the Stats view renders without a second copy
+ *  of the chrome. Returns the body element so callers can append
+ *  additional children. The `goalsLabel` argument drives the head's
+ *  Goals pill text (e.g. "Neutral" / "Informal" / "Formal"). */
+function renderChrome(
     aside: HTMLElement,
-    m: PanelModel,
     goalsLabel: string,
-    hasRephrase: boolean,
+    renderBody: (bodyEl: HTMLElement) => void,
 ): HTMLElement {
     // Head
     const head = el(aside, 'div', 'gf-panel__head')
@@ -297,14 +328,63 @@ function renderInto(
     statsTab.setAttribute('data-action', 'open-stats')
     statsTab.textContent = 'Stats'
 
-    // Body slot — the review content (banner + score + insights + actions
-    // + list) lives inside this container. The W2-4 Stats view mounts INTO
-    // this same slot when the Stats tab is clicked (the orchestrator gets
-    // the container via `getBodyContainer()` and replaces the children).
-    // Keeping head + tabs + footer OUTSIDE the slot means the Stats view
-    // can render without a second copy of the head/chrome.
+    // Body slot
     const body = el(aside, 'div', 'gf-panel__body')
+    renderBody(body)
 
+    // Footer
+    const footer = el(aside, 'div', 'gf-panel__footer')
+    el(footer, 'span', 'gf-panel__learns').textContent = '\u2728 Learns your style'
+    el(footer, 'span', 'gf-panel__spacer')
+    const disable = el(footer, 'button', 'gf-panel__soft') as HTMLButtonElement
+    disable.type = 'button'
+    disable.setAttribute('data-action', 'disable-site')
+    disable.textContent = 'Disable on this site'
+
+    return body
+}
+
+/** Fill a body slot with the paused empty-state (W3-3b). Centered
+ *  message + a "Turn on for this site" button (which re-uses the
+ *  `data-action="disable-site"` branch — pausing is symmetric, so the
+ *  same callback that disables the site re-enables it). The chrome
+ *  (head + tabs + footer) is rendered by `renderChrome`; this function
+ *  only populates the body slot. */
+function renderDisabledBodyContent(
+    body: HTMLElement,
+    onDisableSite: () => void,
+): void {
+    const wrap = el(body, 'div', 'gf-panel__paused')
+    const icon = el(wrap, 'span', 'gf-panel__paused-icon')
+    icon.setAttribute('aria-hidden', 'true')
+    icon.textContent = '\u23F8'
+    const title = el(wrap, 'p', 'gf-panel__paused-title')
+    title.textContent = 'GrammarForge is paused on this site'
+    const sub = el(wrap, 'p', 'gf-panel__paused-sub')
+    sub.textContent =
+        'Suggestions and on-page checks are off. Re-enable to keep writing with the same corrections as before.'
+    const btn = el(wrap, 'button', 'gf-panel__primary') as HTMLButtonElement
+    btn.type = 'button'
+    btn.setAttribute('data-action', 'disable-site')
+    btn.textContent = 'Turn on for this site'
+    // onDisableSite is the orchestrator's togglePower — used by both
+    // the "Disable" and "Turn on" branches (symmetric flip). Kept
+    // unused here at the JS level; the click handler in the panel's
+    // delegated `onClick` dispatches data-action="disable-site" to
+    // `options.onDisableSite()`. The button is reachable WITHOUT a
+    // reference to onDisableSite in this body, but the type signature
+    // documents the contract.
+    void onDisableSite
+}
+
+/** Fill a body slot with the full review content (banner + score +
+ *  insights + actions + grouped list + muted note). */
+function renderReviewBodyContent(
+    body: HTMLElement,
+    m: PanelModel,
+    hasRephrase: boolean,
+    _goalsLabel: string,
+): void {
     // Streaming banner
     if (m.showStreamingBanner) {
         const banner = el(body, 'div', 'gf-banner')
@@ -416,17 +496,6 @@ function renderInto(
             goalsBtn.textContent = 'Goals'
         }
     }
-
-    // Footer
-    const footer = el(aside, 'div', 'gf-panel__footer')
-    el(footer, 'span', 'gf-panel__learns').textContent = '\u2728 Learns your style'
-    el(footer, 'span', 'gf-panel__spacer')
-    const disable = el(footer, 'button', 'gf-panel__soft') as HTMLButtonElement
-    disable.type = 'button'
-    disable.setAttribute('data-action', 'disable-site')
-    disable.textContent = 'Disable on this site'
-
-    return body
 }
 
 function el(parent: Node, tag: string, className?: string): HTMLElement {

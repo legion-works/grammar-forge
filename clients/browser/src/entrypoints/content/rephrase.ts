@@ -19,11 +19,15 @@ import {
     showRephraseError,
     showRephrasePending,
     type RephraseCardHandle,
+    type RephraseTone,
 } from '@/overlay/rephrase-card'
+import type { RephraseScope as CardRephraseScope } from '@/overlay/rephrase-card'
 import { debugWarn } from '@/lib/debug-log'
 import { getSettings } from '@/storage/settings'
 import { selectRephraseTarget, type RephraseSelection } from '@/hotkeys/rephrase-target'
 import type { BridgeClient } from '@/api/client'
+import type { Goals } from '@/api/types'
+import { defaultToneFromGoals } from '@/lib/view-model'
 
 export interface RephraseScope {
     el: HTMLElement
@@ -96,6 +100,15 @@ export interface RephraseDeps {
         span: { start: number; end: number },
         replacement: string,
     ) => Promise<void>
+    /** Resolve the FOCUSED field's goals. W3-2: the rephrase default
+     *  tone is seeded from `formality` (formal→'formal',
+     *  informal→'casual', else→'neutral') so the W2b review panel's
+     *  goals popover + the rephrase card's tone stay in sync. The
+     *  orchestrator owns the per-field goals state; this callback is
+     *  read at openRephraseFor time. Optional for back-compat (W1-4
+     *  used `rephraseTone` only); when absent we fall back to the
+     *  `rephraseTone` setting. */
+    getGoals?: () => Goals | null
 }
 
 export interface RephraseFlow {
@@ -120,8 +133,25 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
         el: HTMLElement,
         text: string,
         span: { start: number; end: number },
+        /** Re-issue path: when provided, the user toggled scope/tone on
+         *  the existing card and we re-issue with the new state. When
+         *  absent (initial open), we seed scope='sentence' and tone
+         *  from the focused field's goals. */
+        reissueState: { scope: CardRephraseScope; tone: RephraseTone } | null = null,
     ): Promise<void> => {
         const s = await getSettings()
+        // W3-2: seed the rephrase default tone from the FOCUSED field's
+        // goals. `formality === 'formal'` → 'formal', `informal` → 'casual',
+        // else → 'neutral'. Falls back to the `rephraseTone` setting when
+        // the orchestrator didn't supply a `getGoals` (W1-4 back-compat).
+        const goals = deps.getGoals?.() ?? null
+        const goalTone = goals ? defaultToneFromGoals(goals) : null
+        const rephraseToneRaw = reissueState?.tone ?? goalTone ?? s.rephraseTone
+        const rephraseTone: 'neutral' | 'formal' | 'casual' =
+            rephraseToneRaw === 'formal' || rephraseToneRaw === 'casual'
+                ? rephraseToneRaw
+                : 'neutral'
+        const scope: CardRephraseScope = reissueState?.scope ?? 'sentence'
         hideRephraseButton()
         const pending: RephraseCardHandle = showRephrasePending(deps.overlayRoot, {
             anchorRect: el.getBoundingClientRect(),
@@ -130,7 +160,7 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
         try {
             const res = await deps.client.rephrase({
                 text,
-                tone: s.rephraseTone || undefined,
+                tone: rephraseTone,
                 style: s.rephraseStyle || undefined,
                 alternatives: s.rephraseAlternatives,
                 source: 'browser',
@@ -143,19 +173,8 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                 original: res.original,
                 rephrased: res.rephrased,
                 alternatives: res.alternatives,
-                // W1-4: the orchestrator owns the scope/tone state machine
-                // (W3 will re-issue rephrase() on changes). For now the
-                // card reflects the values used in the outgoing request.
-                // `scope` is hardcoded to 'sentence' — the scope state isn't
-                // persisted yet (deferred to W3 along with the re-issue
-                // wiring on onScopeChange); the segmented control will reflect
-                // whatever the orchestrator passes here.
-                scope: 'sentence',
-                tone: ((): 'neutral' | 'formal' | 'casual' => {
-                    const t = s.rephraseTone
-                    if (t === 'formal' || t === 'casual') return t
-                    return 'neutral'
-                })(),
+                scope,
+                tone: rephraseTone,
                 onAccept: (chosen: string) => {
                     const live = getText(el)
                     if (live.slice(span.start, span.end) !== text) {
@@ -167,17 +186,19 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                     })
                 },
                 onClose: () => {},
-                onScopeChange: (scope) => {
-                    // W1-4 stub: the orchestrator (W3) will re-issue
-                    // rephrase() with the new scope and replace the card
-                    // with pending → result. W1b only delivers the callback.
-                    debugWarn('rephrase', 'scope changed to', scope)
+                onScopeChange: (nextScope) => {
+                    // W3-1: re-issue the bridge call with the new scope,
+                    // the same text/span/tone, and replace the card via
+                    // pending → result. The re-issue path (via
+                    // reissueState) preserves the user's current scope
+                    // and tone across calls.
+                    void openRephraseFor(el, text, span, { scope: nextScope, tone: rephraseTone })
                 },
-                onToneChange: (tone) => {
-                    debugWarn('rephrase', 'tone changed to', tone)
+                onToneChange: (nextTone) => {
+                    void openRephraseFor(el, text, span, { scope, tone: nextTone })
                 },
                 onRegenerate: () => {
-                    debugWarn('rephrase', 'regenerate requested')
+                    void openRephraseFor(el, text, span, { scope, tone: rephraseTone })
                 },
                 modelLabel: 'Gemma',
             })
@@ -188,7 +209,7 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
             showRephraseError(deps.overlayRoot, {
                 anchorRect: el.getBoundingClientRect(),
                 message: 'Rephrase failed',
-                onRetry: () => void openRephraseFor(el, text, span),
+                onRetry: () => void openRephraseFor(el, text, span, reissueState),
                 onClose: () => {},
             })
         }

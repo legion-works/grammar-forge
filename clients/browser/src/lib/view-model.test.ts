@@ -443,3 +443,60 @@ describe('orbState (per-field score orb)', () => {
         expect(s.ringColor).toBe(BAND_COLOR.excellent)
     })
 })
+
+// W3-1: the orchestrator's renderField computes the score+band from
+// `visibleItems(items, phase, goals)`, then hands the result to the
+// status-button as `score` + `band` + `phase`. These tests pin the
+// contract: `visibleItems` is the single source of truth for what
+// counts toward the score (and the orb's count badge).
+describe('visibleItems (W3-1 orchestrator integration)', () => {
+    const goals: Goals = { audience: 'general', formality: 'neutral' }
+    const informalGoals: Goals = { audience: 'general', formality: 'informal' }
+    it("phase='fast' drops LLM items (the streaming preview is local-only)", () => {
+        const items: RenderableItem[] = [
+            item({ model: 'harper', category: 'spelling' }),
+            item({ model: 'llm', category: 'grammar' }),
+        ]
+        const visible = visibleItems(items, 'fast', goals)
+        expect(visible.map((i) => i.model)).toEqual(['harper'])
+    })
+    it("phase='done' includes LLM items alongside the fast-path rules", () => {
+        const items: RenderableItem[] = [
+            item({ model: 'harper', category: 'spelling' }),
+            item({ model: 'llm', category: 'grammar' }),
+        ]
+        const visible = visibleItems(items, 'done', goals)
+        expect(visible).toHaveLength(2)
+    })
+    it("informal mutes style items (they vanish from the score + count)", () => {
+        const items: RenderableItem[] = [
+            item({ model: 'harper', category: 'spelling' }),
+            item({ model: 'llm', category: 'style' }),
+        ]
+        const neutralVisible = visibleItems(items, 'done', goals)
+        const informalVisible = visibleItems(items, 'done', informalGoals)
+        expect(neutralVisible).toHaveLength(2)
+        expect(informalVisible).toHaveLength(1)
+        expect(informalVisible[0]?.category).toBe('spelling')
+    })
+    it('accepted/dismissed items are filtered out (status: open only)', () => {
+        const items: RenderableItem[] = [
+            item({ status: 'open' }),
+            item({ status: 'accepted' }),
+            item({ status: 'dismissed' }),
+        ]
+        const visible = visibleItems(items, 'done', goals)
+        expect(visible).toHaveLength(1)
+    })
+    it('combined fast + informal: only non-style, non-LLM items count', () => {
+        const items: RenderableItem[] = [
+            item({ model: 'harper', category: 'spelling', status: 'open' }),
+            item({ model: 'llm', category: 'grammar', status: 'open' }),
+            item({ model: 'llm', category: 'style', status: 'open' }),
+            item({ model: 'harper', category: 'style', status: 'open' }),
+        ]
+        const visible = visibleItems(items, 'fast', informalGoals)
+        expect(visible).toHaveLength(1)
+        expect(visible[0]?.category).toBe('spelling')
+    })
+})

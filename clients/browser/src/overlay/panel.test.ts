@@ -487,4 +487,45 @@ describe('showPanel (W2b review panel)', () => {
         handle.destroy()
         expect(() => handle.destroy()).not.toThrow()
     })
+
+    // W3-3b: the panel's `disabled` prop swaps the body for a paused
+    // empty-state. The head + tabs + footer stay mounted (so the user
+    // can close / re-enable without a second mount).
+    describe('disabled (W3-3b paused empty-state)', () => {
+        it('renders the paused empty-state instead of the score/list body when disabled=true', () => {
+            const root = mkRoot()
+            showPanel(root, mkOptions({ disabled: true }))
+            expect(root.querySelector('.gf-panel__paused')).not.toBeNull()
+            expect(root.querySelector('.gf-panel__score')).toBeNull()
+            expect(root.querySelector('.gf-panel__list')).toBeNull()
+            // Head + tabs + footer still mounted.
+            expect(root.querySelector('.gf-panel__head')).not.toBeNull()
+            expect(root.querySelector('.gf-panel__tabs')).not.toBeNull()
+            expect(root.querySelector('.gf-panel__footer')).not.toBeNull()
+        })
+        it('the "Turn on for this site" button (data-action="disable-site") fires onDisableSite', () => {
+            const root = mkRoot()
+            const onDisableSite = vi.fn<() => void>()
+            showPanel(root, mkOptions({ disabled: true, onDisableSite }))
+            // The button is the one inside .gf-panel__paused (the
+            // footer also has a disable-site button, so scope the
+            // selector).
+            const paused = root.querySelector('.gf-panel__paused') as HTMLElement
+            const btn = paused.querySelector('[data-action="disable-site"]') as HTMLElement
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+            expect(onDisableSite).toHaveBeenCalledOnce()
+        })
+        it('still shows the score/list body when disabled is unset (default)', () => {
+            const root = mkRoot()
+            showPanel(root, mkOptions())
+            expect(root.querySelector('.gf-panel__paused')).toBeNull()
+            expect(root.querySelector('.gf-panel__score')).not.toBeNull()
+        })
+        it('still shows the score/list body when disabled=false (explicit)', () => {
+            const root = mkRoot()
+            showPanel(root, mkOptions({ disabled: false }))
+            expect(root.querySelector('.gf-panel__paused')).toBeNull()
+            expect(root.querySelector('.gf-panel__score')).not.toBeNull()
+        })
+    })
 })

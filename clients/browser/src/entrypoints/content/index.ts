@@ -31,6 +31,12 @@ import {
 } from '@/lib/pipeline'
 import { applyScopedOverlayClear } from '@/lib/scoped-clear'
 import { isMessage, type GfMessageMap } from '@/messaging/schema'
+import {
+    computeScore,
+    highConfidenceItems,
+    scoreBand,
+    visibleItems,
+} from '@/lib/view-model'
 import { createOverlayHost, isWithinOverlay } from '@/overlay/shadow-host'
 import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightSpec } from '@/overlay/highlight'
@@ -45,6 +51,14 @@ import {
     type StatusButtonHandle,
     type StatusButtonOptions,
 } from '@/overlay/status-button'
+import { showPanel, type PanelHandle, type PanelOptions } from '@/overlay/panel'
+import { showGoals, type GoalsHandle } from '@/overlay/goals'
+import { mountStatsView, type StatsViewHandle } from '@/overlay/stats-view'
+import {
+    resolveWordFromDblClick,
+    showSynonyms,
+    type SynonymsHandle,
+} from '@/overlay/synonyms'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
 import {
@@ -164,6 +178,23 @@ interface FieldState {
      * lose it, and so different fields don't share an undo queue.
      */
     lastApplied: InverseEdit[] | null
+    /**
+     * W3-2: per-field writing goals (audience + formality + domain).
+     * Seeded from settings on attach; updated when the user edits goals
+     * via the panel's Goals popover (the orchestrator patches settings
+     * and re-renders the field). Used by the panel's `visibleItems`
+     * filter (informal mutes style) + the muted-style note + the
+     * rephrase default tone.
+     */
+    goals: import('@/api/types').Goals
+    /**
+     * W3-1: the streaming phase of the LATEST check. `'done'` is the
+     * stable post-LLM state; `'fast'` is the local-only preview frame.
+     * Drives the orb's pip center glyph (sparkle → count) and the
+     * panel's streaming banner. Settles to `'done'` on the final frame
+     * or on a clear-all (no items).
+     */
+    phase: import('@/api/types').Phase
 }
 
 interface ActiveSuggestion {
@@ -208,6 +239,31 @@ interface Runtime {
      *  back-reference lets openPopoverFor close the previous field's popover and
      *  detach/teardown clear it. */
     activePopoverField: HTMLElement | null
+    /** W3-1: the SINGLE review-panel instance for the runtime (one
+     *  panel at a time, regardless of how many fields are attached).
+     *  A new `showPanel()` dismisses the prior via `destroyExisting`
+     *  inside showPanel; the handle is updated so a later Stats-view
+     *  mount can find the live body container. `null` between opens. */
+    panelHandle: PanelHandle | null
+    /** W3-1: the field the open review panel belongs to. The panel
+     *  is anchored to the field's orb rect; the orchestrator reads
+     *  this back-reference so the panel can re-anchor to the same
+     *  field's rect on a settings/Goals change. */
+    panelField: HTMLElement | null
+    /** W3-1: the active Goals popover (one at a time, anchored to
+     *  the panel's Goals pill rect). `null` when closed. */
+    goalsHandle: GoalsHandle | null
+    /** W3-1: the active Stats view (mounts INTO the panel's body
+     *  slot via `panelHandle.getBodyContainer()`). `null` when the
+     *  Stats tab isn't open. */
+    statsHandle: StatsViewHandle | null
+    /** W3-1: the active Synonyms popover (one at a time, anchored
+     *  to a double-clicked clean word). `null` when closed. */
+    synonymsHandle: SynonymsHandle | null
+    /** W3-1: the FOCUSED field at the time the user opened the
+     *  review panel. Re-anchor + re-render helpers use this to find
+     *  the right state to refresh when goals change. */
+    panelFor: HTMLElement | null
     stopObserver: (() => void) | null
     /**
      * Every remover that bound a listener to this runtime. teardownRuntime
@@ -301,6 +357,22 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             r.hoverField.removeAttribute('aria-describedby')
         }
         r.hoverField = null
+        // 2c. Dismiss the review panel / Goals popover / Stats view /
+        //     Synonyms popover if any are open. They are children of
+        //     the overlay root so destroyExisting(dismiss) inside showPanel
+        //     et al. would clean them up, but the runtime holds explicit
+        //     handles for test introspection + for the "dismiss → signal"
+        //     wiring. Explicit destroy is idempotent.
+        r.synonymsHandle?.destroy()
+        r.synonymsHandle = null
+        r.goalsHandle?.destroy()
+        r.goalsHandle = null
+        r.statsHandle?.destroy()
+        r.statsHandle = null
+        r.panelHandle?.destroy()
+        r.panelHandle = null
+        r.panelField = null
+        r.panelFor = null
         // 3. Tear down the DOM.
         r.overlay.destroy()
         // 3b. Destroy the document-global native highlighter too — it
@@ -335,6 +407,12 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             hoverItem: null,
             hoverField: null,
             activePopoverField: null,
+            panelHandle: null,
+            panelField: null,
+            goalsHandle: null,
+            statsHandle: null,
+            synonymsHandle: null,
+            panelFor: null,
             stopObserver: null,
             cleanups: [],
         }
@@ -365,8 +443,30 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         // unchanged. The wired runtime fires the one-shot once the observer
         // re-attaches that exact field.
         const initialCheckField = lastFocusedField?.isConnected ? lastFocusedField : null
-        wireRuntime(ctx, r, () => currentSettings, togglePower, pillPosition, initialCheckField)
+        wireRuntime(
+            ctx,
+            r,
+            () => currentSettings,
+            togglePower,
+            pillPosition,
+            initialCheckField,
+            // W3-2: wireRuntime registers a callback that start's
+            // settings watcher can call to refresh every field's render
+            // + re-open the panel on a goals change. Wire it in BOTH
+            // directions so the closure captures the right `runtime`
+            // and `reconcile` instances.
+            (refresh) => {
+                refreshOnGoalsChange = refresh
+            },
+        )
     }
+
+    // W3-2: a settings-watcher-side hook that wireRuntime registers
+    // when it mounts (and nulls on teardown). The hook re-renders
+    // every field AND re-opens the review panel with the new goals.
+    // Lives in start() scope so the closure survives a settings-driven
+    // teardown of wireRuntime (re-mounted runtimes re-register the hook).
+    let refreshOnGoalsChange: (() => void) | null = null
 
     // Paused-site mode: a MINIMAL runtime — field discovery + focus tracking
     // only (no checking, no bridge, no highlights). Extracted to
@@ -460,6 +560,16 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         if (runtime && prev.suppressNativeSpellcheck !== next.suppressNativeSpellcheck) {
             teardownRuntime()
         }
+        // W3-2: a goals change must propagate to every attached field's
+        // local `state.goals` AND trigger a fresh render. The refresh
+        // hook is registered by wireRuntime (it has access to the
+        // per-runtime `renderField` + `openReviewPanelFor`); start() can't
+        // see those directly. When no runtime is mounted (off / paused),
+        // the next reconcile cycle wires the new goals from
+        // currentSettings.goals on attach.
+        if (runtime && prev.goals !== next.goals) {
+            refreshOnGoalsChange?.()
+        }
         reconcile(next)
     })
     ctx.onInvalidated(() => unwatchSettings())
@@ -499,6 +609,14 @@ function wireRuntime(
     togglePower: () => void,
     pillPosition: PillPosition,
     initialCheckField: HTMLElement | null,
+    /** W3-2: register a callback the start() settings watcher calls on
+     *  a goals change. wireRuntime wires up the closure (it has access
+     *  to `renderField` + `openReviewPanelFor` which live inside
+     *  wireRuntime's scope); start() can't see them directly, so the
+     *  indirection is the only way to plumb a settings-side hook to
+     *  the runtime-side refresh. The setter is called exactly once,
+     *  immediately after wireRuntime returns. */
+    setRefreshOnGoalsChange: (refresh: (() => void) | null) => void = () => {},
 ): void {
     const { overlay, signalQueue } = runtime
 
@@ -506,6 +624,29 @@ function wireRuntime(
     // Consumed the first time `attach` re-discovers that exact field, so a
     // later attach of a different field doesn't trigger a spurious check.
     let pendingInitialCheck = initialCheckField
+
+    // W3-2: build the goals-change refresh closure now (it captures
+    // `renderField` + `openReviewPanelFor` references by closure, which
+    // is the whole point of the indirection). Register with start()
+    // BEFORE wireRuntime returns; the teardown path nulls it so a
+    // later settings-driven teardown doesn't leak a stale closure.
+    setRefreshOnGoalsChange(() => {
+        for (const el of runtime.trackedFields) {
+            const st = runtime.fields.get(el)
+            if (!st) continue
+            st.goals = getSettings().goals
+            renderField(el, runtime.overlay.root, st)
+            updateFocusedCounts(runtime, el)
+        }
+        if (runtime.panelHandle && runtime.panelFor) {
+            const el = runtime.panelFor
+            const anchor = el.getBoundingClientRect()
+            runtime.panelHandle.destroy()
+            runtime.panelHandle = null
+            openReviewPanelFor(el, anchor)
+        }
+    })
+    runtime.cleanups.push(() => setRefreshOnGoalsChange(null))
 
     // ---- Hover-tooltip lifecycle (shared across fields; one tooltip at a
     // time). The tooltip itself holds no listeners/timers — the grace-delay
@@ -629,6 +770,12 @@ function wireRuntime(
                 if (seq !== state.checkSeq) return
                 const { items } = buildRenderableItems(text, res, {}, { preview })
                 state.items = items
+                // W3-1: the streaming phase drives the orb's pip
+                // center-glyph (sparkle on 'fast' → count on 'done') and
+                // the panel's "Fast results in · AI refining…" banner.
+                // The phase is set on the field state BEFORE the render
+                // so renderField reads the fresh value.
+                state.phase = preview ? 'fast' : 'done'
                 renderField(el, overlay.root, state)
                 updateFocusedCounts(runtime, el)
             }
@@ -645,6 +792,7 @@ function wireRuntime(
                 // intrusive (matches the previous behaviour).
                 if (ctx.isValid && seq === state.checkSeq && state.items.some((i) => i.preview)) {
                     state.items = []
+                    state.phase = 'done'
                     renderField(el, overlay.root, state)
                     updateFocusedCounts(runtime, el)
                 }
@@ -843,6 +991,15 @@ function wireRuntime(
             statusHandle: null,
             restoreSpellcheck: () => {},
             lastApplied: null,
+            // W3-2: seed the per-field goals from the current settings.
+            // Updated when the user edits goals via the panel; the new
+            // value is persisted AND pushed to settings.goals so the
+            // other field's goals (and the popup) stay in sync.
+            goals: s.goals,
+            // W3-1: every new field starts in the 'done' phase — the
+            // first render (after attach) is the post-LLM steady state.
+            // The 'fast' phase is set per-frame by renderStage().
+            phase: 'done',
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -1061,13 +1218,142 @@ function wireRuntime(
             hideTooltipNow()
             openPopoverFor(el, hit.item, hit.rect)
         }
+        // W3-1: dblclick on a NON-flagged word → open the Synonyms
+        // popover. The native browser dblclick selects the clicked word
+        // (range across the word's boundaries) — we use Selection.toString
+        // via the synonyms' resolveWordFromDblClick helper to map the
+        // click into a code-unit span into the field's flat text. If
+        // the click hits a flagged word (inside an item rect), the
+        // popover opens instead — single-click on flagged words already
+        // opens it, but a dblclick would otherwise feel dead. We
+        // distinguish by hit-testing the itemRects first.
+        const onFieldDblClick = (e: MouseEvent): void => {
+            // If the dblclick hit a flagged word, let the click handler
+            // chain handle the card (it'll already have opened one
+            // popover, so we don't fight it).
+            const flagged = hitTest(state.itemRects, e.clientX, e.clientY)
+            if (flagged) return
+            // Resolve the clicked word.
+            const text = getText(el)
+            const resolved = resolveWordFromDblClick(e, text, el)
+            if (!resolved) return
+            // Don't open synonyms on a word the popover would have
+            // flagged (defensive — the flagged check above should catch
+            // this, but a hit-test between the rects and the word
+            // boundary is racy).
+            const wordInsideItem = state.itemRects.some(({ rects }) =>
+                rects.some(
+                    (r) =>
+                        r.left <= e.clientX &&
+                        r.right >= e.clientX &&
+                        r.top <= e.clientY &&
+                        r.bottom >= e.clientY,
+                ),
+            )
+            if (wordInsideItem) return
+            // Get a word rect by measuring the span via getSpanRectsBatch
+            // (mirror of how the orchestrator's hit-test rects are built).
+            // MEASURE FIRST (the W3 gotcha): we capture the word's rect
+            // BEFORE mounting showSynonyms. The synonyms popover's
+            // anchorRect is caller-measured; a detached node's rect is
+            // all zeros and the popover would fly off-screen.
+            const wordRects = getSpanRectsBatch(el, [
+                { start: resolved.start, end: resolved.end },
+            ])
+            const anchorRect = wordRects[0]?.[0] ?? el.getBoundingClientRect()
+            // Dismiss any prior synonyms popover (one at a time).
+            runtime.synonymsHandle?.destroy()
+            // Show the popover in the LOADING state immediately (per
+            // spec: "loading state shows a small spinner + Finding
+            // synonyms…"; the synonyms surface itself handles the
+            // empty / loaded states). Then fire the bridge call and
+            // re-mount with the result.
+            runtime.synonymsHandle = showSynonyms(overlay.root, {
+                anchorRect,
+                word: resolved.word,
+                synonyms: [],
+                loading: true,
+                onPick: () => {
+                    /* replaced on the loaded re-mount */
+                },
+                onClose: () => {
+                    runtime.synonymsHandle = null
+                },
+            })
+            void runtime.client
+                .synonyms(resolved.word)
+                .then((res) => {
+                    if (!ctx.isValid) return
+                    // The popover may have been closed (Escape, focus
+                    // loss) while the bridge call was in flight; bail
+                    // in that case.
+                    if (runtime.synonymsHandle == null) return
+                    // Re-measure the word's rect on the live DOM (the
+                    // popover mount above detached nothing but the
+                    // field could have scrolled). Bail if the rect is
+                    // degenerate.
+                    const liveRects = getSpanRectsBatch(el, [
+                        { start: resolved.start, end: resolved.end },
+                    ])
+                    const liveAnchor = liveRects[0]?.[0] ?? anchorRect
+                    runtime.synonymsHandle.destroy()
+                    runtime.synonymsHandle = showSynonyms(overlay.root, {
+                        anchorRect: liveAnchor,
+                        word: resolved.word,
+                        synonyms: res.synonyms,
+                        loading: false,
+                        onPick: (synonym: string) => {
+                            // In-place swap at the resolved span. We
+                            // measure the field's text inside the
+                            // apply closure to stale-guard.
+                            void applyEdit(
+                                el,
+                                { start: resolved.start, end: resolved.end },
+                                synonym,
+                            ).then(() => {
+                                const stInner = runtime.fields.get(el)
+                                if (stInner) {
+                                    stInner.lastApplied = appendInverseEdit([], {
+                                        start: resolved.start,
+                                        end: resolved.end,
+                                        replacement: synonym,
+                                        original: text.slice(
+                                            resolved.start,
+                                            resolved.end,
+                                        ),
+                                    })
+                                }
+                                showToast(overlay.root, {
+                                    message: `Replaced with "${synonym}"`,
+                                    subText: 'Press Undo to revert',
+                                    actionLabel: 'Undo',
+                                    onUndo: () => void undoFor(el),
+                                })
+                                // No accepted signal — synonyms aren't
+                                // bridge-tracked corrections.
+                                void rerunFor(el)(getText(el))
+                            })
+                        },
+                        onClose: () => {
+                            runtime.synonymsHandle = null
+                        },
+                    })
+                })
+                .catch((e) => {
+                    debugWarn('synonyms', 'fetch failed', e)
+                    runtime.synonymsHandle?.destroy()
+                    runtime.synonymsHandle = null
+                })
+        }
         el.addEventListener('mousemove', onFieldMouseMove)
         el.addEventListener('mouseleave', onFieldMouseLeave)
         el.addEventListener('click', onFieldClick)
+        el.addEventListener('dblclick', onFieldDblClick)
         runtime.cleanups.push(() => {
             el.removeEventListener('mousemove', onFieldMouseMove)
             el.removeEventListener('mouseleave', onFieldMouseLeave)
             el.removeEventListener('click', onFieldClick)
+            el.removeEventListener('dblclick', onFieldDblClick)
         })
 
         // Re-measure rects + reconcile highlights + re-anchor the pill when the
@@ -1199,6 +1485,21 @@ function wireRuntime(
         dismissRephraseButtonsIn(overlay.root)
         dismissRephraseCardsIn(overlay.root)
         rephraseFlow.dismissButton()
+        // W3-1: SPA navigation also drops the review panel + Goals
+        // popover + Stats view + Synonyms popover — their rects are
+        // anchored to a now-stale field rect (the field may be in
+        // the same DOM but the content has navigated; the new
+        // composer is a different field).
+        runtime.synonymsHandle?.destroy()
+        runtime.synonymsHandle = null
+        runtime.goalsHandle?.destroy()
+        runtime.goalsHandle = null
+        runtime.statsHandle?.destroy()
+        runtime.statsHandle = null
+        runtime.panelHandle?.destroy()
+        runtime.panelHandle = null
+        runtime.panelField = null
+        runtime.panelFor = null
         runtime.active = null
         // dismissPopoversIn removes the popover DOM directly (not via
         // closePopoverFor), so clear the active-field back-reference too.
@@ -1250,6 +1551,26 @@ function wireRuntime(
             return null
         },
         applyEdit,
+        // W3-2: rephrase's default tone is seeded from the FOCUSED
+        // field's goals. `formal`/`informal`/`neutral` map 1:1 to
+        // `formality`. The rephrase flow reads this at openRephraseFor
+        // time; user tone changes inside the card still win on the
+        // re-issue path.
+        getGoals: () => {
+            const focused = document.activeElement
+            if (focused instanceof HTMLElement) {
+                const st = runtime.fields.get(focused)
+                if (st) return st.goals
+                // Try contains() — rich editors put focus on a child.
+                for (const el of runtime.trackedFields) {
+                    if (el.contains(focused)) {
+                        const s = runtime.fields.get(el)
+                        if (s) return s.goals
+                    }
+                }
+            }
+            return null
+        },
     })
     runtime.cleanups.push(rephraseFlow.stop)
 
@@ -1393,13 +1714,16 @@ function wireRuntime(
                     },
                 )
             },
-            onIgnore: () => {
-                // Capture the item + its index BEFORE mutating state.items so
-                // the Undo closure can restore it. The ignored signal is
-                // enqueued unconditionally — Undo is a CLIENT-SIDE visual
-                // restore only; we do NOT send a compensating signal (a future
-                // bridge `un-ignore` is out of scope, and the original
-                // 'ignored' event is the source of truth for the training loop).
+            onDismiss: () => {
+                // W1a review nit: the popover button says "Dismiss" (since
+                // W1), so the callback is now `onDismiss` (was `onIgnore`).
+                // Capture the item + its index BEFORE mutating state.items
+                // so the Undo closure can restore it. The 'ignored' signal
+                // is enqueued unconditionally — Undo is a CLIENT-SIDE
+                // visual restore only; we do NOT send a compensating
+                // signal (a future bridge `un-ignore` is out of scope, and
+                // the original 'ignored' event is the source of truth for
+                // the training loop).
                 const idx = state.items.indexOf(item)
                 if (idx >= 0) state.items.splice(idx, 1)
                 // Reconcile the persistent highlight layer (the highlight for
@@ -1413,7 +1737,7 @@ function wireRuntime(
                     source: 'browser',
                 })
                 showToast(overlay.root, {
-                    message: 'Ignored',
+                    message: 'Dismissed',
                     actionLabel: 'Undo',
                     onAction: () => {
                         if (idx < 0) return
@@ -1424,6 +1748,14 @@ function wireRuntime(
                 })
                 closePopoverFor(el)
             },
+            // PopoverOptions still has `onIgnore` as REQUIRED (kept for
+            // back-compat with W1 callers). The new `onDismiss` callback
+            // wins in the popover's dispatch (see popover.ts: when both
+            // are supplied, onDismiss is called). We pass a no-op here
+            // so the W1 path stays callable if some legacy code ever
+            // calls opts.onIgnore directly (it does not, in the W3
+            // orchestrator — the button is wired to onDismiss).
+            onIgnore: () => {},
         })
         openPopovers.set(el, handle)
         runtime.active = { el, item, replacementIndex: 0 }
@@ -1592,6 +1924,287 @@ function wireRuntime(
         void rerunFor(el)(getText(el))
     }
 
+    // W3-1: accept every VISIBLE item whose confidence is at or above the
+    // view-model high-confidence threshold (0.90). The visible filter
+    // already applied informal-mutes-style + LLM-during-fast, so this is
+    // a strict subset of `applyAllFor`. Reuses the same per-item apply +
+    // rAF-yield + inverse-edit batching. Returns the list of items
+    // applied (used by the caller to fire a single toast + Undo).
+    async function applyHighConfFor(el: HTMLElement): Promise<RenderableItem[]> {
+        const st = runtime.fields.get(el)
+        if (!st) return []
+        const visible = visibleItems(st.items, st.phase, st.goals)
+        const high = highConfidenceItems(visible)
+        if (high.length === 0) return []
+        // Reuse the same last-to-first batched apply path as applyAllFor,
+        // but restricted to the high-conf subset. We re-run the loop
+        // here so the inverse-edit batch only covers the high items (a
+        // subsequent Undo should not also undo a future low-conf apply
+        // on the next pass — single-slot semantics).
+        const ordered = [...high].sort((a, b) => b.cuStart - a.cuStart)
+        let batch: InverseEdit[] = []
+        for (const item of ordered) {
+            if (!ctx.isValid) return batch.map((_b) => ({ id: -1 } as RenderableItem))
+            if (!isSpanStillValid(getText(el), item)) continue
+            const replacement = item.replacements[0] ?? ''
+            await applyEdit(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+            batch = appendInverseEdit(batch, {
+                start: item.cuStart,
+                end: item.cuEnd,
+                replacement,
+                original: item.original,
+            })
+            if (typeof item.id === 'number' && item.id > 0) {
+                void signalQueue.enqueue({
+                    id: item.id,
+                    action: 'accepted',
+                    category: item.category,
+                    source: 'browser',
+                })
+            }
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        }
+        if (batch.length > 0) st.lastApplied = batch
+        if (!ctx.isValid) return batch.map((_b) => ({ id: -1 } as RenderableItem))
+        void rerunFor(el)(getText(el))
+        return high
+    }
+
+    // W3-1: accept every VISIBLE item in a single category. Mirrors
+    // `applyHighConfFor` but filters on category; same rAF-yield + batch
+    // + lastApplied semantics.
+    async function applyCategoryFor(
+        el: HTMLElement,
+        cat: Category,
+    ): Promise<RenderableItem[]> {
+        const st = runtime.fields.get(el)
+        if (!st) return []
+        const visible = visibleItems(st.items, st.phase, st.goals).filter(
+            (it) => it.category === cat,
+        )
+        if (visible.length === 0) return []
+        const ordered = [...visible].sort((a, b) => b.cuStart - a.cuStart)
+        let batch: InverseEdit[] = []
+        for (const item of ordered) {
+            if (!ctx.isValid) return batch.map((_b) => ({ id: -1 } as RenderableItem))
+            if (!isSpanStillValid(getText(el), item)) continue
+            const replacement = item.replacements[0] ?? ''
+            await applyEdit(el, { start: item.cuStart, end: item.cuEnd }, replacement)
+            batch = appendInverseEdit(batch, {
+                start: item.cuStart,
+                end: item.cuEnd,
+                replacement,
+                original: item.original,
+            })
+            if (typeof item.id === 'number' && item.id > 0) {
+                void signalQueue.enqueue({
+                    id: item.id,
+                    action: 'accepted',
+                    category: item.category,
+                    source: 'browser',
+                })
+            }
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        }
+        if (batch.length > 0) st.lastApplied = batch
+        if (!ctx.isValid) return batch.map((_b) => ({ id: -1 } as RenderableItem))
+        void rerunFor(el)(getText(el))
+        return visible
+    }
+
+    // W3-1: show a mutation toast (Undo + dismiss) for an applied batch.
+    // The accept signals were already enqueued in the apply path; the
+    // toast's Undo reverts the batch via `undoFor` (which uses the
+    // single-slot `lastApplied`). The toast's natural auto-dismiss
+    // (after `durationMs`) does NOT enqueue another signal — the
+    // already-accepted record is the source of truth.
+    function showMutationToast(el: HTMLElement, message: string, count: number): void {
+        showToast(overlay.root, {
+            message,
+            subText:
+                count === 1
+                    ? 'Press Undo to revert'
+                    : `${String(count)} changes \u00b7 press Undo to revert`,
+            actionLabel: 'Undo',
+            onUndo: () => void undoFor(el),
+        })
+    }
+
+    // W3-1: open (or re-anchor) the per-field review panel. One panel
+    // per runtime — a new showPanel dismisses the prior via the
+    // showPanel's `destroyExisting`. The orchestrator owns the
+    // lifecycle: the panel handle lives on `runtime.panelHandle`, the
+    // owning field on `runtime.panelFor`, so onAcceptItem / onClose /
+    // a later settings change can find the live references.
+    //
+    // MEASURE-BEFORE-RERENDER (the W3 gotcha): the panel's anchor rect
+    // is read from the live orb node (`statusHandle.reposition`'s
+    // previous position) or, when the status handle is absent, the
+    // field's own rect. We measure FIRST, then mount the panel — a
+    // detached node's getBoundingClientRect() is all zeros and the
+    // panel would fly off-screen. The orb's `reposition(rect)` was
+    // called on the last scroll/resize, so its current position is
+    // already fresh; we read it via the field's own rect (the orb is
+    // anchored to the field's bottom-right corner) and pass that to
+    // showPanel.
+    function openReviewPanelFor(el: HTMLElement, anchorOverride?: DOMRect): void {
+        const st = runtime.fields.get(el)
+        if (!st) return
+        // Close any prior panel (defensive — showPanel's destroyExisting
+        // already does this, but the orchestrator's tracked handle can
+        // become stale during a rapid Goals toggle).
+        if (runtime.panelHandle) {
+            runtime.panelHandle.destroy()
+            runtime.panelHandle = null
+        }
+        const text = getText(el)
+        const visible = visibleItems(st.items, st.phase, st.goals)
+        const anchor = anchorOverride ?? st.statusHandle?.reposition
+            ? el.getBoundingClientRect()
+            : el.getBoundingClientRect()
+        const options: PanelOptions = {
+            anchorRect: anchor,
+            items: st.items,
+            text,
+            goals: st.goals,
+            phase: st.phase,
+            onAcceptAll: () => {
+                void applyAllFor(el).then(() => {
+                    showMutationToast(el, 'Accepted all suggestions', visible.length)
+                })
+            },
+            onAcceptHighConf: () => {
+                void applyHighConfFor(el).then((applied) => {
+                    if (applied.length > 0) {
+                        showMutationToast(
+                            el,
+                            `Accepted ${String(applied.length)} high-confidence`,
+                            applied.length,
+                        )
+                    }
+                })
+            },
+            onAcceptCategory: (cat) => {
+                void applyCategoryFor(el, cat).then((applied) => {
+                    if (applied.length > 0) {
+                        showMutationToast(
+                            el,
+                            `Accepted ${String(applied.length)} ${cat}`,
+                            applied.length,
+                        )
+                    }
+                })
+            },
+            onAcceptItem: (item) => {
+                // Per-item accept from the panel: same as the popover
+                // Apply (applyItemPrimary), then show a toast. The
+                // panel is closed (closePopoverFor is a no-op when
+                // nothing is open) so the user can re-click another row.
+                void applyItemPrimary(el, item).then((applied) => {
+                    if (applied) {
+                        showMutationToast(el, 'Applied suggestion', 1)
+                        // Re-render the panel with the fresh state so
+                        // the just-applied row disappears. The panel
+                        // re-opens anchored to the same field.
+                        const newSt = runtime.fields.get(el)
+                        if (newSt) {
+                            renderField(el, overlay.root, newSt)
+                            updateFocusedCounts(runtime, el)
+                            // Re-anchor: destroy + re-open keeps the
+                            // model in sync (a future patch can add
+                            // an in-place update method).
+                            if (runtime.panelHandle) {
+                                runtime.panelHandle.destroy()
+                                runtime.panelHandle = null
+                                openReviewPanelFor(el, anchor)
+                            }
+                        }
+                    }
+                })
+            },
+            onRephrase: () => rephraseFlow.rephraseFor(el),
+            onOpenGoals: () => {
+                // Anchor the Goals popover to the panel's Goals pill —
+                // its viewport rect inside the panel. We measure via
+                // `getElementsByClassName` (the panel owns the .gf-
+                // goals-pill element); the orchestrator measures FIRST
+                // and passes the rect to showGoals, which never self-
+                // measures.
+                const pill = runtime.panelHandle
+                    ?.getBodyContainer()
+                    ?.parentElement?.querySelector<HTMLElement>('.gf-goals-pill') ??
+                    null
+                if (!pill) return
+                const rect = pill.getBoundingClientRect()
+                // Replace any prior goals popover (one at a time).
+                runtime.goalsHandle?.destroy()
+                runtime.goalsHandle = showGoals(overlay.root, {
+                    anchorRect: rect,
+                    goals: st.goals,
+                    onChange: (next) => {
+                        // Persist + push to every field. The settings
+                        // watcher re-renders + re-opens the panel with
+                        // the new goals; here we just persist (the
+                        // watcher does NOT echo another showPanel for
+                        // an open one because the watcher's refresh
+                        // path uses the runtime.panelHandle to destroy
+                        // + re-open with the new goals).
+                        void setSettings({ goals: next }).catch((e) =>
+                            debugWarn('goals', 'persist failed', e),
+                        )
+                        // Apply locally so the popover re-segments
+                        // immediately; the watcher will reconcile
+                        // every field in the next tick.
+                        st.goals = next
+                    },
+                    onClose: () => {
+                        runtime.goalsHandle = null
+                    },
+                })
+            },
+            onOpenStats: () => {
+                // Stats mounts INTO the panel's body container (replacing
+                // the review content). The destroy is handled by the
+                // Stats view's own destroy; mounting a new one via
+                // mountStatsView dismisses the prior (its destroyExisting
+                // runs first).
+                if (runtime.statsHandle) {
+                    runtime.statsHandle.destroy()
+                    runtime.statsHandle = null
+                }
+                const body = runtime.panelHandle?.getBodyContainer() ?? null
+                if (!body) return
+                runtime.statsHandle = mountStatsView(body, {
+                    loadStats: () => runtime.client.stats(),
+                    loadDict: async () => {
+                        const r = await runtime.client.dictionaryList()
+                        return r.words
+                    },
+                    removeDictWord: (word: string) => runtime.client.dictionaryRemove(word),
+                })
+            },
+            onRecheck: () => void rerunFor(el)(getText(el)),
+            onDisableSite: togglePower,
+            onClose: () => {
+                if (runtime.statsHandle) {
+                    runtime.statsHandle.destroy()
+                    runtime.statsHandle = null
+                }
+                if (runtime.goalsHandle) {
+                    runtime.goalsHandle.destroy()
+                    runtime.goalsHandle = null
+                }
+                runtime.panelHandle?.destroy()
+                runtime.panelHandle = null
+                runtime.panelField = null
+                runtime.panelFor = null
+            },
+        }
+        runtime.panelHandle = showPanel(overlay.root, options)
+        runtime.panelField = el
+        runtime.panelFor = el
+    }
+
     function renderField(el: HTMLElement, root: ShadowRoot, state: FieldState): void {
         // Reset the hit-test rects every render; repopulated below when there
         // are suggestions. Cleared first so the count===0 early-return leaves
@@ -1605,13 +2218,20 @@ function wireRuntime(
             count,
             focused: document.activeElement === el,
         })
+        // W3-1: compute score + band via the view-model helpers. The
+        // visible items run through `visibleItems` (LLM items dropped
+        // on 'fast', style items dropped on 'informal') so the orb's
+        // center glyph + ring color match the panel's score block.
+        const visible = visibleItems(state.items, state.phase, state.goals)
+        const score = computeScore(visible)
+        const band = scoreBand(score)
         // Build options once; reused for both initial render and update path.
         const statusOptions: StatusButtonOptions = {
-            count,
-            byCategory: tallyByCategory(state.items),
+            count: visible.length,
+            byCategory: tallyByCategory(visible),
             anchorRect: anchor,
             disabled: false,
-            corrections: state.items.map((it) => ({
+            corrections: visible.map((it) => ({
                 category: it.category,
                 diffOriginal: it.diffOriginal,
                 diffCorrected: it.diffCorrected,
@@ -1627,6 +2247,19 @@ function wireRuntime(
             onUndo: () => void undoFor(el),
             onRephrase: () => rephraseFlow.rephraseFor(el),
             undoAvailable: (state.lastApplied?.length ?? 0) > 0,
+            // W3-1: drive the orb's score ring + center glyph. The
+            // center 'pip' state is automatic when phase==='fast' AND
+            // visible.length>0 (see view-model.orbState). Score falls
+            // back to 100 (green full ring) on the FIRST render — the
+            // first check resolves with a non-default score.
+            score,
+            band,
+            phase: state.phase,
+            // W3-1: orb click → open the review panel anchored at the
+            // orb's live rect. The panel is a single shared instance
+            // (orchestrator-scoped handle, NOT a per-field one) — a new
+            // showPanel dismisses the prior via destroyExisting().
+            onOpen: () => openReviewPanelFor(el),
             // Persisted (session) pill drag offset — a dragged spot survives
             // re-renders and the enabled↔disabled swap (state in start() scope),
             // and re-anchors to the field on scroll/resize (via reposition).
