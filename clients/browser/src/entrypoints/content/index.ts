@@ -304,6 +304,12 @@ interface Runtime {
 async function start(ctx: ContentScriptContext): Promise<void> {
     // eslint-disable-next-line no-console
     console.info('[gf] content script loaded')
+    // Build stamp — open DevTools console to verify the running build.
+    // __GF_BUILD_SHA__ and __GF_BUILD_TIME__ are injected by wxt.config.ts
+    // via Vite define at build time. They survive minification (string
+    // literals after substitution). The `declare` is in env.d.ts below.
+    // eslint-disable-next-line no-console
+    console.info('[gf] build', __GF_BUILD_SHA__, __GF_BUILD_TIME__)
     let currentSettings: Settings = await getSettings()
     // Drive the verbose logger from the setting (null = fall back to the
     // localStorage.gfDebug manual override).
@@ -1033,6 +1039,10 @@ function wireRuntime(
                 runtime.goalsHandle.destroy()
                 runtime.goalsHandle = null
             }
+            // Close the correction card (popover.ts .gf-card) on scroll.
+            // openPopovers is a WeakMap (not iterable), so we use
+            // dismissPopoversIn which iterates the per-root registry.
+            dismissPopoversIn(overlay.root)
         },
     })
     runtime.cleanups.push(reanchor.stop)
@@ -2402,23 +2412,21 @@ function wireRuntime(
                     (panelAside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
                         .setActiveTab('review')
                 }
-                // Rebuild the review body content in-place. The body
-                // container is still mounted; we clear it and re-render.
-                const body = runtime.panelHandle?.getBodyContainer() ?? null
-                if (!body) {
-                    // Body container gone (shouldn't happen) — fall back
-                    // to a full panel rebuild.
-                    openReviewPanelFor(el)
-                    return
-                }
-                // Clear the Stats content and re-render the review body.
-                while (body.firstChild) body.removeChild(body.firstChild)
+                // Restore the review body in-place using the panel handle's
+                // restoreReviewBody method (no teardown/rebuild = no flash).
                 const st = runtime.fields.get(el)
                 if (!st) return
-                // Re-use the same model the panel was opened with. A full
-                // rebuild would be needed for fresh items — but the user
-                // just switched tabs, so the model is still current.
-                openReviewPanelFor(el)
+                const restored = runtime.panelHandle?.restoreReviewBody(
+                    st.items,
+                    getText(el),
+                    st.goals,
+                    st.phase ?? 'done',
+                    true, // onRephrase is always wired in the browser client
+                )
+                if (!restored) {
+                    // Panel was destroyed — fall back to full rebuild.
+                    openReviewPanelFor(el)
+                }
             },
             onRecheck: () => void rerunFor(el)(getText(el)),
             onDisableSite: togglePower,

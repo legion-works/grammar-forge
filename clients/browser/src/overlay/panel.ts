@@ -106,6 +106,18 @@ export interface PanelHandle {
      *  calls `mountStatsView(panel.getBodyContainer(), deps)`. Returns
      *  null after destroy(). */
     getBodyContainer: () => HTMLElement | null
+    /** Restore the Review body IN PLACE (no panel teardown/rebuild).
+     *  Clears the body container and re-renders the review content with
+     *  fresh items/text/goals/phase. Used by onOpenReview to switch from
+     *  Stats back to Review without a flash. Returns false if the panel
+     *  is already destroyed. */
+    restoreReviewBody: (
+        items: readonly RenderableItem[],
+        text: string,
+        goals: Goals,
+        phase: Phase,
+        hasRephrase: boolean,
+    ) => boolean
 }
 
 const VIEWPORT_GUTTER = 8
@@ -270,6 +282,21 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
         },
         isOpen: () => aside.isConnected,
         getBodyContainer: () => bodyRef,
+        restoreReviewBody: (
+            items: readonly RenderableItem[],
+            text: string,
+            goals: Goals,
+            phase: Phase,
+            hasRephrase: boolean,
+        ): boolean => {
+            if (!bodyRef || !bodyRef.isConnected) return false
+            // Clear the body container (Stats content or stale review).
+            while (bodyRef.firstChild) bodyRef.removeChild(bodyRef.firstChild)
+            // Re-build the review model with fresh data and re-render.
+            const freshModel = buildPanelModel({ items, text, goals, phase })
+            renderReviewBodyContent(bodyRef, freshModel, hasRephrase, formatFormality(goals.formality))
+            return true
+        },
     }
 }
 
