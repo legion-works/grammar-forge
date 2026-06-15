@@ -122,19 +122,18 @@ function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void 
     const vh = view.innerHeight
     const spaceBelow = vh - anchor.bottom
     const showAbove = spaceBelow < TOOLTIP_HEIGHT_ESTIMATE
-    let left = anchor.left
-    if (left + TOOLTIP_WIDTH_MAX > vw) {
-        left = Math.max(VIEWPORT_GUTTER, vw - TOOLTIP_WIDTH_MAX - VIEWPORT_GUTTER)
+    // Center the pill horizontally on the word. Use the estimated width
+    // (the pill is inline-flex so its actual width isn't known before layout).
+    // The caret (.gf-tip__tail) is centered via left:50% in CSS, so it
+    // always points at the pill's center — which we align to the word center.
+    const wordCenterX = anchor.left + anchor.width / 2
+    let left = wordCenterX - TOOLTIP_WIDTH_MAX / 2
+    if (left + TOOLTIP_WIDTH_MAX > vw - VIEWPORT_GUTTER) {
+        left = vw - TOOLTIP_WIDTH_MAX - VIEWPORT_GUTTER
     }
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     tip.style.left = `${left}px`
     if (showAbove) {
-        // Bug-fix: was `bottom: vh - anchor.top + ANCHOR_GAP` which is a
-        // CSS `bottom` value on a position:fixed element — that means
-        // "distance from viewport bottom", not "distance from viewport top".
-        // `vh - anchor.top + 6` = a large value that pushes the pill far
-        // off-screen. Use `top` instead: anchor.top - tipHeight - gap.
-        // We don't know tipHeight before layout, so use the estimate.
         const estimatedTop = anchor.top - TOOLTIP_HEIGHT_ESTIMATE - ANCHOR_GAP
         tip.style.top = `${Math.max(VIEWPORT_GUTTER, estimatedTop)}px`
         tip.style.bottom = 'auto'

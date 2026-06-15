@@ -112,12 +112,15 @@ describe('showTooltip (preview pill)', () => {
         expect(root.querySelector('.gf-tip')).toBeNull()
     })
 
-    it('uses the supplied anchorRect (no DOM re-measurement)', () => {
+    it('uses the supplied anchorRect (no DOM re-measurement) and centers on the word', () => {
         // MEASURE-BEFORE-RERENDER invariant: the orchestrator must measure
         // the word's rect BEFORE re-rendering the underline overlay, and
         // pass that rect in. showTooltip must NOT call getBoundingClientRect
-        // itself — it just uses the passed-in value. We assert the pill
-        // is positioned at the supplied anchor's left.
+        // itself — it just uses the passed-in value.
+        //
+        // #2 fix: the pill is now CENTERED on the word horizontally.
+        // left = wordCenterX - TOOLTIP_WIDTH_MAX/2, clamped to viewport.
+        // TOOLTIP_WIDTH_MAX = 320, VIEWPORT_GUTTER = 10.
         const root = mkRoot()
         const customAnchor = new DOMRect(247, 333, 60, 18)
         showTooltip(root, {
@@ -128,9 +131,9 @@ describe('showTooltip (preview pill)', () => {
             diffIsDeletion: false,
         })
         const tip = root.querySelector('.gf-tip') as HTMLElement
-        // Position must be derived from the supplied rect — the pill sits
-        // just below the anchor (space permits) with a 6px gap.
-        expect(tip.style.left).toBe('247px')
+        // wordCenterX = 247 + 60/2 = 277; left = 277 - 320/2 = 117
+        // (no clamping: 117 + 320 = 437 < 1024 - 10; 117 > 10)
+        expect(tip.style.left).toBe('117px')
         expect(tip.style.top).toBe(`${customAnchor.bottom + 6}px`)
     })
 
