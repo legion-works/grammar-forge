@@ -106,11 +106,18 @@ export interface PanelHandle {
      *  calls `mountStatsView(panel.getBodyContainer(), deps)`. Returns
      *  null after destroy(). */
     getBodyContainer: () => HTMLElement | null
+    /** Which tab is currently active. Used by the orchestrator to guard
+     *  the on-check refresh: restoreReviewBody is a no-op when Stats is
+     *  active (so a check completing while the user is on Stats doesn't
+     *  clobber the Stats view). */
+    getActiveTab: () => 'review' | 'stats'
     /** Restore the Review body IN PLACE (no panel teardown/rebuild).
      *  Clears the body container and re-renders the review content with
      *  fresh items/text/goals/phase. Used by onOpenReview to switch from
      *  Stats back to Review without a flash. Returns false if the panel
-     *  is already destroyed. */
+     *  is already destroyed OR if the Stats tab is currently active
+     *  (guard: a check completing while Stats is shown must not clobber
+     *  the Stats view). */
     restoreReviewBody: (
         items: readonly RenderableItem[],
         text: string,
@@ -271,6 +278,13 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
     // open-state behavior is unchanged: returns the live .gf-panel__body
     // element while the panel is mounted.
     let bodyRef: HTMLElement | null = body
+    // Track the active tab so restoreReviewBody can guard against
+    // clobbering the Stats view when a check completes while Stats is shown.
+    let activeTab: 'review' | 'stats' = 'review'
+    // Wire the tab-state updater back into renderChrome's setActiveTab so
+    // clicking a tab updates both the DOM indicator AND this closure's state.
+    ;(aside as HTMLElement & { _gfSetActiveTabState: (t: 'review' | 'stats') => void })._gfSetActiveTabState =
+        (tab: 'review' | 'stats') => { activeTab = tab }
 
     return {
         destroy: () => {
@@ -282,6 +296,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
         },
         isOpen: () => aside.isConnected,
         getBodyContainer: () => bodyRef,
+        getActiveTab: () => activeTab,
         restoreReviewBody: (
             items: readonly RenderableItem[],
             text: string,
@@ -290,6 +305,11 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
             hasRephrase: boolean,
         ): boolean => {
             if (!bodyRef || !bodyRef.isConnected) return false
+            // Guard: when Stats is active, a check completing must NOT
+            // clobber the Stats view. Return false so the caller knows
+            // the refresh was skipped (it will fire again on next check
+            // after the user switches back to Review).
+            if (activeTab === 'stats') return false
             // Build the new review content OFF-DOM in a DocumentFragment,
             // then swap it in with ONE atomic replaceChildren() call.
             // This avoids the intermediate empty-body flash that occurs
@@ -396,6 +416,10 @@ function renderChrome(
     // can toggle the active tab indicator WITHOUT rebuilding the panel.
     // Called synchronously before mounting the Stats view or restoring
     // the Review body — so the indicator is always in sync with content.
+    // Also updates the handle's activeTab state so restoreReviewBody can
+    // guard against clobbering the Stats view on a check-refresh.
+    // The activeTabRef is a shared mutable box between renderChrome and
+    // the handle's restoreReviewBody closure.
     ;(aside as HTMLElement & { setActiveTab: (tab: 'review' | 'stats') => void }).setActiveTab =
         (tab: 'review' | 'stats') => {
             const isReview = tab === 'review'
@@ -403,6 +427,10 @@ function renderChrome(
             reviewTab.setAttribute('aria-selected', String(isReview))
             statsTab.classList.toggle('is-active', !isReview)
             statsTab.setAttribute('aria-selected', String(!isReview))
+            // Update the handle's activeTab via the shared ref injected below.
+            if ((aside as HTMLElement & { _gfSetActiveTabState?: (t: 'review' | 'stats') => void })._gfSetActiveTabState) {
+                (aside as HTMLElement & { _gfSetActiveTabState: (t: 'review' | 'stats') => void })._gfSetActiveTabState(tab)
+            }
         }
 
     // Body slot

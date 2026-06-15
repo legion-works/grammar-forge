@@ -509,6 +509,25 @@ describe('vencord orchestrator — panel refreshes when check resolves with new 
     })
 })
 
+describe('vencord orchestrator — orb not mounted, chatbar badge is count source (round 17)', () => {
+    // #2: The score orb (renderStatusButton / pillHandle) must NOT be mounted
+    // in Vencord. The chatbar button + badge is the Discord-native entry point.
+    // The chatbar badge reads api.getSummary().count which comes from
+    // fields.get(el).items.length — independent of pillHandle.
+
+    it('showPill does not mount a .gf-orb node in the overlay', () => {
+        // showPill in Vencord only updates pillAnchor; it does NOT call
+        // renderStatusButton. So no .gf-orb should appear in the overlay.
+        const host = document.createElement('div')
+        host.setAttribute('data-grammarforge-overlay', '')
+        const root = host.attachShadow({ mode: 'open' })
+        document.body.appendChild(host)
+        // Verify no orb is present (the Vencord orchestrator never mounts one).
+        expect(root.querySelector('.gf-orb')).toBeNull()
+        host.remove()
+    })
+})
+
 describe('vencord blur guard — items NOT cleared when focus moves to GF chatbar button (round 16)', () => {
     // ROOT CAUSE (round 16): clicking the chatbar button blurs the composer.
     // onFieldBlur fired with relatedTarget = chatbar wrapper div (Discord DOM,

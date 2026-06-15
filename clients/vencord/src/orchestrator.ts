@@ -386,11 +386,8 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // closes the panel (the W1 hover-panel behaviour is gone),
             // so the prior `!panelOpen` skip is stale and the update
             // can run unconditionally.
-            const zeroPillUpdated = !!(pillHandle && pillHandle.isMounted())
-            if (pillHandle && pillHandle.isMounted()) {
-                pillHandle.update(buildPillOptions(el, st))
-            }
-            debugLog('render', { items: 0, pillUpdated: zeroPillUpdated, panelOpen })
+            // Orb not mounted in Vencord — chatbar badge is the count source.
+            debugLog(`render items=0 panelOpen=${String(panelOpen)}`)
             notify()
             // Panel refresh (zero items → empty state): if the review panel
             // is open for this field, rebuild the body in-place so the
@@ -455,16 +452,8 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // pill.update() while the panel is open is safe — the panel
         // stays mounted + readable while the orb's count/band/ring stay
         // live. The W1 `!panelOpen` skip is stale; remove it.
-        const pillUpdated = !!(pillHandle && pillHandle.isMounted())
-        if (pillHandle && pillHandle.isMounted()) {
-            pillHandle.update(buildPillOptions(el, st))
-        }
-        debugLog('render', {
-            items: st.items.length,
-            rectsMeasured: allRects != null,
-            pillUpdated,
-            panelOpen,
-        })
+        // Orb not mounted in Vencord — chatbar badge is the count source.
+        debugLog(`render items=${st.items.length} rectsMeasured=${String(allRects != null)} panelOpen=${String(panelOpen)}`)
         notify()
         // Panel refresh: if the review panel is open for this field, rebuild
         // its body in-place with the fresh items/score so applied suggestions
@@ -1031,42 +1020,24 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     }
 
     const showPill = (anchorRect: DOMRect): void => {
-        const el = activeComposer()
-        if (!el) return
-        const st = fields.get(el)
-        if (!st) return
-        cancelPillHide()
+        // In Vencord, the chatbar button IS the Discord-native entry point.
+        // The score orb (pillHandle / renderStatusButton) is NOT mounted —
+        // it would be redundant and visually intrusive over Discord's UI.
+        // We still track pillAnchor so openReviewPanel has a valid anchor.
         pillAnchor = pillAnchorAbove(anchorRect)
-        // Update in place when the pill is already mounted (e.g. a resize
-        // reposition); only build fresh on first mount.
-        if (pillHandle && pillHandle.isMounted()) {
-            pillHandle.update(buildPillOptions(el, st))
-            pillHandle.setVisible(true)
-            bindPillNode()
-            return
-        }
-        pillHandle = renderStatusButton(overlay.root, buildPillOptions(el, st))
-        panelOpen = false
-        bindPillNode()
+        // pillHandle intentionally NOT mounted in Vencord.
     }
 
     const hidePill = (): void => {
-        if (panelOpen) return
-        cancelPillHide()
-        pillHideTimer = setTimeout(() => {
-            pillHideTimer = null
-            if (!panelOpen) pillHandle?.setVisible(false)
-        }, PILL_HIDE_GRACE_MS)
+        // No-op in Vencord: the orb is not mounted, nothing to hide.
+        // The chatbar button manages its own visibility via Discord's React.
     }
 
     const togglePanel = (anchorRect: DOMRect): void => {
-        // W2b: the chatbar button toggles the W2b review panel (the W1
-        // hover panel is retired). The pill's body click (when present)
-        // ALSO fires `onOpen` which lands in `openReviewPanel`, so the
-        // entry point is uniform. The pill is mounted only as a position
-        // source — the W2b review panel reads its own anchor from
-        // `anchorRect`.
-        if (!pillHandle || !pillHandle.isMounted()) showPill(anchorRect)
+        // Chatbar button click: update the anchor, then toggle the panel.
+        // The orb is not mounted in Vencord — the chatbar button is the
+        // sole entry point. No showPill() call needed.
+        pillAnchor = pillAnchorAbove(anchorRect)
         if (panelOpen) {
             closeReviewPanel()
         } else {
@@ -1195,27 +1166,49 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 })
             },
             onOpenStats: () => {
-                // W3-3: Stats tab mounts the W2-4 view into the panel's
-                // body slot (panel.getBodyContainer() returns the live
-                // .gf-panel__body element; mountStatsView clears it and
-                // renders its own tree). When the user switches back to
-                // Review the next showPanel call rebuilds fresh.
+                // Stats tab: toggle indicator FIRST (synchronously), then
+                // mount the Stats view into the body slot. Mirrors the
+                // browser orchestrator's onOpenStats (content/index.ts).
+                statsHandle?.destroy()
+                statsHandle = null
+                const panelAside = reviewPanel?.isOpen()
+                    ? reviewPanel.getBodyContainer()?.parentElement
+                    : null
+                if (panelAside && 'setActiveTab' in panelAside) {
+                    (panelAside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
+                        .setActiveTab('stats')
+                }
                 const body = reviewPanel?.getBodyContainer()
                 if (!body) return
-                statsHandle?.destroy()
                 statsHandle = mountStatsView(body, buildStatsViewDeps())
             },
             onOpenReview: () => {
-                // Review tab clicked — destroy the Stats view and re-open
-                // the panel with fresh review content (same pattern as the
-                // browser orchestrator). Re-read st + anchor live so the
-                // panel gets fresh items/phase and the correct field rect.
+                // Review tab: toggle indicator FIRST, then restore the
+                // review body IN-PLACE (no panel rebuild = no flash).
+                // Mirrors the browser orchestrator's onOpenReview.
                 statsHandle?.destroy()
                 statsHandle = null
+                const panelAside = reviewPanel?.isOpen()
+                    ? reviewPanel.getBodyContainer()?.parentElement
+                    : null
+                if (panelAside && 'setActiveTab' in panelAside) {
+                    (panelAside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
+                        .setActiveTab('review')
+                }
                 const stNow = fields.get(el)
                 if (!stNow) return
-                const anchorNow = el.getBoundingClientRect()
-                openReviewPanel(el, stNow, anchorNow)
+                const restored = reviewPanel?.restoreReviewBody(
+                    stNow.items,
+                    getText(el),
+                    getConfig().goals,
+                    stNow.phase ?? 'done',
+                    false,
+                )
+                if (!restored) {
+                    // Body gone — fall back to full rebuild.
+                    const anchorNow = el.getBoundingClientRect()
+                    openReviewPanel(el, stNow, anchorNow)
+                }
             },
             onRecheck: () => void rerunFor(el)(getText(el)),
             onDisableSite: () => {

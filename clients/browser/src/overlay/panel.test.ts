@@ -579,6 +579,44 @@ describe('showPanel (W2b review panel)', () => {
             expect(root.querySelector('.gf-panel__score')).not.toBeNull()
         })
 
+        it('restoreReviewBody returns false (no-op) when Stats tab is active (guard: no clobber)', () => {
+            // When the user is on the Stats tab, a check completing must NOT
+            // clobber the Stats view. restoreReviewBody returns false when
+            // activeTab === 'stats'.
+            const root = mkRoot()
+            const handle = showPanel(root, mkOptions({ items: [item({ id: 1 })] }))
+            // Switch to Stats tab (simulates user clicking Stats).
+            const aside = root.querySelector('.gf-panel-aside') as HTMLElement
+            if ('setActiveTab' in aside) {
+                (aside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
+                    .setActiveTab('stats')
+            }
+            expect(handle.getActiveTab()).toBe('stats')
+            // restoreReviewBody must be a no-op when Stats is active.
+            const refreshed = handle.restoreReviewBody([], 'text', neutralGoals, 'done', false)
+            expect(refreshed).toBe(false)
+            // Body still has Stats content (not cleared by the no-op).
+            // The body container is still connected.
+            expect(handle.getBodyContainer()?.isConnected).toBe(true)
+        })
+
+        it('getActiveTab returns review initially, stats after setActiveTab(stats)', () => {
+            const root = mkRoot()
+            const handle = showPanel(root, mkOptions())
+            expect(handle.getActiveTab()).toBe('review')
+            const aside = root.querySelector('.gf-panel-aside') as HTMLElement
+            if ('setActiveTab' in aside) {
+                (aside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
+                    .setActiveTab('stats')
+            }
+            expect(handle.getActiveTab()).toBe('stats')
+            if ('setActiveTab' in aside) {
+                (aside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
+                    .setActiveTab('review')
+            }
+            expect(handle.getActiveTab()).toBe('review')
+        })
+
         it('restoreReviewBody returns false and is a no-op after destroy()', () => {
             // Stale-guard: if the panel was closed before the re-check resolved,
             // restoreReviewBody must not throw or render onto a dead container.
