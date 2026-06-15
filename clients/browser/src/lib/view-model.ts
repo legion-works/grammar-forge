@@ -2,25 +2,25 @@
 // goals, stats) across both clients. NO DOM, NO network — the orchestrator
 // passes in items + goals + phase and reads back the derived values.
 //
-// Penalty weights and band cut-offs come from the redesign plan and the
-// `_tokens.scss` / `flows.md` spec. The `BAND_COLOR` map is the SCSS source
-// of truth for the arc stroke; the *score math* (penalty sum, band cut-offs)
-// is independent of the visual tokens and lives here.
+// Penalty weights, band cut-offs, ring geometry, and insight math come from
+// the REFERENCE DC `GrammarForge Assistant.dc.html` (lines 252-258, 486-490,
+// 192) — the user-facing mock is the single source of truth. The plan + SCSS
+// tokens are derivations of the DC and are not authoritative for the score
+// math, band colours, or ring geometry used at render time.
 
 import type { Band, Goals, Phase } from '@/api/types'
 import type { RenderableItem } from '@/lib/pipeline'
 
 /** Penalty deducted from the 100-point score per open issue, by category.
- *  Spelling costs the most (8), typography the least (2). Unknown / future
- *  categories fall back to 2. The plan's exact weights — see the §Penalty
- *  block in `.opencode/plans/2026-06-15-redesign-client-surfaces.md`. */
+ *  Spelling 5, grammar 4, punctuation 3, style 2, typography 1. Unknown /
+ *  future categories fall back to 1. (Reference DC lines 252-258.) */
 const PENALTY: Record<string, number> = {
-    spelling: 8,
-    grammar: 6,
-    punctuation: 4,
-    style: 3,
-    typography: 2,
-    unknown: 2,
+    spelling: 5,
+    grammar: 4,
+    punctuation: 3,
+    style: 2,
+    typography: 1,
+    unknown: 1,
 }
 
 /** Items that count toward the score AND appear in the UI.
@@ -47,13 +47,12 @@ export function visibleItems(
  *  catastrophically-broken text never produces a negative score (the panel
  *  ring's `arcOffset` would render a > 1.0 multiplier). */
 export function computeScore(visible: readonly RenderableItem[]): number {
-    const penalty = visible.reduce((acc, it) => acc + (PENALTY[it.category] ?? 2), 0)
+    const penalty = visible.reduce((acc, it) => acc + (PENALTY[it.category] ?? 1), 0)
     return Math.max(0, 100 - penalty)
 }
 
 /** Band label from score. Inclusive lower bounds: ≥90 excellent, ≥78 good,
- *  ≥60 fair, else needs-work. Matches `flows.md §0` and the panel ring
- *  colour (`BAND_COLOR`). */
+ *  ≥60 fair, else needs-work. (Reference DC; matches `flows.md §0`.) */
 export function scoreBand(score: number): Band {
     if (score >= 90) return 'excellent'
     if (score >= 78) return 'good'
@@ -61,20 +60,20 @@ export function scoreBand(score: number): Band {
     return 'needs-work'
 }
 
-/** SVG arc dashoffset for a 24-radius circle (circumference = 2πr ≈ 150.8).
- *  Score 100 → 0 (full ring); score 0 → 150.8 (no ring). */
+/** SVG arc dashoffset for the score ring (r=24.5, circumference = 2πr ≈ 153.9).
+ *  Score 100 → 0 (full ring); score 0 → 153.9 (no ring). (Reference DC line 486.) */
 export function arcOffset(score: number): number {
-    return 150.8 * (1 - score / 100)
+    return 153.9 * (1 - score / 100)
 }
 
-/** Stroke colour per band — matches the SCSS `$gf-band-*` tokens (plan
- *  specifies these hex values verbatim; verified against the
- *  `_tokens.scss` palette at design-system time). */
+/** Stroke colour per band — matches the reference DC score ring palette
+ *  (line 486). Distinct from the SCSS `$gf-band-*` tokens, which are
+ *  decorative only — the math here drives what users see on the orb. */
 export const BAND_COLOR: Record<Band, string> = {
     excellent: '#16a34a',
-    good: '#2563eb',
+    good: '#0891b2',
     fair: '#d97706',
-    'needs-work': '#ef4444',
+    'needs-work': '#dc2626',
 }
 
 /** High-confidence items (confidence ≥ 0.90). The panel's "Accept
@@ -102,4 +101,54 @@ export function defaultToneFromGoals(goals: Goals): 'neutral' | 'formal' | 'casu
     if (goals.formality === 'formal') return 'formal'
     if (goals.formality === 'informal') return 'casual'
     return 'neutral'
+}
+
+/** Confidence → label + stroke colour for the correction-card confidence
+ *  bar. `>= 0.9` → 'High' green, `>= 0.75` → 'Medium' amber, else → 'Low'
+ *  slate. (Reference DC line 192 — the confbar's "High/Medium/Low" pill
+ *  + bar fill colour.) */
+export type ConfidenceLabel = 'High' | 'Medium' | 'Low'
+export function confLabel(confidence: number | undefined): ConfidenceLabel {
+    const c = confidence ?? 0
+    if (c >= 0.9) return 'High'
+    if (c >= 0.75) return 'Medium'
+    return 'Low'
+}
+export const CONF_COLOR: Record<ConfidenceLabel, string> = {
+    High: '#16a34a',
+    Medium: '#d97706',
+    Low: '#64748b',
+}
+
+/** Insight numbers for the panel's stat row. The reference DC renders
+ *  these as a static "Words / Read time / Sentences / Readability" strip
+ *  populated from the field's text + suggestion state.
+ *
+ *  Math (reference DC lines 192/486/490 — verbatim, no rounding tricks):
+ *  - `words`  = text.trim() ? text.trim().split(/\s+/).length : 0
+ *  - `sents`  = Math.max(1, (text.match(/[.!?]+/g) || []).length)
+ *  - `wps`    = words / sents
+ *  - `grade`  = wps < 13 ? 6 : wps < 17 ? 8 : 11  (US school grade)
+ *  - `readLabel` = wps < 17 ? 'Clear' : 'Dense'
+ *  - `readSecs`  = Math.max(1, Math.round(words / 200 * 60))  (200 wpm)
+ *
+ *  Tone row ('Confident' / 'Warm') is a STATIC decorative tag in the
+ *  reference — it is NOT computed and does not call /tone. The orchestrator
+ *  is free to swap the static string later (W3+ wiring). */
+export interface FieldInsights {
+    words: number
+    sentences: number
+    wordsPerSentence: number
+    grade: 6 | 8 | 11
+    readLabel: 'Clear' | 'Dense'
+    readSecs: number
+}
+export function makeInsights(text: string): FieldInsights {
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0
+    const sents = Math.max(1, (text.match(/[.!?]+/g) || []).length)
+    const wps = words / sents
+    const grade: 6 | 8 | 11 = wps < 13 ? 6 : wps < 17 ? 8 : 11
+    const readLabel: 'Clear' | 'Dense' = wps < 17 ? 'Clear' : 'Dense'
+    const readSecs = Math.max(1, Math.round((words / 200) * 60))
+    return { words, sentences: sents, wordsPerSentence: wps, grade, readLabel, readSecs }
 }
