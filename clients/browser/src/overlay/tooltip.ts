@@ -36,6 +36,13 @@ export interface TooltipOptions {
      *  render the pill without the accept button (e.g. when the item has
      *  no replacement). */
     onAccept?: () => void
+    /** Hover-bridge: called when the pointer enters the pill itself.
+     *  The orchestrator cancels the hide-grace timer so the pill stays
+     *  open while the user moves from the word to the ✓ button. */
+    onPillMouseEnter?: () => void
+    /** Hover-bridge: called when the pointer leaves the pill. The
+     *  orchestrator re-arms the hide-grace timer. */
+    onPillMouseLeave?: () => void
 }
 
 export interface TooltipHandle {
@@ -82,6 +89,16 @@ export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipH
                 options.onAccept!()
             })
         }
+    }
+
+    // Hover-bridge: keep the pill alive while the pointer is over it so
+    // the user can move from the word to the ✓ button without the pill
+    // vanishing. The orchestrator cancels/re-arms the hide-grace timer.
+    if (options.onPillMouseEnter) {
+        tip.addEventListener('mouseenter', options.onPillMouseEnter)
+    }
+    if (options.onPillMouseLeave) {
+        tip.addEventListener('mouseleave', options.onPillMouseLeave)
     }
 
     positionTooltip(tip, options.anchorRect, view)
