@@ -189,7 +189,6 @@ export function mountStatsView(
     container: HTMLElement,
     deps: StatsViewDeps,
 ): StatsViewHandle {
-    container.textContent = ''
     let mounted = true
     let inFlight = false
 
@@ -197,10 +196,12 @@ export function mountStatsView(
     root.className = 'gf-stats'
     root.setAttribute('role', 'region')
     root.setAttribute('aria-label', 'Stats')
-    container.appendChild(root)
-
-    // Initial placeholder (loading) — replaced when the first load resolves.
+    // Initial placeholder (loading) — rendered off-DOM first, then
+    // swapped in atomically so there's no intermediate empty flash.
     renderLoading(root)
+    // Atomic swap: replaceChildren replaces all existing content in one
+    // operation — no intermediate empty state visible to the user.
+    container.replaceChildren(root)
 
     const refresh = async (): Promise<void> => {
         if (inFlight) return

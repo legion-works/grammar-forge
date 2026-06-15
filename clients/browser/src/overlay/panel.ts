@@ -290,11 +290,18 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
             hasRephrase: boolean,
         ): boolean => {
             if (!bodyRef || !bodyRef.isConnected) return false
-            // Clear the body container (Stats content or stale review).
-            while (bodyRef.firstChild) bodyRef.removeChild(bodyRef.firstChild)
-            // Re-build the review model with fresh data and re-render.
+            // Build the new review content OFF-DOM in a DocumentFragment,
+            // then swap it in with ONE atomic replaceChildren() call.
+            // This avoids the intermediate empty-body flash that occurs
+            // when clearing first and rebuilding second.
             const freshModel = buildPanelModel({ items, text, goals, phase })
-            renderReviewBodyContent(bodyRef, freshModel, hasRephrase, formatFormality(goals.formality))
+            const frag = doc.createDocumentFragment()
+            // Render into a temporary container, then move children to frag.
+            const tmp = doc.createElement('div')
+            renderReviewBodyContent(tmp, freshModel, hasRephrase, formatFormality(goals.formality))
+            while (tmp.firstChild) frag.appendChild(tmp.firstChild)
+            // Atomic swap: no intermediate empty state.
+            bodyRef.replaceChildren(frag)
             return true
         },
     }
