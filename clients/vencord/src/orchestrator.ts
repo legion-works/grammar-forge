@@ -36,6 +36,7 @@ import {
     type StatusButtonHandle,
     type StatusButtonOptions,
 } from '@/overlay/status-button'
+import { showPanel, type PanelHandle, type PanelOptions } from '@/overlay/panel'
 import { dismissRephraseCardsIn } from '@/overlay/rephrase-card'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
 import { shouldRephraseHotkey } from '@/hotkeys/rephrase-target'
@@ -253,6 +254,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     let pillHandle: StatusButtonHandle | null = null
     let pillAnchor: DOMRect | null = null
     let panelOpen = false
+    let reviewPanel: PanelHandle | null = null
     let lastActiveField: HTMLElement | null = null
     // Single hover tooltip (one per overlay, mirrors browser client).
     // Shared across all fields; a new showTooltip call dismisses the prior.
@@ -757,16 +759,74 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     }
 
     const togglePanel = (anchorRect: DOMRect): void => {
-        // Mount the pill first if it isn't already, then drive the panel.
+        // W2b: the chatbar button toggles the W2b review panel (the W1
+        // hover panel is retired). The pill's body click (when present)
+        // ALSO fires `onOpen` which lands here, so the entry point is
+        // uniform. The pill is mounted only as a position source — the
+        // W2b review panel reads its own anchor from `anchorRect`.
         if (!pillHandle || !pillHandle.isMounted()) showPill(anchorRect)
         if (panelOpen) {
-            pillHandle?.closePanel()
+            reviewPanel?.destroy()
+            reviewPanel = null
             panelOpen = false
         } else {
-            pillHandle?.openPanel()
-            panelOpen = true
+            const el = activeComposer()
+            const st = el ? fields.get(el) : null
+            if (el && st) {
+                const opts = buildReviewPanelOptions(el, st, anchorRect)
+                reviewPanel = showPanel(overlay.root, opts)
+                panelOpen = true
+            }
         }
     }
+
+    /** Build the W2b review panel options for the given field state. The
+     *  W3 wiring will move the apply calls into the orchestrator (the
+     *  W2b scope freezes the panel at open time — apply/lifecycle are
+     *  out of scope; the chatbar button gets a working entry point +
+     *  the data model flows through). */
+    const buildReviewPanelOptions = (
+        el: HTMLElement,
+        st: FieldState,
+        anchor: DOMRect,
+    ): PanelOptions => ({
+        anchorRect: anchor,
+        items: st.items,
+        text: getText(el),
+        goals: { audience: 'general', formality: 'neutral' },
+        phase: 'done',
+        onAcceptAll: () => void applyAllFor(el),
+        onAcceptHighConf: () => {
+            // W3 will wire high-confidence acceptance properly; the W2b
+            // entry point just calls applyAllFor so the surface is wired.
+            void applyAllFor(el)
+        },
+        onAcceptCategory: (cat) => {
+            const categoryItems = st.items.filter((it) => it.category === cat)
+            for (const item of categoryItems) {
+                void applyItem(el, item)
+            }
+        },
+        onAcceptItem: (item) => {
+            void applyItem(el, item)
+        },
+        onOpenGoals: () => {
+            // W2-3 ships the Goals popover module; the W2b entry point
+            // surfaces the click but defers wiring to W3 (orchestrator
+            // owns the showGoals lifecycle).
+        },
+        onOpenStats: () => {
+            // W2-4 ships the Stats view; the W2b entry point surfaces
+            // the click but defers wiring to W3.
+        },
+        onRecheck: () => void rerunFor(el)(getText(el)),
+        onDisableSite: () => togglePause(),
+        onClose: () => {
+            reviewPanel?.destroy()
+            reviewPanel = null
+            panelOpen = false
+        },
+    })
 
     // togglePause: flip paused, clear every field's items + popovers, update
     // the pill (disabled: paused), notify subscribers. On resume, re-check

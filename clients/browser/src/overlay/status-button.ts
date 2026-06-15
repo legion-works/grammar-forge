@@ -1,30 +1,30 @@
 // Adapted from codextde/textchecker @ 7b66d78e74379f9fc909f6d4a2d984cb50a5d088 (MIT)
-// The per-field score orb (formerly the status pill). Four responsibilities:
+// The per-field score orb (formerly the status pill). Three responsibilities:
 //   1. Render the score ring (track + band-colored arc) + the inner state
 //      glyph (count number / ✓ clean / power (paused) / ✨ AI pip while the
 //      LLM is still refining).
-//   2. Be the click target that opens the per-field review panel — for the
-//      W2 redesign this fires `onOpen`; the existing hover panel stays as the
-//      legacy path until W2b replaces it with the full review panel.
+//   2. Be the click target that opens the per-field review panel — the
+//      W2b redesign fires `onOpen`, and the caller (orchestrator) wires
+//      that callback to `showPanel` from `@/overlay/panel`. The W1 hover
+//      panel is RETIRED in W2b (the new review panel replaces it).
 //   3. Drag the orb to a new spot inside its field (session-persisted offset
 //      so it re-anchors as the field scrolls/resizes).
-//   4. Show a streaming "Fast results in · AI refining…" banner inside the
-//      panel while `phase === 'fast'`, so the streaming state has a panel-
-//      level signal in addition to the AI pip on the orb itself.
 // Anchored to the bottom-right corner of the field; positioned from its
 // measured size after mount so a wide label never overflows the field edge.
-import { diffInnerHTML } from '@/overlay/diff-view'
 import type { Band, Category, Phase } from '@/api/types'
-import { arcOffset, BAND_COLOR, orbState } from '@/lib/view-model'
+import { orbState } from '@/lib/view-model'
 
 const ORB_SIZE = 60
 const PILL_WIDTH_FALLBACK = ORB_SIZE
 const PILL_HEIGHT_FALLBACK = ORB_SIZE
 const VIEWPORT_GUTTER = 8
-const PANEL_HIDE_GRACE_MS = 150
 const DRAG_THRESHOLD_PX = 4
 
-/** One correction shown in the hover panel (display-only diff + category). */
+/** One correction shown in the hover panel (display-only diff + category).
+ *  Kept on the public surface for back-compat with the Vencord orchestrator's
+ *  `buildPillOptions` — the W2b review panel reads the FULL `RenderableItem`
+ *  via its own options, not this condensed shape. W3 will retire this once
+ *  the Vencord orchestrator stops passing hover-panel-shaped data. */
 export interface PillCorrection {
     category: Category
     diffOriginal: string
@@ -39,32 +39,34 @@ export interface StatusButtonOptions {
     /** Per-category breakdown. KEPT in the type for back-compat with the
      *  Vencord orchestrator's `buildPillOptions` (which always passes
      *  `tallyByCategory(st.items)`); the W2 orb no longer renders a
-     *  breakdown bar — the W2b review panel will own per-category counts. */
+     *  breakdown bar — the W2b review panel owns per-category counts. */
     byCategory?: Partial<Record<Category, number>>
     /** Viewport rect of the field the orb is anchored to. */
     anchorRect: DOMRect
     /** Collapsed power-only state (checking disabled on this site). */
     disabled: boolean
-    /** Corrections for the hover panel (ignored when disabled / count 0). */
+    /** Corrections for the hover panel. Unused by the W2b orb — the review
+     *  panel reads the full items list from its own options. Kept for
+     *  back-compat with the Vencord orchestrator. */
     corrections: PillCorrection[]
     /** Click the orb body — focus the field. */
     onFocusField: () => void
-    /** Click the power button — toggle site disable. */
+    /** Click the power button — toggle site disable. Unused by the W2b
+     *  orb; the review panel's footer "Disable on this site" owns the
+     *  toggle. Kept for back-compat. */
     onTogglePower: () => void
-    /** Click the recheck button — force a fresh check of the field now. */
+    /** "Recheck" — unused by the W2b orb; the review panel's head
+     *  recheck button owns the action. Kept for back-compat. */
     onRecheck: () => void
-    /** "Apply all" in the hover panel. */
+    /** "Apply all" in the W1 hover panel. Unused by the W2b orb. */
     onApplyAll: () => void
-    /** Click a single correction row in the hover panel. */
+    /** "Apply one" in the W1 hover panel. Unused by the W2b orb. */
     onApplyOne: (index: number) => void
-    /** "Undo last apply" in the panel action row. */
+    /** "Undo last apply" in the W1 hover panel. Unused by the W2b orb. */
     onUndo: () => void
-    /** "Rephrase" in the panel action row (selection, else whole field).
-     *  Optional: omit when the host has no rephrase action (the button is
-     *  then hidden in the panel). Reads freshly on every panel build, so
-     *  update() can add/drop the callback between checks. */
+    /** "Rephrase" in the W1 hover panel. Unused by the W2b orb. */
     onRephrase?: () => void
-    /** Enables the panel's Undo button (the field has an undoable apply). */
+    /** "Undo" button enable state. Unused by the W2b orb. */
     undoAvailable: boolean
     /** Drag OFFSET from the field's default bottom-right anchor (dx,dy). When
      *  set, the orb is placed at (anchor + offset), clamped — so a dragged
@@ -85,15 +87,13 @@ export interface StatusButtonOptions {
      *  computed (ring renders full + green until the first check resolves). */
     score?: number
     /** Streaming phase for the fast→slow pipeline. 'fast' swaps the count
-     *  badge for a pulsing AI pip on the orb and adds a streaming banner to
-     *  the panel; 'done' is the default and shows the count. */
+     *  badge for a pulsing AI pip on the orb. */
     phase?: Phase
     /** Pre-computed band label — short-circuits the score→band lookup in the
      *  orb's render path. Optional: derive from `score` when omitted. */
     band?: Band
-    /** Fires on orb click (alongside the existing showPanel() hover-panel
-     *  path). The W2b review panel listens to this; for now it's a stub the
-     *  orchestrator can leave undefined. */
+    /** Fires on orb click. The W2b review-panel entry point — the
+     *  orchestrator wires this to `showPanel` from `@/overlay/panel`. */
     onOpen?: () => void
 }
 
@@ -107,73 +107,34 @@ export interface StatusButtonHandle {
     /** Show/hide the orb without destroying it. The orb is FOCUS-ONLY: the
      *  orchestrator hides it on field blur and shows it on focus (a hidden
      *  orb is `display:none` so it neither paints nor intercepts pointer
-     *  events, but its hover panel / drag state survive). */
+     *  events, but its drag state survives). */
     setVisible: (visible: boolean) => void
-    /** Programmatic open of the same hover panel (same code path, same anchor).
-     *  No-op when the panel is already open, when the orb is hidden via
-     *  setVisible(false), or after destroy(). */
-    openPanel: () => void
-    /** Programmatic close. Idempotent: safe to call when the panel is closed
-     *  (and after destroy()). */
-    closePanel: () => void
-    /** Refresh the orb's ring + center glyph + hover-panel corrections IN
-     *  PLACE (no teardown) when a new check resolves. Preserves the orb
-     *  element, its drag offset + live drag, the hover-panel lifecycle, and
-     *  the visibility (setVisible) state. A panel open at update time is
-     *  closed (it reopens with fresh data on the next hover). */
+    /** Refresh the orb's ring + center glyph IN PLACE (no teardown) when a
+     *  new check resolves. Preserves the orb element, its drag offset +
+     *  live drag, and the visibility (setVisible) state. The W2b review
+     *  panel is owned by the orchestrator; this method does not touch it
+     *  (the next onOpen() rebuilds it with fresh data). */
     update: (options: StatusButtonOptions) => void
 }
 
-// NOTE: the xmlns attribute is REQUIRED. svgFromConstant parses these with
-// DOMParser('image/svg+xml') — a strict XML parser that does NOT auto-
-// namespace <svg> the way the HTML parser (innerHTML) did. Without xmlns the
-// elements land in no namespace and the browser renders nothing.
+// NOTE: the xmlns attribute is REQUIRED. The power SVG is inlined via
+// innerHTML in buildCenterHTML; the browser's HTML parser namespaces the
+// <svg> automatically (DOMParser('image/svg+xml') would NOT — that's why
+// the W1 panel had a separate `svgFromConstant` helper for its action
+// icons, which the W2b review panel no longer needs).
 const POWER_SVG =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" ` +
     `fill="none" stroke="currentColor" ` +
     `stroke-width="2.4" stroke-linecap="round" aria-hidden="true">` +
     `<path d="M12 4 L12 12" /><path d="M7.5 6.5 A7 7 0 1 0 16.5 6.5" /></svg>`
 
-const REFRESH_SVG =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" ` +
-    `fill="none" stroke="currentColor" ` +
-    `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
-    `<path d="M20 11 A8 8 0 1 0 18.4 16"/><path d="M20 4 L20 11 L13 11"/></svg>`
-
-const UNDO_SVG =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" ` +
-    `fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ` +
-    `stroke-linejoin="round" aria-hidden="true">` +
-    `<path d="M9 14 L4 9 L9 4"/><path d="M4 9 H14 A6 6 0 1 1 14 21 H10"/></svg>`
-
-const REPHRASE_SVG =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="13" height="13" ` +
-    `fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ` +
-    `stroke-linejoin="round" aria-hidden="true">` +
-    `<path d="M4 7 H20 M4 12 H14 M4 17 H10"/><path d="M17 14 L21 18 L17 22"/></svg>`
-
-// Parse a TRUSTED, hardcoded SVG constant into a real element. DOMParser with
-// image/svg+xml never executes scripts, and going through it (instead of
-// innerHTML on the live element) keeps the "no innerHTML" rule greppable and
-// makes any future interpolation of these constants an obvious code smell.
+// Reused by the score-ring + track SVG creation below.
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
-function svgFromConstant(doc: Document, svgText: string): SVGElement {
-    const parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml')
-    const el = parsed.documentElement
-    // Guard the namespace: a constant missing xmlns parses "successfully"
-    // into no-namespace elements that silently render as NOTHING (live bug:
-    // invisible orb icons). Fail loudly at the source instead.
-    if (el.namespaceURI !== SVG_NS) {
-        throw new Error('svgFromConstant: constant must carry xmlns="http://www.w3.org/2000/svg"')
-    }
-    return doc.importNode(el, true) as unknown as SVGElement
-}
-
 /**
- * Render the per-field score orb (+ its hover panel) in the supplied shadow
- * root. Replaces any prior orb. The returned handle's destroy() removes the
- * orb AND the hover panel AND clears the hide timer + listeners.
+ * Render the per-field score orb in the supplied shadow root. Replaces any
+ * prior orb. The returned handle's destroy() removes the orb and clears
+ * its listeners.
  */
 export function renderStatusButton(
     root: ShadowRoot,
@@ -184,7 +145,7 @@ export function renderStatusButton(
     const view = doc.defaultView ?? window
 
     // Mutable current options: update() swaps this in place so the ring/
-    // center glyph + the panel/click closures all read fresh data without
+    // center glyph + the click closures all read fresh data without
     // recreating the orb (and its drag state / listeners / visibility).
     let current = options
 
@@ -225,16 +186,15 @@ export function renderStatusButton(
     orb.appendChild(ringSvg)
 
     // Body (center glyph — count / ✓ / power / ✨ pip). Always present.
-    // Click focuses the field AND opens the panel AND fires onOpen (the W2b
-    // review-panel entry point). The body is a real <button> so it's
+    // Click focuses the field AND fires onOpen (the W2b review-panel entry
+    // point). The orchestrator wires onOpen to `showPanel` from
+    // `@/overlay/panel`. The body is a real <button> so it's
     // keyboard-activatable and screen-readers announce it as the trigger.
     const body = doc.createElement('button')
     body.type = 'button'
     body.className = 'gf-orb__body'
     bindButton(body, () => {
         current.onFocusField()
-        clearHide()
-        showPanel()
         current.onOpen?.()
     })
     orb.appendChild(body)
@@ -263,7 +223,7 @@ export function renderStatusButton(
 
     root.appendChild(orb)
     // Focus-only visibility: a hidden orb is display:none (no paint, no
-    // pointer events) but keeps its drag/hover state. Default visible.
+    // pointer events) but keeps its drag state. Default visible.
     if (current.initiallyVisible === false) orb.classList.add('gf-orb--hidden')
     // Live drag offset from the field's default bottom-right anchor. Seeded
     // from the persisted session offset; drag-end accumulates into it; the
@@ -348,96 +308,8 @@ export function renderStatusButton(
     orb.addEventListener('pointerup', onPointerUp)
     orb.addEventListener('click', onClickCapture, { capture: true })
 
-    // Hover panel (only when there are corrections to show).
-    let panel: HTMLElement | null = null
-    let hideTimer: number | null = null
-    const clearHide = (): void => {
-        if (hideTimer !== null) {
-            view.clearTimeout(hideTimer)
-            hideTimer = null
-        }
-    }
-    const hidePanel = (): void => {
-        clearHide()
-        if (panel?.isConnected) panel.remove()
-        panel = null
-    }
-    const scheduleHide = (): void => {
-        clearHide()
-        hideTimer = view.setTimeout(hidePanel, PANEL_HIDE_GRACE_MS)
-    }
-    const showPanel = (): void => {
-        if (panel) return
-        // Programmatic openPanel after destroy() / while the orb is hidden
-        // (setVisible(false)) must be a no-op. The orb node carries the
-        // gf-orb--hidden class; display:none already blocks hover from
-        // reaching it, but openPanel can be called directly.
-        if (!orb.isConnected) return
-        if (orb.classList.contains('gf-orb--hidden')) return
-        panel = buildPanel(doc, current)
-        root.appendChild(panel)
-        positionPanel(panel, orb.getBoundingClientRect(), view)
-        panel.addEventListener('mouseenter', clearHide)
-        panel.addEventListener('mouseleave', scheduleHide)
-        panel.addEventListener('mousedown', (e) => e.stopPropagation())
-        panel.addEventListener('click', (event) => {
-            const target = event.target as HTMLElement | null
-            const btn = target?.closest<HTMLElement>('[data-action]')
-            if (!btn) return
-            // Disabled buttons (Undo when undoAvailable is false) never fire
-            // click in browsers/jsdom — guard defensively in case a browser
-            // dispatches click anyway.
-            if (btn instanceof HTMLButtonElement && btn.disabled) return
-            event.preventDefault()
-            event.stopPropagation()
-            if (btn.dataset.action === 'apply-all') {
-                hidePanel()
-                current.onApplyAll()
-                return
-            }
-            if (btn.dataset.action === 'apply-one') {
-                const i = Number.parseInt(btn.dataset.index ?? '', 10)
-                if (Number.isInteger(i)) {
-                    hidePanel()
-                    current.onApplyOne(i)
-                }
-                return
-            }
-            if (btn.dataset.action === 'undo') {
-                hidePanel()
-                current.onUndo()
-                return
-            }
-            if (btn.dataset.action === 'recheck') {
-                hidePanel()
-                current.onRecheck()
-                return
-            }
-            if (btn.dataset.action === 'rephrase') {
-                hidePanel()
-                // Defensive: the button is only rendered when onRephrase is
-                // supplied, but guard against stale panels whose options
-                // changed between build and click.
-                current.onRephrase?.()
-                return
-            }
-            if (btn.dataset.action === 'power') {
-                hidePanel()
-                current.onTogglePower()
-                return
-            }
-        })
-    }
-
-    orb.addEventListener('mouseenter', () => {
-        clearHide()
-        showPanel()
-    })
-    orb.addEventListener('mouseleave', scheduleHide)
-
     return {
         destroy: () => {
-            hidePanel()
             orb.remove()
         },
         isMounted: () => orb.isConnected,
@@ -445,21 +317,10 @@ export function renderStatusButton(
         setVisible: (visible: boolean) => {
             orb.classList.toggle('gf-orb--hidden', !visible)
         },
-        // openPanel / closePanel are the SAME code path as the hover panel
-        // (showPanel / hidePanel). External callers (e.g. the Vencord client)
-        // can drive the panel without dispatching synthetic mouse events;
-        // showPanel's own guards (already-open, isConnected, hidden) keep
-        // both paths identical.
-        openPanel: showPanel,
-        closePanel: hidePanel,
         update: (next: StatusButtonOptions) => {
             current = next
             orb.classList.toggle('gf-orb--disabled', current.disabled)
             renderBody()
-            // A panel open at update time is closed; it reopens on the next
-            // hover with fresh corrections (update happens per-check, not
-            // per-hover, so this is invisible in practice).
-            hidePanel()
         },
     }
 }
@@ -485,7 +346,11 @@ function bindButton(el: HTMLElement, onClick: () => void): void {
 }
 
 function destroyExisting(root: ShadowRoot): void {
-    root.querySelectorAll('.gf-orb, .gf-pill-panel').forEach((el) => el.remove())
+    // W2b: the W1 hover panel (.gf-pill-panel) is RETIRED. The W2b review
+    // panel (.gf-panel-aside) is owned by `showPanel` in @/overlay/panel
+    // and is replaced by the orchestrator; this teardown only needs to
+    // swap the orb node.
+    root.querySelectorAll('.gf-orb').forEach((el) => el.remove())
 }
 
 function positionPill(
@@ -558,110 +423,6 @@ function positionAbsolute(
     pill.style.transform = `translate(${left}px, ${top}px)`
 }
 
-function positionPanel(panel: HTMLElement, pillRect: DOMRect, view: Window): void {
-    const vw = view.innerWidth
-    const width = panel.offsetWidth || 280
-    const height = panel.offsetHeight || 160
-    // Right-align the panel to the orb, sitting just ABOVE it (no gap, so
-    // the pointer can travel orb -> panel without leaving the hover group).
-    let left = pillRect.right - width
-    if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
-    if (left + width > vw - VIEWPORT_GUTTER) left = vw - width - VIEWPORT_GUTTER
-    let top = pillRect.top - height
-    if (top < VIEWPORT_GUTTER) top = pillRect.bottom // flip below if no room above
-    panel.style.left = `${left}px`
-    panel.style.top = `${top}px`
-}
-
-function buildPanel(doc: Document, options: StatusButtonOptions): HTMLElement {
-    const panel = doc.createElement('div')
-    panel.className = 'gf-pill-panel'
-    panel.setAttribute('role', 'dialog')
-    panel.setAttribute('aria-label', 'Corrections')
-    // Streaming banner: visible ONLY while the LLM is still refining. The
-    // orb's center shows the AI pip at the same time, but the panel needs
-    // its own panel-level signal (the pip is tiny and off to the side).
-    if (options.phase === 'fast') {
-        const banner = doc.createElement('div')
-        banner.className = 'gf-banner'
-        banner.setAttribute('aria-live', 'polite')
-        const spinner = doc.createElement('span')
-        spinner.className = 'gf-spinner'
-        spinner.setAttribute('aria-hidden', 'true')
-        banner.appendChild(spinner)
-        const text = doc.createElement('span')
-        text.className = 'gf-banner__text'
-        text.textContent = 'Fast results in · AI refining…'
-        banner.appendChild(text)
-        panel.appendChild(banner)
-    }
-    // Corrections list — exactly today's rows: per-correction diff +
-    // per-row Apply. Hidden when paused or when count is 0 (the empty
-    // action-row panel still opens for Recheck / Rephrase / Power).
-    if (!options.disabled && options.corrections.length > 0) {
-        const n = options.corrections.length
-        const rows = options.corrections
-            .map((c, i) => {
-                // Strip the per-row category dot — the orb already shows
-                // the band-color score ring; the per-row dot is a holdover
-                // from the old W1 pill and isn't in the W2 reference DC.
-                return (
-                    `<button class="gf-pill-panel__row" data-action="apply-one" data-index="${i}" type="button">` +
-                    diffInnerHTML(c.diffOriginal, c.diffCorrected, c.diffIsDeletion) +
-                    `</button>`
-                )
-            })
-            .join('')
-        const header = doc.createElement('div')
-        header.className = 'gf-pill-panel__header'
-        header.textContent = `${n} correction${n === 1 ? '' : 's'}`
-        const list = doc.createElement('div')
-        list.className = 'gf-pill-panel__list'
-        list.innerHTML = rows
-        panel.append(header, list)
-    }
-    // Action row — always present: Apply all (count>0) · Undo · Recheck ·
-    // Rephrase · Power. The paused-site panel short-circuits to just the
-    // Enable affordance.
-    panel.appendChild(buildActionRow(doc, options))
-    return panel
-}
-
-function buildActionRow(doc: Document, options: StatusButtonOptions): HTMLElement {
-    const row = doc.createElement('div')
-    row.className = 'gf-pill-panel__actions'
-    const add = (
-        action: string,
-        svg: string | null,
-        label: string,
-        opts?: { disabled?: boolean },
-    ): void => {
-        const btn = doc.createElement('button')
-        btn.type = 'button'
-        btn.className = 'gf-pill-panel__action'
-        btn.dataset.action = action
-        if (opts?.disabled) {
-            btn.disabled = true
-            btn.setAttribute('aria-disabled', 'true')
-        }
-        if (svg) btn.appendChild(svgFromConstant(doc, svg))
-        const text = doc.createElement('span')
-        text.textContent = label
-        btn.appendChild(text)
-        row.appendChild(btn)
-    }
-    if (options.disabled) {
-        add('power', POWER_SVG, 'Enable')
-        return row
-    }
-    if (options.count > 0) add('apply-all', null, 'Apply all')
-    add('undo', UNDO_SVG, 'Undo', { disabled: !options.undoAvailable })
-    add('recheck', REFRESH_SVG, 'Recheck')
-    if (options.onRephrase) add('rephrase', REPHRASE_SVG, 'Rephrase')
-    add('power', POWER_SVG, 'Disable on this site')
-    return row
-}
-
 /** Inner glyph for the orb's center. The state selection lives in
  *  `orbState()` (view-model); this just turns the result into markup. */
 function buildCenterHTML(s: ReturnType<typeof orbState>): string {
@@ -682,12 +443,3 @@ function buildCenterHTML(s: ReturnType<typeof orbState>): string {
         `aria-live="polite" aria-atomic="true">${s.count}</span>`
     )
 }
-
-// arcOffset + BAND_COLOR are imported above for the JS-side arc.setAttribute
-// calls in renderBody(); reference them here so dead-code elimination doesn't
-// strip the import if the call sites change shape in a refactor. The compile-
-// time `void` lets a linter see they're used, the runtime cost is one
-// property read per render. Kept at the bottom so the file's story still
-// reads "import → render → helpers."
-void arcOffset
-void BAND_COLOR
