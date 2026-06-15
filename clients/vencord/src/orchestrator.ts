@@ -406,7 +406,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                         getText(el),
                         getConfig().goals,
                         st.phase ?? 'done',
-                        false,
+                        true, // onRephrase is wired in buildReviewPanelOptions
                     )
                 } else {
                     debugLog(`panel refresh skipped renderUid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} items=${st.items.length}`)
@@ -474,7 +474,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     getText(el),
                     getConfig().goals,
                     st.phase ?? 'done',
-                    false,
+                    true, // onRephrase is wired in buildReviewPanelOptions
                 )
             } else {
                 debugLog(`panel refresh skipped renderUid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} items=${st.items.length}`)
@@ -1121,6 +1121,11 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // accept several suggestions before dismissing); the panel
             // stays open until × / Esc / onDisableSite. The apply
             // handlers do close the popover for the specific item.
+            // "✨ Rephrase message" button in the panel. Wired to the same
+            // rephraseFor(el) the chatbar rephrase uses — whole-message when
+            // no selection, selection-scoped when text is selected. Mirrors
+            // the browser panel's onRephrase: () => rephraseFlow.rephraseFor(el).
+            onRephrase: () => rephraseFor(el),
             onAcceptAll: () => {
                 void applyAllFor(el)
             },
@@ -1202,7 +1207,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     getText(el),
                     getConfig().goals,
                     stNow.phase ?? 'done',
-                    false,
+                    true, // onRephrase is wired in buildReviewPanelOptions
                 )
                 if (!restored) {
                     // Body gone — fall back to full rebuild.
