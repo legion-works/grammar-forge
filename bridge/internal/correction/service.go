@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/grammarforge/bridge/internal/thesaurus"
 )
 
 // Service orchestrates the correction pipeline:
@@ -86,6 +89,14 @@ type Service struct {
 	toneCache          *toneCache
 	toneEnabled        bool
 	toneMinChars       int
+	// Synonyms (Moby Thesaurus II, public domain). The thesaurus is loaded
+	// once at startup into a frozen lookup map; nil = uninitialised, and
+	// the lookup short-circuits to nil without panicking. synonymsEnabled
+	// is the GF_SYNONYMS_ENABLED gate; when false the /synonyms endpoint
+	// returns an empty array (the route is always on the wire — the gate
+	// only controls the payload, not the status code).
+	thesaurus       *thesaurus.Thesaurus
+	synonymsEnabled bool
 	// articleFix enables the deterministic a/an article repair applied to
 	// LLM output before diffing (see article.go). Default false (zero value);
 	// enabled by SetArticleFix(true) / GF_ARTICLE_FIX=true. Mirrors the
@@ -225,6 +236,35 @@ func (s *Service) SetToneConfig(enabled bool, minChars int) {
 
 // ToneEnabled reports whether the /tone endpoint is enabled.
 func (s *Service) ToneEnabled() bool { return s.toneEnabled }
+
+// SetThesaurus injects the loaded Moby thesaurus. nil is a valid value —
+// it disables synonyms without removing the route, mirroring the
+// SetDictionary pattern (so the wiring order in main can be linear and
+// the dataset being absent at deploy time is a no-op, not a crash).
+func (s *Service) SetThesaurus(th *thesaurus.Thesaurus) { s.thesaurus = th }
+
+// SetSynonymsConfig sets the GF_SYNONYMS_ENABLED gate. The thesaurus
+// is set separately via SetThesaurus; this flag only controls whether
+// the /synonyms endpoint returns a payload.
+func (s *Service) SetSynonymsConfig(enabled bool) { s.synonymsEnabled = enabled }
+
+// SynonymsEnabled reports whether the /synonyms endpoint is wired to
+// return a non-empty payload.
+func (s *Service) SynonymsEnabled() bool { return s.synonymsEnabled }
+
+// Synonyms returns up to 8 case-insensitive synonyms for word from the
+// loaded Moby thesaurus. Returns nil for unknown words, a disabled
+// feature, or a nil thesaurus — the handler maps all of these to an
+// empty JSON array so the response shape is uniform. Errors from the
+// lookup are propagated (today the lookup is in-memory and cannot
+// fail, but the contract leaves the door open for an out-of-process
+// backend later).
+func (s *Service) Synonyms(_ context.Context, word string) ([]string, error) {
+	if !s.synonymsEnabled {
+		return nil, nil
+	}
+	return s.thesaurus.Lookup(word), nil
+}
 
 // spellingHints filters fast-path suggestions down to the CategorySpelling
 // entries that the LLM should see as arbitration hints. Other categories
@@ -679,6 +719,17 @@ func (s *Service) CountCorrections(ctx context.Context) (int64, error) {
 // CountSignals exposes the store's edit-signal aggregate for /stats.
 func (s *Service) CountSignals(ctx context.Context) (SignalCounts, error) {
 	return s.store.CountSignals(ctx)
+}
+
+// CountStatsExtended exposes the retention field block (top_issues, streak,
+// words_this_week) for /stats. The store computes the per-category
+// histogram, the consecutive-day streak, and the 7d word sum from the
+// corrections + edits tables; this pass-through just makes it reachable
+// from the REST layer. `now` is the reference time the store uses for the
+// streak (today) and the 7d window — production passes time.Now(), tests
+// pin to a synthetic date.
+func (s *Service) CountStatsExtended(ctx context.Context, now time.Time) (StatsExtended, error) {
+	return s.store.CountStatsExtended(ctx, now)
 }
 
 // Rephrase asks the LLM to rewrite req.Text for clarity/fluency. It is

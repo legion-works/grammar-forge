@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/grammarforge/bridge/internal/correction"
 )
@@ -199,13 +200,26 @@ func (s *Server) handleSignal(w http.ResponseWriter, r *http.Request) {
 // statsResponse is the GET /stats payload. AcceptanceRate is
 // accepted/(accepted+rejected+ignored), omitted until at least one signal
 // exists. Edit counts come from the edit-level signal log.
+//
+// The retention block (TopIssues, Streak, WordsThisWeek) is computed by
+// Store.CountStatsExtended and ALWAYS inlined — never gated, never hidden
+// behind an enable flag — so clients render a uniform shape on a fresh
+// install. Zero values on each field are valid: empty top_issues is a
+// valid "no categories flagged" state, Streak=0 is "today is not an
+// active day" (not "no data"), and WordsThisWeek=0 is "no logged
+// corrections in the last 7 days". See correction.StatsExtended for the
+// per-field derivation and the "approximate" qualifier on
+// WordsThisWeek.
 type statsResponse struct {
-	Corrections    int64    `json:"corrections"`
-	EditsTotal     int64    `json:"edits_total"`
-	EditsAccepted  int64    `json:"edits_accepted"`
-	EditsRejected  int64    `json:"edits_rejected"`
-	EditsIgnored   int64    `json:"edits_ignored"`
-	AcceptanceRate *float64 `json:"acceptance_rate,omitempty"`
+	Corrections    int64                      `json:"corrections"`
+	EditsTotal     int64                      `json:"edits_total"`
+	EditsAccepted  int64                      `json:"edits_accepted"`
+	EditsRejected  int64                      `json:"edits_rejected"`
+	EditsIgnored   int64                      `json:"edits_ignored"`
+	AcceptanceRate *float64                   `json:"acceptance_rate,omitempty"`
+	TopIssues      []correction.CategoryCount `json:"top_issues"`
+	Streak         int                        `json:"streak"`
+	WordsThisWeek  int64                      `json:"words_this_week"`
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -219,16 +233,30 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
 		return
 	}
+	ex, err := s.svc.CountStatsExtended(r.Context(), time.Now())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+		return
+	}
 	resp := statsResponse{
 		Corrections:   n,
 		EditsTotal:    sc.TotalEdits,
 		EditsAccepted: sc.Accepted,
 		EditsRejected: sc.Rejected,
 		EditsIgnored:  sc.Ignored,
+		TopIssues:     ex.TopIssues,
+		Streak:        ex.Streak,
+		WordsThisWeek: ex.WordsThisWeek,
 	}
 	if signaled := sc.Accepted + sc.Rejected + sc.Ignored; signaled > 0 {
 		rate := float64(sc.Accepted) / float64(signaled)
 		resp.AcceptanceRate = &rate
+	}
+	// Keep TopIssues non-nil on the wire even when empty so clients can
+	// iterate without a nil check (mirrors the /synonyms contract: empty
+	// array is the legitimate "no data" response, not null).
+	if resp.TopIssues == nil {
+		resp.TopIssues = []correction.CategoryCount{}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -402,6 +430,43 @@ func toToneResponse(r correction.ToneResult) toneResponse {
 		out.Sentences = append(out.Sentences, sj)
 	}
 	return out
+}
+
+// synonymsResponse is the GET /synonyms payload. Synonyms is always a
+// non-nil array (empty when the word is unknown, the thesaurus is
+// disabled, or ?word= is absent) so clients iterate without a nil
+// check. Word is the echoed query value — preserved as the user sent
+// it (no lowercasing) so client-side rendering of the original
+// casing matches the request.
+type synonymsResponse struct {
+	Word     string   `json:"word"`
+	Synonyms []string `json:"synonyms"`
+}
+
+// handleSynonyms is GET /synonyms?word=X. Always responds 200 with the
+// {word, synonyms} shape — never 404, even when the feature is
+// disabled or the thesaurus dataset is missing on disk. The route is
+// always on the wire so clients can render a uniform "no synonyms"
+// affordance; an empty array IS the disabled / unknown / no-data
+// response, distinguished only by which server-side condition fired
+// (which the client does not need to know).
+func (s *Server) handleSynonyms(w http.ResponseWriter, r *http.Request) {
+	word := r.URL.Query().Get("word")
+	if word == "" {
+		// Absent ?word= is "no data" — same response shape as unknown.
+		writeJSON(w, http.StatusOK, synonymsResponse{Word: "", Synonyms: []string{}})
+		return
+	}
+	syns, err := s.svc.Synonyms(r.Context(), word)
+	if err != nil {
+		s.log.Error("synonyms lookup failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "synonyms unavailable"})
+		return
+	}
+	if syns == nil {
+		syns = []string{}
+	}
+	writeJSON(w, http.StatusOK, synonymsResponse{Word: word, Synonyms: syns})
 }
 
 func toToneTags(tags []correction.ToneTag) []toneTagJSON {

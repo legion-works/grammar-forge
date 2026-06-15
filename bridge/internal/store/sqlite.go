@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"time"
+	"unicode"
 
 	"github.com/grammarforge/bridge/internal/correction"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS edits (
     signal_ts     INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_edits_correction ON edits(correction_id);
+CREATE INDEX IF NOT EXISTS idx_edits_category   ON edits(category);
 CREATE INDEX IF NOT EXISTS idx_edits_signal ON edits(signal);
 CREATE TABLE IF NOT EXISTS tone_signals (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,6 +182,165 @@ func (s *SQLite) CountSignals(ctx context.Context) (correction.SignalCounts, err
 		return correction.SignalCounts{}, fmt.Errorf("count signals: %w", err)
 	}
 	return c, nil
+}
+
+// CountStatsExtended computes the retention field block for /stats:
+// top_issues, streak, and words_this_week. `now` is the reference time —
+// the production caller passes time.Now(), tests pin it to a synthetic
+// date so the streak and 7d window are deterministic.
+//
+// Algorithms:
+//   - top_issues: GROUP BY edits.category, ordered by count DESC, category
+//     ASC as a stable tiebreak. COALESCE makes NULL categories surface as
+//     "" (the CategoryGrammar value). Every edit counts, including those
+//     with signal IS NULL — "what the corrector flagged" is the habit
+//     signal, not "what the user accepted".
+//   - streak: list distinct UTC days with at least one correction in the
+//     last 365 days, ordered DESC; count consecutive days starting at
+//     the `now` day. A gap of >=1 day breaks the chain. 0 when `now`'s
+//     day is not active. The 365-day cap bounds the in-memory work for
+//     power users with multi-year histories.
+//   - words_this_week: sum of whitespace-delimited word counts of
+//     corrections.suggestion in the inclusive 7d window
+//     [now-7d, now]. APPROXIMATE: exact for the rows in the window, but
+//     computed at query time (no precomputed word_count column). A
+//     dedicated `word_count INTEGER` column on corrections, set at
+//     LogCorrection time, would make this O(1) and would also surface
+//     checked-but-uncorrected sentences that never get a corrections
+//     row. Documented on correction.StatsExtended.
+func (s *SQLite) CountStatsExtended(ctx context.Context, now time.Time) (correction.StatsExtended, error) {
+	out := correction.StatsExtended{
+		TopIssues:     []correction.CategoryCount{},
+		WordsThisWeek: 0,
+	}
+
+	// top_issues — one query, scan into the result. COALESCE keeps NULL
+	// (an unsignaled edit whose category was never set) as "" in the
+	// output so clients can render it as the grammar bucket.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT COALESCE(category, ''), COUNT(*)
+		FROM edits
+		GROUP BY COALESCE(category, '')
+		ORDER BY COUNT(*) DESC, COALESCE(category, '') ASC`)
+	if err != nil {
+		return correction.StatsExtended{}, fmt.Errorf("count top_issues: %w", err)
+	}
+	for rows.Next() {
+		var cc correction.CategoryCount
+		if err := rows.Scan(&cc.Category, &cc.Count); err != nil {
+			_ = rows.Close()
+			return correction.StatsExtended{}, fmt.Errorf("scan top_issues: %w", err)
+		}
+		out.TopIssues = append(out.TopIssues, cc)
+	}
+	if err := rows.Err(); err != nil {
+		return correction.StatsExtended{}, fmt.Errorf("rows top_issues: %w", err)
+	}
+	_ = rows.Close()
+
+	// streak — distinct UTC days with at least one correction in the last
+	// 365 days. The Go-side chain walk keeps the query trivial (a single
+	// index hit on corrections.ts) and the per-row work bounded by the
+	// 365-day cap, not by the full log size.
+	nowDay := now.UTC().Truncate(24 * time.Hour)
+	cutoffMs := now.AddDate(0, 0, -365).UnixMilli()
+	dayRows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT (ts / 86400000)
+		FROM corrections
+		WHERE ts >= ?
+		ORDER BY (ts / 86400000) DESC`,
+		cutoffMs)
+	if err != nil {
+		return correction.StatsExtended{}, fmt.Errorf("count streak days: %w", err)
+	}
+	defer func() { _ = dayRows.Close() }()
+	// Use a set of day-since-epoch ints (UTC midnight) so the chain walk
+	// is O(N) without sorting (the SQL already returned them DESC). The
+	// streak starts at the `now` day; a gap of >=1 day terminates the
+	// walk immediately.
+	streak := 0
+	expected := nowDay.UnixMilli() / 86400000
+	chainBroken := false
+	for !chainBroken && dayRows.Next() {
+		var dayEpoch int64
+		if err := dayRows.Scan(&dayEpoch); err != nil {
+			return correction.StatsExtended{}, fmt.Errorf("scan streak day: %w", err)
+		}
+		gap := int(expected - dayEpoch)
+		switch gap {
+		case 0:
+			streak++
+		case streak:
+			// dayEpoch = nowDay - streak; we already counted `streak` days
+			// (today, today-1, ..., today-(streak-1)), so this extends the
+			// chain by 1.
+			streak++
+		default:
+			// Either `now` is not active (gap > streak) or the chain just
+			// broke. The DESC ordering means the first non-matching row
+			// terminates the walk.
+			_ = dayRows.Close()
+			chainBroken = true
+		}
+	}
+	if err := dayRows.Err(); err != nil {
+		return correction.StatsExtended{}, fmt.Errorf("rows streak days: %w", err)
+	}
+	out.Streak = streak
+
+	// words_this_week — sum of whitespace-delimited word counts of
+	// corrections.suggestion in the inclusive 7d window. The Go-side
+	// strings.Fields keeps the SQL trivial (a single index hit on
+	// corrections.ts) at the cost of an in-process scan of the
+	// windowed rows. A dedicated word_count column would replace the
+	// scan with a SUM.
+	weekStartMs := now.AddDate(0, 0, -7).UnixMilli()
+	weekRows, err := s.db.QueryContext(ctx,
+		`SELECT suggestion FROM corrections WHERE ts >= ?`, weekStartMs)
+	if err != nil {
+		return correction.StatsExtended{}, fmt.Errorf("count words_this_week: %w", err)
+	}
+	defer func() { _ = weekRows.Close() }()
+	for weekRows.Next() {
+		var text string
+		if err := weekRows.Scan(&text); err != nil {
+			return correction.StatsExtended{}, fmt.Errorf("scan words_this_week: %w", err)
+		}
+		// Count tokens using the same whitespace rule the LLM sees in
+		// the prompt: split on unicode.IsSpace, drop empty tokens.
+		// A precomputed word_count column would replace this with a
+		// single SQL SUM.
+		out.WordsThisWeek += int64(countWords(text))
+	}
+	if err := weekRows.Err(); err != nil {
+		return correction.StatsExtended{}, fmt.Errorf("rows words_this_week: %w", err)
+	}
+
+	return out, nil
+}
+
+// countWords is a whitespace-delimited word counter used by
+// CountStatsExtended. A precomputed word_count column on corrections
+// would let the SQL SUM it directly; until then, this is the
+// in-process fallback. Matches unicode.IsSpace semantics — the
+// production LLM prompts split on the same boundary.
+func countWords(s string) int {
+	n := 0
+	inWord := false
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			if inWord {
+				n++
+				inWord = false
+			}
+			continue
+		}
+		inWord = true
+	}
+	if inWord {
+		n++
+	}
+	return n
 }
 
 // PersonalizationExamples aggregates the signal log into the few-shot pairs

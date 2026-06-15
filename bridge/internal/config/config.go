@@ -176,6 +176,18 @@ type Config struct {
 	// independently, and serves unchanged sentences from the cache, collapsing
 	// steady-state typing latency to ~one sentence's cost.
 	SentenceCacheSize int
+
+	// SynonymsEnabled gates the /synonyms payload (default true). The route
+	// is always on the wire regardless — disabled just means the response
+	// is `{word, synonyms:[]}`. Matches the SPEC §1 "informational endpoint
+	// on by default" posture so a misconfigured deploy never hides the
+	// route from clients.
+	SynonymsEnabled bool
+	// ThesaurusPath is the on-disk path to the Moby Thesaurus II dataset
+	// (fetched at deploy via bridge/scripts/fetch-thesaurus.sh, gitignored).
+	// The file is read once at startup; a missing file is a no-op, not an
+	// error — the bridge still boots and /synonyms returns empty.
+	ThesaurusPath string
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -256,26 +268,26 @@ func Load(getenv Getenv) Config {
 		ToneMinChars:  getInt("GF_TONE_MIN_CHARS", 80),
 		ToneCacheSize: getInt("GF_TONE_CACHE_SIZE", 512),
 
-		GECToRModelDir:         get("GF_GECTOR_MODEL_DIR", "/models/gector"),
-		HarperEnabled:          getBool("GF_HARPER_ENABLED", true),
-		HarperMarkdown:         getBool("GF_HARPER_MARKDOWN", true),
-		HarperIgnoreLinkTitle:  getBool("GF_HARPER_IGNORE_LINK_TITLE", false),
-		HarperDialect:          get("GF_HARPER_DIALECT", "american"),
-		HarperDisabledRules:    getCSV("GF_HARPER_DISABLED_RULES"),
-		HarperEnabledRules:     getCSV("GF_HARPER_ENABLED_RULES"),
-		HarperMaxInputLen:      getInt("GF_HARPER_MAX_INPUT_LEN", 0),
-		HarperUserDictPath:     get("GF_HARPER_USER_DICT", "/data/user-dict.txt"),
-		EscalateMinConfidence:  getFloat("GF_ESCALATE_MIN_CONFIDENCE", 0.7),
-		EscalateMaxSentenceLen: getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
-		EscalateMinWords:       getInt("GF_ESCALATE_MIN_WORDS", 3),
-		EscalateOnFastEdit:     getBool("GF_ESCALATE_ON_FAST_EDIT", true),
-		SkipLLMForSpellingOnly: getBool("GF_SKIP_LLM_FOR_SPELLING_ONLY", false),
-		MergeFastEditsMode:     get("GF_MERGE_FAST_EDITS", ""),
-		OverEditFilterEnabled:      getBool("GF_OVEREDIT_FILTER", true),
-		ArticleFixEnabled:          getBool("GF_ARTICLE_FIX", true),
-		IrregularPluralFixEnabled:  getBool("GF_IRREGULAR_PLURAL_FIX", true),
-		CapitalizationFixEnabled:   getBool("GF_CAPITALIZATION_FIX", true),
-		FastHintsEnabled:           getBool("GF_FAST_HINTS", false),
+		GECToRModelDir:            get("GF_GECTOR_MODEL_DIR", "/models/gector"),
+		HarperEnabled:             getBool("GF_HARPER_ENABLED", true),
+		HarperMarkdown:            getBool("GF_HARPER_MARKDOWN", true),
+		HarperIgnoreLinkTitle:     getBool("GF_HARPER_IGNORE_LINK_TITLE", false),
+		HarperDialect:             get("GF_HARPER_DIALECT", "american"),
+		HarperDisabledRules:       getCSV("GF_HARPER_DISABLED_RULES"),
+		HarperEnabledRules:        getCSV("GF_HARPER_ENABLED_RULES"),
+		HarperMaxInputLen:         getInt("GF_HARPER_MAX_INPUT_LEN", 0),
+		HarperUserDictPath:        get("GF_HARPER_USER_DICT", "/data/user-dict.txt"),
+		EscalateMinConfidence:     getFloat("GF_ESCALATE_MIN_CONFIDENCE", 0.7),
+		EscalateMaxSentenceLen:    getInt("GF_ESCALATE_MAX_SENTENCE_LEN", 200),
+		EscalateMinWords:          getInt("GF_ESCALATE_MIN_WORDS", 3),
+		EscalateOnFastEdit:        getBool("GF_ESCALATE_ON_FAST_EDIT", true),
+		SkipLLMForSpellingOnly:    getBool("GF_SKIP_LLM_FOR_SPELLING_ONLY", false),
+		MergeFastEditsMode:        get("GF_MERGE_FAST_EDITS", ""),
+		OverEditFilterEnabled:     getBool("GF_OVEREDIT_FILTER", true),
+		ArticleFixEnabled:         getBool("GF_ARTICLE_FIX", true),
+		IrregularPluralFixEnabled: getBool("GF_IRREGULAR_PLURAL_FIX", true),
+		CapitalizationFixEnabled:  getBool("GF_CAPITALIZATION_FIX", true),
+		FastHintsEnabled:          getBool("GF_FAST_HINTS", false),
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),
 		PersonalizationTTL:     getDuration("GF_PERSONALIZATION_TTL", 5*time.Minute),
@@ -283,6 +295,9 @@ func Load(getenv Getenv) Config {
 		RetentionDays: getInt("GF_RETENTION_DAYS", 90),
 
 		SentenceCacheSize: getInt("GF_SENTENCE_CACHE_SIZE", 2048),
+
+		SynonymsEnabled: getBool("GF_SYNONYMS_ENABLED", true),
+		ThesaurusPath:   get("GF_THESAURUS_PATH", "/data/mthesaur.txt"),
 	}
 }
 

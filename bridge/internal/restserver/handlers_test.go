@@ -8,27 +8,41 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/grammarforge/bridge/internal/correction"
 	"github.com/stretchr/testify/require"
 )
 
 type fakeService struct {
-	correctOut    correction.Correction
-	correctErr    error
-	lastSignal    correction.Signal
-	lastID        int64
-	count         int64
-	signalCounts  correction.SignalCounts
-	rephraseOut   correction.RephraseResult
-	rephraseErr   error
-	rephraseSeen  correction.RephraseRequest
-	lastCorrect   correction.Request
-	fastSugs      []correction.Suggestion
-	multiFastSugs [][]correction.Suggestion // when set, onFast is called once per entry
-	toneEnabled   bool
-	toneOut       correction.ToneResult
-	toneErr       error
+	correctOut   correction.Correction
+	correctErr   error
+	lastSignal   correction.Signal
+	lastID       int64
+	count        int64
+	signalCounts correction.SignalCounts
+	// extendedStats is the canned CountStatsExtended return. Zero value
+	// is the legitimate "no data" StatsExtended; tests set it to drive
+	// specific /stats response shapes.
+	extendedStats correction.StatsExtended
+	// lastExtendedNow records the `now` the handler passed so tests can
+	// assert the handler uses time.Now() (and not, e.g., a fixed epoch).
+	lastExtendedNow time.Time
+	rephraseOut     correction.RephraseResult
+	rephraseErr     error
+	rephraseSeen    correction.RephraseRequest
+	lastCorrect     correction.Request
+	fastSugs        []correction.Suggestion
+	multiFastSugs   [][]correction.Suggestion // when set, onFast is called once per entry
+	toneEnabled     bool
+	toneOut         correction.ToneResult
+	toneErr         error
+	// Synonyms stub: enabled flag + canned synonym list. lastWord records
+	// the most recent lookup target for assertions.
+	synonymsEnabled bool
+	synonymsOut     []string
+	synonymsErr     error
+	lastSynWord     string
 }
 
 func (f *fakeService) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
@@ -58,6 +72,11 @@ func (f *fakeService) CountSignals(context.Context) (correction.SignalCounts, er
 	return f.signalCounts, nil
 }
 
+func (f *fakeService) CountStatsExtended(_ context.Context, now time.Time) (correction.StatsExtended, error) {
+	f.lastExtendedNow = now
+	return f.extendedStats, nil
+}
+
 func (f *fakeService) Rephrase(_ context.Context, req correction.RephraseRequest) (correction.RephraseResult, error) {
 	f.rephraseSeen = req
 	return f.rephraseOut, f.rephraseErr
@@ -68,6 +87,12 @@ func (f *fakeService) AnalyzeTone(_ context.Context, _ correction.ToneRequest) (
 }
 
 func (f *fakeService) ToneEnabled() bool { return f.toneEnabled }
+
+func (f *fakeService) Synonyms(_ context.Context, word string) ([]string, error) {
+	f.lastSynWord = word
+	return f.synonymsOut, f.synonymsErr
+}
+func (f *fakeService) SynonymsEnabled() bool { return f.synonymsEnabled }
 
 func serve(svc CorrectionService) http.Handler { return New(Config{}, svc).Handler() }
 
@@ -194,6 +219,93 @@ func TestStatsOmitsAcceptanceRateWhenNoSignals(t *testing.T) {
 	require.Contains(t, body, `"edits_total":5`)
 	require.NotContains(t, body, "acceptance_rate",
 		"acceptance_rate must be omitted from JSON when no signals exist")
+}
+
+// /stats surfaces the retention block (top_issues, streak, words_this_week)
+// inlined from CountStatsExtended. The fields are NEVER omitted — empty
+// top_issues renders as [], streak=0 and words_this_week=0 are valid "no
+// activity" values. Mirrors the /synonyms contract: the wire shape is
+// uniform regardless of whether the store has data.
+func TestStatsSurfacesExtendedFields(t *testing.T) {
+	svc := &fakeService{
+		count:        42,
+		signalCounts: correction.SignalCounts{TotalEdits: 10, Accepted: 7, Rejected: 2, Ignored: 1},
+		extendedStats: correction.StatsExtended{
+			TopIssues: []correction.CategoryCount{
+				{Category: correction.CategorySpelling, Count: 5},
+				{Category: correction.CategoryGrammar, Count: 3},
+				{Category: correction.CategoryPunctuation, Count: 2},
+			},
+			Streak:        4,
+			WordsThisWeek: 1234,
+		},
+	}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		Corrections   int64                      `json:"corrections"`
+		EditsTotal    int64                      `json:"edits_total"`
+		EditsAccepted int64                      `json:"edits_accepted"`
+		TopIssues     []correction.CategoryCount `json:"top_issues"`
+		Streak        int                        `json:"streak"`
+		WordsThisWeek int64                      `json:"words_this_week"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, int64(42), got.Corrections)
+	require.Equal(t, int64(10), got.EditsTotal)
+	require.Equal(t, int64(7), got.EditsAccepted)
+	require.Equal(t, []correction.CategoryCount{
+		{Category: correction.CategorySpelling, Count: 5},
+		{Category: correction.CategoryGrammar, Count: 3},
+		{Category: correction.CategoryPunctuation, Count: 2},
+	}, got.TopIssues)
+	require.Equal(t, 4, got.Streak)
+	require.Equal(t, int64(1234), got.WordsThisWeek)
+}
+
+// Fresh install (no corrections logged) -> top_issues is an empty array
+// (not null), streak=0, words_this_week=0. The fields are NEVER omitted
+// from the JSON — clients render a uniform shape.
+func TestStatsFreshInstallRendersEmptyRetentionBlock(t *testing.T) {
+	svc := &fakeService{
+		count:         0,
+		signalCounts:  correction.SignalCounts{},
+		extendedStats: correction.StatsExtended{}, // zero value
+	}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		TopIssues     []correction.CategoryCount `json:"top_issues"`
+		Streak        int                        `json:"streak"`
+		WordsThisWeek int64                      `json:"words_this_week"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.NotNil(t, got.TopIssues, "top_issues must be [] not null on a fresh install")
+	require.Empty(t, got.TopIssues)
+	require.Equal(t, 0, got.Streak)
+	require.Equal(t, int64(0), got.WordsThisWeek)
+	// Sanity: the JSON contains the literal "top_issues":[] so clients
+	// can iterate without a nil check.
+	require.Contains(t, rr.Body.String(), `"top_issues":[]`)
+}
+
+// The handler MUST pass time.Now() to CountStatsExtended (not a fixed
+// epoch, not the request's ts) — production callers rely on the
+// server-side clock so the 7d window and the streak "today" reference
+// move with the wall clock.
+func TestStatsHandlerPassesTimeNow(t *testing.T) {
+	svc := &fakeService{}
+	before := time.Now()
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	after := time.Now()
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.False(t, svc.lastExtendedNow.Before(before),
+		"handler passed a `now` before the request — should be time.Now()")
+	require.False(t, svc.lastExtendedNow.After(after),
+		"handler passed a `now` after the request — should be time.Now()")
 }
 
 // Rephrase endpoint contract. 200 with {original, rephrased, alternatives}.
@@ -431,6 +543,76 @@ func TestDictionaryRoutes(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/dictionary/al%20pha", nil))
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.Equal(t, "al pha", fd.del, "DELETE path value must be URL-decoded by net/http")
+}
+
+// /synonyms contract: returns {word, synonyms:[...]} with HTTP 200. The
+// route is always on the wire — unknown words, missing/empty ?word=,
+// and a disabled feature all return 200 with an empty array, not 404.
+// Clients can iterate `synonyms` without a nil/null check.
+func TestSynonymsOK(t *testing.T) {
+	svc := &fakeService{synonymsEnabled: true, synonymsOut: []string{"glad", "joyful"}}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/synonyms?word=happy", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		Word     string   `json:"word"`
+		Synonyms []string `json:"synonyms"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, "happy", got.Word)
+	require.Equal(t, []string{"glad", "joyful"}, got.Synonyms)
+	require.Equal(t, "happy", svc.lastSynWord, "service must receive the requested word")
+}
+
+// Unknown word: the handler must NOT 404 — the route stays on the wire
+// with 200 + {word, synonyms:[]} so clients can render a "no synonyms"
+// affordance without a special-case for missing entries. This is the
+// opposite of /tone's disabled=404 contract because the /synonyms
+// feature is informational and on by default.
+func TestSynonymsUnknownWordEmptyArray(t *testing.T) {
+	svc := &fakeService{synonymsEnabled: true, synonymsOut: nil}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/synonyms?word=xyzzy", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		Synonyms []string `json:"synonyms"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.NotNil(t, got.Synonyms, "synonyms must serialise as [] not null")
+	require.Empty(t, got.Synonyms)
+}
+
+// Disabled feature (GF_SYNONYMS_ENABLED=false) is still 200 + empty —
+// the route is on the wire; the field just has no payload. This keeps
+// client rendering logic uniform across the "no data" and "off"
+// states.
+func TestSynonymsDisabledEmptyArray(t *testing.T) {
+	svc := &fakeService{synonymsEnabled: false}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/synonyms?word=happy", nil))
+	require.Equal(t, http.StatusOK, rr.Code, "disabled synonyms still 200, never 404")
+	var got struct {
+		Synonyms []string `json:"synonyms"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.NotNil(t, got.Synonyms)
+	require.Empty(t, got.Synonyms)
+}
+
+// Missing ?word= is the "absent" case — 200 + empty rather than 400, for
+// the same reason: the route always responds with a uniform shape.
+func TestSynonymsMissingWordEmptyArray(t *testing.T) {
+	svc := &fakeService{synonymsEnabled: true}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/synonyms", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		Word     string   `json:"word"`
+		Synonyms []string `json:"synonyms"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, "", got.Word, "absent word round-trips as the empty string")
+	require.Empty(t, got.Synonyms)
 }
 
 // When the dictionary store is not injected (no SetDictionary call, e.g. an

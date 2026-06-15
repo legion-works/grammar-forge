@@ -20,6 +20,9 @@ data/
 *.db-wal
 *.sqlite
 *.sqlite3
+# Moby Thesaurus II dataset (public domain, ~24 MB flat text — fetched
+# at deploy via bridge/scripts/fetch-thesaurus.sh, not committed).
+bridge/data/mthesaur.txt
 
 # --- Large model assets (pulled/downloaded, never committed) ---
 ngrams/
