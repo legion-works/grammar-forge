@@ -160,25 +160,34 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
     })
 
     describe('.gf-u (per-span highlight)', () => {
-        it('renders a wavy underline via border-bottom (works on empty divs)', () => {
-            // text-decoration: underline wavy does NOT render on a div with
-            // no text content — the highlight nodes are empty <div>s. The
-            // underline MUST use border-bottom: 1.7px wavy which renders
-            // regardless of content. This test guards the border-bottom.
-            const rule = /\.gf-u\s*\{[^}]*border-bottom:\s*1\.7px wavy/s.exec(OVERLAY_CSS)
-            expect(rule, '.gf-u must set border-bottom: 1.7px wavy').not.toBeNull()
+        it('renders a visible underline via SVG mask ::after (NOT border-bottom wavy)', () => {
+            // ROOT CAUSE FIX (round 7): border-bottom: 1.7px wavy was INVALID CSS.
+            // 'wavy' is only valid for text-decoration-style, NOT border-style.
+            // The entire shorthand was silently dropped -> no underline rendered.
+            //
+            // FIX: SVG wave via CSS mask on .gf-u::after. The ::after strip
+            // sits at bottom:-2px, 4px tall, masked to a sine-wave shape.
+            // background-color = var(--gf-hl) so one mask works for all categories.
+            //
+            // Assert: NO .gf-u rule uses 'wavy' as a border-style.
+            const stripped = OVERLAY_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+            expect(
+                /\.gf-u[^{]*\{[^}]*border[^}]*wavy/s.test(stripped),
+                '.gf-u must NOT use border-style: wavy (invalid CSS — silently dropped)',
+            ).toBe(false)
+            // Assert: the underline mechanism is present (mask-image on ::after).
+            const hasMask = /\.gf-u::after[^{]*\{[^}]*mask-image/s.test(stripped)
+            expect(hasMask, '.gf-u::after must set mask-image for the wave underline').toBe(true)
+            // Assert: background-color uses --gf-hl (the category color variable).
+            const hasBgColor = /\.gf-u::after[^{]*\{[^}]*background-color:\s*var\(--gf-hl\)/s.test(stripped)
+            expect(hasBgColor, '.gf-u::after must set background-color: var(--gf-hl)').toBe(true)
         })
 
         it('does NOT use text-decoration for the underline (text-decoration does not render on empty divs)', () => {
-            // Regression guard: a previous version of the design-system .gf-u
-            // block used text-decoration: underline wavy which does NOT render
+            // Regression guard: text-decoration: underline wavy does NOT render
             // on empty <div> elements (the highlight nodes). This caused all
-            // GF underlines to be invisible. The underline must use border-bottom.
-            // Strip comments first to avoid false positives from comment text.
+            // GF underlines to be invisible. The underline must use mask/background.
             const stripped = OVERLAY_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
-            // Find the .gf-u rule block and check it does NOT set text-decoration
-            // as the underline mechanism (text-decoration: underline is forbidden;
-            // text-decoration: line-through on .gf-tip__old is fine).
             const gfUBlock = /\.gf-u\s*\{([^}]*)\}/gs
             let match: RegExpExecArray | null
             let foundTextDecorationUnderline = false
@@ -190,7 +199,7 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
             }
             expect(
                 foundTextDecorationUnderline,
-                '.gf-u must NOT use text-decoration: underline (use border-bottom instead — text-decoration does not render on empty divs)',
+                '.gf-u must NOT use text-decoration: underline (does not render on empty divs)',
             ).toBe(false)
         })
 

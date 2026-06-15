@@ -44,40 +44,59 @@ export const OVERLAY_CSS = `
   /* ============================================================
    * Highlight (the "issue" marker drawn over each flagged word).
    *
-   * Migrated from the legacy .gf-highlight (full-rect permanent tint)
-   * to the design-system .gf-u per the W1-1 task.
+   * ROOT CAUSE FIX (round 7): border-bottom: 1.7px wavy was INVALID CSS.
+   * 'wavy' is only valid for text-decoration-style, NOT border-style.
+   * The entire shorthand was silently dropped -> no underline rendered.
+   *
+   * FIX: SVG wave via CSS mask on a ::after pseudo-element.
+   * The highlight div is position:fixed, sized to the word rect by
+   * highlight.ts. The ::after strip sits at bottom:-2px of the div
+   * (just below the word baseline), 4px tall, masked to a sine-wave
+   * shape. background-color = var(--gf-hl) so one mask works for all
+   * category colors.
    * ============================================================ */
   .gf-u {
     position: fixed;
-    /* Purely visual: hover/click interaction is detected on the FIELD itself
-       (content orchestrator hit-tests the pointer against the edit rects), so
-       the highlight must NEVER intercept the page's mouse events — that keeps
-       the field fully editable and selectable under the overlay. */
     pointer-events: none;
     z-index: ${Z_OVERLAY};
     border-radius: 2px;
     background: transparent;
-    border-bottom: 1.7px wavy var(--gf-hl, #888);
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
+    overflow: visible;
     transition: background 140ms ease-out;
+    --gf-hl: #888;
   }
-  .gf-u--spelling    { border-bottom-color: var(--gf-cat-spelling); }
-  .gf-u--grammar     { border-bottom-color: var(--gf-cat-grammar); }
-  .gf-u--punctuation { border-bottom-color: var(--gf-cat-punctuation); }
-  .gf-u--style       { border-bottom-color: var(--gf-cat-style); }
-  .gf-u--typography  { border-bottom-color: var(--gf-cat-typography); }
-  .gf-u.is-on         { background: color-mix(in srgb, var(--gf-hl, #888) 22%, transparent); }
+  /* Wave underline via SVG mask. The SVG is an 8x4 sine-wave tile.
+     The mask clips background-color to the wave shape. */
+  .gf-u::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -2px;
+    height: 4px;
+    background-color: var(--gf-hl);
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%228%22 height=%224%22%3E%3Cpath d=%22M0,3 C2,3 2,1 4,1 C6,1 6,3 8,3%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.5%22/%3E%3C/svg%3E");
+            mask-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%228%22 height=%224%22%3E%3Cpath d=%22M0,3 C2,3 2,1 4,1 C6,1 6,3 8,3%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.5%22/%3E%3C/svg%3E");
+    -webkit-mask-repeat: repeat-x;
+            mask-repeat: repeat-x;
+    -webkit-mask-size: 8px 4px;
+            mask-size: 8px 4px;
+    -webkit-mask-position: left bottom;
+            mask-position: left bottom;
+    pointer-events: none;
+  }
+  .gf-u--spelling    { --gf-hl: var(--gf-cat-spelling); }
+  .gf-u--grammar     { --gf-hl: var(--gf-cat-grammar); }
+  .gf-u--punctuation { --gf-hl: var(--gf-cat-punctuation); }
+  .gf-u--style       { --gf-hl: var(--gf-cat-style); }
+  .gf-u--typography  { --gf-hl: var(--gf-cat-typography); }
+  .gf-u.is-on         { background: color-mix(in srgb, var(--gf-hl) 22%, transparent); }
   .gf-u--spelling.is-on    { background: color-mix(in srgb, var(--gf-cat-spelling) 22%, transparent); }
   .gf-u--grammar.is-on     { background: color-mix(in srgb, var(--gf-cat-grammar) 22%, transparent); }
   .gf-u--punctuation.is-on { background: color-mix(in srgb, var(--gf-cat-punctuation) 22%, transparent); }
   .gf-u--style.is-on       { background: color-mix(in srgb, var(--gf-cat-style) 22%, transparent); }
   .gf-u--typography.is-on  { background: color-mix(in srgb, var(--gf-cat-typography) 22%, transparent); }
 
-  /* Transient applied flourish: a quick fade and lift the moment a fix is
-     applied, before the highlight reconciles away. Animation-only on a
-     transient class removed on animationend, so it never sticks to a reused
-     pooled node and never overrides the idle/focus/hover background. */
   .gf-u--applied {
     animation: gf-highlight-applied 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
@@ -88,8 +107,8 @@ export const OVERLAY_CSS = `
   }
 
   @media (prefers-contrast: more) {
-    .gf-u { border-bottom-width: 2.2px; }
-    .gf-u.is-on { background: color-mix(in srgb, var(--gf-hl, #888) 40%, transparent); }
+    .gf-u::after { height: 5px; bottom: -3px; }
+    .gf-u.is-on { background: color-mix(in srgb, var(--gf-hl) 40%, transparent); }
   }
 
   /* ============================================================
@@ -1090,34 +1109,15 @@ export const OVERLAY_CSS = `
       inset 0 -2px 2px rgba(0, 0, 0, 0.42);
   }
 
-  /* ----- Issue underline (in-composer marker) -----
-   * Underline ALWAYS shows. Background tint appears ONLY on
-   * hover or when the issue's card is open (.is-on).
-   *
-   * IMPORTANT: the highlight nodes are EMPTY <div>s (position:fixed,
-   * sized to the word's bounding rect). text-decoration:underline wavy
-   * does NOT render on empty elements — it only applies to text content.
-   * The underline MUST use border-bottom (which renders on any element
-   * regardless of content). The W1 .gf-u block above sets border-bottom;
-   * this design-system block must NOT override it with text-decoration.
-   * Use border-bottom-color for per-category colors (not text-decoration-color). */
+  /* ----- Issue underline (in-composer marker) — design-system block -----
+   * The W1 .gf-u block above owns the wave underline (SVG mask ::after).
+   * This block only adds the design-system transition and removes any
+   * stale border-bottom-color overrides (the color is now --gf-hl on the
+   * div, consumed by the ::after background-color). */
   .gf-u {
-    /* border-bottom is set by the W1 .gf-u block above — do NOT add
-       text-decoration here (it will not render on empty divs). */
     border-radius: 2px;
     transition: background 120ms ease-out;
   }
-  .gf-u--spelling    { border-bottom-color: var(--gf-cat-spelling); }
-  .gf-u--spelling.is-on    { background: color-mix(in srgb, var(--gf-cat-spelling) 22%, transparent); }
-  .gf-u--grammar     { border-bottom-color: var(--gf-cat-grammar); }
-  .gf-u--grammar.is-on     { background: color-mix(in srgb, var(--gf-cat-grammar) 22%, transparent); }
-  .gf-u--punctuation { border-bottom-color: var(--gf-cat-punctuation); }
-  .gf-u--punctuation.is-on { background: color-mix(in srgb, var(--gf-cat-punctuation) 22%, transparent); }
-  .gf-u--style       { border-bottom-color: var(--gf-cat-style); }
-  .gf-u--style.is-on       { background: color-mix(in srgb, var(--gf-cat-style) 22%, transparent); }
-  .gf-u--typography  { border-bottom-color: var(--gf-cat-typography); }
-  .gf-u--typography.is-on  { background: color-mix(in srgb, var(--gf-cat-typography) 22%, transparent); }
-
   /* ----- Hover preview pill (diff only) ----- */
   .gf-tip {
     /* Bug-fix: was position:absolute z-index:30. The highlight nodes are
