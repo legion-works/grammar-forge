@@ -245,8 +245,16 @@ export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): Synony
         if (path.includes(pop)) return
         options.onClose()
     }
-    document.addEventListener('keydown', onKeydown)
-    document.addEventListener('mousedown', onOutsideMouseDown, true)
+    // Use the popover's own document (`root.ownerDocument`) rather than
+    // the bare `document` global. In a real extension / shadow-root
+    // context the field lives in a content-script document, and the
+    // orchestrator's other listeners are bound to that same document —
+    // a `document` global would target whatever the running script's
+    // lexical `document` happens to be, which is not always the same
+    // node. Both add + remove go through `doc` for symmetry. Behaviour
+    // is identical in jsdom (both resolve to the test's `document`).
+    doc.addEventListener('keydown', onKeydown)
+    doc.addEventListener('mousedown', onOutsideMouseDown, true)
     const armTimer = view.setTimeout(() => {
         outsideClickArmed = true
     }, 0)
@@ -254,8 +262,8 @@ export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): Synony
     return {
         destroy: () => {
             view.clearTimeout(armTimer)
-            document.removeEventListener('keydown', onKeydown)
-            document.removeEventListener('mousedown', onOutsideMouseDown, true)
+            doc.removeEventListener('keydown', onKeydown)
+            doc.removeEventListener('mousedown', onOutsideMouseDown, true)
             if (pop.isConnected) pop.remove()
         },
         isOpen: () => pop.isConnected,

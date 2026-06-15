@@ -468,6 +468,19 @@ describe('showPanel (W2b review panel)', () => {
         expect(root.querySelector('.gf-panel-aside')).toBeNull()
     })
 
+    it('getBodyContainer() returns the live .gf-panel__body while open (the W2-4 mountStatsView slot)', () => {
+        const root = mkRoot()
+        const handle = showPanel(root, mkOptions())
+        expect(handle.getBodyContainer()).toBe(root.querySelector('.gf-panel__body'))
+    })
+
+    it('getBodyContainer() returns null after destroy() (so a caller cannot mount into a dead container)', () => {
+        const root = mkRoot()
+        const handle = showPanel(root, mkOptions())
+        handle.destroy()
+        expect(handle.getBodyContainer()).toBeNull()
+    })
+
     it('destroy() is idempotent (safe to call twice)', () => {
         const root = mkRoot()
         const handle = showPanel(root, mkOptions())

@@ -202,14 +202,23 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
     aside.addEventListener('click', onClick)
     aside.addEventListener('mousedown', onMouseDown)
 
+    // `bodyRef` mirrors the body element, but is nulled by destroy() so
+    // `getBodyContainer()` returns null after teardown (the detached
+    // .gf-panel__body element would otherwise be returned and a caller
+    // that trusts the JSDoc would mount into a dead container). The
+    // open-state behavior is unchanged: returns the live .gf-panel__body
+    // element while the panel is mounted.
+    let bodyRef: HTMLElement | null = body
+
     return {
         destroy: () => {
             aside.removeEventListener('click', onClick)
             aside.removeEventListener('mousedown', onMouseDown)
             if (aside.isConnected) aside.remove()
+            bodyRef = null
         },
         isOpen: () => aside.isConnected,
-        getBodyContainer: () => body,
+        getBodyContainer: () => bodyRef,
     }
 }
 
