@@ -1043,6 +1043,17 @@ function wireRuntime(
             // openPopovers is a WeakMap (not iterable), so we use
             // dismissPopoversIn which iterates the per-root registry.
             dismissPopoversIn(overlay.root)
+            // Close the rephrase card + floating Rephrase button on scroll.
+            // The rephrase card is position:fixed anchored to a selection
+            // rect that is now stale. The floating Rephrase button is
+            // anchored to the selection rect via rephrase-button.ts.
+            // Both use per-root registries (dismissRephraseCardsIn /
+            // dismissRephraseButtonsIn) — same pattern as dismissPopoversIn.
+            dismissRephraseCardsIn(overlay.root)
+            dismissRephraseButtonsIn(overlay.root)
+            // Also tell the rephrase flow to hide its button handle so the
+            // selectionchange listener doesn't immediately re-show it.
+            rephraseFlow.dismissButton()
         },
     })
     runtime.cleanups.push(reanchor.stop)
