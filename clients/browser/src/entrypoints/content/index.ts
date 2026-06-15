@@ -2109,6 +2109,16 @@ function wireRuntime(
         // Close any prior panel (defensive — showPanel's destroyExisting
         // already does this, but the orchestrator's tracked handle can
         // become stale during a rapid Goals toggle).
+        // Also destroy child popovers (Goals, Stats) so they don't orphan
+        // when the panel is re-opened (e.g. after accepting an item).
+        if (runtime.goalsHandle) {
+            runtime.goalsHandle.destroy()
+            runtime.goalsHandle = null
+        }
+        if (runtime.statsHandle) {
+            runtime.statsHandle.destroy()
+            runtime.statsHandle = null
+        }
         if (runtime.panelHandle) {
             runtime.panelHandle.destroy()
             runtime.panelHandle = null

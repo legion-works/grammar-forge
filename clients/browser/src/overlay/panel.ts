@@ -240,11 +240,22 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
     // because the orb's click handler fires onOpen → a new showPanel() which
     // destroys this one first; the outside-click listener is removed in
     // destroy() before the new panel mounts.
+    // Child popovers (Goals, synonyms) are siblings in the shadow root, NOT
+    // inside `aside` — exclude them so clicking inside Goals/synonyms doesn't
+    // close the panel. We check for any .gf-goals-pop or .gf-syn in the path.
     let outsideListenerInstalled = false
     const onOutsidePointerDown = (event: PointerEvent): void => {
         if (!aside.isConnected) return
         const path = event.composedPath()
         if (path.includes(aside)) return
+        // Don't close the panel when the user clicks inside a child popover
+        // (Goals, synonyms) that is a sibling of the panel in the shadow root.
+        for (const node of path) {
+            if (node instanceof Element) {
+                if (node.classList.contains('gf-goals-pop')) return
+                if (node.classList.contains('gf-syn')) return
+            }
+        }
         options.onClose()
     }
     const outsideTimer = view.setTimeout(() => {
