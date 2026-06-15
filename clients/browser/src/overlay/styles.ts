@@ -1426,4 +1426,451 @@ export const OVERLAY_CSS = `
     70%  { transform: scale(0.96); }
     100% { transform: scale(1); }
   }
+
+  /* ============================================================
+   * W2b Review Panel (.gf-panel-aside) — the full per-field review
+   * surface opened by the orb's onOpen. The W1 popover is also
+   * .gf-panel; this NEW class scopes the W2b aside without
+   * colliding with the popover's glass material. Anchor + position
+   * are caller-measured (the orchestrator passes anchorRect),
+   * not self-measured.
+   * ============================================================ */
+  .gf-panel-aside {
+    position: fixed;
+    pointer-events: auto;
+    z-index: 2147483647;
+    width: 344px;
+    max-height: 80vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border-radius: 16px;
+    isolation: isolate;
+    contain: layout paint;
+    background: rgba(28, 28, 30, 0.78);
+    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    color: light-dark(#111, #f5f5f5);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+      0 1px 3px rgba(0, 0, 0, 0.14),
+      0 12px 36px rgba(0, 0, 0, 0.22);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    /* Transform-only entrance: scale-in keeps opacity: 1 so a non-
+       animating context (reduced-motion) or first paint never strands
+       the panel invisible. transform-origin: 100% 100% makes it
+       expand from the orb's bottom-right corner. */
+    transform-origin: 100% 100%;
+    animation: gf-panel-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    opacity: 1;
+  }
+  .gf-panel-aside::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      inset 0 1px 1.5px rgba(255, 255, 255, 0.5),
+      inset 1px 0 1px rgba(255, 255, 255, 0.18),
+      inset -1px 0 1px rgba(255, 255, 255, 0.18),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+      inset 0 -1px 1px rgba(0, 0, 0, 0.18);
+  }
+  .gf-panel__head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 13px 16px 12px;
+    border-bottom: 1px solid rgba(127, 127, 140, 0.18);
+    flex: 0 0 auto;
+  }
+  .gf-panel__logo {
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    background: linear-gradient(150deg, #3b82f6, #2563eb);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    flex: 0 0 auto;
+  }
+  .gf-panel__title {
+    font: 700 14px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: inherit;
+  }
+  .gf-panel__spacer { flex: 1; }
+  .gf-panel__iconbtn {
+    appearance: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: 500 18px/1 system-ui, sans-serif;
+    transition: background 120ms ease-out, opacity 120ms ease-out;
+  }
+  .gf-panel__iconbtn:hover { background: rgba(127, 127, 140, 0.16); opacity: 1; }
+  .gf-panel__iconbtn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-goals-pill {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 9999px;
+    border: 1px solid rgba(127, 127, 140, 0.22);
+    background: rgba(127, 127, 140, 0.06);
+    color: inherit;
+    font: 600 11px/1 system-ui, sans-serif;
+    cursor: pointer;
+    transition: background 120ms ease-out, transform 120ms ease-out;
+  }
+  .gf-goals-pill:hover { background: rgba(127, 127, 140, 0.14); }
+  .gf-goals-pill:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-goals-pill__dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(127, 127, 140, 0.5);
+    display: inline-block;
+  }
+
+  .gf-panel__tabs {
+    display: flex;
+    gap: 3px;
+    margin: 10px 14px 4px;
+    padding: 3px;
+    border-radius: 10px;
+    background: rgba(127, 127, 140, 0.08);
+    flex: 0 0 auto;
+  }
+  .gf-tab {
+    flex: 1;
+    height: 28px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+    font: 600 12px/1 system-ui, sans-serif;
+    transition: background 120ms ease-out, opacity 120ms ease-out, box-shadow 120ms ease-out;
+  }
+  .gf-tab.is-active {
+    opacity: 1;
+    background: light-dark(#fff, rgba(255, 255, 255, 0.12));
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  }
+  .gf-tab:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+
+  /* Score block: ring + band label + count message. */
+  .gf-panel__score {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px 6px;
+    flex: 0 0 auto;
+  }
+  .gf-panel__ring { flex: 0 0 auto; display: block; }
+  .gf-panel__ring-track {
+    fill: none;
+    stroke: rgba(127, 127, 140, 0.18);
+    stroke-width: 5;
+  }
+  .gf-band {
+    font: 600 14px/1.2 system-ui, sans-serif;
+  }
+  .gf-panel__sub {
+    font: 400 12px/1.4 system-ui, sans-serif;
+    opacity: 0.7;
+    margin-top: 3px;
+  }
+
+  /* Insights row: 2x2 grid of stat tiles. */
+  .gf-panel__insights {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
+    padding: 2px 16px 12px;
+    flex: 0 0 auto;
+  }
+  .gf-stat {
+    padding: 8px 11px;
+    border-radius: 11px;
+    background: rgba(127, 127, 140, 0.08);
+    border: 1px solid rgba(127, 127, 140, 0.10);
+  }
+  .gf-stat__label {
+    font: 600 9.5px/1 system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    opacity: 0.6;
+    margin-bottom: 6px;
+  }
+  .gf-stat__body {
+    font: 600 12.5px/1 system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  .gf-stat__tone-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: 1px;
+  }
+
+  /* Bulk actions column. */
+  .gf-panel__actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 16px 12px;
+    flex: 0 0 auto;
+  }
+  .gf-panel__primary {
+    appearance: none;
+    width: 100%;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid #1d4ed8;
+    background: #2563eb;
+    color: #fff;
+    font: 600 13px/1 system-ui, sans-serif;
+    cursor: pointer;
+    transition: background 120ms ease-out;
+  }
+  .gf-panel__primary:hover { background: #1d4ed8; }
+  .gf-panel__primary:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-panel__primary:disabled { opacity: 0.5; cursor: default; }
+  .gf-panel__soft {
+    appearance: none;
+    width: 100%;
+    height: 30px;
+    border-radius: 10px;
+    border: 1px solid rgba(127, 127, 140, 0.22);
+    background: rgba(127, 127, 140, 0.06);
+    color: inherit;
+    font: 600 12.5px/1 system-ui, sans-serif;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: background 120ms ease-out, transform 120ms ease-out;
+  }
+  .gf-panel__soft:hover { background: rgba(127, 127, 140, 0.14); transform: translateY(-1px); }
+  .gf-panel__soft:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+
+  /* Grouped corrections list (scrollable). */
+  .gf-panel__list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 0 12px 12px;
+    min-height: 0;
+  }
+  .gf-group {
+    margin-bottom: 10px;
+  }
+  .gf-group__head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 4px 6px;
+    font: 600 11px/1 system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.85;
+  }
+  .gf-group__dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    display: inline-block; flex: 0 0 auto;
+  }
+  .gf-group__count {
+    font-weight: 500;
+    opacity: 0.65;
+  }
+  .gf-textbtn {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--gf-accent, #2563eb);
+    font: 500 11px/1 system-ui, sans-serif;
+    cursor: pointer;
+    padding: 3px 6px;
+    border-radius: 6px;
+  }
+  .gf-textbtn:hover { background: rgba(37, 99, 235, 0.10); }
+  .gf-textbtn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-row-item {
+    appearance: none;
+    width: 100%;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 9px;
+    margin-bottom: 4px;
+    border-radius: 9px;
+    border: none;
+    background: rgba(127, 127, 140, 0.06);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    transition: background 120ms ease-out, transform 120ms ease-out;
+  }
+  .gf-row-item:hover { background: rgba(127, 127, 140, 0.14); transform: translateX(3px); }
+  .gf-row-item:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-row-item__diff { flex: 1; min-width: 0; }
+  .gf-chip-source {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: 9999px;
+    background: rgba(127, 127, 140, 0.10);
+    border: 1px solid rgba(127, 127, 140, 0.18);
+    color: inherit;
+    opacity: 0.85;
+    font: 600 10.5px/1 system-ui, sans-serif;
+    flex: 0 0 auto;
+  }
+  .gf-chip-source--ai {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(37, 99, 235, 0.18));
+    border-color: rgba(139, 92, 246, 0.35);
+    color: light-dark(#7c3aed, #c4b5fd);
+  }
+  .gf-chip-source__hint { opacity: 0.6; font-weight: 500; }
+  .gf-hidden-note {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    background: rgba(127, 127, 140, 0.04);
+    border: 1px dashed rgba(127, 127, 140, 0.22);
+    font: 500 11.5px/1.3 system-ui, sans-serif;
+    opacity: 0.85;
+    margin-top: 2px;
+  }
+
+  /* Footer: learns note + disable button. */
+  .gf-panel__footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-top: 1px solid rgba(127, 127, 140, 0.18);
+    flex: 0 0 auto;
+  }
+  .gf-panel__learns { font: 500 11.5px/1.3 system-ui, sans-serif; opacity: 0.65; }
+
+  /* ============================================================
+   * Goals popover (.gf-goals-pop) — the audience/formality/domain
+   * editor opened by the panel's goals pill. Glass material matches
+   * the panel. The goal EFFECT (informal mutes style + seeds rephrase
+   * tone) is computed in view-model; this module just edits the
+   * Goals object and calls onChange.
+   * ============================================================ */
+  .gf-goals-pop {
+    position: fixed;
+    pointer-events: auto;
+    z-index: 2147483647;
+    width: 300px;
+    padding: 14px 15px;
+    border-radius: 14px;
+    isolation: isolate;
+    contain: layout paint;
+    background: rgba(28, 28, 30, 0.78);
+    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    color: light-dark(#111, #f5f5f5);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+      0 1px 3px rgba(0, 0, 0, 0.14),
+      0 8px 24px rgba(0, 0, 0, 0.20);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    transform-origin: 50% 0%;
+    animation: gf-popover-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    opacity: 1;
+  }
+  .gf-goals__head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font: 600 13px/1 system-ui, sans-serif;
+    margin-bottom: 11px;
+  }
+  .gf-goals__faint { font: 500 11px/1 system-ui, sans-serif; opacity: 0.6; margin-left: 6px; }
+  .gf-goals__row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin-bottom: 10px;
+  }
+  .gf-goals__label {
+    flex: 0 0 70px;
+    font: 600 11px/1 system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+  }
+  .gf-seg-group {
+    display: inline-flex;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 10px;
+    background: rgba(127, 127, 140, 0.10);
+    flex: 1;
+  }
+  .gf-seg {
+    flex: 1;
+    height: 26px;
+    border-radius: 7px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+    font: 600 12px/1 system-ui, sans-serif;
+    transition: background 120ms ease-out, opacity 120ms ease-out, box-shadow 120ms ease-out;
+  }
+  .gf-seg.is-active {
+    opacity: 1;
+    background: light-dark(#fff, rgba(255, 255, 255, 0.12));
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.16);
+  }
+  .gf-seg:hover:not(.is-active) { background: rgba(127, 127, 140, 0.10); }
+  .gf-seg:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-goals__note {
+    margin: 8px 0 0;
+    font: 500 11.5px/1.45 system-ui, sans-serif;
+    opacity: 0.7;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .gf-panel-aside, .gf-goals-pop {
+      background: color-mix(in oklab, #1c1c1e 92%, transparent);
+      background: light-dark(
+        color-mix(in oklab, #f5f5f5 92%, transparent),
+        color-mix(in oklab, #1c1c1e 92%, transparent)
+      );
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .gf-panel-aside, .gf-goals-pop {
+      animation-duration: 1ms;
+      animation-name: gf-no-motion;
+    }
+  }
+
 `
