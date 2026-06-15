@@ -33,6 +33,17 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
             expect(rule, '.gf-orb must be position: fixed').not.toBeNull()
         })
 
+        it('has pointer-events: auto (shadow host is pointer-events:none; orb must opt back in)', () => {
+            // Bug-fix B: the shadow host has `pointer-events: none` so the
+            // overlay never blocks the page. Every interactive surface must
+            // opt back in with `pointer-events: auto`. The pre-redesign
+            // .gf-pill carried this explicitly (styles.ts line ~136 on
+            // master). The W2 .gf-orb omitted it → the orb was invisible
+            // to mouse events and the click handler never fired.
+            const rule = /\.gf-orb\s*\{[^}]*pointer-events:\s*auto/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-orb must set pointer-events: auto').not.toBeNull()
+        })
+
         it('does not position via transform translate (W2 design system uses left/top)', () => {
             // The W1 status-button.ts set `transform: translate(x, y)` to
             // position the orb (composited, no reflow). The W2 design
@@ -78,6 +89,42 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
             // the shadow host's positioning context changes.
             const rule = /\.gf-card\s*\{[^}]*position:\s*fixed/s.exec(OVERLAY_CSS)
             expect(rule, '.gf-card must be position: fixed').not.toBeNull()
+        })
+
+        it('has pointer-events: auto (shadow host is pointer-events:none; card must opt back in)', () => {
+            // Bug-fix B: the shadow host has pointer-events:none so the
+            // overlay never blocks the page. Every interactive surface
+            // must opt back in with pointer-events:auto. The W2 .gf-card
+            // omitted this → the card was unclickable (buttons inside it
+            // never fired). The W1 .gf-panel carries pointer-events:auto.
+            const rule = /\.gf-card\s*\{[^}]*pointer-events:\s*auto/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-card must set pointer-events: auto').not.toBeNull()
+        })
+
+        it('has a base font declaration (never inherits the host page font-size)', () => {
+            // Bug-fix B: without an explicit font, .gf-card inherits the
+            // host page's font-size (Fastmail ~16px → huge text, ~980px
+            // apparent width). The :host sets 13px but the card is in the
+            // top layer (popover) which may not inherit :host styles.
+            // An explicit font: ... on .gf-card is the safe guard.
+            const rule = /\.gf-card\s*\{[^}]*font:\s*500\s*13px/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-card must set an explicit base font (500 13px/...)').not.toBeNull()
+        })
+
+        it('has a glass background (not transparent — never inherits the page background)', () => {
+            // Bug-fix B: without background, the card is transparent and
+            // the page content shows through. The glass scrim must be
+            // declared on .gf-card itself (not just on .gf-surface).
+            const rule = /\.gf-card\s*\{[^}]*background:/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-card must set a background').not.toBeNull()
+        })
+
+        it('has a width cap (320px) so it never fills the viewport', () => {
+            // Bug-fix B: without width, the card stretches to fill its
+            // containing block. The DC specifies 360px (desktop) / 312px
+            // (mobile); the implementation uses 320px (between the two).
+            const rule = /\.gf-card\s*\{[^}]*width:\s*320px/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-card must set width: 320px').not.toBeNull()
         })
     })
 

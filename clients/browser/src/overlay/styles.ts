@@ -156,6 +156,12 @@ export const OVERLAY_CSS = `
     border-radius: 50%;
     isolation: isolate;
     contain: layout paint;
+    /* Bug-fix B: the shadow host is pointer-events:none (so the overlay
+       never blocks the page). Every interactive surface must opt back in
+       with pointer-events:auto — the pre-redesign .gf-pill carried this
+       explicitly. The W2 .gf-orb omitted it → the orb was invisible to
+       mouse events and the click handler never fired. */
+    pointer-events: auto;
     cursor: pointer;
     background: rgba(28, 28, 30, 0.78);
     background: light-dark(rgba(245, 245, 245, 0.78), rgba(28, 28, 30, 0.78));
@@ -1160,23 +1166,55 @@ export const OVERLAY_CSS = `
    *       above are the live correction popover; .gf-card is the
    *       design-system canonical correction card for future use. */
   .gf-card {
-    /* Bug-fix: the W2 design system re-skinned the W1 popover (.gf-panel)
-     * to .gf-card, but the W2 rule omitted the margin: 0; inset: auto;
-     * override that .gf-panel + .gf-rephrase-card carry. When the popover
-     * is promoted to the top layer via popover=manual + showPopover(),
-     * the UA stylesheet applies inset: 0; margin: auto; which CENTERS
-     * the card in the containing block and overrides the JS-positioned
-     * left/top - the popover lands far from the word (visually at the
-     * top of the page). Reset both so the orchestrator's anchorRect
-     * wins. position: fixed (not absolute) so the popover anchors to
-     * the viewport, matching .gf-panel/.gf-rephrase-card. */
+    /* Bug-fix A (aa9a67a): the W2 design system re-skinned the W1 popover
+     * (.gf-panel) to .gf-card, but the W2 rule omitted the margin: 0;
+     * inset: auto; override that .gf-panel + .gf-rephrase-card carry.
+     * When the popover is promoted to the top layer via popover=manual +
+     * showPopover(), the UA stylesheet applies inset: 0; margin: auto;
+     * which CENTERS the card and overrides the JS-positioned left/top.
+     * Reset both so the orchestrator's anchorRect wins.
+     *
+     * Bug-fix B (this commit): the W2 .gf-card rule also omitted the
+     * glass material (background, color, border, box-shadow, isolation,
+     * contain, pointer-events, font) that .gf-panel carries. Without
+     * these the card is transparent, inherits the host page's font-size
+     * (Fastmail ~16px → huge text), and has no glass scrim. The shadow
+     * host is pointer-events:none; without pointer-events:auto the card
+     * is also unclickable. Replicate the .gf-panel glass recipe here. */
     position: fixed;
+    pointer-events: auto;
+    z-index: ${Z_OVERLAY};
     margin: 0;
     inset: auto;
     width: 320px;
     padding: var(--gf-sp-5);
-    z-index: 40;
+    border-radius: var(--gf-r-card);
+    isolation: isolate;
+    contain: layout paint;
+    /* base font so the card never inherits the host page's font-size */
+    font: 500 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* default solid scrim — text reads on any page background */
+    background: rgba(28, 28, 30, 0.78);
+    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    color: light-dark(#111, #f5f5f5);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+      0 1px 2px rgba(0, 0, 0, 0.12),
+      0 8px 24px rgba(0, 0, 0, 0.20);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     animation: gf-pop var(--gf-dur-pop) var(--gf-ease);
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-card {
+      background: light-dark(
+        color-mix(in oklab, #f5f5f5 50%, transparent),
+        color-mix(in oklab, #1c1c1e 40%, transparent)
+      );
+      border-color: color-mix(in oklab, white 14%, transparent);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      backdrop-filter: blur(16px) saturate(180%);
+    }
   }
   .gf-card__head { display: flex; align-items: center; gap: var(--gf-sp-3); margin-bottom: 9px; }
   .gf-card__cat  { font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.05em; }
