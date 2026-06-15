@@ -1,5 +1,16 @@
 import { storage } from '#imports'
 import { resolveCommonSettings } from './settings-core'
+import type { Goals } from '@/api/types'
+
+/** Default writing goals (W3-2) — the W2b review panel + the muted-style
+ *  filter + the rephrase default tone all read from this. `audience` is
+ *  currently unused by the panel (no /tone call yet); `formality` drives
+ *  the style-mute + rephrase default tone. `domain` is reserved for a
+ *  future LLM prompt header. */
+export const DEFAULT_GOALS: Goals = {
+    audience: 'general',
+    formality: 'neutral',
+}
 
 /**
  * Persistent settings for the browser extension. Lives in `browser.storage.local`
@@ -56,6 +67,14 @@ export interface Settings {
         model: string
         apiKey: string
     }
+    /**
+     * Writing goals (W3-2) — the W2b review panel + the muted-style
+     * filter + the rephrase default tone all read from this. `audience`
+     * is currently unused by the panel (no /tone call yet);
+     * `formality === 'informal'` mutes style suggestions; `formality`
+     * also seeds the rephrase card's tone picker.
+     */
+    goals: Goals
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -72,11 +91,12 @@ export const DEFAULT_SETTINGS: Settings = {
     acceptHotkey: 'Alt+Period',
     onDemandHotkey: 'Ctrl+Shift+Period',
     rephraseHotkey: 'Ctrl+/',
-    suppressNativeSpellcheck: false,
+    suppressNativeSpellcheck: true,
     debugLogging: false,
     rephraseTone: '',
     rephraseStyle: '',
     rephraseAlternatives: 1,
+    goals: DEFAULT_GOALS,
 }
 
 /**
@@ -113,12 +133,22 @@ export async function getSettings(): Promise<Settings> {
         bridgeUrl: defined.bridgeBaseUrl,
     }
     const { common } = resolveCommonSettings(rawForResolver)
+    // Goals: merge over DEFAULT_GOALS so a partial stored object (e.g. a
+    // 2026 build that only persisted `audience`) still gets the missing
+    // field's default. Without this the panel would crash on
+    // `goals.formality` and the muted-style filter would never apply.
+    const storedGoals = (defined.goals ?? {}) as Partial<Goals>
+    const goals: Goals = {
+        ...DEFAULT_GOALS,
+        ...storedGoals,
+    }
     return {
         ...DEFAULT_SETTINGS,
         ...defined,
         bridgeBaseUrl: common.bridgeUrl,
         realtimeDelayMs: common.realtimeDelayMs,
         allowRemoteBridge: common.allowRemoteBridge,
+        goals,
     } as Settings
 }
 

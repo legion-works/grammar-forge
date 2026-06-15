@@ -64,6 +64,12 @@ const settings = definePluginSettings({
         description: 'Verbose console logging ([GrammarForge] prefix) for debugging',
         default: false,
     },
+    goals: {
+        type: OptionType.CUSTOM,
+        description:
+            'Writing goals (audience + formality). Drives the muted-style filter and the default rephrase tone.',
+        default: { audience: 'general', formality: 'neutral' },
+    },
 })
 
 let orchestrator: OrchestratorApi | null = null

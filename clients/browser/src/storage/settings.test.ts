@@ -36,11 +36,12 @@ describe('DEFAULT_SETTINGS', () => {
             acceptHotkey: 'Alt+Period',
             onDemandHotkey: 'Ctrl+Shift+Period',
             rephraseHotkey: 'Ctrl+/',
-            suppressNativeSpellcheck: false,
+            suppressNativeSpellcheck: true,
             debugLogging: false,
             rephraseTone: '',
             rephraseStyle: '',
             rephraseAlternatives: 1,
+            goals: { audience: 'general', formality: 'neutral' },
         })
     })
 })

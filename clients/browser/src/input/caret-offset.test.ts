@@ -55,6 +55,7 @@ const stub = (over: Partial<RenderableItem>): RenderableItem => ({
     diffIsDeletion: false,
     byteSpan: { start: 0, end: 0 },
     model: 'harper',
+    status: 'open',
     ...over,
 })
 

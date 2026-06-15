@@ -1,8 +1,8 @@
 // Render the per-rect translucent highlight nodes inside a shadow root. One
 // position:fixed node per getClientRects() rect (a wrapped line = two rects =
 // two nodes). The category colour is set per-node via the `--gf-hl` custom
-// property; the visible alpha is driven by intensity classes (default / focus
-// / hover), all in styles.ts.
+// property; the visible alpha is driven by the `.is-on` class (the design
+// system's hover/active indicator), all in styles.ts.
 //
 // The highlight is PURELY VISUAL: it is pointer-events:none (see styles.ts) and
 // installs no listeners. Hover/click interaction is detected on the FIELD
@@ -26,7 +26,13 @@ export interface HighlightLayerState {
 
 function styleHighlightNode(node: HTMLDivElement, spec: HighlightSpec): void {
     if (node.getAttribute('aria-hidden') !== 'true') node.setAttribute('aria-hidden', 'true')
-    node.className = 'gf-highlight'
+    // `.gf-u` = the design-system underline class. The category modifier
+    // (`.gf-u--<cat>`) drives the underline colour via CSS custom property;
+    // the `.is-on` modifier (toggled by applyState below) drives the
+    // background tint on hover / when the card for that item is open. The
+    // base state is INTENTIONALLY tint-free — the underline is the resting
+    // visual marker.
+    node.className = `gf-u gf-u--${spec.category}`
     node.dataset.item = String(spec.itemIndex)
     if (spec.rect.width <= 0 || spec.rect.height <= 0) {
         node.style.display = 'none'
@@ -41,9 +47,17 @@ function styleHighlightNode(node: HTMLDivElement, spec: HighlightSpec): void {
 }
 
 function applyState(node: HTMLDivElement, state: HighlightLayerState): void {
-    node.classList.toggle('gf-highlight--focus', state.focused)
+    // `.is-on` = hover or the card is open for this specific item.
+    // Per the DC: tint appears ONLY on hover/active (hoverItemIndex match),
+    // NOT on field focus. The old `state.focused` branch tinted ALL flagged
+    // words when the field was focused — that was wrong (the DC shows a
+    // subtle underline at rest, tint only on hover/active). The `focused`
+    // flag is kept on HighlightLayerState for the native-highlight path
+    // (which uses it to set the focused-field CSS class), but the overlay
+    // path must not tint all words on focus.
     const idx = Number(node.dataset.item)
-    node.classList.toggle('gf-highlight--hover', state.hoverItemIndex === idx)
+    const isOn = state.hoverItemIndex === idx
+    node.classList.toggle('is-on', isOn)
 }
 
 export interface HighlightLayer {
@@ -144,8 +158,8 @@ export function createHighlightLayer(root: ShadowRoot): HighlightLayer {
         flashApplied(itemIndex) {
             for (const n of pool) {
                 if (Number(n.dataset.item) !== itemIndex) continue
-                n.classList.add('gf-highlight--applied')
-                const clear = (): void => n.classList.remove('gf-highlight--applied')
+                n.classList.add('gf-u--applied')
+                const clear = (): void => n.classList.remove('gf-u--applied')
                 n.addEventListener('animationend', clear, { once: true })
             }
         },

@@ -1,4 +1,4 @@
-// Lightweight hover tooltip — a minimal "preview chip" (category dot +
+// Lightweight hover tooltip — a minimal "preview pill" (category dot +
 // diff). The popover (click → actionable card) is the single source of
 // rich information; the hover chip is intentionally stripped down to a
 // glanceable diff so it never duplicates the card. pointer-events:none
@@ -9,12 +9,19 @@ import { diffInnerHTML } from '@/overlay/diff-view'
 import type { Category } from '@/api/types'
 
 const TOOLTIP_WIDTH_MAX = 320
-const TOOLTIP_HEIGHT_ESTIMATE = 72
+const TOOLTIP_HEIGHT_ESTIMATE = 36
 const VIEWPORT_GUTTER = 10
 const ANCHOR_GAP = 6
 
 export interface TooltipOptions {
-    /** Viewport rect of the edit (word) the tooltip is anchored to. */
+    /**
+     * Viewport rect of the edit (word) the tooltip is anchored to.
+     * ⚠️ The orchestrator MUST measure this BEFORE re-rendering the
+     * underline overlay — a detached node's getBoundingClientRect() is
+     * all zeros and the pill lands off-screen. (Spec: INSTRUCTIONS §D.)
+     * The tooltip takes the rect as a plain value so the ordering is a
+     * caller-side invariant; the function itself never re-measures.
+     */
     anchorRect: DOMRect
     category: Category
     /** Word-level diff: original word(s) (shown red, struck) -> corrected
@@ -23,6 +30,19 @@ export interface TooltipOptions {
     diffCorrected: string
     /** True when the correction removes the text (no green side). */
     diffIsDeletion: boolean
+    /** Quick-accept callback — fires when the user clicks the ✓ button in
+     *  the hover pill. The orchestrator applies the primary replacement,
+     *  shows the Undo toast, and hides the tooltip. Optional: omit to
+     *  render the pill without the accept button (e.g. when the item has
+     *  no replacement). */
+    onAccept?: () => void
+    /** Hover-bridge: called when the pointer enters the pill itself.
+     *  The orchestrator cancels the hide-grace timer so the pill stays
+     *  open while the user moves from the word to the ✓ button. */
+    onPillMouseEnter?: () => void
+    /** Hover-bridge: called when the pointer leaves the pill. The
+     *  orchestrator re-arms the hide-grace timer. */
+    onPillMouseLeave?: () => void
 }
 
 export interface TooltipHandle {
@@ -43,15 +63,53 @@ export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipH
     const view = doc.defaultView ?? window
 
     const tip = doc.createElement('div')
-    tip.className = 'gf-tooltip'
+    // W1-2: the design-system class is `.gf-tip` (the old `.gf-tooltip`
+    // is gone). The matching tail is appended as `.gf-tip__tail` so the
+    // CSS can draw a downward caret pointing at the word.
+    tip.className = 'gf-tip'
     tip.id = 'gf-chip'
     tip.setAttribute('role', 'tooltip')
+    // When an accept button is present the pill needs pointer-events so
+    // the button is clickable. Without onAccept the pill stays inert.
+    if (options.onAccept) tip.style.pointerEvents = 'auto'
 
     const meta = CATEGORY_META[options.category]
     tip.innerHTML = renderInnerHTML(meta.badge, options)
 
-    positionTooltip(tip, options.anchorRect, view)
+    // Wire the quick-accept button (rendered by renderInnerHTML when
+    // onAccept is provided). mousedown preventDefault keeps the field
+    // focused; click fires the accept callback.
+    if (options.onAccept) {
+        const btn = tip.querySelector<HTMLButtonElement>('.gf-tip__accept')
+        if (btn) {
+            btn.addEventListener('mousedown', (e) => e.preventDefault())
+            btn.addEventListener('click', (e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                options.onAccept!()
+            })
+        }
+    }
+
+    // Hover-bridge: keep the pill alive while the pointer is over it so
+    // the user can move from the word to the ✓ button without the pill
+    // vanishing. The orchestrator cancels/re-arms the hide-grace timer.
+    if (options.onPillMouseEnter) {
+        tip.addEventListener('mouseenter', options.onPillMouseEnter)
+    }
+    if (options.onPillMouseLeave) {
+        tip.addEventListener('mouseleave', options.onPillMouseLeave)
+    }
+
+    // Append first so the browser lays out the pill and offsetWidth is
+    // the ACTUAL rendered width (not TOOLTIP_WIDTH_MAX which over-shifts
+    // the pill left when the content is short, e.g. "a → an ✓").
+    // Position off-screen initially to avoid a flash at the wrong spot.
+    tip.style.left = '-9999px'
+    tip.style.top = '-9999px'
     root.appendChild(tip)
+    // Now measure the actual rendered width and reposition correctly.
+    positionTooltip(tip, options.anchorRect, view)
 
     return {
         hide: () => {
@@ -63,34 +121,57 @@ export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipH
 
 /** Remove every tooltip mounted in `root`. Used on teardown. */
 export function dismissTooltipsIn(root: ShadowRoot): void {
-    root.querySelectorAll('.gf-tooltip').forEach((el) => el.remove())
+    root.querySelectorAll('.gf-tip').forEach((el) => el.remove())
 }
 
 function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void {
     const vw = view.innerWidth
     const vh = view.innerHeight
-    const spaceBelow = vh - anchor.bottom
-    const showAbove = spaceBelow < TOOLTIP_HEIGHT_ESTIMATE
-    let left = anchor.left
-    if (left + TOOLTIP_WIDTH_MAX > vw) {
-        left = Math.max(VIEWPORT_GUTTER, vw - TOOLTIP_WIDTH_MAX - VIEWPORT_GUTTER)
-    }
+    // Use actual rendered dimensions (measured after mount at left:-9999px).
+    // Falls back to constants when offsetWidth/Height is 0 (jsdom).
+    const pillWidth = tip.offsetWidth > 0 ? tip.offsetWidth : TOOLTIP_WIDTH_MAX
+    const pillHeight = tip.offsetHeight > 0 ? tip.offsetHeight : TOOLTIP_HEIGHT_ESTIMATE
+
+    // DEFAULT: place ABOVE the word (DC: pill sits above, caret points down).
+    // FLIP BELOW only when there isn't room above (word too close to top).
+    const spaceAbove = anchor.top - VIEWPORT_GUTTER
+    const showBelow = spaceAbove < pillHeight + ANCHOR_GAP
+
+    // Horizontal: center on the word. Caret (left:50%) points at pill center
+    // = word center. Clamp to viewport.
+    const wordCenterX = anchor.left + anchor.width / 2
+    let left = wordCenterX - pillWidth / 2
+    if (left + pillWidth > vw - VIEWPORT_GUTTER) left = vw - pillWidth - VIEWPORT_GUTTER
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     tip.style.left = `${left}px`
-    if (showAbove) {
-        tip.style.bottom = `${vh - anchor.top + ANCHOR_GAP}px`
-        tip.style.top = 'auto'
-    } else {
+
+    // Vertical + caret direction.
+    if (showBelow) {
+        // No room above → place below, caret points UP.
         tip.style.top = `${anchor.bottom + ANCHOR_GAP}px`
         tip.style.bottom = 'auto'
+        tip.classList.add('gf-tip--below')
+    } else {
+        // Default: place above, caret points DOWN.
+        const top = anchor.top - pillHeight - ANCHOR_GAP
+        tip.style.top = `${Math.max(VIEWPORT_GUTTER, top)}px`
+        tip.style.bottom = 'auto'
+        tip.classList.remove('gf-tip--below')
     }
 }
 
 function renderInnerHTML(badge: string, opts: TooltipOptions): string {
+    // The diff fragment is already built (.gf-diff with __old/__arrow/
+    // __new) by diffInnerHTML; the tip wraps it with the category dot,
+    // an optional quick-accept button (DC: .gf-pillok, ✓ green button),
+    // and the downward caret (gf-tip__tail).
+    const acceptBtn = opts.onAccept && !opts.diffIsDeletion
+        ? `<button class="gf-tip__accept" type="button" title="Accept suggestion" aria-label="Accept suggestion">&#x2713;</button>`
+        : ''
     return (
-        `<span class="gf-tooltip__dot" style="background:${badge}"></span>` +
-        `<span class="gf-tooltip__chip-diff">` +
+        `<span class="gf-tip__dot" style="background:${badge}"></span>` +
         diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion) +
-        `</span>`
+        acceptBtn +
+        `<span class="gf-tip__tail" aria-hidden="true"></span>`
     )
 }

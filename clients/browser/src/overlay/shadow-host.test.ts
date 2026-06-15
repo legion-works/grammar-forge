@@ -193,25 +193,25 @@ describe('createOverlayHost teardown (popover listener + timer leak)', () => {
         }
     }
 
-    it('destroy() while a popover is open removes the document-level mousedown listener', () => {
+    it('destroy() while a popover is open removes the window-level pointerdown listener', () => {
+        // SYSTEMIC-2 fix: dismiss now uses window capture + pointerdown.
         vi.useFakeTimers()
         const host = mkHost()
         const handle = showPopover(host.root, mkPopoverOpts())
         expect(handle.isOpen()).toBe(true)
-        // advance past the 100ms mount delay so the outside-click listener
-        // is actually installed
-        vi.advanceTimersByTime(150)
-        // spy on document.removeEventListener so we can assert the cleanup
-        const removeSpy = vi.spyOn(document, 'removeEventListener')
+        // advance past the setTimeout(0) arm delay
+        vi.advanceTimersByTime(10)
+        // spy on window.removeEventListener so we can assert the cleanup
+        const removeSpy = vi.spyOn(window, 'removeEventListener')
         host.destroy()
-        // the outside-click handler must have been removed
-        const mousedownRemovals = removeSpy.mock.calls.filter((c) => c[0] === 'mousedown')
-        expect(mousedownRemovals.length).toBeGreaterThan(0)
+        // the outside-click handler must have been removed from window
+        const pointerdownRemovals = removeSpy.mock.calls.filter((c) => c[0] === 'pointerdown')
+        expect(pointerdownRemovals.length).toBeGreaterThan(0)
         // and the popover must be closed
         expect(handle.isOpen()).toBe(false)
-        // dispatching a click on document afterwards is a no-op (no error)
+        // dispatching a pointerdown on window afterwards is a no-op (no error)
         expect(() =>
-            document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })),
+            window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
         ).not.toThrow()
     })
 
@@ -220,13 +220,13 @@ describe('createOverlayHost teardown (popover listener + timer leak)', () => {
         const host = mkHost()
         showPopover(host.root, mkPopoverOpts())
         // the timer is scheduled but the listener is NOT yet attached
-        const addSpy = vi.spyOn(document, 'addEventListener')
+        const addSpy = vi.spyOn(window, 'addEventListener')
         host.destroy()
         const addCountBefore = addSpy.mock.calls.length
-        // advance past the 100ms mount delay
+        // advance past the setTimeout(0) arm delay
         vi.advanceTimersByTime(500)
         const addCountAfter = addSpy.mock.calls.length
-        // no new document-level mousedown listener was added after destroy
+        // no new window-level pointerdown listener was added after destroy
         expect(addCountAfter).toBe(addCountBefore)
     })
 
@@ -289,30 +289,36 @@ describe('OVERLAY_CSS (Liquid Glass contract)', () => {
         expect(enterBlock?.[0]).toContain('opacity:')
     })
 
-    it('defines translucent per-category highlight classes', () => {
-        // base + intensity modifiers must each be present
-        expect(OVERLAY_CSS).toContain('.gf-highlight')
-        expect(OVERLAY_CSS).toContain('.gf-highlight--focus')
-        expect(OVERLAY_CSS).toContain('.gf-highlight--hover')
-        // the per-category color is set via the --gf-hl custom property, and
-        // the highlight paints a translucent tint via color-mix().
-        expect(OVERLAY_CSS).toContain('--gf-hl')
-        expect(OVERLAY_CSS).toMatch(/color-mix\(in srgb, var\(--gf-hl/)
+    it('defines translucent per-category underline classes', () => {
+        // W1-1 migration: the design-system .gf-u + .gf-u--<cat> family
+        // replaces the legacy .gf-highlight / --focus / --hover ladder.
+        // The .is-on class is the single hover/active indicator (no
+        // separate --focus / --hover modifiers in the new design).
+        expect(OVERLAY_CSS).toContain('.gf-u')
+        expect(OVERLAY_CSS).toMatch(/\.gf-u--spelling\b/)
+        expect(OVERLAY_CSS).toMatch(/\.gf-u--grammar\b/)
+        expect(OVERLAY_CSS).toMatch(/\.gf-u--punctuation\b/)
+        expect(OVERLAY_CSS).toMatch(/\.gf-u--style\b/)
+        expect(OVERLAY_CSS).toMatch(/\.gf-u--typography\b/)
+        expect(OVERLAY_CSS).toContain('.gf-u.is-on')
+        // the per-category color is set via the --gf-cat-* custom properties,
+        // and the .is-on tint paints via color-mix().
+        expect(OVERLAY_CSS).toContain('--gf-cat-spelling')
+        expect(OVERLAY_CSS).toMatch(/color-mix\(in srgb, var\(--gf-cat-spelling\)/)
     })
 
-    it('.gf-highlight uses color-mix alpha for the per-state tint ladder', () => {
-        // Extract the .gf-highlight, .gf-highlight--focus, .gf-highlight--hover
-        // rule bodies and assert the alpha ladder is 20% / 24% / 42%. This
-        // ladder MUST match the native-highlight.ts IDLE/STRONG/HOVER_ALPHA
-        // constants (contenteditable path) or the two renderers diverge.
-        const idle = OVERLAY_CSS.match(/\.gf-highlight\s*\{([\s\S]*?)\n\s*\}/)
-        const focus = OVERLAY_CSS.match(/\.gf-highlight--focus\s*\{([\s\S]*?)\n\s*\}/)
-        const hover = OVERLAY_CSS.match(/\.gf-highlight--hover\s*\{([\s\S]*?)\n\s*\}/)
+    it('.gf-u resting state has NO background tint (only on .is-on)', () => {
+        // The resting visual is just the wavy underline — the background
+        // tint must NOT be permanent. Extract the .gf-u rule body and
+        // assert its background is transparent. The .gf-u.is-on rule is
+        // where the tint ladder lives (now 22% per the SCSS tokens).
+        const idle = OVERLAY_CSS.match(/\.gf-u\s*\{([\s\S]*?)\n\s*\}/)
         expect(idle).not.toBeNull()
-        expect(focus).not.toBeNull()
-        expect(hover).not.toBeNull()
-        expect(idle![1]!).toMatch(/20%/)
-        expect(focus![1]!).toMatch(/24%/)
-        expect(hover![1]!).toMatch(/42%/)
+        // Resting background is transparent.
+        expect(idle![1]!).toMatch(/background:\s*transparent/)
+        // The .is-on rule resolves to a 22% color-mix blend.
+        const onRule = OVERLAY_CSS.match(/\.gf-u\.is-on\s*\{([\s\S]*?)\n\s*\}/)
+        expect(onRule).not.toBeNull()
+        expect(onRule![1]!).toMatch(/22%/)
     })
 })
