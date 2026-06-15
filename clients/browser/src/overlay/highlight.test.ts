@@ -100,20 +100,27 @@ describe('createHighlightLayer', () => {
     })
 
     it('reapplies the last state to every node after a reconcile (no flicker)', () => {
+        // Tint is hover/active-only: focused:true alone does NOT add .is-on.
+        // Use hoverItemIndex to verify the state is re-applied after reconcile.
         const root = mkRoot()
         const layer = createHighlightLayer(root)
-        layer.setState({ focused: true, hoverItemIndex: null })
+        layer.setState({ focused: true, hoverItemIndex: 0 })
         layer.reconcile([
             { rect: new DOMRect(0, 0, 50, 16), category: 'spelling', itemIndex: 0 },
             { rect: new DOMRect(0, 20, 50, 16), category: 'spelling', itemIndex: 1 },
         ])
         const nodes = root.querySelectorAll('.gf-u')
-        for (const n of nodes) {
-            expect((n as HTMLElement).classList.contains('is-on')).toBe(true)
-        }
+        // item 0 is hovered → .is-on; item 1 is not → no .is-on
+        expect((nodes[0] as HTMLElement).classList.contains('is-on')).toBe(true)
+        expect((nodes[1] as HTMLElement).classList.contains('is-on')).toBe(false)
     })
 
-    it('setState({focused:true}) adds is-on to every node', () => {
+    it('setState({focused:true}) does NOT add is-on to nodes (tint is hover/active-only per DC)', () => {
+        // Bug-fix: the old applyState used `state.focused || hoverItemIndex === idx`
+        // which tinted ALL flagged words when the field was focused. The DC
+        // specifies tint ONLY on hover/active (hoverItemIndex match), not on
+        // field focus. The focused flag is kept for the native-highlight path
+        // but must not tint overlay nodes.
         const root = mkRoot()
         const layer = createHighlightLayer(root)
         layer.reconcile([
@@ -122,10 +129,16 @@ describe('createHighlightLayer', () => {
         ])
         layer.setState({ focused: true, hoverItemIndex: null })
         const nodes = root.querySelectorAll('.gf-u')
+        // focused:true alone must NOT add .is-on (tint is hover/active-only)
         for (const n of nodes) {
-            expect((n as HTMLElement).classList.contains('is-on')).toBe(true)
+            expect((n as HTMLElement).classList.contains('is-on')).toBe(false)
         }
-        layer.setState({ focused: false, hoverItemIndex: null })
+        // hoverItemIndex=0 adds .is-on only to item 0
+        layer.setState({ focused: true, hoverItemIndex: 0 })
+        expect((nodes[0] as HTMLElement).classList.contains('is-on')).toBe(true)
+        expect((nodes[1] as HTMLElement).classList.contains('is-on')).toBe(false)
+        // clearing hover removes .is-on even while focused
+        layer.setState({ focused: true, hoverItemIndex: null })
         for (const n of nodes) {
             expect((n as HTMLElement).classList.contains('is-on')).toBe(false)
         }
@@ -234,12 +247,9 @@ describe('createHighlightLayer', () => {
     })
 
     it('updateItem applies the last state to the touched node (no flicker)', () => {
-        // The new design collapses focus + hover into a single `.is-on`
-        // class — there is no separate `.gf-highlight--focus` anymore.
-        // focused=true means EVERY node gets .is-on; a specific hover
-        // additionally forces the hovered node to .is-on (which it
-        // already has under focused). Move the hover from 0 to 1; the
+        // Tint is hover/active-only. Move the hover from 0 to 1; the
         // touched node (1) must keep .is-on after the rect update.
+        // Node 0 loses .is-on because it is no longer hovered.
         const root = mkRoot()
         const layer = createHighlightLayer(root)
         layer.setState({ focused: true, hoverItemIndex: 0 })
@@ -250,10 +260,8 @@ describe('createHighlightLayer', () => {
         layer.setState({ focused: true, hoverItemIndex: 1 })
         layer.updateItem(1, { rect: new DOMRect(0, 25, 50, 16), category: 'spelling' })
         const nodes = Array.from(root.querySelectorAll('.gf-u')) as HTMLElement[]
-        // Both nodes are focused → both have .is-on.
-        expect(nodes[0]!.classList.contains('is-on')).toBe(true)
-        expect(nodes[1]!.classList.contains('is-on')).toBe(true)
-        // The hovered item (1) must still have .is-on after the rect update.
+        // Only item 1 is hovered → only item 1 has .is-on.
+        expect(nodes[0]!.classList.contains('is-on')).toBe(false)
         expect(nodes[1]!.classList.contains('is-on')).toBe(true)
     })
 

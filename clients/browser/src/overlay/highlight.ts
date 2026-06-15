@@ -47,12 +47,16 @@ function styleHighlightNode(node: HTMLDivElement, spec: HighlightSpec): void {
 }
 
 function applyState(node: HTMLDivElement, state: HighlightLayerState): void {
-    // `.is-on` = hover or the card is open. The field-level "focused" flag
-    // bumps every node into `.is-on` (the whole field is highlighted when
-    // it has focus, matching the design system spec). A specific
-    // hoverItemIndex also forces `.is-on` for just that item's rect-nodes.
+    // `.is-on` = hover or the card is open for this specific item.
+    // Per the DC: tint appears ONLY on hover/active (hoverItemIndex match),
+    // NOT on field focus. The old `state.focused` branch tinted ALL flagged
+    // words when the field was focused — that was wrong (the DC shows a
+    // subtle underline at rest, tint only on hover/active). The `focused`
+    // flag is kept on HighlightLayerState for the native-highlight path
+    // (which uses it to set the focused-field CSS class), but the overlay
+    // path must not tint all words on focus.
     const idx = Number(node.dataset.item)
-    const isOn = state.focused || state.hoverItemIndex === idx
+    const isOn = state.hoverItemIndex === idx
     node.classList.toggle('is-on', isOn)
 }
 
