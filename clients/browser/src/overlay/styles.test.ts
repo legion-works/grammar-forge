@@ -130,13 +130,6 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
 
     describe('.gf-panel-aside (W2b review panel)', () => {
         it('is position: fixed so the JS left/top anchors to the viewport', () => {
-            // The panel.ts positionPanel() sets style.left + style.top.
-            // If the panel were position: absolute (or unset), the panel
-            // would anchor to its containing block (the shadow host at
-            // 0,0 of the viewport — same result, but fixed is the
-            // honest declaration). The bug-fix that motivated this test
-            // was the .gf-card omission; the .gf-panel-aside has always
-            // been fixed, so this is a regression guard.
             const rule = /\.gf-panel-aside\s*\{[^}]*position:\s*fixed/s.exec(OVERLAY_CSS)
             expect(rule, '.gf-panel-aside must be position: fixed').not.toBeNull()
         })
@@ -144,6 +137,28 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
         it('constrains the width to 344px (W2b design)', () => {
             const rule = /\.gf-panel-aside\s*\{[^}]*width:\s*344px/s.exec(OVERLAY_CSS)
             expect(rule, '.gf-panel-aside must set width: 344px').not.toBeNull()
+        })
+
+        it('has a high-opacity base background (≥0.90 alpha) so page text does not bleed through', () => {
+            // Bug-fix: the panel was 0.78 alpha → page text bled through.
+            // DC reference: dark = rgba(58,62,72,0.80)/rgba(33,36,43,0.74)
+            // gradient; light = rgba(255,255,255,0.95)/rgba(255,255,255,0.80).
+            // The base (non-@supports) background must be ≥0.90 so the panel
+            // is readable even without backdrop-filter support.
+            // We check for 0.9x or 0.95 in the base background declaration.
+            const rule = /\.gf-panel-aside\s*\{[^}]*background:[^;]*0\.9[0-9]/s.exec(OVERLAY_CSS)
+            expect(
+                rule,
+                '.gf-panel-aside base background must have alpha ≥ 0.90 (was 0.78 → page text bled through)',
+            ).not.toBeNull()
+        })
+
+        it('has a @supports backdrop-filter glass upgrade', () => {
+            // The @supports block upgrades the panel to the full glass recipe
+            // (gradient background + blur) when backdrop-filter is available.
+            // Without it the panel stays at the base solid scrim.
+            const rule = /@supports[^{]*backdrop-filter[^{]*\{[^}]*\.gf-panel-aside/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-panel-aside must have a @supports backdrop-filter upgrade block').not.toBeNull()
         })
     })
 

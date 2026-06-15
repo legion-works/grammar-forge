@@ -1161,10 +1161,13 @@ export const OVERLAY_CSS = `
   :host([data-gf-theme="light"]) .gf-tip__new { color: var(--gf-diff-new); }
   :host([data-gf-theme="light"]) .gf-tip__tail { border-top: 5px solid rgba(252, 252, 254, 0.96); }
 
-  /* ----- Correction card (the popover when wrapped in .gf-surface
-   *       + data-gf-theme on the host). The existing .gf-panel rules
-   *       above are the live correction popover; .gf-card is the
-   *       design-system canonical correction card for future use. */
+  /* ----- Correction card (.gf-card) — the LIVE correction popover.
+   *       popover.ts mounts .gf-card elements via showPopover(); this
+   *       is NOT a future-use stub. The W1 popover used .gf-panel;
+   *       the W2 redesign re-skinned it to .gf-card. Both the glass
+   *       material (background, border, box-shadow, font, pointer-events)
+   *       AND the Popover-API centering override (margin:0; inset:auto)
+   *       are load-bearing — do not remove either. */
   .gf-card {
     /* Bug-fix A (aa9a67a): the W2 design system re-skinned the W1 popover
      * (.gf-panel) to .gf-card, but the W2 rule omitted the margin: 0;
@@ -1497,13 +1500,19 @@ export const OVERLAY_CSS = `
     border-radius: 16px;
     isolation: isolate;
     contain: layout paint;
-    background: rgba(28, 28, 30, 0.78);
-    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    /* Base solid scrim — opaque enough to read on any page background.
+       DC reference: dark = rgba(58,62,72,0.80)/rgba(33,36,43,0.74) gradient;
+       light = rgba(255,255,255,0.95)/rgba(255,255,255,0.80) gradient.
+       The @supports block below upgrades to the full glass recipe when
+       backdrop-filter is available. Without the upgrade the panel was
+       only 0.78 alpha → page text bled through. */
+    background: rgba(28, 28, 30, 0.92);
+    background: light-dark(rgba(245, 245, 245, 0.95), rgba(28, 28, 30, 0.92));
     color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow:
       inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
-      0 1px 3px rgba(0, 0, 0, 0.14),
+      0 4px 16px rgba(0, 0, 0, 0.42),
       0 12px 36px rgba(0, 0, 0, 0.22);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     /* Transform-only entrance: scale-in keeps opacity: 1 so a non-
@@ -1513,6 +1522,23 @@ export const OVERLAY_CSS = `
     transform-origin: 100% 100%;
     animation: gf-panel-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
     opacity: 1;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-panel-aside {
+      /* Glass upgrade: DC dark = linear-gradient(rgba(58,62,72,0.80),rgba(33,36,43,0.74))
+         light = linear-gradient(rgba(255,255,255,0.95),rgba(255,255,255,0.80)).
+         The gradient + blur gives the panel the depth the DC shows. */
+      background: light-dark(
+        linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.80) 100%),
+        linear-gradient(180deg, rgba(58, 62, 72, 0.84) 0%, rgba(33, 36, 43, 0.80) 100%)
+      );
+      border-color: light-dark(rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.10));
+      -webkit-backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+      backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+      box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.42),
+        0 18px 50px rgba(0, 0, 0, 0.52);
+    }
   }
   .gf-panel-aside::after {
     content: "";
