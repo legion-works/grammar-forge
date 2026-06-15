@@ -193,25 +193,25 @@ describe('createOverlayHost teardown (popover listener + timer leak)', () => {
         }
     }
 
-    it('destroy() while a popover is open removes the document-level mousedown listener', () => {
+    it('destroy() while a popover is open removes the window-level pointerdown listener', () => {
+        // SYSTEMIC-2 fix: dismiss now uses window capture + pointerdown.
         vi.useFakeTimers()
         const host = mkHost()
         const handle = showPopover(host.root, mkPopoverOpts())
         expect(handle.isOpen()).toBe(true)
-        // advance past the 100ms mount delay so the outside-click listener
-        // is actually installed
-        vi.advanceTimersByTime(150)
-        // spy on document.removeEventListener so we can assert the cleanup
-        const removeSpy = vi.spyOn(document, 'removeEventListener')
+        // advance past the setTimeout(0) arm delay
+        vi.advanceTimersByTime(10)
+        // spy on window.removeEventListener so we can assert the cleanup
+        const removeSpy = vi.spyOn(window, 'removeEventListener')
         host.destroy()
-        // the outside-click handler must have been removed
-        const mousedownRemovals = removeSpy.mock.calls.filter((c) => c[0] === 'mousedown')
-        expect(mousedownRemovals.length).toBeGreaterThan(0)
+        // the outside-click handler must have been removed from window
+        const pointerdownRemovals = removeSpy.mock.calls.filter((c) => c[0] === 'pointerdown')
+        expect(pointerdownRemovals.length).toBeGreaterThan(0)
         // and the popover must be closed
         expect(handle.isOpen()).toBe(false)
-        // dispatching a click on document afterwards is a no-op (no error)
+        // dispatching a pointerdown on window afterwards is a no-op (no error)
         expect(() =>
-            document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })),
+            window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
         ).not.toThrow()
     })
 
@@ -220,13 +220,13 @@ describe('createOverlayHost teardown (popover listener + timer leak)', () => {
         const host = mkHost()
         showPopover(host.root, mkPopoverOpts())
         // the timer is scheduled but the listener is NOT yet attached
-        const addSpy = vi.spyOn(document, 'addEventListener')
+        const addSpy = vi.spyOn(window, 'addEventListener')
         host.destroy()
         const addCountBefore = addSpy.mock.calls.length
-        // advance past the 100ms mount delay
+        // advance past the setTimeout(0) arm delay
         vi.advanceTimersByTime(500)
         const addCountAfter = addSpy.mock.calls.length
-        // no new document-level mousedown listener was added after destroy
+        // no new window-level pointerdown listener was added after destroy
         expect(addCountAfter).toBe(addCountBefore)
     })
 

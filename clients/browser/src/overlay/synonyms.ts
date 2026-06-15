@@ -193,6 +193,8 @@ const POPOVER_HEIGHT_FALLBACK = 140
  * root). The popover sits BELOW the word (the tail points up at the
  * word's baseline) and is viewport-clamped.
  */
+import { installOutsideDismiss, type OutsideDismissHandle } from '@/overlay/dismiss'
+
 export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): SynonymsHandle {
     destroyExisting(root)
     const doc = root.ownerDocument
@@ -249,33 +251,21 @@ export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): Synony
             options.onClose()
         }
     }
-    // Outside-click (light-dismiss) — uses `pointerdown` matching the
-    // working panel pattern. `mousedown` misses pointer-events-only
-    // dismissals (e.g. Fastmail's compose area fires pointerdown but not
-    // always mousedown). composedPath() is shadow-DOM aware.
-    // Uses root.ownerDocument (not the bare `document` global) for
-    // correctness in content-script contexts.
-    let outsideListenerInstalled = false
-    const onOutsidePointerDown = (event: PointerEvent): void => {
-        if (!outsideListenerInstalled) return
-        const path = event.composedPath()
-        if (path.includes(pop)) return
-        options.onClose()
-    }
     doc.addEventListener('keydown', onKeydown)
-    const armTimer = view.setTimeout(() => {
-        outsideListenerInstalled = true
-        doc.addEventListener('pointerdown', onOutsidePointerDown, true)
-    }, 0)
+
+    // Outside-click (light-dismiss) via the unified dismiss helper.
+    // Uses window capture so host-page stopPropagation can't block it.
+    const outsideDismiss: OutsideDismissHandle = installOutsideDismiss(
+        view,
+        (el) => pop.contains(el) || el === pop,
+        () => options.onClose(),
+        'synonyms',
+    )
 
     return {
         destroy: () => {
-            view.clearTimeout(armTimer)
+            outsideDismiss.remove()
             doc.removeEventListener('keydown', onKeydown)
-            if (outsideListenerInstalled) {
-                doc.removeEventListener('pointerdown', onOutsidePointerDown, true)
-                outsideListenerInstalled = false
-            }
             if (pop.isConnected) pop.remove()
         },
         isOpen: () => pop.isConnected,

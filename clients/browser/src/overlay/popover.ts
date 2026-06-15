@@ -10,6 +10,7 @@
 // on document and inspects composedPath() (shadow-DOM aware). The previous
 // card is always torn down before a new one mounts.
 import { CATEGORY_META } from '@/api/category'
+import { installOutsideDismiss, type OutsideDismissHandle } from '@/overlay/dismiss'
 import { diffInnerHTML } from '@/overlay/diff-view'
 import {
     clampNavIndex,
@@ -230,34 +231,26 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
     // / Space without tabbing in from the field.
     panel.querySelector<HTMLButtonElement>('.gf-btn-primary')?.focus()
 
-    let outsideListenerInstalled = false
-    function onOutsideMouseDown(event: MouseEvent): void {
-        if (!panel.isConnected) return
-        // composedPath() crosses shadow boundaries; if the click was inside
-        // the popover (or one of our highlights that is about to reopen us),
-        // bail.
-        const path = event.composedPath()
-        if (path.includes(panel)) return
-        const highlights = root.querySelectorAll('.gf-u')
-        for (const h of highlights) {
-            if (path.includes(h)) return
-        }
-        handle.hide()
-    }
-    // Outside-click: install after a short delay so the click that opened
-    // us doesn't dismiss us in the same tick.
-    const outsideTimer = view.setTimeout(() => {
-        outsideListenerInstalled = true
-        doc.addEventListener('mousedown', onOutsideMouseDown, true)
-    }, OUTSIDE_CLICK_DELAY_MS)
+    // Outside-click (light-dismiss) via the unified dismiss helper.
+    // Uses window capture so host-page stopPropagation can't block it.
+    // Also excludes our own highlight spans (.gf-u) so clicking a
+    // different highlight reopens the card rather than just closing.
+    const outsideDismiss: OutsideDismissHandle = installOutsideDismiss(
+        view,
+        (el) => {
+            if (panel.contains(el) || el === panel) return true
+            // Don't dismiss when clicking another highlight (it will
+            // reopen the card via the highlight click handler).
+            if (el.classList.contains('gf-u')) return true
+            return false
+        },
+        () => handle.hide(),
+        'popover',
+    )
 
     handle = {
         hide: () => {
-            view.clearTimeout(outsideTimer)
-            if (outsideListenerInstalled) {
-                doc.removeEventListener('mousedown', onOutsideMouseDown, true)
-                outsideListenerInstalled = false
-            }
+            outsideDismiss.remove()
             panel.removeEventListener('keydown', onKeydown)
             if (usePopoverApi && panel.isConnected) {
                 try {

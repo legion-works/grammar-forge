@@ -22,6 +22,7 @@
 //     the pill's top). `transform-origin: 50% 0%`.
 
 import type { Goals } from '@/api/types'
+import { installOutsideDismiss, type OutsideDismissHandle } from '@/overlay/dismiss'
 
 const VIEWPORT_GUTTER = 8
 const POPOVER_WIDTH = 300
@@ -109,36 +110,21 @@ export function showGoals(root: ShadowRoot, options: GoalsOptions): GoalsHandle 
             options.onClose()
         }
     }
-    // Outside-click (light-dismiss) — delayed to ignore the same click that
-    // opened the popover. Uses `pointerdown` (matching the working panel
-    // pattern) — `mousedown` misses pointer-events-only dismissals (e.g.
-    // Fastmail's compose area fires pointerdown but not always mousedown).
-    // composedPath() is shadow-DOM aware so clicks inside the popover are
-    // correctly excluded even when the shadow host retargets e.target.
-    // Uses doc (root.ownerDocument) not the bare `document` global for
-    // correctness in content-script contexts.
-    let outsideListenerInstalled = false
-    const onOutsidePointerDown = (event: PointerEvent): void => {
-        if (!outsideListenerInstalled) return
-        const path = event.composedPath()
-        if (path.includes(pop)) return
-        options.onClose()
-    }
     doc.addEventListener('keydown', onKeydown)
-    // Arm after the current click tick so the opening click doesn't dismiss.
-    const armTimer = view.setTimeout(() => {
-        outsideListenerInstalled = true
-        doc.addEventListener('pointerdown', onOutsidePointerDown, true)
-    }, 0)
+
+    // Outside-click (light-dismiss) via the unified dismiss helper.
+    // Uses window capture so host-page stopPropagation can't block it.
+    const outsideDismiss: OutsideDismissHandle = installOutsideDismiss(
+        view,
+        (el) => pop.contains(el) || el === pop,
+        () => options.onClose(),
+        'goals',
+    )
 
     return {
         destroy: () => {
-            view.clearTimeout(armTimer)
+            outsideDismiss.remove()
             doc.removeEventListener('keydown', onKeydown)
-            if (outsideListenerInstalled) {
-                doc.removeEventListener('pointerdown', onOutsidePointerDown, true)
-                outsideListenerInstalled = false
-            }
             if (pop.isConnected) pop.remove()
         },
         isOpen: () => pop.isConnected,

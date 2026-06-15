@@ -308,24 +308,26 @@ describe('showPopover outside-click dismiss', () => {
         removePopoverStub()
     })
 
-    it('dismisses on a mousedown outside the card (after the 100ms mount delay)', () => {
+    it('dismisses on a pointerdown outside the card (after the arm delay, window capture)', () => {
+        // SYSTEMIC-2 fix: dismiss now uses window capture + pointerdown
+        // (not doc + mousedown) so host-page stopPropagation can't block it.
         const opts = mkOptions()
         const handle = showPopover(root, opts)
-        // outside-click handler is installed on a 100ms delay; advance time
-        vi.advanceTimersByTime(120)
-        // dispatch a click somewhere far from the card
+        // outside-click handler is installed on a setTimeout(0) delay.
+        vi.advanceTimersByTime(10)
+        // dispatch a pointerdown somewhere far from the card
         const outsideEl = document.createElement('div')
         document.body.appendChild(outsideEl)
-        outsideEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+        outsideEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
         expect(handle?.isOpen()).toBe(false)
     })
 
-    it('a click inside the card does not dismiss', () => {
+    it('a pointerdown inside the card does not dismiss', () => {
         const opts = mkOptions()
         const handle = showPopover(root, opts)
-        vi.advanceTimersByTime(120)
+        vi.advanceTimersByTime(10)
         const card = root.querySelector('.gf-card') as HTMLElement
-        card.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, composed: true }))
+        card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
         expect(handle?.isOpen()).toBe(true)
     })
 })

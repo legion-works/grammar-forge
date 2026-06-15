@@ -29,6 +29,7 @@
 // network, no recomputation, no domain math.
 
 import { diffInnerHTML } from '@/overlay/diff-view'
+import { installOutsideDismiss, type OutsideDismissHandle } from '@/overlay/dismiss'
 import type { Category, Goals, Phase } from '@/api/types'
 import { buildPanelModel, type PanelModel } from '@/overlay/panel-model'
 import type { RenderableItem } from '@/lib/pipeline'
@@ -232,36 +233,24 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
     aside.addEventListener('click', onClick)
     aside.addEventListener('mousedown', onMouseDown)
 
-    // Outside-click (light-dismiss): a pointerdown outside the panel closes
-    // it. Delayed by one tick so the click that opened the panel (e.g. the
-    // orb click) doesn't immediately dismiss it. composedPath() is shadow-DOM
-    // aware — a click inside the panel's shadow subtree is correctly excluded.
-    // Clicks on the orb itself (which re-opens the panel) are also excluded
-    // because the orb's click handler fires onOpen → a new showPanel() which
-    // destroys this one first; the outside-click listener is removed in
-    // destroy() before the new panel mounts.
-    // Child popovers (Goals, synonyms) are siblings in the shadow root, NOT
-    // inside `aside` — exclude them so clicking inside Goals/synonyms doesn't
-    // close the panel. We check for any .gf-goals-pop or .gf-syn in the path.
-    let outsideListenerInstalled = false
-    const onOutsidePointerDown = (event: PointerEvent): void => {
-        if (!aside.isConnected) return
-        const path = event.composedPath()
-        if (path.includes(aside)) return
-        // Don't close the panel when the user clicks inside a child popover
-        // (Goals, synonyms) that is a sibling of the panel in the shadow root.
-        for (const node of path) {
-            if (node instanceof Element) {
-                if (node.classList.contains('gf-goals-pop')) return
-                if (node.classList.contains('gf-syn')) return
-            }
-        }
-        options.onClose()
-    }
-    const outsideTimer = view.setTimeout(() => {
-        outsideListenerInstalled = true
-        doc.addEventListener('pointerdown', onOutsidePointerDown, true)
-    }, 0)
+    // Outside-click (light-dismiss) via the unified dismiss helper.
+    // Uses window capture so host-page stopPropagation can't block it.
+    // Child popovers (Goals, synonyms, correction card) are siblings in
+    // the shadow root — exclude them so clicking inside them doesn't
+    // close the panel.
+    const outsideDismiss: OutsideDismissHandle = installOutsideDismiss(
+        view,
+        (el) => {
+            if (aside.contains(el) || el === aside) return true
+            // Sibling popovers in the shadow root — keep panel open.
+            if (el.classList.contains('gf-goals-pop')) return true
+            if (el.classList.contains('gf-syn')) return true
+            if (el.classList.contains('gf-card')) return true
+            return false
+        },
+        () => options.onClose(),
+        'panel',
+    )
 
     // `bodyRef` mirrors the body element, but is nulled by destroy() so
     // `getBodyContainer()` returns null after teardown (the detached
@@ -273,11 +262,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
 
     return {
         destroy: () => {
-            view.clearTimeout(outsideTimer)
-            if (outsideListenerInstalled) {
-                doc.removeEventListener('pointerdown', onOutsidePointerDown, true)
-                outsideListenerInstalled = false
-            }
+            outsideDismiss.remove()
             aside.removeEventListener('click', onClick)
             aside.removeEventListener('mousedown', onMouseDown)
             if (aside.isConnected) aside.remove()
@@ -363,13 +348,28 @@ function renderChrome(
     const reviewTab = el(tabs, 'button', 'gf-tab is-active') as HTMLButtonElement
     reviewTab.type = 'button'
     reviewTab.setAttribute('role', 'tab')
+    reviewTab.setAttribute('aria-selected', 'true')
     reviewTab.setAttribute('data-action', 'open-review')
     reviewTab.textContent = 'Review'
     const statsTab = el(tabs, 'button', 'gf-tab') as HTMLButtonElement
     statsTab.type = 'button'
     statsTab.setAttribute('role', 'tab')
+    statsTab.setAttribute('aria-selected', 'false')
     statsTab.setAttribute('data-action', 'open-stats')
     statsTab.textContent = 'Stats'
+
+    // Expose a tab-sync helper on the aside element so the orchestrator
+    // can toggle the active tab indicator WITHOUT rebuilding the panel.
+    // Called synchronously before mounting the Stats view or restoring
+    // the Review body — so the indicator is always in sync with content.
+    ;(aside as HTMLElement & { setActiveTab: (tab: 'review' | 'stats') => void }).setActiveTab =
+        (tab: 'review' | 'stats') => {
+            const isReview = tab === 'review'
+            reviewTab.classList.toggle('is-active', isReview)
+            reviewTab.setAttribute('aria-selected', String(isReview))
+            statsTab.classList.toggle('is-active', !isReview)
+            statsTab.setAttribute('aria-selected', String(!isReview))
+        }
 
     // Body slot
     const body = el(aside, 'div', 'gf-panel__body')
