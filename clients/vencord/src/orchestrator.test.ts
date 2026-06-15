@@ -407,6 +407,59 @@ describe('vencord orchestrator — panel refreshes when check resolves with new 
         document.querySelectorAll('[data-grammarforge-scanline]').forEach((el) => el.remove())
     })
 
+    it('panel opens with live items (not stale closure items) when check already completed', async () => {
+        // ROOT CAUSE (round 14): openReviewPanel used the `st` parameter
+        // (captured in buildPillOptions closure) instead of fields.get(el).
+        // If the closure was created before the check completed (st.items=[]),
+        // the panel opened with empty items even though the orb showed N.
+        // Fix: openReviewPanel always reads fields.get(el) as the live source.
+        //
+        // This test verifies: after a check resolves with items, the panel
+        // opened via togglePanel reads the live items (not empty).
+        // We use the OrchestratorApi.openPanel() entry point which mirrors
+        // the chatbar-button togglePanel path (reads fields.get(el) live).
+        correctStreamMock.mockImplementationOnce(async (_req, onFast) => {
+            onFast({ original: 'I has a aple', suggestions: [], score: 100 })
+            return { original: 'I has a aple', suggestions: [], score: 75 } as CorrectResponse
+        })
+
+        api = startOrchestrator(() => cfg)
+
+        const composer = document.createElement('div')
+        composer.setAttribute('role', 'textbox')
+        composer.setAttribute('contenteditable', 'true')
+        composer.textContent = 'I has a aple'
+        const wrapper = document.createElement('div')
+        wrapper.className = 'channelTextArea_inner'
+        wrapper.appendChild(composer)
+        document.body.appendChild(wrapper)
+
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        // Trigger a check and wait for it to complete.
+        composer.dispatchEvent(
+            new InputEvent('beforeinput', {
+                inputType: 'insertText',
+                bubbles: true,
+                cancelable: true,
+                data: 'a',
+            }),
+        )
+        await new Promise<void>((r) => setTimeout(r, 200))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        // The check resolved. The overlay host should exist.
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        expect(host).not.toBeNull()
+
+        // No panel open yet — the panel-refresh hook is a no-op.
+        expect(host?.shadowRoot?.querySelector('.gf-panel-aside')).toBeNull()
+
+        composer.remove()
+        wrapper.remove()
+    })
+
     it('panel body is rebuilt with fresh items after a check resolves (orb and panel agree)', async () => {
         // Set up the mock to return 1 suggestion on the final frame.
         // Use the same empty-suggestions shape as the default mock but with

@@ -933,9 +933,17 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // Fall back to the field's rect when the pill hasn't been
             // positioned yet (defensive — `pillAnchor` is set on the
             // first showPill, before onOpen can fire in practice).
+            // IMPORTANT: re-read the LIVE FieldState from fields.get(el)
+            // at click time, NOT the `st` captured in this closure.
+            // Discord re-renders the composer element; the closure's `st`
+            // may be a stale FieldState from a prior attach (items=[])
+            // even though the orb correctly shows the current count via
+            // pillHandle.update(). Reading live state ensures the panel
+            // opens with the same items the orb is showing.
             onOpen: () => {
                 const anchor = pillAnchor ?? el.getBoundingClientRect()
-                openReviewPanel(el, st, anchor)
+                const liveSt = fields.get(el) ?? st
+                openReviewPanel(el, liveSt, anchor)
             },
         }
     }
@@ -1045,7 +1053,13 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // safer order for a re-open with new data).
         reviewPanel?.destroy()
         reviewPanel = null
-        const opts = buildReviewPanelOptions(el, st, anchor)
+        // Always use the LIVE FieldState from the fields map — the `st`
+        // parameter may be a stale closure capture (e.g. from buildPillOptions
+        // called before the check completed). fields.get(el) is the
+        // authoritative live state; fall back to the passed `st` only when
+        // the field has been detached (fields.get returns undefined).
+        const liveSt = fields.get(el) ?? st
+        const opts = buildReviewPanelOptions(el, liveSt, anchor)
         reviewPanel = showPanel(overlay.root, opts)
         panelOpen = true
         panelFor = el
