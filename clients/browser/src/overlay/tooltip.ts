@@ -101,8 +101,15 @@ export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipH
         tip.addEventListener('mouseleave', options.onPillMouseLeave)
     }
 
-    positionTooltip(tip, options.anchorRect, view)
+    // Append first so the browser lays out the pill and offsetWidth is
+    // the ACTUAL rendered width (not TOOLTIP_WIDTH_MAX which over-shifts
+    // the pill left when the content is short, e.g. "a → an ✓").
+    // Position off-screen initially to avoid a flash at the wrong spot.
+    tip.style.left = '-9999px'
+    tip.style.top = '-9999px'
     root.appendChild(tip)
+    // Now measure the actual rendered width and reposition correctly.
+    positionTooltip(tip, options.anchorRect, view)
 
     return {
         hide: () => {
@@ -122,14 +129,18 @@ function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void 
     const vh = view.innerHeight
     const spaceBelow = vh - anchor.bottom
     const showAbove = spaceBelow < TOOLTIP_HEIGHT_ESTIMATE
-    // Center the pill horizontally on the word. Use the estimated width
-    // (the pill is inline-flex so its actual width isn't known before layout).
-    // The caret (.gf-tip__tail) is centered via left:50% in CSS, so it
-    // always points at the pill's center — which we align to the word center.
+    // Use the pill's ACTUAL rendered width (tip.offsetWidth after mount)
+    // so the centering is exact for short pills like "a → an ✓".
+    // Falls back to TOOLTIP_WIDTH_MAX when offsetWidth is 0 (jsdom / not
+    // yet laid out — the fallback keeps tests deterministic).
+    const pillWidth = tip.offsetWidth > 0 ? tip.offsetWidth : TOOLTIP_WIDTH_MAX
+    // Center the pill horizontally on the word. The caret (.gf-tip__tail)
+    // is centered via left:50% in CSS, so it always points at the pill's
+    // center — which we align to the word center.
     const wordCenterX = anchor.left + anchor.width / 2
-    let left = wordCenterX - TOOLTIP_WIDTH_MAX / 2
-    if (left + TOOLTIP_WIDTH_MAX > vw - VIEWPORT_GUTTER) {
-        left = vw - TOOLTIP_WIDTH_MAX - VIEWPORT_GUTTER
+    let left = wordCenterX - pillWidth / 2
+    if (left + pillWidth > vw - VIEWPORT_GUTTER) {
+        left = vw - pillWidth - VIEWPORT_GUTTER
     }
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     tip.style.left = `${left}px`
