@@ -37,6 +37,18 @@ import {
     type StatusButtonOptions,
 } from '@/overlay/status-button'
 import { showPanel, type PanelHandle, type PanelOptions } from '@/overlay/panel'
+import { showGoals, type GoalsHandle } from '@/overlay/goals'
+import { mountStatsView, type StatsViewHandle, type StatsViewDeps } from '@/overlay/stats-view'
+import { resolveWordFromDblClick, showSynonyms, type SynonymsHandle } from '@/overlay/synonyms'
+import { showToast } from '@/overlay/toast'
+import {
+    computeScore,
+    scoreBand,
+    visibleItems,
+    highConfidenceItems,
+    defaultToneFromGoals,
+} from '@/lib/view-model'
+import type { Phase, Category } from '@/api/types'
 import { dismissRephraseCardsIn } from '@/overlay/rephrase-card'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
 import { shouldRephraseHotkey } from '@/hotkeys/rephrase-target'
@@ -134,6 +146,12 @@ interface FieldState {
      *  so a settings-driven teardown doesn't lose it and different fields
      *  don't share an undo queue. */
     lastApplied: InverseEdit[] | null
+    /** Streaming phase of the latest check for THIS field. `'fast'` is the
+     *  local-rules preview (Harper + GECToR + cached LLM); `'done'` includes
+     *  the LLM escalation. LLM items are suppressed from visibleItems()
+     *  while in 'fast'. Per-field so a re-check on one composer doesn't
+     *  leak phase into another. */
+    phase: Phase
 }
 
 export interface OrchestratorApi {
@@ -219,6 +237,13 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         send: (events) => refreshClient().signal(events),
     })
     const overlay = createOverlayHost()
+    // W3-4: Vencord is always dark (Discord is always dark). Set the
+    // data-gf-theme attribute on the host so the design tokens resolve
+    // against the dark palette regardless of the user's OS preference.
+    // The shared createOverlayHost() does not set this — it is a
+    // per-client choice (the browser also handles light + OS-watcher
+    // there; Vencord skips the light path entirely).
+    ;(overlay.host as HTMLElement).dataset.gfTheme = 'dark'
     // Deps bundle for the extracted addWordToDictionary (./dictionary.ts).
     // Built here so the deps reference the live closures (refreshClient,
     // rerunFor, signalQueue, overlay.root) instead of being passed in.
@@ -229,10 +254,15 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         overlayRoot: overlay.root,
     }
     // Deps bundle for the extracted openRephraseFor (./rephrase.ts).
+    // W3-3: pass a `defaultTone` getter so the rephrase card's
+    // initial tone is seeded from the user's goals (formal→Formal,
+    // informal→Casual, neutral→Neutral). The card still lets the user
+    // override per-request — this is the seed only.
     const rephraseDeps: RephraseDeps = {
         client: () => refreshClient(),
         overlayRoot: overlay.root,
         debugLog,
+        defaultTone: () => defaultToneFromGoals(getConfig().goals),
     }
     const fields = new Map<HTMLElement, FieldState>()
     const trackedFields = new Set<HTMLElement>()
@@ -255,6 +285,14 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     let pillAnchor: DOMRect | null = null
     let panelOpen = false
     let reviewPanel: PanelHandle | null = null
+    // W3-3: completion of the W2b panel callback wiring. The W2b NIT2
+    // (panel.ts exported onOpenGoals/onOpenStats but the orchestrator
+    // stubbed them) gets these real surfaces here. One handle per overlay
+    // (showGoals + showSynonyms + mountStatsView each dismiss the prior
+    // on a new mount — the orchestrator's track-and-destroy is defensive).
+    let goalsHandle: GoalsHandle | null = null
+    let statsHandle: StatsViewHandle | null = null
+    let synonymsHandle: SynonymsHandle | null = null
     let lastActiveField: HTMLElement | null = null
     // Single hover tooltip (one per overlay, mirrors browser client).
     // Shared across all fields; a new showTooltip call dismisses the prior.
@@ -295,10 +333,13 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             if (lastActiveField === el && document.activeElement !== el) {
                 lastActiveField = null
             }
-            // Refresh the pill (count → 0) if mounted + visible. Skipped
-            // while a panel is open — the next open rebuilds fresh.
-            const zeroPillUpdated = !!(pillHandle && pillHandle.isMounted() && !panelOpen)
-            if (pillHandle && pillHandle.isMounted() && !panelOpen) {
+            // Refresh the pill (count → 0) if mounted. The W2b review
+            // panel owns its own data snapshot — pill.update() no longer
+            // closes the panel (the W1 hover-panel behaviour is gone),
+            // so the prior `!panelOpen` skip is stale and the update
+            // can run unconditionally.
+            const zeroPillUpdated = !!(pillHandle && pillHandle.isMounted())
+            if (pillHandle && pillHandle.isMounted()) {
                 pillHandle.update(buildPillOptions(el, st))
             }
             debugLog('render', { items: 0, pillUpdated: zeroPillUpdated, panelOpen })
@@ -337,11 +378,14 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 hoverItemIndex: null,
             })
         }
-        // Refresh the pill if mounted + visible. Skipped while a panel is
-        // open — the pill's update() closes the panel by design (acceptable;
-        // the next open rebuilds with fresh data).
-        const pillUpdated = !!(pillHandle && pillHandle.isMounted() && !panelOpen)
-        if (pillHandle && pillHandle.isMounted() && !panelOpen) {
+        // Refresh the pill if mounted. The W2b review panel keeps its
+        // OWN snapshot of items/goals/phase at open time (panel.ts uses
+        // buildPanelModel once and never re-reads live state), so a
+        // pill.update() while the panel is open is safe — the panel
+        // stays mounted + readable while the orb's count/band/ring stay
+        // live. The W1 `!panelOpen` skip is stale; remove it.
+        const pillUpdated = !!(pillHandle && pillHandle.isMounted())
+        if (pillHandle && pillHandle.isMounted()) {
             pillHandle.update(buildPillOptions(el, st))
         }
         debugLog('render', {
@@ -366,10 +410,27 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             }
             const seq = ++st.checkSeq
             debugLog('check start', { seq, textLen: text.length })
+            // W3-3: streaming fast→slow. The bridge's /correct/stream returns
+            // a `fast` frame (Harper + GECToR + cached LLM) then a `final`
+            // frame (LLM escalation). We render `fast` immediately so the
+            // user sees motion; `final` supersedes with the complete set.
+            // The bridge client falls back to plain /correct when streaming
+            // is unsupported (older bridge versions), in which case onFast
+            // is never called and we land directly on `done`.
             try {
-                const res = await refreshClient().correct({ text, source: 'vencord' })
+                const res = await refreshClient().correctStream(
+                    { text, source: 'vencord' },
+                    (fastRes) => {
+                        if (seq !== st.checkSeq) return
+                        st.items = buildRenderableItems(text, fastRes).items
+                        st.phase = 'fast'
+                        debugLog('check fast', { seq, items: st.items.length })
+                        renderField(el, st)
+                    },
+                )
                 if (seq !== st.checkSeq) return
                 st.items = buildRenderableItems(text, res).items
+                st.phase = 'done'
                 debugLog('check done', { seq, items: st.items.length })
                 renderField(el, st)
             } catch (e) {
@@ -383,6 +444,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     // Returns false (no-op) when the span has gone stale. Async: the Slate-
     // aware apply yields a tick between selection and insert (see
     // slate-apply.ts — the sync applyFix corrupted Slate's selection state).
+    // W3-3: every mutation surfaces an Undo toast. The single-item path
+    // shows "Fixed {original} → {replacement}" + Undo; the batch path
+    // shows "Fixed N suggestions" + Undo (one click restores them all).
     const applyItem = async (el: HTMLElement, item: RenderableItem): Promise<boolean> => {
         const st = fields.get(el)
         if (!st) return false
@@ -414,6 +478,11 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             action: 'accepted',
             category: item.category,
             source: 'vencord',
+        })
+        showToast(overlay.root, {
+            message: `Fixed \u201C${item.diffOriginal}\u201D \u2192 \u201C${replacement}\u201D`,
+            actionLabel: 'Undo',
+            onAction: () => void undoFor(el),
         })
         void rerunFor(el)(getText(el))
         return true
@@ -471,7 +540,16 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // text and the next applyFix lands cleanly.
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
         }
-        if (batch.length > 0) st.lastApplied = batch
+        if (batch.length > 0) {
+            st.lastApplied = batch
+            // W3-3: surface a single batch-Undo toast (the toast's Undo
+            // action reverts the whole batch via `undoFor`).
+            showToast(overlay.root, {
+                message: `Fixed ${String(batch.length)} suggestion${batch.length === 1 ? '' : 's'}`,
+                actionLabel: 'Undo',
+                onAction: () => void undoFor(el),
+            })
+        }
         if (!el.isConnected) return
         debugLog('apply all', { count: batch.length })
         void rerunFor(el)(getText(el))
@@ -506,6 +584,70 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     const closePopoverFor = (el: HTMLElement): void => {
         openPopovers.get(el)?.hide()
         openPopovers.delete(el)
+    }
+
+    /** Measure the on-screen rect of a word range. The shared
+     *  `getSpanRectsBatch` returns a DOMRect[] per range — we use the
+     *  first rect (the dominant baseline rect) for anchor positioning.
+     *  Returns null when measurement throws or returns empty (the word
+     *  is in a detached subtree, or a zero-width surrogate pair). */
+    const measureWordRect = (fieldEl: HTMLElement, text: string, start: number, end: number): DOMRect | null => {
+        try {
+            const rects = getSpanRectsBatch(fieldEl, [{ start, end }])
+            const first = rects[0]?.[0]
+            return first ?? null
+        } catch {
+            return null
+        }
+    }
+
+    /** Close the active synonyms popover, if any. Idempotent. */
+    const closeSynonyms = (): void => {
+        synonymsHandle?.destroy()
+        synonymsHandle = null
+    }
+
+    /** Apply a synonym swap: stale-guard → applySlateFix → signal →
+     *  Undo toast → re-check. Mirror of `applyItem` but the toast reads
+     *  as "Synonym applied" with the new word and the Undo re-runs the
+     *  inverse (the previous word). */
+    const applySynonym = async (
+        el: HTMLElement,
+        resolved: { word: string; start: number; end: number },
+        synonym: string,
+    ): Promise<void> => {
+        const st = fields.get(el)
+        if (!st) return
+        const live = getText(el)
+        const slice = live.slice(resolved.start, resolved.end)
+        if (slice !== resolved.word) {
+            debugLog('synonym stale slice; not applying', { slice, expected: resolved.word })
+            void rerunFor(el)(live)
+            return
+        }
+        const applied = await applySlateFix(
+            el,
+            { start: resolved.start, end: resolved.end },
+            synonym,
+            debugLog as unknown as ApplyTraceLogger,
+        )
+        if (!applied) {
+            void rerunFor(el)(live)
+            return
+        }
+        st.lastApplied = appendInverseEdit(st.lastApplied ?? [], {
+            start: resolved.start,
+            end: resolved.end,
+            replacement: synonym,
+            original: resolved.word,
+        })
+        showToast(overlay.root, {
+            message: `Synonym: ${resolved.word} \u2192 ${synonym}`,
+            actionLabel: 'Undo',
+            onAction: () => void undoFor(el),
+        })
+        closeSynonyms()
+        void rerunFor(el)(getText(el))
     }
 
     const openPopoverFor = (el: HTMLElement, item: RenderableItem, anchorRect: DOMRect): void => {
@@ -578,6 +720,11 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 })
             },
             onIgnore: () => {
+                // W3-3: dismiss → 'rejected' signal (the W1 'ignored' is
+                // superseded; the spec now uses 'rejected' for the user-
+                // dismissed path so the learning loop has a clean
+                // accept/reject signal pair). Also: an Undo toast so the
+                // dismiss is reversible (re-shows the item in place).
                 const st = fields.get(el)
                 if (!st) return
                 const idx = st.items.indexOf(item)
@@ -585,9 +732,20 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 renderField(el, st)
                 signalQueue.enqueue({
                     id: item.id,
-                    action: 'ignored',
+                    action: 'rejected',
                     category: item.category,
                     source: 'vencord',
+                })
+                showToast(overlay.root, {
+                    message: `Won\u2019t flag \u201C${item.diffOriginal}\u201D again`,
+                    actionLabel: 'Undo',
+                    onAction: () => {
+                        // Restore the item in place at its original index.
+                        if (idx >= 0 && !st.items.includes(item)) {
+                            st.items.splice(idx, 0, item)
+                            renderField(el, st)
+                        }
+                    },
                 })
                 closePopoverFor(el)
             },
@@ -664,6 +822,16 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             diffCorrected: it.diffCorrected,
             diffIsDeletion: it.diffIsDeletion,
         }))
+        // W3-3: drive the score ring + center glyph through the view-model
+        // so the orb reflects the SAME math the review panel does. We
+        // derive `visible` (informal mutes style) here, compute the score
+        // + band once, and hand the orb the trio — `orbState` inside the
+        // shared status-button turns the trio into ringColor / ringOffset
+        // / center-glyph, so no scoring math lives in this file.
+        const goals = getConfig().goals
+        const visible = visibleItems(st.items, st.phase, goals)
+        const score = computeScore(visible)
+        const band = scoreBand(score)
         return {
             count: st.items.length,
             byCategory: tallyByCategory(st.items),
@@ -679,6 +847,18 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             onRephrase: () => rephraseFor(el),
             undoAvailable: (st.lastApplied?.length ?? 0) > 0,
             initiallyVisible: true,
+            score,
+            band,
+            phase: st.phase,
+            // W2-1: orb body click → show the review panel anchored to
+            // the pill (the synthetic anchor above the chatbar button).
+            // Fall back to the field's rect when the pill hasn't been
+            // positioned yet (defensive — `pillAnchor` is set on the
+            // first showPill, before onOpen can fire in practice).
+            onOpen: () => {
+                const anchor = pillAnchor ?? el.getBoundingClientRect()
+                openReviewPanel(el, st, anchor)
+            },
         }
     }
 
@@ -761,72 +941,250 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     const togglePanel = (anchorRect: DOMRect): void => {
         // W2b: the chatbar button toggles the W2b review panel (the W1
         // hover panel is retired). The pill's body click (when present)
-        // ALSO fires `onOpen` which lands here, so the entry point is
-        // uniform. The pill is mounted only as a position source — the
-        // W2b review panel reads its own anchor from `anchorRect`.
+        // ALSO fires `onOpen` which lands in `openReviewPanel`, so the
+        // entry point is uniform. The pill is mounted only as a position
+        // source — the W2b review panel reads its own anchor from
+        // `anchorRect`.
         if (!pillHandle || !pillHandle.isMounted()) showPill(anchorRect)
         if (panelOpen) {
-            reviewPanel?.destroy()
-            reviewPanel = null
-            panelOpen = false
+            closeReviewPanel()
         } else {
             const el = activeComposer()
             const st = el ? fields.get(el) : null
-            if (el && st) {
-                const opts = buildReviewPanelOptions(el, st, anchorRect)
-                reviewPanel = showPanel(overlay.root, opts)
-                panelOpen = true
-            }
+            if (el && st) openReviewPanel(el, st, anchorRect)
         }
     }
 
+    /** Open (or re-open) the W2b review panel for the given field. The
+     *  panel renders its own goals/phase-aware content; the orchestrator
+     *  owns the showGoals / mountStatsView / applyShowSwap lifecycles
+     *  (the panel surface is callback-only — it does not know about
+     *  the bridge or the orchestrator's deps). */
+    const openReviewPanel = (el: HTMLElement, st: FieldState, anchor: DOMRect): void => {
+        // One panel at a time: destroy any prior review panel BEFORE
+        // building the new one (the W2b showPanel does this itself for
+        // .gf-panel-aside siblings, but a teardown-then-mount is the
+        // safer order for a re-open with new data).
+        reviewPanel?.destroy()
+        reviewPanel = null
+        const opts = buildReviewPanelOptions(el, st, anchor)
+        reviewPanel = showPanel(overlay.root, opts)
+        panelOpen = true
+    }
+
+    const closeReviewPanel = (): void => {
+        reviewPanel?.destroy()
+        reviewPanel = null
+        // Dismiss any child surfaces the panel opened (Goals popover,
+        // Stats view, Synonyms popover). They each have their own
+        // destroy() — calling them is idempotent.
+        goalsHandle?.destroy()
+        goalsHandle = null
+        statsHandle?.destroy()
+        statsHandle = null
+        synonymsHandle?.destroy()
+        synonymsHandle = null
+        panelOpen = false
+    }
+
     /** Build the W2b review panel options for the given field state. The
-     *  W3 wiring will move the apply calls into the orchestrator (the
-     *  W2b scope freezes the panel at open time — apply/lifecycle are
-     *  out of scope; the chatbar button gets a working entry point +
-     *  the data model flows through). */
+     *  W3 wiring finishes the surface's callback contract: the apply
+     *  calls flow into the orchestrator's applyItem / applyAllFor /
+     *  applyAllForCategory / applyAllForHighConf (toast + signal +
+     *  inverse-edit bookkeeping is uniform), and the Goals + Stats
+     *  entries open their child surfaces in the same overlay. */
     const buildReviewPanelOptions = (
         el: HTMLElement,
         st: FieldState,
         anchor: DOMRect,
-    ): PanelOptions => ({
-        anchorRect: anchor,
-        items: st.items,
-        text: getText(el),
-        goals: { audience: 'general', formality: 'neutral' },
-        phase: 'done',
-        onAcceptAll: () => void applyAllFor(el),
-        onAcceptHighConf: () => {
-            // W3 will wire high-confidence acceptance properly; the W2b
-            // entry point just calls applyAllFor so the surface is wired.
-            void applyAllFor(el)
-        },
-        onAcceptCategory: (cat) => {
-            const categoryItems = st.items.filter((it) => it.category === cat)
-            for (const item of categoryItems) {
+    ): PanelOptions => {
+        const goals = getConfig().goals
+        return {
+            anchorRect: anchor,
+            items: st.items,
+            text: getText(el),
+            goals,
+            // W3-3: per-field phase, not a hardcoded 'done'. While the
+            // streaming LLM frame is still in flight, the panel shows
+            // the streaming banner; once it lands, the LLM items appear.
+            phase: st.phase,
+            // Panel clicks do not auto-close the panel (the user may
+            // accept several suggestions before dismissing); the panel
+            // stays open until × / Esc / onDisableSite. The apply
+            // handlers do close the popover for the specific item.
+            onAcceptAll: () => {
+                void applyAllFor(el)
+            },
+            onAcceptHighConf: () => {
+                void applyAllForHighConf(el)
+            },
+            onAcceptCategory: (cat: Category) => {
+                void applyAllForCategory(el, cat)
+            },
+            onAcceptItem: (item: RenderableItem) => {
+                closePopoverFor(el)
                 void applyItem(el, item)
-            }
-        },
-        onAcceptItem: (item) => {
-            void applyItem(el, item)
-        },
-        onOpenGoals: () => {
-            // W2-3 ships the Goals popover module; the W2b entry point
-            // surfaces the click but defers wiring to W3 (orchestrator
-            // owns the showGoals lifecycle).
-        },
-        onOpenStats: () => {
-            // W2-4 ships the Stats view; the W2b entry point surfaces
-            // the click but defers wiring to W3.
-        },
-        onRecheck: () => void rerunFor(el)(getText(el)),
-        onDisableSite: () => togglePause(),
-        onClose: () => {
-            reviewPanel?.destroy()
-            reviewPanel = null
-            panelOpen = false
-        },
+            },
+            onOpenGoals: () => {
+                // W3-3: Goals popover entry. The panel head has a
+                // dedicated Goals pill; clicking it positions a Goals
+                // popover above the pill, anchored to the panel head
+                // (so the popover sits inside the panel's chrome
+                // visually). The shared showGoals handles the outside-
+                // click + Esc dismiss; onChange persists the goals to
+                // settings + re-renders the panel with the new visible
+                // filter + rephrase tone.
+                const goalsRect = measureGoalsPillRect()
+                if (!goalsRect) return
+                const current = getConfig().goals
+                goalsHandle?.destroy()
+                goalsHandle = showGoals(overlay.root, {
+                    anchorRect: goalsRect,
+                    goals: current,
+                    onChange: (next) => {
+                        // Persist + re-render. The panel re-renders from
+                        // a fresh model on next open; the in-flight panel
+                        // keeps its old model until the user re-opens.
+                        // A live update would require an update() on
+                        // panel.ts — not in the W2b scope.
+                        getConfig().goals = next
+                        debugLog('goals change', next)
+                    },
+                    onClose: () => {
+                        goalsHandle?.destroy()
+                        goalsHandle = null
+                    },
+                })
+            },
+            onOpenStats: () => {
+                // W3-3: Stats tab mounts the W2-4 view into the panel's
+                // body slot (panel.getBodyContainer() returns the live
+                // .gf-panel__body element; mountStatsView clears it and
+                // renders its own tree). When the user switches back to
+                // Review the next showPanel call rebuilds fresh.
+                const body = reviewPanel?.getBodyContainer()
+                if (!body) return
+                statsHandle?.destroy()
+                statsHandle = mountStatsView(body, buildStatsViewDeps())
+            },
+            onRecheck: () => void rerunFor(el)(getText(el)),
+            onDisableSite: () => {
+                // W3-3b: per-site disable. The panel footer button
+                // toggles the runtime-wide pause; the disabled empty-
+                // state needs a `disabled` prop on PanelOptions that's
+                // not in the W2b shared surface — see W3-3b report.
+                togglePause()
+                closeReviewPanel()
+            },
+            onClose: () => {
+                closeReviewPanel()
+            },
+        }
+    }
+
+    /** The deps bundle for `mountStatsView`. Wires the bridge client's
+     *  stats / dictionary endpoints and the orchestrator's rerun closure
+     *  so dictionary-add / remove paths stay in lockstep with the
+     *  the live re-check loop. */
+    const buildStatsViewDeps = (): StatsViewDeps => ({
+        loadStats: () => refreshClient().stats(),
+        loadDict: () =>
+            refreshClient().dictionaryList().then((r) => r.words).catch(() => []),
+        removeDictWord: (word: string) => refreshClient().dictionaryRemove(word),
     })
+
+    /** Locate the panel's Goals pill rect (caller-measured — the surface
+     *  contract: never self-measure). Walks the live review panel DOM
+     *  for `[data-action="open-goals"]`; returns null if the panel
+     *  has been torn down or the pill is offscreen. */
+    const measureGoalsPillRect = (): DOMRect | null => {
+        if (!reviewPanel) return null
+        // The panel's body is in overlay.root; the head (with the pill)
+        // is a sibling. Walk all .gf-panel-aside nodes; pick the live
+        // one (only one should ever be mounted — showPanel replaces).
+        const panels = overlay.root.querySelectorAll('.gf-panel-aside')
+        for (const p of Array.from(panels)) {
+            if (!p.isConnected) continue
+            const pill = p.querySelector<HTMLElement>('[data-action="open-goals"]')
+            if (pill) return pill.getBoundingClientRect()
+        }
+        return null
+    }
+
+    // ---- Apply chains: category / high-confidence / single ----
+    // The review panel exposes three bulk-accept entry points beyond
+    // the chatbar's applyAllFor: per-category and high-confidence only.
+    // Both reuse the per-item apply machinery (applySlateFix + signal +
+    // inverse-edit bookkeeping) with the same frame-yield as applyAllFor
+    // so Slate reconciles between edits. The unified entry-point
+    // `applyBatchFor` keeps the batch ordering + inverse-edit assembly in
+    // one place; the three variants just choose which items to feed it.
+
+    /** Apply the given items, last-to-first, with frame yields. Records
+     *  the combined inverse-edit batch on the field's undo slot. Mirrors
+     *  `applyAllFor` but accepts a pre-filtered set (e.g. high-confidence
+     *  only, or one category). */
+    const applyBatchFor = async (el: HTMLElement, items: readonly RenderableItem[]): Promise<void> => {
+        const st = fields.get(el)
+        if (!st) return
+        if (items.length === 0) return
+        closePopoverFor(el)
+        const ordered = [...items].sort((a, b) => b.cuStart - a.cuStart)
+        const signaled = new Set<number>()
+        let batch: InverseEdit[] = []
+        for (const item of ordered) {
+            if (!el.isConnected) return
+            if (!isSpanStillValid(getText(el), item)) continue
+            const replacement = item.replacements[0] ?? ''
+            const applied = await applySlateFix(
+                el,
+                { start: item.cuStart, end: item.cuEnd },
+                replacement,
+                debugLog as unknown as ApplyTraceLogger,
+            )
+            if (!applied) continue
+            batch = appendInverseEdit(batch, {
+                start: item.cuStart,
+                end: item.cuEnd,
+                replacement,
+                original: item.original,
+            })
+            if (typeof item.id === 'number' && item.id > 0 && !signaled.has(item.id)) {
+                signaled.add(item.id)
+                signalQueue.enqueue({
+                    id: item.id,
+                    action: 'accepted',
+                    category: item.category,
+                    source: 'vencord',
+                })
+            }
+            // Let Slate reconcile so the next isSpanStillValid reads fresh
+            // text and the next applyFix lands cleanly.
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        }
+        if (batch.length > 0) st.lastApplied = batch
+        if (!el.isConnected) return
+        debugLog('apply batch', { count: batch.length })
+        void rerunFor(el)(getText(el))
+    }
+
+    /** Apply only the visible, high-confidence (>= 0.90) suggestions. */
+    const applyAllForHighConf = async (el: HTMLElement): Promise<void> => {
+        const st = fields.get(el)
+        if (!st) return
+        const goals = getConfig().goals
+        const visible = visibleItems(st.items, st.phase, goals)
+        await applyBatchFor(el, highConfidenceItems(visible))
+    }
+
+    /** Apply every visible suggestion in a single category. */
+    const applyAllForCategory = async (el: HTMLElement, cat: Category): Promise<void> => {
+        const st = fields.get(el)
+        if (!st) return
+        const goals = getConfig().goals
+        const visible = visibleItems(st.items, st.phase, goals)
+        await applyBatchFor(el, visible.filter((it) => it.category === cat))
+    }
 
     // togglePause: flip paused, clear every field's items + popovers, update
     // the pill (disabled: paused), notify subscribers. On resume, re-check
@@ -842,8 +1200,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             renderField(el, st)
         }
         // Refresh the pill (disabled: paused) so the surface reflects the
-        // new state. Skipped while a panel is open — the next open rebuilds.
-        if (pillHandle && pillHandle.isMounted() && !panelOpen) {
+        // new state. The W2b review panel keeps its own snapshot and
+        // is independent of the pill; update runs unconditionally.
+        if (pillHandle && pillHandle.isMounted()) {
             const el = activeComposer()
             const st = el ? fields.get(el) : null
             if (el && st) pillHandle.update(buildPillOptions(el, st))
@@ -1019,6 +1378,10 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             highlightLayer: null,
             hoverItemIndex: null,
             lastApplied: null,
+            // Initial phase is 'done' so a freshly-attached field with
+            // no check yet renders an empty pill cleanly; the first
+            // check transitions fast → done and the orb updates.
+            phase: 'done',
         }
         fields.set(el, st)
         trackedFields.add(el)
@@ -1063,6 +1426,94 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         }
         el.addEventListener('click', onFieldClick)
         cleanups.push(() => el.removeEventListener('click', onFieldClick))
+
+        // W3-3: double-click on a NON-flagged word → synonyms popover.
+        // Mirror of the browser's dblclick handler in
+        // clients/browser/src/entrypoints/content/index.ts. The browser
+        // resolves the word via caretPositionFromPoint + resolveWordAtPoint
+        // and fetches /synonyms; we reuse both via the shared `@/overlay/
+        // synonyms` module. The apply is via applySlateFix (NEVER innerHTML)
+        // + an Undo toast + an 'accepted' signal. Pasted text is excluded
+        // from checks; we don't add the same exclusion to synonyms — the
+        // user explicitly chose to dblclick.
+        const onFieldDblClick = (e: MouseEvent): void => {
+            if (paused) return
+            const text = getText(el)
+            if (!text) return
+            const resolved = resolveWordFromDblClick(e, text, el)
+            if (!resolved) return
+            const s = fields.get(el)
+            if (!s) return
+            // Skip dblclicks that land on a flagged word (the existing
+            // single-click popover owns those; a synonyms popover would
+            // overlap visually).
+            const flaggedAt = s.items.find(
+                (it) => resolved.start < it.cuEnd && resolved.end > it.cuStart,
+            )
+            if (flaggedAt) return
+            // Show the popover immediately in the loading state, then
+            // swap the body with the loaded synonyms (or empty). The
+            // shared showSynonyms owns the loading spinner + the
+            // pick-list render.
+            const wordRect = measureWordRect(el, text, resolved.start, resolved.end)
+            if (!wordRect) return
+            hideTooltipNow()
+            closeSynonyms()
+            synonymsHandle = showSynonyms(overlay.root, {
+                anchorRect: wordRect,
+                word: resolved.word,
+                synonyms: [],
+                loading: true,
+                onPick: (synonym) => {
+                    void applySynonym(el, resolved, synonym)
+                },
+                onClose: () => {
+                    synonymsHandle?.destroy()
+                    synonymsHandle = null
+                },
+            })
+            // Fetch in the background; the surface re-mounts on resolve
+            // so the loading state is replaced with the loaded list.
+            refreshClient()
+                .synonyms(resolved.word)
+                .then((res) => {
+                    if (!synonymsHandle) return
+                    synonymsHandle.destroy()
+                    synonymsHandle = showSynonyms(overlay.root, {
+                        anchorRect: wordRect,
+                        word: resolved.word,
+                        synonyms: res.synonyms,
+                        loading: false,
+                        onPick: (synonym) => {
+                            void applySynonym(el, resolved, synonym)
+                        },
+                        onClose: () => {
+                            synonymsHandle?.destroy()
+                            synonymsHandle = null
+                        },
+                    })
+                })
+                .catch((err) => {
+                    debugLog('synonyms fetch failed', err)
+                    if (!synonymsHandle) return
+                    synonymsHandle.destroy()
+                    synonymsHandle = showSynonyms(overlay.root, {
+                        anchorRect: wordRect,
+                        word: resolved.word,
+                        synonyms: [],
+                        loading: false,
+                        onPick: (synonym) => {
+                            void applySynonym(el, resolved, synonym)
+                        },
+                        onClose: () => {
+                            synonymsHandle?.destroy()
+                            synonymsHandle = null
+                        },
+                    })
+                })
+        }
+        el.addEventListener('dblclick', onFieldDblClick)
+        cleanups.push(() => el.removeEventListener('dblclick', onFieldDblClick))
 
         // Hover preview: mousemove hit-tests the pointer against itemRects and
         // shows a lightweight tooltip chip (diff only, no buttons). Only updates
@@ -1271,7 +1722,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // Refresh the pill if it was anchored to the detached field.
             // Use the new active composer (or null → no active pill).
             const next = activeComposer()
-            if (pillHandle && pillHandle.isMounted() && !panelOpen) {
+            if (pillHandle && pillHandle.isMounted()) {
                 if (next) {
                     const ns = fields.get(next)
                     if (ns) pillHandle.update(buildPillOptions(next, ns))
