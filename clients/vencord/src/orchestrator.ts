@@ -712,12 +712,14 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     }
     const PILL_HIDE_GRACE_MS = 250
 
-    // The browser pill idles at opacity 0.1 (styles.ts — it sits over the
+    // The browser orb idles at opacity 0.1 (styles.ts — it sits over the
     // user's text field and must not occlude). In the Vencord placement it
     // hovers over chrome, not text: force full opacity inline (inline style
     // beats the stylesheet rule; the hover transition still applies).
+    // (Renamed .gf-pill → .gf-orb in the W2 redesign; selector + dataset
+    // key kept distinct so a stale DOM cache doesn't double-bind.)
     const bindPillNode = (): void => {
-        const node = overlay.root.querySelector<HTMLElement>('.gf-pill')
+        const node = overlay.root.querySelector<HTMLElement>('.gf-orb')
         if (!node || node.dataset.gfVencordBound === '1') return
         node.dataset.gfVencordBound = '1'
         node.style.opacity = '1'

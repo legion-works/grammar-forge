@@ -76,6 +76,63 @@ export const BAND_COLOR: Record<Band, string> = {
     'needs-work': '#dc2626',
 }
 
+/** Pure derivation of what the per-field score orb should render, given the
+ *  current streaming phase + visible count + (optional) score. CONSUMED by
+ *  the browser `status-button.ts` and the Vencord equivalent; the orchestrator
+ *  is the only caller that should compute `score` from items — the orb itself
+ *  is a thin consumer of the helpers above (arcOffset / scoreBand / BAND_COLOR).
+ *
+ *  The four center-glyph states (per flows.md §6 + plan W2-1 / W1-6):
+ *  - `power`  — site-paused (disabled wins over everything; the user sees a
+ *               single, unambiguous affordance).
+ *  - `pip`    — `phase === 'fast'` AND there are visible suggestions (the LLM
+ *               is still refining; the user sees motion + sparkle, not a stale
+ *               number that will jump when 'done' arrives).
+ *  - `clean`  — `openCount === 0` (all clear; renders ✓ in the center).
+ *  - `count`  — `openCount > 0` and the phase has settled (default).
+ *
+ *  Score / band fallbacks: an undefined `score` (the orchestrator has not run
+ *  a check yet) defaults to 100 — the ring renders FULL + green and the orb
+ *  reads as "nothing to flag." `band` short-circuits the score→band lookup
+ *  when the caller already has it (saves one map access per render). */
+export type OrbCenter = 'count' | 'clean' | 'power' | 'pip'
+
+export interface OrbStateInput {
+    /** 0-100 writing score (see `computeScore`). Undefined = not yet computed. */
+    score?: number
+    /** Pre-computed band (skips `scoreBand()` if provided). */
+    band?: Band
+    /** Number of open, visible suggestions driving the center glyph. */
+    openCount: number
+    /** Streaming phase. 'fast' swaps the count for the AI pip (see above). */
+    phase: Phase
+    /** Site-paused state — power glyph always wins. */
+    disabled: boolean
+}
+
+export interface OrbState {
+    /** Which center glyph to render. */
+    center: OrbCenter
+    /** The number to render in the center when `center === 'count'`. */
+    count: number
+    /** SVG `stroke-dashoffset` for the score ring (r=24.5, circ 153.9). */
+    ringOffset: number
+    /** SVG `stroke` for the score ring — matches the score's band. */
+    ringColor: string
+}
+
+export function orbState(input: OrbStateInput): OrbState {
+    const { score, band, openCount, phase, disabled } = input
+    const effectiveScore = score ?? 100
+    const effectiveBand = band ?? scoreBand(effectiveScore)
+    const ringColor = BAND_COLOR[effectiveBand]
+    const ringOffset = arcOffset(effectiveScore)
+    if (disabled) return { center: 'power', count: 0, ringOffset, ringColor }
+    if (phase === 'fast' && openCount > 0) return { center: 'pip', count: 0, ringOffset, ringColor }
+    if (openCount === 0) return { center: 'clean', count: 0, ringOffset, ringColor }
+    return { center: 'count', count: openCount, ringOffset, ringColor }
+}
+
 /** High-confidence items (confidence ≥ 0.90). The panel's "Accept
  *  high-confidence only" button is gated on `0 < highConf.length <
  *  visible.length` by the caller — this helper just returns the matching

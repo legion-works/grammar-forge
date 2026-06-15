@@ -9,6 +9,7 @@ import {
     highConfidenceItems,
     makeInsights,
     mutedStyleCount,
+    orbState,
     scoreBand,
     visibleItems,
 } from './view-model'
@@ -359,5 +360,86 @@ describe('makeInsights (reference DC math)', () => {
         expect(i.sentences).toBe(3)
         // floor of 1 means an empty string still reports 1.
         expect(makeInsights('').sentences).toBe(1)
+    })
+})
+
+describe('orbState (per-field score orb)', () => {
+    it('disabled wins over every other state', () => {
+        // Even with a fresh score + a fast phase + a non-zero count, the
+        // site-paused state always shows the power glyph — single,
+        // unambiguous affordance for the user.
+        const s = orbState({ score: 100, openCount: 5, phase: 'fast', disabled: true })
+        expect(s.center).toBe('power')
+        expect(s.count).toBe(0)
+    })
+    it('disabled still computes a sensible ring color/offset (no NaN, no throw)', () => {
+        // Guard against the pure helper bailing out for the disabled branch.
+        const s = orbState({ openCount: 0, phase: 'done', disabled: true })
+        expect(Number.isFinite(s.ringOffset)).toBe(true)
+        expect(s.ringColor).toMatch(/^#[0-9a-f]{6}$/i)
+    })
+    it("phase='fast' with openCount > 0 shows the AI pip (not a stale count)", () => {
+        const s = orbState({ score: 90, openCount: 3, phase: 'fast', disabled: false })
+        expect(s.center).toBe('pip')
+        expect(s.count).toBe(0)
+    })
+    it("phase='fast' with openCount === 0 still shows ✓ (no pip when there is nothing to refine)", () => {
+        const s = orbState({ score: 100, openCount: 0, phase: 'fast', disabled: false })
+        expect(s.center).toBe('clean')
+    })
+    it("openCount === 0 with phase='done' shows ✓", () => {
+        const s = orbState({ score: 100, openCount: 0, phase: 'done', disabled: false })
+        expect(s.center).toBe('clean')
+    })
+    it("openCount > 0 with phase='done' shows the count number", () => {
+        const s = orbState({ score: 80, openCount: 4, phase: 'done', disabled: false })
+        expect(s.center).toBe('count')
+        expect(s.count).toBe(4)
+    })
+    it('ring offset derives from the score via arcOffset (no re-derivation)', () => {
+        const s = orbState({ score: 60, openCount: 2, phase: 'done', disabled: false })
+        // arcOffset(60) = 153.9 * (1 - 0.6) = 61.56 — consumed, not recomputed
+        expect(s.ringOffset).toBeCloseTo(arcOffset(60))
+        expect(s.ringOffset).toBeCloseTo(61.56)
+    })
+    it('ring offset is 0 (full ring) when score is undefined (no check yet)', () => {
+        const s = orbState({ openCount: 0, phase: 'done', disabled: false })
+        expect(s.ringOffset).toBeCloseTo(0)
+    })
+    it('ring color derives from the score band via BAND_COLOR (no re-derivation)', () => {
+        // score 95 → excellent → green
+        const excellent = orbState({ score: 95, openCount: 1, phase: 'done', disabled: false })
+        expect(excellent.ringColor).toBe(BAND_COLOR.excellent)
+        // score 70 → fair → amber
+        const fair = orbState({ score: 70, openCount: 1, phase: 'done', disabled: false })
+        expect(fair.ringColor).toBe(BAND_COLOR.fair)
+        // score 50 → needs-work → red
+        const needs = orbState({ score: 50, openCount: 1, phase: 'done', disabled: false })
+        expect(needs.ringColor).toBe(BAND_COLOR['needs-work'])
+    })
+    it('an explicit band short-circuits the score→band lookup (caller already has it)', () => {
+        // Pass band=good, score=50 (which would normally resolve to needs-work).
+        // The caller is the source of truth — we render what it says.
+        const s = orbState({ score: 50, band: 'good', openCount: 1, phase: 'done', disabled: false })
+        expect(s.ringColor).toBe(BAND_COLOR.good)
+    })
+    it('ring offset uses the score (not the band) — band only drives the color', () => {
+        // Same band, different scores → different offsets.
+        const a = orbState({ score: 90, band: 'excellent', openCount: 1, phase: 'done', disabled: false })
+        const b = orbState({ score: 60, band: 'excellent', openCount: 1, phase: 'done', disabled: false })
+        expect(a.ringOffset).toBeCloseTo(arcOffset(90))
+        expect(b.ringOffset).toBeCloseTo(arcOffset(60))
+        // Both share the band → same color.
+        expect(a.ringColor).toBe(b.ringColor)
+    })
+    it('undefined score + count > 0 still falls into the count state (ring reads full)', () => {
+        // Pre-check state: the orchestrator has a count but no score yet (it
+        // arrives with the first /correct response). The orb shouldn't crash;
+        // the ring reads "full + green" until the score arrives.
+        const s = orbState({ openCount: 1, phase: 'done', disabled: false })
+        expect(s.center).toBe('count')
+        expect(s.count).toBe(1)
+        expect(s.ringOffset).toBeCloseTo(0)
+        expect(s.ringColor).toBe(BAND_COLOR.excellent)
     })
 })

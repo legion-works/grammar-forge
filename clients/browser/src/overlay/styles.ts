@@ -144,20 +144,19 @@ export const OVERLAY_CSS = `
   }
 
   /* ============================================================
-   * Glass pill (status button) — same material, tighter blur, full radius
+   * Glass orb (W2 score orb, was .gf-pill in W1) — same material, full
+   * radius, 60×60. Holds the score-ring SVG + a click-through <button>
+   * that owns the center glyph (count / ✓ / power / ✨ pip).
    * ============================================================ */
-  .gf-pill {
+  .gf-orb {
     position: fixed;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    pointer-events: auto;
-    z-index: ${Z_OVERLAY};
-    padding: 4px 12px;
-    border-radius: 9999px;
+    display: block;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
     isolation: isolate;
     contain: layout paint;
-    font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    cursor: pointer;
     background: rgba(28, 28, 30, 0.78);
     background: light-dark(rgba(245, 245, 245, 0.78), rgba(28, 28, 30, 0.78));
     color: light-dark(#111, #f5f5f5);
@@ -167,29 +166,35 @@ export const OVERLAY_CSS = `
       0 1px 3px rgba(0, 0, 0, 0.14),
       0 4px 12px rgba(0, 0, 0, 0.10);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-    cursor: pointer;
     /* Position is applied via transform: translate() (P3 — composited, no
        reflow on the scroll/resize loop). There is therefore NO enter-pop scale
        animation: a transform keyframe would clobber the position translate, and
        a filled opacity keyframe would persist its end value and override the
-       faint idle opacity + the :hover lift. The pill simply appears. */
+       faint idle opacity + the :hover lift. The orb simply appears. */
     /* Nearly transparent by default — the user opts in by hovering or dragging.
-       Lifts fully on :hover / .gf-pill--dragging. */
+       Lifts fully on :hover / .gf-orb--dragging. Vencord overrides this inline
+       (the orb sits over chrome, not text — it must read clearly). */
     opacity: 0.1;
     transition: opacity 150ms ease-out, box-shadow 150ms ease-out;
   }
-  .gf-pill:hover,
-  .gf-pill.gf-pill--dragging {
+  .gf-orb:hover,
+  .gf-orb.gf-orb--dragging {
     opacity: 1;
   }
-  .gf-pill--dragging { cursor: grabbing; user-select: none; }
-  /* Focus-only visibility: the active per-field pill is hidden while its field
+  .gf-orb--dragging { cursor: grabbing; user-select: none; }
+  /* Focus-only visibility: the active per-field orb is hidden while its field
      is unfocused. display:none so it neither paints nor intercepts pointer
      events; the orchestrator toggles this on field focus/blur. */
-  .gf-pill--hidden { display: none; }
+  .gf-orb--hidden { display: none; }
+  /* Collapsed (disabled-on-this-site) orb: just the muted power glyph in the
+     center. The ring stays full (it still conveys the score band) but the
+     whole element reads quieter. */
+  .gf-orb--disabled {
+    opacity: 0.65;
+  }
 
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .gf-pill {
+    .gf-orb {
       background: light-dark(
         color-mix(in oklab, #f5f5f5 50%, transparent),
         color-mix(in oklab, #1c1c1e 36%, transparent)
@@ -200,98 +205,58 @@ export const OVERLAY_CSS = `
     }
   }
 
-  /* Power + recheck icon buttons + body inside the pill */
-  .gf-pill__power,
-  .gf-pill__recheck {
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: none;
-    border-radius: 9999px;
-    background: rgba(255, 255, 255, 0.08);
-    color: #f5f5f5;
-    cursor: pointer;
-    flex: 0 0 auto;
-    transition: background 120ms ease-out, color 120ms ease-out;
-  }
-  .gf-pill__power:hover,
-  .gf-pill__recheck:hover {
-    background: rgba(255, 255, 255, 0.18);
-  }
-  .gf-pill__power:focus-visible,
-  .gf-pill__recheck:focus-visible {
-    outline: 2px solid #93c5fd;
-    outline-offset: 1px;
-  }
-  .gf-pill__recheck:active svg {
-    transform: rotate(180deg);
-    transition: transform 200ms ease-out;
-  }
-  .gf-pill__body {
+  /* Power + recheck icon buttons removed in W2 — the orb has no inline
+     buttons (the W1 pill's power/recheck chips lived in the hover panel,
+     which keeps them — the per-row "apply" + action row are the panel
+     action surface). The collapsed-state power glyph is now rendered
+     inside the orb's center as a regular glyph (see .gf-orb__glyph). */
+  .gf-orb__body {
+    position: absolute;
+    inset: 0;
     appearance: none;
     border: none;
     background: transparent;
     color: inherit;
     font: inherit;
     cursor: pointer;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
     padding: 0;
+    border-radius: 50%;
     font-variant-numeric: tabular-nums;
   }
-  /* Compact count badge (replaces the "N issues · …" text; detail is in the
-     toolbar popup). Red-tinted for issues, green for the clean state. */
-  .gf-pill__badge {
+  .gf-orb__body:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
+  }
+  /* Center glyph wrapper. The orb has four center states (see
+     orbState() in view-model); the wrapper class makes each variant
+     theme-able + testable. The state-derivation lives in JS; the styling
+     is the only place the four states are listed. */
+  .gf-orb__glyph {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    background: color-mix(in srgb, #ef4444 22%, transparent);
-    color: light-dark(#b91c1c, #fecaca);
+    line-height: 1;
+    pointer-events: none;
   }
-  .gf-pill__badge--ok {
-    /* Clean state reads CALM, not a loud success banner: a fainter green wash
-       and a muted green glyph. The pill itself is near-transparent at idle and
-       lifts on hover, so the badge only needs to whisper "all clear". */
-    background: color-mix(in srgb, #22c55e 14%, transparent);
+  .gf-orb__glyph--count {
+    font: 700 14px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: light-dark(#0f172a, #f5f5f5);
+    font-variant-numeric: tabular-nums;
+  }
+  .gf-orb__glyph--clean {
+    font: 700 22px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     color: #4b9e6a;
   }
-  .gf-pill-bar {
-    display: inline-flex;
-    gap: 2px;
-    align-items: center;
-    width: 28px;
-    height: 4px;
-    margin-left: 2px;
-    border-radius: 2px;
-    overflow: hidden;
-  }
-  .gf-pill-bar__stripe {
-    height: 4px;
-    border-radius: 2px;
-    opacity: 0.6;
-    min-width: 3px;
-  }
-  /* Collapsed (disabled-on-this-site) pill: just the muted power icon */
-  .gf-pill--disabled {
-    padding: 4px;
-    opacity: 0.65;
-  }
-  .gf-pill--disabled .gf-pill__power {
-    background: transparent;
+  .gf-orb__glyph--power svg {
+    display: block;
     color: #9ca3af;
   }
+  /* Disabled (paused-on-this-site) modifier — the orb's body still shows the
+     power glyph in the center; the ring still conveys the score band. The
+     whole element just reads quieter (see .gf-orb--disabled above). */
 
   /* Pill hover panel — corrections list + Apply all (glass like the popover) */
   .gf-pill-panel {
@@ -417,9 +382,9 @@ export const OVERLAY_CSS = `
     opacity: 0.4;
     cursor: default;
   }
-  /* Paused-site badge: a power-glyph <span> (not a button) sits inside the
-     pill body — needs its inner <svg> to actually paint at full size. */
-  .gf-pill__badge--power svg { display: block; }
+  /* Paused-site orb: the power-glyph <svg> sits inside .gf-orb__glyph--power
+     — the inner <svg> needs to actually paint at full size. */
+  .gf-orb__glyph--power svg { display: block; }
 
   /* ============================================================
    * Hover tooltip — read-only preview (no buttons). Same glass material
@@ -900,7 +865,7 @@ export const OVERLAY_CSS = `
    * ============================================================ */
   @media (prefers-reduced-transparency: reduce) {
     .gf-panel,
-    .gf-pill,
+    .gf-orb,
     .gf-pill-panel,
     .gf-tooltip,
     .gf-toast,
@@ -923,7 +888,7 @@ export const OVERLAY_CSS = `
    * opaque tint).
    * ============================================================ */
   @media (prefers-contrast: more) {
-    .gf-panel, .gf-pill, .gf-tooltip, .gf-pill-panel, .gf-toast, .gf-rephrase-card {
+    .gf-panel, .gf-orb, .gf-tooltip, .gf-pill-panel, .gf-toast, .gf-rephrase-card {
       backdrop-filter: none; -webkit-backdrop-filter: none;
     }
   }
@@ -949,7 +914,7 @@ export const OVERLAY_CSS = `
     /* The pill's enter is transform-only; drop it entirely under reduced
        motion (don't swap to gf-no-motion — that animates opacity and would
        force the faint idle pill fully opaque). */
-    .gf-pill { animation: none; }
+    .gf-orb { animation: none; }
     .gf-tooltip,
     .gf-toast {
       animation-duration: 1ms;
@@ -1423,6 +1388,37 @@ export const OVERLAY_CSS = `
   @keyframes gf-pip {
     0%, 100% { transform: scale(1);    opacity: 1; }
     50%      { transform: scale(1.16); opacity: 0.78; }
+  }
+
+  /* ============================================================
+   * Streaming banner — "Fast results in · AI refining…" row that
+   * lives at the top of the per-field review panel (and the W2b
+   * full review panel) while phase is 'fast'. The orb already
+   * shows the AI pip on the field; the banner is the panel-level
+   * signal — the pip is tiny and off to the side, easy to miss.
+   * ============================================================ */
+  .gf-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    margin: -8px -8px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: light-dark(#334155, #d4d4d8);
+  }
+  .gf-banner__text {
+    flex: 1;
+  }
+  .gf-spinner {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: 2px solid rgba(37, 99, 235, 0.25);
+    border-top-color: #2563eb;
+    animation: gf-spin 0.7s linear infinite;
+    flex-shrink: 0;
   }
   @keyframes gf-celebrate {
     0%   { transform: scale(1); }
