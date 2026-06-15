@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -718,6 +719,17 @@ func (s *Service) CountCorrections(ctx context.Context) (int64, error) {
 // CountSignals exposes the store's edit-signal aggregate for /stats.
 func (s *Service) CountSignals(ctx context.Context) (SignalCounts, error) {
 	return s.store.CountSignals(ctx)
+}
+
+// CountStatsExtended exposes the retention field block (top_issues, streak,
+// words_this_week) for /stats. The store computes the per-category
+// histogram, the consecutive-day streak, and the 7d word sum from the
+// corrections + edits tables; this pass-through just makes it reachable
+// from the REST layer. `now` is the reference time the store uses for the
+// streak (today) and the 7d window — production passes time.Now(), tests
+// pin to a synthetic date.
+func (s *Service) CountStatsExtended(ctx context.Context, now time.Time) (StatsExtended, error) {
+	return s.store.CountStatsExtended(ctx, now)
 }
 
 // Rephrase asks the LLM to rewrite req.Text for clarity/fluency. It is

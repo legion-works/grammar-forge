@@ -27,6 +27,12 @@ type CorrectionService interface {
 	Signal(ctx context.Context, correctionID int64, signal correction.Signal) error
 	CountCorrections(ctx context.Context) (int64, error)
 	CountSignals(ctx context.Context) (correction.SignalCounts, error)
+	// CountStatsExtended backs the retention field block on /stats
+	// (top_issues, streak, words_this_week). The handler always calls it
+	// and inlines the result into the response — StatsExtended is
+	// additive, never gated, so empty/zero values surface on a fresh
+	// install rather than being hidden behind an enable flag.
+	CountStatsExtended(ctx context.Context, now time.Time) (correction.StatsExtended, error)
 	Rephrase(ctx context.Context, req correction.RephraseRequest) (correction.RephraseResult, error)
 	// AnalyzeTone is the tone-detection entry point. ToneEnabled gates the
 	// /tone route (404 when off) so the endpoint is off the wire until

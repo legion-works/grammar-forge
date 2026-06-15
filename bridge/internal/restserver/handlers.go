@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/grammarforge/bridge/internal/correction"
 )
@@ -199,13 +200,26 @@ func (s *Server) handleSignal(w http.ResponseWriter, r *http.Request) {
 // statsResponse is the GET /stats payload. AcceptanceRate is
 // accepted/(accepted+rejected+ignored), omitted until at least one signal
 // exists. Edit counts come from the edit-level signal log.
+//
+// The retention block (TopIssues, Streak, WordsThisWeek) is computed by
+// Store.CountStatsExtended and ALWAYS inlined — never gated, never hidden
+// behind an enable flag — so clients render a uniform shape on a fresh
+// install. Zero values on each field are valid: empty top_issues is a
+// valid "no categories flagged" state, Streak=0 is "today is not an
+// active day" (not "no data"), and WordsThisWeek=0 is "no logged
+// corrections in the last 7 days". See correction.StatsExtended for the
+// per-field derivation and the "approximate" qualifier on
+// WordsThisWeek.
 type statsResponse struct {
-	Corrections    int64    `json:"corrections"`
-	EditsTotal     int64    `json:"edits_total"`
-	EditsAccepted  int64    `json:"edits_accepted"`
-	EditsRejected  int64    `json:"edits_rejected"`
-	EditsIgnored   int64    `json:"edits_ignored"`
-	AcceptanceRate *float64 `json:"acceptance_rate,omitempty"`
+	Corrections    int64                      `json:"corrections"`
+	EditsTotal     int64                      `json:"edits_total"`
+	EditsAccepted  int64                      `json:"edits_accepted"`
+	EditsRejected  int64                      `json:"edits_rejected"`
+	EditsIgnored   int64                      `json:"edits_ignored"`
+	AcceptanceRate *float64                   `json:"acceptance_rate,omitempty"`
+	TopIssues      []correction.CategoryCount `json:"top_issues"`
+	Streak         int                        `json:"streak"`
+	WordsThisWeek  int64                      `json:"words_this_week"`
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -219,16 +233,30 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
 		return
 	}
+	ex, err := s.svc.CountStatsExtended(r.Context(), time.Now())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+		return
+	}
 	resp := statsResponse{
 		Corrections:   n,
 		EditsTotal:    sc.TotalEdits,
 		EditsAccepted: sc.Accepted,
 		EditsRejected: sc.Rejected,
 		EditsIgnored:  sc.Ignored,
+		TopIssues:     ex.TopIssues,
+		Streak:        ex.Streak,
+		WordsThisWeek: ex.WordsThisWeek,
 	}
 	if signaled := sc.Accepted + sc.Rejected + sc.Ignored; signaled > 0 {
 		rate := float64(sc.Accepted) / float64(signaled)
 		resp.AcceptanceRate = &rate
+	}
+	// Keep TopIssues non-nil on the wire even when empty so clients can
+	// iterate without a nil check (mirrors the /synonyms contract: empty
+	// array is the legitimate "no data" response, not null).
+	if resp.TopIssues == nil {
+		resp.TopIssues = []correction.CategoryCount{}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

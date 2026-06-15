@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -59,6 +60,11 @@ type fakeStore struct {
 	lastSignal Signal
 	lastID     int64
 	count      int64
+	// extendedStats is the canned return for CountStatsExtended (set by
+	// the test when it cares about /stats retention fields; the zero
+	// value is an empty StatsExtended which is the correct "no data"
+	// response).
+	extendedStats StatsExtended
 }
 
 func (f *fakeStore) LogCorrection(_ context.Context, ev Event) (int64, []int64, error) {
@@ -84,6 +90,10 @@ func (f *fakeStore) CountSignals(context.Context) (SignalCounts, error) {
 
 func (f *fakeStore) PersonalizationExamples(context.Context) (PersonalizationData, error) {
 	return PersonalizationData{}, nil
+}
+
+func (f *fakeStore) CountStatsExtended(_ context.Context, _ time.Time) (StatsExtended, error) {
+	return f.extendedStats, nil
 }
 func (f *fakeStore) Close() error { return nil }
 

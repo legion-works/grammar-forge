@@ -541,3 +541,222 @@ func TestPersonalizationExamplesHandlesNullSignalTS(t *testing.T) {
 		{Original: "has", Suggestion: "have", Count: 1},
 	}, got.Accepted, "row with NULL signal_ts is treated as oldest (0) and still surfaces the reconstructed pair")
 }
+
+// CountStatsExtended powers the retention fields on /stats: per-category edit
+// counts (top_issues), consecutive active days (streak), and the
+// approximate word count over the last 7 days. The function accepts the
+// reference "now" as a parameter so tests can pin the window — the production
+// caller passes time.Now() and the test pins to a synthetic date so the
+// streak/7d window is deterministic.
+
+// top_issues: every edit's category column is bucketed and the result is
+// ordered by count DESC, with category as a stable tiebreak. Empty-string
+// category is the default grammar bucket and surfaces as "" in the result —
+// the client treats "" as grammar (matches the wire-format category on
+// /correct suggestions).
+func TestCountStatsExtendedTopIssuesOrdersByCountDesc(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// Seed edits: 3 spelling, 1 grammar (default empty category), 2 punctuation.
+	seed := func(category string) {
+		_, _, err := s.LogCorrection(ctx, correction.Event{
+			Source: correction.SourceVencord, Original: "x", Suggestion: "y", Model: correction.ModelLLM,
+			Edits: []correction.EditRecord{{
+				SpanStart: 0, SpanEnd: 1, Original: "x", Replacement: "y",
+				Model: correction.ModelLLM, Category: category,
+			}},
+		})
+		require.NoError(t, err)
+	}
+	for i := 0; i < 3; i++ {
+		seed(correction.CategorySpelling)
+	}
+	seed("") // CategoryGrammar — default
+	for i := 0; i < 2; i++ {
+		seed(correction.CategoryPunctuation)
+	}
+
+	// Pin "now" so the streak/words path doesn't pick up real-time rows.
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	got, err := s.CountStatsExtended(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, []correction.CategoryCount{
+		{Category: correction.CategorySpelling, Count: 3},
+		{Category: correction.CategoryPunctuation, Count: 2},
+		{Category: correction.CategoryGrammar, Count: 1},
+	}, got.TopIssues, "categories ordered by count DESC; empty-string grammar surfaces as \"\"")
+}
+
+// streak: consecutive UTC days (calendar days) with at least one correction,
+// counted BACKWARD from the supplied `now`. A gap of >=1 day breaks the
+// streak. Days in the future relative to `now` are ignored (no future
+// activity contributes to "active days"). Seeded by backdating
+// corrections.ts directly — the production code path that stamps ts is
+// unchanged.
+func TestCountStatsExtendedStreakConsecutiveDays(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) // Monday noon
+
+	// Seed 1 row per day for today, yesterday, and 2 days back. Distinct
+	// parent text so LogCorrection inserts 3 distinct corrections.
+	backdate := func(daysAgo int) {
+		_, _, err := s.LogCorrection(ctx, correction.Event{
+			Source: correction.SourceVencord, Original: "x", Suggestion: "y", Model: correction.ModelLLM,
+			Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 1, Original: "x", Replacement: "y", Model: correction.ModelLLM}},
+		})
+		require.NoError(t, err)
+		ts := now.AddDate(0, 0, -daysAgo).UnixMilli()
+		_, err = s.db.Exec(`UPDATE corrections SET ts = ? WHERE id = (SELECT MAX(id) FROM corrections)`, ts)
+		require.NoError(t, err)
+	}
+	backdate(0) // today
+	backdate(1) // yesterday
+	backdate(2) // 2 days back
+
+	got, err := s.CountStatsExtended(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, 3, got.Streak, "3 consecutive days ending today = streak 3")
+}
+
+// streak: a gap of >=1 day breaks the streak; the count restarts from the
+// most-recent active day and is bounded by that chain.
+func TestCountStatsExtendedStreakBreaksOnGap(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	backdate := func(daysAgo int) {
+		_, _, err := s.LogCorrection(ctx, correction.Event{
+			Source: correction.SourceVencord, Original: "x", Suggestion: "y", Model: correction.ModelLLM,
+			Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 1, Original: "x", Replacement: "y", Model: correction.ModelLLM}},
+		})
+		require.NoError(t, err)
+		ts := now.AddDate(0, 0, -daysAgo).UnixMilli()
+		_, err = s.db.Exec(`UPDATE corrections SET ts = ? WHERE id = (SELECT MAX(id) FROM corrections)`, ts)
+		require.NoError(t, err)
+	}
+	// Active: today, yesterday. Then 5-day gap. Then a 3-day chain (days
+	// 7, 8, 9 back). The most-recent chain is 2 (today + yesterday) — the
+	// older 3-day chain must NOT count because it doesn't end at today.
+	backdate(0)
+	backdate(1)
+	backdate(7)
+	backdate(8)
+	backdate(9)
+
+	got, err := s.CountStatsExtended(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, 2, got.Streak, "gap breaks the streak; the older chain does not extend it")
+}
+
+// streak: no rows at all = 0. No future-dated rows contribute to the streak.
+func TestCountStatsExtendedStreakEmpty(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	got, err := s.CountStatsExtended(context.Background(), now)
+	require.NoError(t, err)
+	require.Equal(t, 0, got.Streak)
+	require.Empty(t, got.TopIssues)
+	require.Equal(t, int64(0), got.WordsThisWeek)
+}
+
+// streak: activity only on older days (NOT ending today) is NOT a streak.
+// The user must have done something today for the chain to start.
+func TestCountStatsExtendedStreakDoesNotCountHistoricalOnly(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	_, _, err := s.LogCorrection(ctx, correction.Event{
+		Source: correction.SourceVencord, Original: "x", Suggestion: "y", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 1, Original: "x", Replacement: "y", Model: correction.ModelLLM}},
+	})
+	require.NoError(t, err)
+	ts := now.AddDate(0, 0, -3).UnixMilli() // 3 days ago, not today
+	_, err = s.db.Exec(`UPDATE corrections SET ts = ?`, ts)
+	require.NoError(t, err)
+
+	got, err := s.CountStatsExtended(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, 0, got.Streak, "no activity today = no streak, even if historical activity exists")
+}
+
+// words_this_week: sum of the word count of corrections.suggestion for
+// corrections logged in the last 7 days (from now-7d inclusive to now
+// inclusive). Word count uses strings.Fields (whitespace-delimited
+// tokens) on the raw text. The sum is mathematically exact for the
+// rows in the 7d window — the "approximate" qualifier applies to the
+// schema design (no dedicated word_count column) and is documented
+// in the spec. The column that would make this O(1) is a per-row
+// word_count INTEGER on corrections, set at LogCorrection time.
+func TestCountStatsExtendedWordsThisWeek(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	seed := func(text string, daysAgo int) {
+		_, _, err := s.LogCorrection(ctx, correction.Event{
+			Source: correction.SourceVencord, Original: "x", Suggestion: text, Model: correction.ModelLLM,
+			Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 1, Original: "x", Replacement: "y", Model: correction.ModelLLM}},
+		})
+		require.NoError(t, err)
+		ts := now.AddDate(0, 0, -daysAgo).UnixMilli()
+		_, err = s.db.Exec(`UPDATE corrections SET ts = ? WHERE id = (SELECT MAX(id) FROM corrections)`, ts)
+		require.NoError(t, err)
+	}
+	// 10 words in the window (today)
+	seed("one two three four five six seven eight nine ten", 0)
+	// 5 words in the window (3 days ago)
+	seed("alpha beta gamma delta epsilon", 3)
+	// 8 words OUTSIDE the 7d window (10 days ago) — must not contribute
+	seed("a b c d e f g h", 10)
+	// 7 words on the boundary (exactly 7 days ago) — included (7d window is inclusive)
+	seed("w1 w2 w3 w4 w5 w6 w7", 7)
+
+	got, err := s.CountStatsExtended(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, int64(10+5+7), got.WordsThisWeek,
+		"10 + 5 + 7 = 22 words inside the inclusive 7d window; the 8 words at day -10 are excluded")
+}
+
+// words_this_week on an empty store is exactly zero, not a missing field.
+func TestCountStatsExtendedWordsThisWeekEmpty(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	got, err := s.CountStatsExtended(context.Background(), now)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), got.WordsThisWeek)
+}
+
+// The aggregation MUST be additive with the rest of /stats: an edit logged
+// without a signal still counts toward top_issues (top_issues is "what the
+// corrector flagged", not "what the user accepted") and toward streak (a
+// correction was logged). A test that seeds edits and ignores half of them
+// proves no implicit signal filter is being applied.
+func TestCountStatsExtendedIncludesSignallessEdits(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	_, _, err := s.LogCorrection(ctx, correction.Event{
+		Source: correction.SourceVencord, Original: "x", Suggestion: "y", Model: correction.ModelLLM,
+		Edits: []correction.EditRecord{{
+			SpanStart: 0, SpanEnd: 1, Original: "x", Replacement: "y",
+			Model: correction.ModelLLM, Category: correction.CategorySpelling,
+		}},
+	})
+	require.NoError(t, err)
+	// No LogSignal call — the edit stays unsignaled. Backdate the
+	// correction to `now` so the streak walks against the synthetic date
+	// (real-time LogCorrection stamps ts = time.Now(), which would
+	// shift the day if the test runs on a non-2026-06-15 machine).
+	_, err = s.db.Exec(`UPDATE corrections SET ts = ?`, now.UnixMilli())
+	require.NoError(t, err)
+
+	got, err := s.CountStatsExtended(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, []correction.CategoryCount{
+		{Category: correction.CategorySpelling, Count: 1},
+	}, got.TopIssues, "signalless edits MUST still count toward top_issues")
+	require.Equal(t, 1, got.Streak, "an unsignaled correction today still counts as an active day")
+}

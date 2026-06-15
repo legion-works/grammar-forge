@@ -1,6 +1,9 @@
 package correction
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Request is one unit of text to check, with provenance for logging/signals.
 type Request struct {
@@ -104,6 +107,45 @@ type PersonalizationData struct {
 	Rejected []EditPair // signal='rejected', grouped, Count>=3, capped
 }
 
+// CategoryCount is one bucket of the per-category edit histogram surfaced on
+// /stats.top_issues. The Category field is the raw value from edits.category
+// (empty string = CategoryGrammar, "spelling" = CategorySpelling, etc.) so
+// the wire shape matches the suggestion category on /correct.
+type CategoryCount struct {
+	Category string `json:"category"`
+	Count    int64  `json:"count"`
+}
+
+// StatsExtended is the retention field block on /stats — the part of the
+// payload that turns the signal log into a habit signal for the user. All
+// three fields are computed from the corrections + edits tables by
+// Store.CountStatsExtended; the wire JSON tag names are the public API
+// surface used by the browser and Vencord clients (see the redesign
+// foundations plan, Area 3).
+//
+//   - TopIssues     : per-category edit counts, ordered by count DESC, with
+//     category as a stable tiebreak. Signalless edits are
+//     included — "what the corrector flagged" is the habit
+//     signal, not "what the user accepted".
+//   - Streak        : number of consecutive UTC days (ending today, with
+//     the supplied `now` as the reference point) on which
+//     at least one correction was logged. A gap of >=1 day
+//     breaks the chain. 0 when today is not active.
+//   - WordsThisWeek : sum of whitespace-delimited word counts of
+//     corrections.suggestion over the inclusive 7-day
+//     window ending at `now`. APPROXIMATE — exact for the
+//     rows in the window, but no precomputed word_count
+//     column exists on corrections; a dedicated
+//     `word_count INTEGER` column (set at LogCorrection
+//     time) would make the query O(1) and would also
+//     include checked-but-uncorrected sentences that
+//     never get a corrections row.
+type StatsExtended struct {
+	TopIssues     []CategoryCount `json:"top_issues"`
+	Streak        int             `json:"streak"`
+	WordsThisWeek int64           `json:"words_this_week"`
+}
+
 // EditRecord is one edit within a logged correction event — the unit a user
 // signal attributes to. Original is the EXACT spanned source text.
 type EditRecord struct {
@@ -134,6 +176,12 @@ type Store interface {
 	CountCorrections(ctx context.Context) (int64, error)
 	// CountSignals aggregates the edits table by signal value for /stats.
 	CountSignals(ctx context.Context) (SignalCounts, error)
+	// CountStatsExtended aggregates the retention fields on /stats
+	// (top_issues / streak / words_this_week). `now` is the reference
+	// time for the streak (today) and the 7d words window — the production
+	// caller passes time.Now(); tests pin it to a synthetic date so the
+	// streak and 7d window are deterministic. See StatsExtended.
+	CountStatsExtended(ctx context.Context, now time.Time) (StatsExtended, error)
 	// PersonalizationExamples aggregates the signal log into the few-shot
 	// pairs used to personalise the chat system prompt. Implementations must
 	// cap the result (e.g. 20 accepted / 20 rejected) and drop rejected
