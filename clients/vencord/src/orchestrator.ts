@@ -296,6 +296,19 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
      *  to refresh the panel body in-place when a check resolves with new items
      *  (mirrors browser orchestrator's runtime.panelFor). */
     let panelFor: HTMLElement | null = null
+    /** Monotonic counter for element identity logging. Assigned once per
+     *  attach so the debug logs show whether panelFor and the render el
+     *  are the same element instance (churn detection). */
+    const elUid = new WeakMap<HTMLElement, number>()
+    let nextElUid = 0
+    const getElUid = (el: HTMLElement): number => {
+        let uid = elUid.get(el)
+        if (uid === undefined) {
+            uid = ++nextElUid
+            elUid.set(el, uid)
+        }
+        return uid
+    }
     // W3-3: completion of the W2b panel callback wiring. The W2b NIT2
     // (panel.ts exported onOpenGoals/onOpenStats but the orchestrator
     // stubbed them) gets these real surfaces here. One handle per overlay
@@ -382,14 +395,33 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // Panel refresh (zero items → empty state): if the review panel
             // is open for this field, rebuild the body in-place so the
             // "No issues remaining" empty state appears immediately.
-            if (panelFor === el && reviewPanel?.isOpen()) {
-                reviewPanel.restoreReviewBody(
-                    st.items,
-                    getText(el),
-                    getConfig().goals,
-                    st.phase ?? 'done',
-                    false, // Vencord has no rephrase button in the panel
-                )
+            // CHURN-TOLERANT: if panelFor was detached (not in fields map),
+            // re-bind to the current render el and refresh.
+            if (panelOpen && reviewPanel?.isOpen()) {
+                const panelForDetached = panelFor !== null && !fields.has(panelFor)
+                if (panelFor === el || panelForDetached) {
+                    if (panelForDetached) {
+                        debugLog('panel churn rebind', {
+                            oldUid: panelFor ? getElUid(panelFor) : null,
+                            newUid: getElUid(el),
+                            items: st.items.length,
+                        })
+                        panelFor = el
+                    }
+                    reviewPanel.restoreReviewBody(
+                        st.items,
+                        getText(el),
+                        getConfig().goals,
+                        st.phase ?? 'done',
+                        false,
+                    )
+                } else {
+                    debugLog('panel refresh skipped (churn?)', {
+                        renderUid: getElUid(el),
+                        panelForUid: panelFor ? getElUid(panelFor) : null,
+                        items: st.items.length,
+                    })
+                }
             }
             return
         }
@@ -445,16 +477,35 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // Panel refresh: if the review panel is open for this field, rebuild
         // its body in-place with the fresh items/score so applied suggestions
         // disappear and the score ring + insights update.
-        // Stale-guard: only refresh when panelFor === el AND the panel is
-        // still mounted (mirrors browser orchestrator's renderField hook).
-        if (panelFor === el && reviewPanel?.isOpen()) {
-            reviewPanel.restoreReviewBody(
-                st.items,
-                getText(el),
-                getConfig().goals,
-                st.phase ?? 'done',
-                false, // Vencord has no rephrase button in the panel
-            )
+        // CHURN-TOLERANT: if panelFor was detached (not in fields map),
+        // re-bind to the current render el and refresh. This handles Discord's
+        // composer element replacement (churn): panelFor = oldEl (detached),
+        // render fires on newEl — re-bind + refresh so the panel stays live.
+        if (panelOpen && reviewPanel?.isOpen()) {
+            const panelForDetached = panelFor !== null && !fields.has(panelFor)
+            if (panelFor === el || panelForDetached) {
+                if (panelForDetached) {
+                    debugLog('panel churn rebind', {
+                        oldUid: panelFor ? getElUid(panelFor) : null,
+                        newUid: getElUid(el),
+                        items: st.items.length,
+                    })
+                    panelFor = el
+                }
+                reviewPanel.restoreReviewBody(
+                    st.items,
+                    getText(el),
+                    getConfig().goals,
+                    st.phase ?? 'done',
+                    false,
+                )
+            } else {
+                debugLog('panel refresh skipped (churn?)', {
+                    renderUid: getElUid(el),
+                    panelForUid: panelFor ? getElUid(panelFor) : null,
+                    items: st.items.length,
+                })
+            }
         }
     }
 
@@ -1060,6 +1111,11 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // the field has been detached (fields.get returns undefined).
         const liveSt = fields.get(el) ?? st
         const opts = buildReviewPanelOptions(el, liveSt, anchor)
+        debugLog('panel open', {
+            uid: getElUid(el),
+            items: liveSt.items.length,
+            phase: liveSt.phase,
+        })
         reviewPanel = showPanel(overlay.root, opts)
         panelOpen = true
         panelFor = el
@@ -1508,6 +1564,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         fields.set(el, st)
         trackedFields.add(el)
         lastActiveField = el
+        // Instrument: log element uid at attach so churn is visible in logs.
+        debugLog('composer attach', {
+            uid: getElUid(el),
+            panelForUid: panelFor ? getElUid(panelFor) : null,
+            panelOpen,
+        })
         notify()
 
         // Release this field's paste-grace timer on global teardown. The
@@ -1863,6 +1925,17 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         st.attachment.detach()
         trackedFields.delete(el)
         fields.delete(el)
+        // Instrument: log element uid at detach so churn is visible in logs.
+        debugLog('composer detach', {
+            uid: getElUid(el),
+            panelForUid: panelFor ? getElUid(panelFor) : null,
+            panelOpen,
+            wasPanelFor: panelFor === el,
+        })
+        // When the panel's field is detached (churn), keep panelFor pointing
+        // to the detached element so the churn-rebind in renderField can
+        // detect it via !fields.has(panelFor). Do NOT null panelFor here —
+        // the rebind logic needs the old reference to compute the uid delta.
         if (lastActiveField === el) {
             lastActiveField = null
             // Refresh the pill if it was anchored to the detached field.
