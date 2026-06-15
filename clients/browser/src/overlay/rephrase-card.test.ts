@@ -239,18 +239,76 @@ describe('rephrase card head', () => {
         removePopoverStub()
     })
 
-    it('shows the modelLabel as faint text in the head when provided', () => {
+    it('shows the modelLabel as .gf-rephrase__head-model text in the head when provided', () => {
         showRephraseCard(root, mkOptions({ modelLabel: 'Gemma' }))
         const head = root.querySelector('.gf-rephrase__head')
         expect(head).not.toBeNull()
-        const faint = head?.querySelector('.gf-faint')
-        expect(faint?.textContent).toContain('Gemma')
+        const model = head?.querySelector('.gf-rephrase__head-model')
+        expect(model?.textContent).toContain('Gemma')
     })
 
-    it('omits the modelLabel span when not provided', () => {
+    it('omits the model span when modelLabel is not provided', () => {
         showRephraseCard(root, mkOptions())
         const head = root.querySelector('.gf-rephrase__head')
-        expect(head?.querySelector('.gf-faint')).toBeNull()
+        expect(head?.querySelector('.gf-rephrase__head-model')).toBeNull()
+    })
+})
+
+describe('rephrase card outside-click dismiss (round 11 regression guard)', () => {
+    // ROOT CAUSE: mountSimpleCard had no installOutsideDismiss call.
+    // The card had no outside-click listener at all — clicking outside
+    // never closed it. Fix: installOutsideDismiss (window capture, one-shot).
+    let root: ShadowRoot
+    beforeEach(() => {
+        root = mkRoot()
+        installPopoverStub()
+        vi.useFakeTimers()
+    })
+    afterEach(() => {
+        vi.useRealTimers()
+        removePopoverStub()
+    })
+
+    it('outside pointerdown closes the card (node removed + onClose called)', async () => {
+        const opts = mkOptions()
+        const handle = showRephraseCard(root, opts)
+        expect(handle.isOpen()).toBe(true)
+        // Arm the outside-dismiss listener (setTimeout 0).
+        vi.advanceTimersByTime(10)
+        // Dispatch a pointerdown outside the card.
+        document.body.dispatchEvent(
+            new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
+        )
+        expect(handle.isOpen()).toBe(false)
+        expect(root.querySelector('.gf-rephrase')).toBeNull()
+        expect(opts.onClose).toHaveBeenCalledOnce()
+    })
+
+    it('outside pointerdown fires onClose exactly ONCE (one-shot, no repeats)', async () => {
+        const opts = mkOptions()
+        showRephraseCard(root, opts)
+        vi.advanceTimersByTime(10)
+        // Fire three outside clicks.
+        for (let i = 0; i < 3; i++) {
+            document.body.dispatchEvent(
+                new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
+            )
+        }
+        expect(opts.onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('pointerdown INSIDE the card (e.g. tone toggle) does NOT dismiss', async () => {
+        const opts = mkOptions()
+        const handle = showRephraseCard(root, opts)
+        vi.advanceTimersByTime(10)
+        // Click a tone button inside the card.
+        const toneBtn = root.querySelector<HTMLButtonElement>('[data-action="tone"]')
+        expect(toneBtn).not.toBeNull()
+        toneBtn?.dispatchEvent(
+            new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
+        )
+        expect(handle.isOpen()).toBe(true)
+        expect(opts.onClose).not.toHaveBeenCalled()
     })
 })
 

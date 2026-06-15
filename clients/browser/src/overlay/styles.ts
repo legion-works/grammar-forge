@@ -493,9 +493,9 @@ export const OVERLAY_CSS = `
 
   /* ============================================================
    * Rephrase flow — entry button (.gf-rephrase-btn) + result card
-   * (.gf-rephrase-card). Both use the same glass material as the
-   * popover + pill; the card adds the Popover-API top-layer fix
-   * (margin:0; inset:auto;) so our inline left/top wins.
+   * (.gf-rephrase). The card DOM uses .gf-rephrase (outer) and
+   * .gf-rephrase__* (inner). The CSS must match these class names.
+   * Glass surface consistent with .gf-card / .gf-panel-aside.
    * ============================================================ */
   .gf-rephrase-btn {
     position: fixed;
@@ -540,27 +540,29 @@ export const OVERLAY_CSS = `
     }
   }
 
-  .gf-rephrase-card {
+  /* Rephrase result card — DOM class is .gf-rephrase (NOT .gf-rephrase-card).
+     Glass surface matching .gf-card / .gf-panel-aside. */
+  .gf-rephrase {
     position: fixed;
     pointer-events: auto;
     z-index: ${Z_OVERLAY};
-    /* When promoted to the top layer via popover=manual + showPopover(), the
-       UA stylesheet applies inset:0 + margin:auto, which CENTERS the card and
-       overrides our explicit left/top (the card opened over the selection /
-       button, not the viewport). Reset both so our JS positionCard() left/top
-       wins — same fix as .gf-panel above. */
+    /* Popover-API top-layer fix: reset UA inset:0 + margin:auto so our
+       JS positionCard() left/top wins. */
     margin: 0;
     inset: auto;
     min-width: 280px;
     max-width: 380px;
-    padding: 12px 14px;
-    border-radius: 14px;
+    padding: 14px 16px;
+    border-radius: 16px;
     isolation: isolate;
     contain: layout paint;
-    background: rgba(28, 28, 30, 0.78);
-    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    /* Base solid scrim — readable on any page without backdrop-filter */
+    background: rgba(28, 28, 30, 0.88);
+    background: light-dark(rgba(248, 248, 250, 0.92), rgba(28, 28, 30, 0.88));
     color: light-dark(#111, #f5f5f5);
+    /* Hairline border — NOT bright white. Same recipe as .gf-card. */
     border: 1px solid rgba(255, 255, 255, 0.10);
+    border: 1px solid light-dark(rgba(15, 23, 42, 0.10), rgba(255, 255, 255, 0.10));
     box-shadow:
       inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
       0 1px 2px rgba(0, 0, 0, 0.12),
@@ -570,123 +572,196 @@ export const OVERLAY_CSS = `
     animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .gf-rephrase-card {
+    .gf-rephrase {
       background: light-dark(
-        color-mix(in oklab, #f5f5f5 50%, transparent),
-        color-mix(in oklab, #1c1c1e 40%, transparent)
+        color-mix(in oklab, #f8f8fa 52%, transparent),
+        color-mix(in oklab, #1c1c1e 42%, transparent)
       );
-      border-color: color-mix(in oklab, white 14%, transparent);
-      -webkit-backdrop-filter: blur(16px) saturate(180%);
-      backdrop-filter: blur(16px) saturate(180%);
+      border-color: light-dark(rgba(15, 23, 42, 0.10), color-mix(in oklab, white 14%, transparent));
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      backdrop-filter: blur(20px) saturate(180%);
     }
   }
 
-  .gf-rephrase-card__header {
+  /* Head: "✨ Rephrase" label + faint model label + × close */
+  .gf-rephrase__head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
+    gap: 6px;
+    margin-bottom: 12px;
   }
-  .gf-rephrase-card__label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    opacity: 0.85;
+  .gf-rephrase__head-label {
+    font: 700 13px/1 system-ui, -apple-system, sans-serif;
+    color: light-dark(#0f172a, #f5f5f5);
   }
-  .gf-rephrase-card__close {
+  .gf-rephrase__head-model {
+    font: 500 11px/1 system-ui, -apple-system, sans-serif;
+    color: light-dark(rgba(15, 23, 42, 0.45), rgba(255, 255, 255, 0.45));
+  }
+  .gf-rephrase__head-spacer { flex: 1; }
+  .gf-rephrase__head-close {
     appearance: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     padding: 0;
     border: none;
-    border-radius: 9999px;
+    border-radius: 7px;
     background: transparent;
-    color: inherit;
-    font: 600 16px/1 system-ui, sans-serif;
+    color: light-dark(rgba(15, 23, 42, 0.45), rgba(255, 255, 255, 0.45));
+    font: 500 16px/1 system-ui, sans-serif;
     cursor: pointer;
-    opacity: 0.7;
-    transition: background 120ms ease-out, opacity 120ms ease-out;
+    transition: background 120ms ease-out, color 120ms ease-out;
   }
-  .gf-rephrase-card__close:hover {
-    background: rgba(255, 255, 255, 0.10);
-    opacity: 1;
+  .gf-rephrase__head-close:hover {
+    background: light-dark(rgba(15, 23, 42, 0.08), rgba(255, 255, 255, 0.10));
+    color: light-dark(#0f172a, #f5f5f5);
   }
-  .gf-rephrase-card__close:focus-visible {
+  .gf-rephrase__head-close:focus-visible {
     outline: 2px solid #93c5fd;
     outline-offset: 1px;
   }
-  .gf-rephrase-card__original {
-    font-size: 12px;
-    line-height: 1.4;
-    opacity: 0.55;
-    margin-bottom: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+
+  /* Scope + tone segmented controls (pill-style row, DC: gf-vtab / gf-chip) */
+  .gf-rephrase__seg-row {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 9999px;
+    background: light-dark(rgba(15, 23, 42, 0.06), rgba(255, 255, 255, 0.08));
+    border: 1px solid light-dark(rgba(15, 23, 42, 0.10), rgba(255, 255, 255, 0.12));
+    margin-bottom: 10px;
   }
-  .gf-rephrase-card__text {
-    font-size: 14px;
-    line-height: 1.45;
+  .gf-rephrase__seg {
+    flex: 1;
+    height: 26px;
+    border-radius: 9999px;
+    border: none;
+    cursor: pointer;
+    font: 600 11.5px/1 system-ui, -apple-system, sans-serif;
+    background: transparent;
+    color: light-dark(rgba(15, 23, 42, 0.55), rgba(255, 255, 255, 0.55));
+    transition: background 130ms ease-out, color 130ms ease-out;
+  }
+  .gf-rephrase__seg.is-active {
+    background: #2563eb;
+    color: #fff;
+  }
+  .gf-rephrase__seg:hover:not(.is-active) {
+    background: light-dark(rgba(15, 23, 42, 0.06), rgba(255, 255, 255, 0.08));
+    color: light-dark(#0f172a, #f5f5f5);
+  }
+  .gf-rephrase__seg:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+  }
+
+  /* Tone chips (pill-style, DC: gf-chip) */
+  .gf-rephrase__tones {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .gf-rephrase__tone {
+    padding: 6px 12px;
+    border-radius: 9999px;
+    border: 1px solid light-dark(rgba(15, 23, 42, 0.12), rgba(255, 255, 255, 0.15));
+    background: transparent;
+    color: light-dark(rgba(15, 23, 42, 0.55), rgba(255, 255, 255, 0.55));
+    font: 600 12px/1 system-ui, -apple-system, sans-serif;
+    cursor: pointer;
+    transition: background 130ms ease-out, border-color 130ms ease-out, color 130ms ease-out;
+  }
+  .gf-rephrase__tone.is-active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+  }
+  .gf-rephrase__tone:hover:not(.is-active) {
+    background: light-dark(rgba(15, 23, 42, 0.06), rgba(255, 255, 255, 0.08));
+    color: light-dark(#0f172a, #f5f5f5);
+  }
+
+  /* Original text: italic, muted, surface background (DC: T.surf bg) */
+  .gf-rephrase__original {
+    font: 400 12.5px/1.5 system-ui, -apple-system, sans-serif;
+    font-style: italic;
+    color: light-dark(rgba(15, 23, 42, 0.55), rgba(255, 255, 255, 0.55));
+    padding: 8px 11px;
+    border-radius: 9px;
+    background: light-dark(rgba(15, 23, 42, 0.05), rgba(255, 255, 255, 0.06));
+    margin-bottom: 12px;
+    max-height: 70px;
+    overflow: hidden;
+  }
+
+  /* Rephrased text: primary result, readable */
+  .gf-rephrase__text {
+    font: 400 13.5px/1.45 system-ui, -apple-system, sans-serif;
+    color: light-dark(#0f172a, #f5f5f5);
     margin-bottom: 12px;
     word-break: break-word;
   }
-  .gf-rephrase-card__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+
+  /* Accept button (primary) */
+  .gf-rephrase__accept {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    height: 34px;
+    padding: 0 16px;
+    border-radius: 9px;
+    border: none;
+    background: #2563eb;
+    color: #fff;
+    font: 600 13px/1 system-ui, -apple-system, sans-serif;
+    cursor: pointer;
+    transition: background 120ms ease-out;
+    margin-bottom: 8px;
   }
-  .gf-rephrase-card__btn {
-    appearance: none;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.06);
-    color: inherit;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 6px 10px;
-    border-radius: 8px;
+  .gf-rephrase__accept:hover { background: #1d4ed8; }
+  .gf-rephrase__accept:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+
+  /* Alternatives (alt chips — DC: gf-alt style) */
+  .gf-rephrase__opts {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+  .gf-chip-alt {
+    text-align: left;
+    padding: 9px 12px;
+    border-radius: 10px;
+    border: 1px solid light-dark(rgba(15, 23, 42, 0.10), rgba(255, 255, 255, 0.12));
+    background: light-dark(rgba(15, 23, 42, 0.04), rgba(255, 255, 255, 0.06));
+    color: light-dark(#0f172a, #f5f5f5);
+    font: 400 13px/1.45 system-ui, -apple-system, sans-serif;
     cursor: pointer;
     transition: background 120ms ease-out, border-color 120ms ease-out;
   }
-  .gf-rephrase-card__btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.30);
+  .gf-chip-alt:hover {
+    background: light-dark(rgba(15, 23, 42, 0.08), rgba(255, 255, 255, 0.10));
+    border-color: light-dark(rgba(15, 23, 42, 0.18), rgba(255, 255, 255, 0.22));
   }
-  .gf-rephrase-card__btn:focus-visible {
-    outline: 2px solid #93c5fd;
-    outline-offset: 1px;
-  }
-  .gf-rephrase-card__btn--primary {
-    background: #2563eb;
-    border-color: #1d4ed8;
-    color: #fff;
-  }
-  .gf-rephrase-card__btn--primary:hover {
-    background: #1d4ed8;
-    border-color: #1e40af;
+  .gf-chip-alt--block { display: block; width: 100%; }
+
+  /* Footer: Regenerate + spacer + "Click one to apply" hint */
+  .gf-rephrase__foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 11px;
+    border-top: 1px solid light-dark(rgba(15, 23, 42, 0.10), rgba(255, 255, 255, 0.10));
   }
 
   /* Pending card (LLM round-trip in flight). Inline spinner + status text,
      no action buttons. Replaces the old empty-action toast hack. */
-  .gf-rephrase-card__pending-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 4px;
-  }
-  .gf-rephrase-card__spinner {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    border: 2px solid rgba(255, 255, 255, 0.25);
-    border-top-color: rgba(255, 255, 255, 0.9);
-    animation: gf-spin 0.8s linear infinite;
-  }
-  @keyframes gf-spin { to { transform: rotate(360deg); } }
-
   /* ============================================================
    * Liquid-glass refractive RIM — an additive highlight ring (does not touch
    * the base box-shadow). Bright specular top edge + a hairline all around so
@@ -697,7 +772,7 @@ export const OVERLAY_CSS = `
   .gf-panel::after,
   .gf-pill-panel::after,
   .gf-tooltip::after,
-  .gf-rephrase-card::after {
+  .gf-rephrase::after {
     content: "";
     position: absolute;
     inset: 0;

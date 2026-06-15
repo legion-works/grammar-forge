@@ -10,6 +10,7 @@
 // All variants use createElement + textContent for visible text (the bridge
 // supplies the rephrased text; NEVER innerHTML with untrusted data).
 // One-per-root (REGISTRY + dismiss-then-show).
+import { installOutsideDismiss, type OutsideDismissHandle } from '@/overlay/dismiss'
 const REPHRASE_CARD_WIDTH_FALLBACK = 320
 const REPHRASE_CARD_HEIGHT_FALLBACK = 220
 const VIEWPORT_GUTTER = 10
@@ -218,8 +219,24 @@ function mountSimpleCard(
         }
     }
 
+    // Outside-click (light-dismiss) via the unified dismiss helper.
+    // Uses window capture so host-page stopPropagation can't block it.
+    // The existing card.addEventListener('mousedown', stopPropagation) only
+    // blocks bubble-phase listeners — our window capture fires first.
+    // Self-removes after firing (one-shot) so it can't repeat.
+    const outsideDismiss: OutsideDismissHandle = installOutsideDismiss(
+        view,
+        (el) => card.contains(el) || el === card,
+        () => {
+            handle.hide()
+            options.onClose()
+        },
+        'rephrase',
+    )
+
     const handle: RephraseCardHandle = {
         hide: () => {
+            outsideDismiss.remove()
             card.removeEventListener('keydown', onKeydown)
             if (usePopoverApi && card.isConnected) {
                 try {
@@ -239,8 +256,7 @@ function mountSimpleCard(
 }
 
 /** Standard card header: ✨ Rephrase + optional faint model label + × close
- *  button. The model label is rendered as `.gf-faint` so it reads as
- *  secondary text against the primary heading. */
+ *  button. Uses .gf-rephrase__head-* classes matching the DC design. */
 function appendHeader(card: HTMLElement, label: string, modelLabel?: string): void {
     const doc = card.ownerDocument
     const header = doc.createElement('div')
@@ -248,21 +264,19 @@ function appendHeader(card: HTMLElement, label: string, modelLabel?: string): vo
     const labelEl = doc.createElement('span')
     labelEl.className = 'gf-rephrase__head-label'
     labelEl.textContent = '\u2728 Rephrase'
-    // The dialog aria-label is set in mountSimpleCard; the visible header
-    // text is the heading for sighted users.
     labelEl.setAttribute('aria-hidden', 'true')
     header.appendChild(labelEl)
     if (modelLabel) {
-        const faint = doc.createElement('span')
-        faint.className = 'gf-faint'
-        faint.textContent = `AI \u00b7 ${modelLabel}`
-        header.appendChild(faint)
+        const model = doc.createElement('span')
+        model.className = 'gf-rephrase__head-model'
+        model.textContent = `AI \u00b7 ${modelLabel}`
+        header.appendChild(model)
     }
     const spacer = doc.createElement('span')
-    spacer.style.flex = '1'
+    spacer.className = 'gf-rephrase__head-spacer'
     header.appendChild(spacer)
     const close = doc.createElement('button')
-    close.className = 'gf-iconbtn'
+    close.className = 'gf-rephrase__head-close'
     close.type = 'button'
     close.setAttribute('aria-label', 'Close')
     close.dataset.action = 'close'
@@ -271,10 +285,10 @@ function appendHeader(card: HTMLElement, label: string, modelLabel?: string): vo
     card.appendChild(header)
 }
 
-/** Build a segmented control group. Returns a div with the
- *  `gf-seg-group` class containing one `gf-seg` button per option. The
- *  option whose value equals `active` gets `is-active`. Buttons carry
- *  `data-action` (the action to fire) and `data-value` (the option). */
+/** Build a segmented control group (scope or tone).
+ *  Scope: pill-style row (.gf-rephrase__seg-row + .gf-rephrase__seg).
+ *  Tone: chip-style row (.gf-rephrase__tones + .gf-rephrase__tone).
+ *  Both use `is-active` for the selected option. */
 function buildSegGroup(
     doc: Document,
     action: string,
@@ -282,12 +296,13 @@ function buildSegGroup(
     active: string,
     labels?: Record<string, string>,
 ): HTMLDivElement {
+    const isTone = action === 'tone'
     const group = doc.createElement('div')
-    group.className = 'gf-seg-group'
+    group.className = isTone ? 'gf-rephrase__tones' : 'gf-rephrase__seg-row'
     for (const value of options) {
         const btn = doc.createElement('button')
         btn.type = 'button'
-        btn.className = 'gf-seg'
+        btn.className = isTone ? 'gf-rephrase__tone' : 'gf-rephrase__seg'
         btn.dataset.action = action
         btn.dataset.value = value
         btn.textContent = labels?.[value] ?? value
