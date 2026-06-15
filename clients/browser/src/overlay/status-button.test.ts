@@ -3,9 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { renderStatusButton, type StatusButtonOptions } from '@/overlay/status-button'
 import { arcOffset, BAND_COLOR } from '@/lib/view-model'
 
-function translateOf(pill: HTMLElement): { x: number; y: number } {
-    const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(pill.style.transform)
-    return m ? { x: parseFloat(m[1]!), y: parseFloat(m[2]!) } : { x: NaN, y: NaN }
+function positionOf(pill: HTMLElement): { x: number; y: number } {
+    // The orb is positioned via inline `left`/`top` (NOT transform), so the
+    // W2 :hover/:active `transform: scale()` doesn't clobber the position.
+    const left = parseFloat(pill.style.left)
+    const top = parseFloat(pill.style.top)
+    return { x: left, y: top }
 }
 
 function mkRoot(): ShadowRoot {
@@ -249,8 +252,8 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
         // style.top = 300-60-8 = 232.
         renderStatusButton(root, mkOptions())
         const orb = root.querySelector('.gf-orb') as HTMLElement
-        expect(translateOf(orb).x).toBe(432)
-        expect(translateOf(orb).y).toBe(232)
+        expect(positionOf(orb).x).toBe(432)
+        expect(positionOf(orb).y).toBe(232)
         orb.dispatchEvent(
             new PointerEvent('pointerdown', { clientX: 200, clientY: 200, bubbles: true }),
         )
@@ -258,8 +261,8 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
             new PointerEvent('pointermove', { clientX: 230, clientY: 250, bubbles: true }),
         )
         // Moved +30,+50 from the style start (432,232) → 462, 282.
-        expect(translateOf(orb).x).toBe(462)
-        expect(translateOf(orb).y).toBe(282)
+        expect(positionOf(orb).x).toBe(462)
+        expect(positionOf(orb).y).toBe(282)
         orb.dispatchEvent(
             new PointerEvent('pointerup', { clientX: 230, clientY: 250, bubbles: true }),
         )
@@ -293,8 +296,8 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
         // right=500, bottom=200 → 500-60-8+10 = 442 ; 200-60-8+20 = 152
         // (left 442 > maxLeft 432 → clamped to 432; top 152 > maxTop 132 →
         // clamped to 132).
-        expect(translateOf(orb).x).toBe(432)
-        expect(translateOf(orb).y).toBe(132)
+        expect(positionOf(orb).x).toBe(432)
+        expect(positionOf(orb).y).toBe(132)
     })
 
     it('dragging the orb past the threshold reports a new accumulated offset', () => {
@@ -408,11 +411,20 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
         expect(root.querySelector('.gf-orb')?.classList.contains('gf-orb--hidden')).toBe(true)
     })
 
-    it('positions the orb via transform translate, not left/top', () => {
+    it('positions the orb via left/top, not transform translate', () => {
+        // The W2 design system uses `transform: scale(1.06)` on :hover, which
+        // would clobber a positioning translate (both target the `transform`
+        // property). The orb is therefore positioned via inline left/top so
+        // the hover/active scale can run without touching the position.
         const root = mkRoot()
         renderStatusButton(root, mkOptions({ count: 1 }))
         const orb = root.querySelector('.gf-orb') as HTMLElement
-        expect(orb.style.transform).toMatch(/translate/)
+        // Default bottom-right of the ANCHOR (100,100,400,200) = (432, 232).
+        expect(orb.style.left).toBe('432px')
+        expect(orb.style.top).toBe('232px')
+        // No transform translate — the transform property is free for the
+        // W2 :hover/:active scale to own.
+        expect(orb.style.transform).toBe('')
     })
 
     it('a drag offset within the field shifts the orb (bound to the field)', () => {
@@ -422,8 +434,8 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
         // a (-50,-40) offset moves it up/left, still within the field.
         renderStatusButton(root, mkOptions({ dragOffset: { dx: -50, dy: -40 } }))
         const orb = root.querySelector('.gf-orb') as HTMLElement
-        expect(translateOf(orb).x).toBe(382)
-        expect(translateOf(orb).y).toBe(192)
+        expect(positionOf(orb).x).toBe(382)
+        expect(positionOf(orb).y).toBe(192)
     })
 
     it('a drag offset cannot push the orb outside the field box (clamped to field)', () => {
@@ -433,8 +445,8 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
         // maxLeft = 500-60-8 = 432 ; maxTop = 300-60-8 = 232.
         renderStatusButton(root, mkOptions({ dragOffset: { dx: 500, dy: 500 } }))
         const orb = root.querySelector('.gf-orb') as HTMLElement
-        expect(translateOf(orb).x).toBe(432)
-        expect(translateOf(orb).y).toBe(232)
+        expect(positionOf(orb).x).toBe(432)
+        expect(positionOf(orb).y).toBe(232)
     })
 
     it('W2b: the orb does NOT render a .gf-pill-panel on click (the W1 hover panel is retired)', () => {

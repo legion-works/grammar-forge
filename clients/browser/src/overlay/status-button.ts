@@ -238,12 +238,15 @@ export function renderStatusButton(
     let dragged = false
     const onPointerDown = (e: PointerEvent): void => {
         if (e.button !== 0) return
-        // Start from the AUTHORITATIVE transform translate (what positionPill
-        // set), NOT orb.offsetLeft/Top: the orb is position:fixed at 0,0 with
-        // a transform offset, so offsetLeft is layout-derived and can differ
-        // from our translate — reading it caused a visual jump at drag start.
-        const t = readTranslate(orb)
-        dragStart = { x: e.clientX, y: e.clientY, left: t.x, top: t.y }
+        // Start from the AUTHORITATIVE left/top (what positionPill set), NOT
+        // orb.offsetLeft/Top: offsetLeft is layout-derived and can differ from
+        // the inline left we just wrote — reading it caused a visual jump at
+        // drag start. (We previously read transform translate, but the W2
+        // design uses transform: scale(1.06) on :hover which clobbers any
+        // positioning translate — see positionAbsolute.)
+        const left = parseFloat(orb.style.left) || 0
+        const top = parseFloat(orb.style.top) || 0
+        dragStart = { x: e.clientX, y: e.clientY, left, top }
         dragged = false
     }
     const onPointerMove = (e: PointerEvent): void => {
@@ -260,8 +263,13 @@ export function renderStatusButton(
         }
         dragged = true
         orb.classList.add('gf-orb--dragging')
-        // Position via transform (composited, no reflow); left/top stay 0.
-        orb.style.transform = `translate(${dragStart.left + ddx}px, ${dragStart.top + ddy}px)`
+        // Position via left/top (the W2 :hover scale uses transform, so we
+        // must keep positioning off the transform property). The browser
+        // does not reflow on inline style writes outside of layout reads,
+        // and the scroll/resize loop never reads offsetLeft/Top between
+        // writes — the inline update is composited.
+        orb.style.left = `${dragStart.left + ddx}px`
+        orb.style.top = `${dragStart.top + ddy}px`
     }
     const onPointerUp = (e: PointerEvent): void => {
         if (!dragStart) return
@@ -323,13 +331,6 @@ export function renderStatusButton(
             renderBody()
         },
     }
-}
-
-/** Read the orb's current transform translate offset (x,y in px). Returns
- *  {0,0} when no translate is set (jsdom / pre-position). */
-function readTranslate(el: HTMLElement): { x: number; y: number } {
-    const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(el.style.transform)
-    return m ? { x: parseFloat(m[1]!), y: parseFloat(m[2]!) } : { x: 0, y: 0 }
 }
 
 function bindButton(el: HTMLElement, onClick: () => void): void {
@@ -415,12 +416,15 @@ function positionAbsolute(
     if (top > vh - height - VIEWPORT_GUTTER) top = vh - height - VIEWPORT_GUTTER
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     if (top < VIEWPORT_GUTTER) top = VIEWPORT_GUTTER
-    // Position via transform (composited, no reflow). The orb stays
-    // position:fixed at 0,0 and the translate carries the offset; the scroll/
-    // resize loop rewriting the transform never forces a synchronous layout.
-    pill.style.left = '0'
-    pill.style.top = '0'
-    pill.style.transform = `translate(${left}px, ${top}px)`
+    // Position via left/top (NOT transform). The W2 design system uses
+    // `transform: scale(1.06)` for the orb's :hover/:active lift — that
+    // shares the `transform` property with our positioning translate, so
+    // either rule (inline or CSS) would clobber the other. left/top is
+    // independent of transform, so the hover/active scale now operates on
+    // the orb's own center without touching its viewport position.
+    pill.style.left = `${left}px`
+    pill.style.top = `${top}px`
+    pill.style.transform = ''
 }
 
 /** Inner glyph for the orb's center. The state selection lives in

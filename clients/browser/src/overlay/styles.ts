@@ -1160,7 +1160,19 @@ export const OVERLAY_CSS = `
    *       above are the live correction popover; .gf-card is the
    *       design-system canonical correction card for future use. */
   .gf-card {
-    position: absolute;
+    /* Bug-fix: the W2 design system re-skinned the W1 popover (.gf-panel)
+     * to .gf-card, but the W2 rule omitted the margin: 0; inset: auto;
+     * override that .gf-panel + .gf-rephrase-card carry. When the popover
+     * is promoted to the top layer via popover=manual + showPopover(),
+     * the UA stylesheet applies inset: 0; margin: auto; which CENTERS
+     * the card in the containing block and overrides the JS-positioned
+     * left/top - the popover lands far from the word (visually at the
+     * top of the page). Reset both so the orchestrator's anchorRect
+     * wins. position: fixed (not absolute) so the popover anchors to
+     * the viewport, matching .gf-panel/.gf-rephrase-card. */
+    position: fixed;
+    margin: 0;
+    inset: auto;
     width: 320px;
     padding: var(--gf-sp-5);
     z-index: 40;
