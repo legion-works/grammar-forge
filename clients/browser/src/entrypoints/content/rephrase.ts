@@ -15,6 +15,7 @@ import { getText } from '@/input/text'
 import { selectionToCodeUnitSpan } from './index'
 import { showRephraseButton, type RephraseButtonHandle } from '@/overlay/rephrase-button'
 import {
+    dismissRephraseCardsIn,
     showRephraseCard,
     showRephraseError,
     showRephrasePending,
@@ -176,6 +177,9 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                 scope,
                 tone: rephraseTone,
                 onAccept: (chosen: string) => {
+                    // Close the card immediately on accept so the user
+                    // sees the result applied without the card lingering.
+                    dismissRephraseCardsIn(deps.overlayRoot)
                     const live = getText(el)
                     if (live.slice(span.start, span.end) !== text) {
                         debugWarn('rephrase', 'selection span went stale; not applying')
@@ -185,7 +189,7 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                         deps.rerun(el, getText(el))
                     })
                 },
-                onClose: () => {},
+                onClose: () => { dismissRephraseCardsIn(deps.overlayRoot) },
                 onScopeChange: (nextScope) => {
                     // W3-1: re-issue the bridge call with the new scope,
                     // the same text/span/tone, and replace the card via
