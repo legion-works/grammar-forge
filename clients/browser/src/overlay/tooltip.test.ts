@@ -112,15 +112,12 @@ describe('showTooltip (preview pill)', () => {
         expect(root.querySelector('.gf-tip')).toBeNull()
     })
 
-    it('centers on the word using actual pill width (falls back to MAX in jsdom where offsetWidth=0)', () => {
-        // #2 fix (round 9): centering uses tip.offsetWidth (actual rendered
-        // width) not TOOLTIP_WIDTH_MAX. In jsdom offsetWidth is always 0
-        // (no layout engine), so the fallback TOOLTIP_WIDTH_MAX=320 is used.
-        // In a real browser a short pill like "a → an ✓" (~120px) would
-        // center correctly: left = wordCenterX - 120/2 (not - 320/2).
-        //
-        // This test verifies the jsdom fallback path (offsetWidth=0 → MAX).
-        // The pure centering math is tested separately below.
+    it('defaults ABOVE the word (DC: pill above, caret points down)', () => {
+        // Round 10 fix: default is now ABOVE the word (DC spec).
+        // jsdom: offsetWidth=0 → MAX=320; offsetHeight=0 → ESTIMATE=36.
+        // spaceAbove = anchor.top - VIEWPORT_GUTTER = 333 - 10 = 323 >= 36+6=42 → above.
+        // top = anchor.top - pillHeight - GAP = 333 - 36 - 6 = 291.
+        // left: wordCenterX = 247 + 30 = 277; left = 277 - 160 = 117.
         const root = mkRoot()
         const customAnchor = new DOMRect(247, 333, 60, 18)
         showTooltip(root, {
@@ -131,11 +128,28 @@ describe('showTooltip (preview pill)', () => {
             diffIsDeletion: false,
         })
         const tip = root.querySelector('.gf-tip') as HTMLElement
-        // jsdom: offsetWidth=0 → fallback to TOOLTIP_WIDTH_MAX=320.
-        // wordCenterX = 247 + 60/2 = 277; left = 277 - 320/2 = 117
-        // (no clamping: 117 + 320 = 437 < 1024 - 10; 117 > 10)
         expect(tip.style.left).toBe('117px')
-        expect(tip.style.top).toBe(`${customAnchor.bottom + 6}px`)
+        expect(tip.style.top).toBe('291px')
+        // Default (above): no .gf-tip--below class.
+        expect(tip.classList.contains('gf-tip--below')).toBe(false)
+    })
+
+    it('flips BELOW when word is near the top of the viewport (no room above)', () => {
+        // spaceAbove = anchor.top - VIEWPORT_GUTTER = 5 - 10 = -5 < 36+6=42 → below.
+        // top = anchor.bottom + GAP = 23 + 6 = 29.
+        const root = mkRoot()
+        const nearTopAnchor = new DOMRect(200, 5, 80, 18) // top=5, bottom=23
+        showTooltip(root, {
+            anchorRect: nearTopAnchor,
+            category: 'grammar',
+            diffOriginal: 'was',
+            diffCorrected: 'were',
+            diffIsDeletion: false,
+        })
+        const tip = root.querySelector('.gf-tip') as HTMLElement
+        expect(tip.style.top).toBe('29px')
+        // Flipped: .gf-tip--below class present (caret points up).
+        expect(tip.classList.contains('gf-tip--below')).toBe(true)
     })
 
     it('centers on the word using actual pill width when offsetWidth is known', () => {
@@ -223,15 +237,12 @@ describe('showTooltip (preview pill)', () => {
         expect(tip.querySelector('.gf-tip__accept')).toBeNull()
     })
 
-    it('positions ABOVE the anchor when space below is insufficient (uses top, not bottom)', () => {
-        // Bug-fix: the old code used `style.bottom = vh - anchor.top + gap`
-        // on a position:fixed element. CSS `bottom` on fixed = distance from
-        // viewport bottom edge, so `vh - anchor.top + 6` is a large value
-        // that pushes the pill far off-screen. Fix: use `style.top` instead.
-        // jsdom innerHeight = 768. Place the anchor near the bottom so
-        // spaceBelow < TOOLTIP_HEIGHT_ESTIMATE (72px).
+    it('positions ABOVE the anchor (default) even when near the bottom of the viewport', () => {
+        // Round 10: default is now ABOVE. A word near the bottom of the
+        // viewport has plenty of space above → still shows above.
+        // jsdom innerHeight=768. anchor.top=730, spaceAbove=730-10=720 >= 42 → above.
+        // top = 730 - 36 - 6 = 688 (< 730 = anchor.top → pill is above).
         const root = mkRoot()
-        // anchor.bottom = 750, spaceBelow = 768 - 750 = 18 < 72 → showAbove
         const nearBottomAnchor = new DOMRect(100, 730, 80, 20)
         showTooltip(root, {
             anchorRect: nearBottomAnchor,
@@ -241,11 +252,11 @@ describe('showTooltip (preview pill)', () => {
             diffIsDeletion: false,
         })
         const tip = root.querySelector('.gf-tip') as HTMLElement
-        // Must use top (not bottom) and be above the anchor.
         expect(tip.style.bottom).toBe('auto')
         const topVal = parseInt(tip.style.top, 10)
         expect(Number.isFinite(topVal)).toBe(true)
-        // The pill top must be above the anchor top (730).
+        // Pill top must be above the anchor top (730).
         expect(topVal).toBeLessThan(nearBottomAnchor.top)
+        expect(tip.classList.contains('gf-tip--below')).toBe(false)
     })
 })

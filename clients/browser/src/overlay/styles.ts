@@ -1171,15 +1171,26 @@ export const OVERLAY_CSS = `
   .gf-tip__accept:focus-visible { outline: 2px solid #16a34a; outline-offset: 1px; }
   .gf-tip__old { text-decoration: line-through; }
   .gf-tip__new { font-weight: 700; }
+  /* Caret/tail: default = pill ABOVE word, caret points DOWN (border-top colored).
+     .gf-tip--below = pill BELOW word, caret points UP (border-bottom colored,
+     tail moves to top of pill). */
   .gf-tip__tail {
     position: absolute;
     top: 100%;
+    bottom: auto;
     left: 50%;
     transform: translateX(-50%);
     width: 0;
     height: 0;
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
+  }
+  /* Flip: pill is below the word — caret points UP at the word. */
+  .gf-tip--below .gf-tip__tail {
+    top: auto;
+    bottom: 100%;
+    border-top: none;
+    border-bottom: 5px solid transparent;
   }
   :host([data-gf-theme="dark"]) .gf-tip {
     backdrop-filter: blur(16px) saturate(180%);
@@ -1191,7 +1202,10 @@ export const OVERLAY_CSS = `
   }
   :host([data-gf-theme="dark"]) .gf-tip__old { color: var(--gf-diff-old); }
   :host([data-gf-theme="dark"]) .gf-tip__new { color: var(--gf-diff-new); }
+  /* Default (above): downward caret = border-top colored. */
   :host([data-gf-theme="dark"]) .gf-tip__tail { border-top: 5px solid rgba(28, 30, 36, 0.94); }
+  /* Flipped (below): upward caret = border-bottom colored. */
+  :host([data-gf-theme="dark"]) .gf-tip--below .gf-tip__tail { border-bottom: 5px solid rgba(28, 30, 36, 0.94); border-top: none; }
   :host([data-gf-theme="light"]) .gf-tip {
     backdrop-filter: blur(16px) saturate(180%);
     -webkit-backdrop-filter: blur(16px) saturate(180%);
@@ -1203,6 +1217,7 @@ export const OVERLAY_CSS = `
   :host([data-gf-theme="light"]) .gf-tip__old { color: var(--gf-diff-old); }
   :host([data-gf-theme="light"]) .gf-tip__new { color: var(--gf-diff-new); }
   :host([data-gf-theme="light"]) .gf-tip__tail { border-top: 5px solid rgba(252, 252, 254, 0.96); }
+  :host([data-gf-theme="light"]) .gf-tip--below .gf-tip__tail { border-bottom: 5px solid rgba(252, 252, 254, 0.96); border-top: none; }
 
   /* ----- Correction card (.gf-card) — the LIVE correction popover.
    *       popover.ts mounts .gf-card elements via showPopover(); this

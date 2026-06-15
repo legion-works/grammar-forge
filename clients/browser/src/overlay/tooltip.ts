@@ -9,7 +9,7 @@ import { diffInnerHTML } from '@/overlay/diff-view'
 import type { Category } from '@/api/types'
 
 const TOOLTIP_WIDTH_MAX = 320
-const TOOLTIP_HEIGHT_ESTIMATE = 72
+const TOOLTIP_HEIGHT_ESTIMATE = 36
 const VIEWPORT_GUTTER = 10
 const ANCHOR_GAP = 6
 
@@ -127,30 +127,36 @@ export function dismissTooltipsIn(root: ShadowRoot): void {
 function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void {
     const vw = view.innerWidth
     const vh = view.innerHeight
-    const spaceBelow = vh - anchor.bottom
-    const showAbove = spaceBelow < TOOLTIP_HEIGHT_ESTIMATE
-    // Use the pill's ACTUAL rendered width (tip.offsetWidth after mount)
-    // so the centering is exact for short pills like "a → an ✓".
-    // Falls back to TOOLTIP_WIDTH_MAX when offsetWidth is 0 (jsdom / not
-    // yet laid out — the fallback keeps tests deterministic).
+    // Use actual rendered dimensions (measured after mount at left:-9999px).
+    // Falls back to constants when offsetWidth/Height is 0 (jsdom).
     const pillWidth = tip.offsetWidth > 0 ? tip.offsetWidth : TOOLTIP_WIDTH_MAX
-    // Center the pill horizontally on the word. The caret (.gf-tip__tail)
-    // is centered via left:50% in CSS, so it always points at the pill's
-    // center — which we align to the word center.
+    const pillHeight = tip.offsetHeight > 0 ? tip.offsetHeight : TOOLTIP_HEIGHT_ESTIMATE
+
+    // DEFAULT: place ABOVE the word (DC: pill sits above, caret points down).
+    // FLIP BELOW only when there isn't room above (word too close to top).
+    const spaceAbove = anchor.top - VIEWPORT_GUTTER
+    const showBelow = spaceAbove < pillHeight + ANCHOR_GAP
+
+    // Horizontal: center on the word. Caret (left:50%) points at pill center
+    // = word center. Clamp to viewport.
     const wordCenterX = anchor.left + anchor.width / 2
     let left = wordCenterX - pillWidth / 2
-    if (left + pillWidth > vw - VIEWPORT_GUTTER) {
-        left = vw - pillWidth - VIEWPORT_GUTTER
-    }
+    if (left + pillWidth > vw - VIEWPORT_GUTTER) left = vw - pillWidth - VIEWPORT_GUTTER
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     tip.style.left = `${left}px`
-    if (showAbove) {
-        const estimatedTop = anchor.top - TOOLTIP_HEIGHT_ESTIMATE - ANCHOR_GAP
-        tip.style.top = `${Math.max(VIEWPORT_GUTTER, estimatedTop)}px`
-        tip.style.bottom = 'auto'
-    } else {
+
+    // Vertical + caret direction.
+    if (showBelow) {
+        // No room above → place below, caret points UP.
         tip.style.top = `${anchor.bottom + ANCHOR_GAP}px`
         tip.style.bottom = 'auto'
+        tip.classList.add('gf-tip--below')
+    } else {
+        // Default: place above, caret points DOWN.
+        const top = anchor.top - pillHeight - ANCHOR_GAP
+        tip.style.top = `${Math.max(VIEWPORT_GUTTER, top)}px`
+        tip.style.bottom = 'auto'
+        tip.classList.remove('gf-tip--below')
     }
 }
 
