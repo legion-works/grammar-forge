@@ -557,4 +557,55 @@ describe('showPanel (W2b review panel)', () => {
             expect(root.querySelector('.gf-panel__score')).not.toBeNull()
         })
     })
+
+    describe('restoreReviewBody (panel refresh after accept-all / accept-item)', () => {
+        // Regression guard for the "stale panel after accept-all" bug (round 12).
+        // After applying suggestions, renderField calls restoreReviewBody with
+        // fresh items. The panel body must rebuild atomically (no flash) and
+        // reflect the new model (empty state when no items remain).
+
+        it('restoreReviewBody returns true and rebuilds the body with fresh items', () => {
+            const root = mkRoot()
+            const handle = showPanel(root, mkOptions({ items: [item({ id: 1 }), item({ id: 2 })] }))
+            // Initially 2 items → "Accept all 2 suggestions" button present.
+            expect(root.querySelector('[data-action="accept-all"]')).not.toBeNull()
+            // Simulate accept-all: items cleared, re-check returned empty.
+            const refreshed = handle.restoreReviewBody([], 'I have an apple.', neutralGoals, 'done', true)
+            expect(refreshed).toBe(true)
+            // After refresh: no accept-all button (no items), no suggestion rows.
+            expect(root.querySelector('[data-action="accept-all"]')).toBeNull()
+            expect(root.querySelectorAll('.gf-row-item')).toHaveLength(0)
+            // Score block still present (shows "No issues remaining").
+            expect(root.querySelector('.gf-panel__score')).not.toBeNull()
+        })
+
+        it('restoreReviewBody returns false and is a no-op after destroy()', () => {
+            // Stale-guard: if the panel was closed before the re-check resolved,
+            // restoreReviewBody must not throw or render onto a dead container.
+            const root = mkRoot()
+            const handle = showPanel(root, mkOptions())
+            handle.destroy()
+            const refreshed = handle.restoreReviewBody([], 'text', neutralGoals, 'done', false)
+            expect(refreshed).toBe(false)
+        })
+
+        it('restoreReviewBody rebuilds with fresh items (partial accept — some remain)', () => {
+            const root = mkRoot()
+            const handle = showPanel(root, mkOptions({
+                items: [item({ id: 1, category: 'spelling' }), item({ id: 2, category: 'grammar' })],
+            }))
+            // Accept the spelling item; grammar remains.
+            const refreshed = handle.restoreReviewBody(
+                [item({ id: 2, category: 'grammar' })],
+                'I have an apple.',
+                neutralGoals,
+                'done',
+                true,
+            )
+            expect(refreshed).toBe(true)
+            // One group (grammar) remains.
+            expect(root.querySelectorAll('.gf-group')).toHaveLength(1)
+            expect(root.querySelectorAll('.gf-row-item')).toHaveLength(1)
+        })
+    })
 })

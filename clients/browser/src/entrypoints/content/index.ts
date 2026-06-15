@@ -2322,6 +2322,9 @@ function wireRuntime(
             onAcceptAll: () => {
                 void applyAllFor(el).then(() => {
                     showMutationToast(el, 'Accepted all suggestions', visible.length)
+                    // Re-run the check so the panel refreshes (renderField
+                    // calls restoreReviewBody when the check resolves).
+                    void rerunFor(el)(getText(el))
                 })
             },
             onAcceptHighConf: () => {
@@ -2332,6 +2335,7 @@ function wireRuntime(
                             `Accepted ${String(applied.length)} high-confidence`,
                             applied.length,
                         )
+                        void rerunFor(el)(getText(el))
                     }
                 })
             },
@@ -2343,33 +2347,20 @@ function wireRuntime(
                             `Accepted ${String(applied.length)} ${cat}`,
                             applied.length,
                         )
+                        void rerunFor(el)(getText(el))
                     }
                 })
             },
             onAcceptItem: (item) => {
-                // Per-item accept from the panel: same as the popover
-                // Apply (applyItemPrimary), then show a toast. The
-                // panel is closed (closePopoverFor is a no-op when
-                // nothing is open) so the user can re-click another row.
+                // Per-item accept from the panel: apply the primary
+                // replacement, show a toast, then re-run the check.
+                // renderField (called by rerunFor when the check resolves)
+                // now refreshes the panel in-place via restoreReviewBody —
+                // no destroy+reopen flash.
                 void applyItemPrimary(el, item).then((applied) => {
                     if (applied) {
                         showMutationToast(el, 'Applied suggestion', 1)
-                        // Re-render the panel with the fresh state so
-                        // the just-applied row disappears. The panel
-                        // re-opens anchored to the same field.
-                        const newSt = runtime.fields.get(el)
-                        if (newSt) {
-                            renderField(el, overlay.root, newSt)
-                            updateFocusedCounts(runtime, el)
-                            // Re-anchor: destroy + re-open keeps the
-                            // model in sync (a future patch can add
-                            // an in-place update method).
-                            if (runtime.panelHandle) {
-                                runtime.panelHandle.destroy()
-                                runtime.panelHandle = null
-                                openReviewPanelFor(el)
-                            }
-                        }
+                        void rerunFor(el)(getText(el))
                     }
                 })
             },
@@ -2807,6 +2798,23 @@ function wireRuntime(
                 }
             },
         })
+
+        // Panel refresh: if the review panel is open for THIS field, rebuild
+        // its body in-place with the fresh items/score so applied suggestions
+        // disappear and the score ring + insights update.
+        // Stale-guard: only refresh when panelFor === el AND the panel is
+        // still mounted (it may have been closed between the apply and the
+        // re-check resolving). Uses restoreReviewBody (round 8 in-place swap)
+        // so there's no flash — the body is rebuilt atomically off-DOM.
+        if (runtime.panelFor === el && runtime.panelHandle?.isOpen()) {
+            runtime.panelHandle.restoreReviewBody(
+                state.items,
+                getText(el),
+                state.goals,
+                state.phase ?? 'done',
+                true, // onRephrase is always wired in the browser client
+            )
+        }
     }
 }
 
