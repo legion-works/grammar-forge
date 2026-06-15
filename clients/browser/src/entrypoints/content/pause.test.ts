@@ -21,6 +21,7 @@ const settings = (over: Partial<Settings> = {}): Settings => ({
     rephraseTone: '',
     rephraseStyle: '',
     rephraseAlternatives: 1,
+    goals: { audience: 'general', formality: 'neutral' },
     ...over,
 })
 

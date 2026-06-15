@@ -476,3 +476,13 @@ textarea {
   gap: 6px;
   font-size: 12px;
 }
+
+/* Settings hint line (W3-2: "Informal mutes style suggestions. Formal
+   seeds rephrase tone." under the Writing goals section). Same
+   treatment as gf-popup__hint — small, dim, no margin needed (the
+   section's h2 already provides breathing room above). */
+.gf-options__hint {
+  margin: 4px 0 0;
+  color: var(--gf-text-dim);
+  font-size: 12px;
+}

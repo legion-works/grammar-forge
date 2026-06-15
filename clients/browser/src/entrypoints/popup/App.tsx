@@ -42,11 +42,33 @@ const CATEGORY_LABELS: Record<Category, string> = {
 
 type TabKey = 'status' | 'settings'
 
+/** Resolve the OS / page theme for the popup. W3-4 — the in-page overlay
+ *  reads the same MediaQueryList and sets `data-gf-theme` on the shadow
+ *  host; the popup mirrors it on its root <main> so the design tokens
+ *  declared in `popup.css` swap consistently. Falls back to 'light'
+ *  when matchMedia is unavailable (older browsers / test fixtures). */
+function resolveTheme(): 'light' | 'dark' {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light'
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
 export function App() {
     const [settings, setSettingsState] = useState<Settings | null>(null)
     const [health, setHealth] = useState<HealthState>({ status: 'unknown' })
     const [tabStatus, setTabStatus] = useState<TabStatus | null>(null)
     const [tab, setTab] = useState<TabKey>('status')
+    const [theme, setTheme] = useState<'light' | 'dark'>(() => resolveTheme())
+    // Track OS theme changes — the popup is short-lived so this only
+    // needs to update while the user has it open.
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+        const mq = window.matchMedia('(prefers-color-scheme: dark)')
+        const onChange = (e: MediaQueryListEvent): void => setTheme(e.matches ? 'dark' : 'light')
+        if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onChange)
+        return () => {
+            if (typeof mq.removeEventListener === 'function') mq.removeEventListener('change', onChange)
+        }
+    }, [])
 
     const refreshHealth = useCallback(async (s: Settings): Promise<void> => {
         try {
@@ -120,7 +142,7 @@ export function App() {
 
     if (!settings) {
         return (
-            <main className="gf-popup">
+            <main className="gf-popup" data-gf-theme={theme}>
                 <p>Loading…</p>
             </main>
         )
@@ -134,7 +156,7 @@ export function App() {
         : 0
 
     return (
-        <main className="gf-popup">
+        <main className="gf-popup" data-gf-theme={theme}>
             <header className="gf-popup__header">
                 <h1>GrammarForge</h1>
                 <p className="gf-popup__subtitle">

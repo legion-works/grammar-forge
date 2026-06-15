@@ -41,6 +41,7 @@ describe('DEFAULT_SETTINGS', () => {
             rephraseTone: '',
             rephraseStyle: '',
             rephraseAlternatives: 1,
+            goals: { audience: 'general', formality: 'neutral' },
         })
     })
 })
