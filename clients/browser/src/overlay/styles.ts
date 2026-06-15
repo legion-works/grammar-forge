@@ -1092,29 +1092,41 @@ export const OVERLAY_CSS = `
 
   /* ----- Issue underline (in-composer marker) -----
    * Underline ALWAYS shows. Background tint appears ONLY on
-   * hover or when the issue's card is open (.is-on). */
+   * hover or when the issue's card is open (.is-on).
+   *
+   * IMPORTANT: the highlight nodes are EMPTY <div>s (position:fixed,
+   * sized to the word's bounding rect). text-decoration:underline wavy
+   * does NOT render on empty elements — it only applies to text content.
+   * The underline MUST use border-bottom (which renders on any element
+   * regardless of content). The W1 .gf-u block above sets border-bottom;
+   * this design-system block must NOT override it with text-decoration.
+   * Use border-bottom-color for per-category colors (not text-decoration-color). */
   .gf-u {
-    text-decoration: underline wavy;
-    text-decoration-thickness: 1.7px;
-    text-underline-offset: 3px;
+    /* border-bottom is set by the W1 .gf-u block above — do NOT add
+       text-decoration here (it will not render on empty divs). */
     border-radius: 2px;
     transition: background 120ms ease-out;
-    text-decoration-skip-ink: none;
   }
-  .gf-u--spelling    { text-decoration-color: var(--gf-cat-spelling); }
+  .gf-u--spelling    { border-bottom-color: var(--gf-cat-spelling); }
   .gf-u--spelling.is-on    { background: color-mix(in srgb, var(--gf-cat-spelling) 22%, transparent); }
-  .gf-u--grammar     { text-decoration-color: var(--gf-cat-grammar); }
+  .gf-u--grammar     { border-bottom-color: var(--gf-cat-grammar); }
   .gf-u--grammar.is-on     { background: color-mix(in srgb, var(--gf-cat-grammar) 22%, transparent); }
-  .gf-u--punctuation { text-decoration-color: var(--gf-cat-punctuation); }
+  .gf-u--punctuation { border-bottom-color: var(--gf-cat-punctuation); }
   .gf-u--punctuation.is-on { background: color-mix(in srgb, var(--gf-cat-punctuation) 22%, transparent); }
-  .gf-u--style       { text-decoration-color: var(--gf-cat-style); }
+  .gf-u--style       { border-bottom-color: var(--gf-cat-style); }
   .gf-u--style.is-on       { background: color-mix(in srgb, var(--gf-cat-style) 22%, transparent); }
-  .gf-u--typography  { text-decoration-color: var(--gf-cat-typography); }
+  .gf-u--typography  { border-bottom-color: var(--gf-cat-typography); }
   .gf-u--typography.is-on  { background: color-mix(in srgb, var(--gf-cat-typography) 22%, transparent); }
 
   /* ----- Hover preview pill (diff only) ----- */
   .gf-tip {
-    position: absolute;
+    /* Bug-fix: was position:absolute z-index:30. The highlight nodes are
+       position:fixed at z-index:Z_OVERLAY (2147483647) — the tooltip was
+       rendered BEHIND them and invisible. Also needs a base background so
+       it reads on any page (the :host([data-gf-theme]) selectors below
+       upgrade to glass; the base is the solid fallback). */
+    position: fixed;
+    z-index: 2147483647;
     display: inline-flex;
     align-items: center;
     gap: var(--gf-sp-2);
@@ -1123,7 +1135,13 @@ export const OVERLAY_CSS = `
     border-radius: var(--gf-r-pill);
     font: 500 12.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     pointer-events: none;
-    z-index: 30;
+    /* Base solid scrim — readable on any page without backdrop-filter */
+    background: rgba(28, 28, 30, 0.92);
+    background: light-dark(rgba(245, 245, 245, 0.95), rgba(28, 28, 30, 0.92));
+    color: light-dark(#111, #f5f5f5);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), 0 6px 18px rgba(0, 0, 0, 0.18);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
   }
   .gf-tip__dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
   .gf-tip__old { text-decoration: line-through; }
@@ -1864,8 +1882,8 @@ export const OVERLAY_CSS = `
     border-radius: 14px;
     isolation: isolate;
     contain: layout paint;
-    background: rgba(28, 28, 30, 0.78);
-    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    background: rgba(28, 28, 30, 0.92);
+    background: light-dark(rgba(245, 245, 245, 0.95), rgba(28, 28, 30, 0.92));
     color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow:
@@ -1876,6 +1894,17 @@ export const OVERLAY_CSS = `
     transform-origin: 50% 0%;
     animation: gf-popover-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
     opacity: 1;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-goals-pop {
+      background: light-dark(
+        linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.80) 100%),
+        linear-gradient(180deg, rgba(58, 62, 72, 0.84) 0%, rgba(33, 36, 43, 0.80) 100%)
+      );
+      border-color: light-dark(rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.10));
+      -webkit-backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+      backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+    }
   }
   .gf-goals__head {
     display: flex;
@@ -2102,8 +2131,8 @@ export const OVERLAY_CSS = `
     border-radius: 13px;
     isolation: isolate;
     contain: layout paint;
-    background: rgba(28, 28, 30, 0.78);
-    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    background: rgba(28, 28, 30, 0.92);
+    background: light-dark(rgba(245, 245, 245, 0.95), rgba(28, 28, 30, 0.92));
     color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow:
@@ -2114,6 +2143,17 @@ export const OVERLAY_CSS = `
     transform-origin: 50% 100%;
     animation: gf-popover-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
     opacity: 1;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .gf-syn {
+      background: light-dark(
+        linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.80) 100%),
+        linear-gradient(180deg, rgba(58, 62, 72, 0.84) 0%, rgba(33, 36, 43, 0.80) 100%)
+      );
+      border-color: light-dark(rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.10));
+      -webkit-backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+      backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+    }
   }
   .gf-syn__head {
     font: 600 10px/1 system-ui, sans-serif;

@@ -166,22 +166,54 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
         it('renders a wavy underline via border-bottom (works on empty divs)', () => {
             // text-decoration: underline wavy does NOT render on a div with
             // no text content — the highlight nodes are empty <div>s. The
-            // W1 .gf-u used border-bottom: 1.7px wavy which renders the
-            // underline regardless of content. Both rules co-exist (W1
-            // border-bottom for the visual, W2 text-decoration for future
-            // text-span use). This test guards the W1 border-bottom.
+            // underline MUST use border-bottom: 1.7px wavy which renders
+            // regardless of content. This test guards the border-bottom.
             const rule = /\.gf-u\s*\{[^}]*border-bottom:\s*1\.7px wavy/s.exec(OVERLAY_CSS)
             expect(rule, '.gf-u must set border-bottom: 1.7px wavy').not.toBeNull()
         })
 
+        it('does NOT use text-decoration for the underline (text-decoration does not render on empty divs)', () => {
+            // Regression guard: a previous version of the design-system .gf-u
+            // block used text-decoration: underline wavy which does NOT render
+            // on empty <div> elements (the highlight nodes). This caused all
+            // GF underlines to be invisible. The underline must use border-bottom.
+            // Strip comments first to avoid false positives from comment text.
+            const stripped = OVERLAY_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+            // Find the .gf-u rule block and check it does NOT set text-decoration
+            // as the underline mechanism (text-decoration: underline is forbidden;
+            // text-decoration: line-through on .gf-tip__old is fine).
+            const gfUBlock = /\.gf-u\s*\{([^}]*)\}/gs
+            let match: RegExpExecArray | null
+            let foundTextDecorationUnderline = false
+            while ((match = gfUBlock.exec(stripped)) !== null) {
+                const block = match[1] ?? ''
+                if (/text-decoration:\s*underline/.test(block)) {
+                    foundTextDecorationUnderline = true
+                }
+            }
+            expect(
+                foundTextDecorationUnderline,
+                '.gf-u must NOT use text-decoration: underline (use border-bottom instead — text-decoration does not render on empty divs)',
+            ).toBe(false)
+        })
+
         it('drives a 22% tint via .is-on (per-category + generic)', () => {
-            // The W1 .gf-u.is-on + W2 .gf-u--<cat>.is-on both produce a
-            // 22% tinted background on hover / focus. If either rule is
-            // removed, the hover tint breaks.
+            // The .gf-u.is-on + .gf-u--<cat>.is-on produce a 22% tinted
+            // background on hover/active. If either rule is removed, the hover
+            // tint breaks.
             const generic = /\.gf-u\.is-on\s*\{[^}]*background:/s.exec(OVERLAY_CSS)
             expect(generic, '.gf-u.is-on must set a background tint').not.toBeNull()
             const perCat = /\.gf-u--spelling\.is-on\s*\{[^}]*background:/s.exec(OVERLAY_CSS)
             expect(perCat, '.gf-u--spelling.is-on must set a background tint').not.toBeNull()
+        })
+
+        it('.gf-tip is position: fixed with z-index at Z_OVERLAY (not position:absolute z-index:30)', () => {
+            // Bug-fix: .gf-tip was position:absolute z-index:30. The highlight
+            // nodes are position:fixed at z-index:2147483647 — the tooltip was
+            // rendered BEHIND them and invisible. Must be position:fixed at the
+            // same z-index as other overlay surfaces.
+            const rule = /\.gf-tip\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*2147483647/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-tip must be position:fixed z-index:2147483647').not.toBeNull()
         })
     })
 })
