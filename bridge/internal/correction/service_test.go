@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/grammarforge/bridge/internal/thesaurus"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1631,4 +1633,49 @@ func TestServiceAnalyzeToneBadLLMSoftEmpty(t *testing.T) {
 	got, err := svc.AnalyzeTone(context.Background(), ToneRequest{Text: "hello there friend", Granularity: ToneGranularityField})
 	require.NoError(t, err, "unparseable LLM output => soft empty, never an error")
 	require.Empty(t, got.Tags)
+}
+
+// The /synonyms endpoint serves a payload only when GF_SYNONYMS_ENABLED is
+// true. When the flag is false, Service.Synonyms must return nil WITHOUT
+// consulting the thesaurus at all — the feature is off the wire for the
+// caller and the dataset must not be touched (the bypass is load-bearing for
+// the "thesaurus absent on disk + feature disabled" boot path). The thesaurus
+// is loaded from a real temp file with a known word so a non-bypass path
+// would return non-empty synonyms — empty result under the disabled flag
+// proves the thesaurus was NOT consulted.
+func TestServiceSynonymsDisabled(t *testing.T) {
+	th, err := thesaurus.Load(writeMobyTempFile(t))
+	require.NoError(t, err)
+	require.NotEmpty(t, th.Lookup("happy"), "sanity: the test fixture must have synonyms for 'happy' so a non-bypass path would return non-empty")
+	svc := NewService(fakePB{}, nil, fakeLLM{}, &fakeStore{}, "m", fastPolicy())
+	svc.SetThesaurus(th)
+	svc.SetSynonymsConfig(false) // disabled
+	got, err := svc.Synonyms(context.Background(), "happy")
+	require.NoError(t, err)
+	require.Nil(t, got, "disabled => bypass; thesaurus is not consulted and nil is returned so the handler renders []")
+}
+
+// Service.Synonyms must be nil-safe: a nil *thesaurus.Thesaurus (the
+// "dataset not loaded yet" boot state) must return nil without panicking.
+// The thesaurus.Lookup method is itself nil-safe — but the bypass is also
+// independent of the flag, so a nil thesaurus with the flag on still
+// returns nil. The contract: nil in, nil out, no panic.
+func TestServiceSynonymsNilThesaurus(t *testing.T) {
+	svc := NewService(fakePB{}, nil, fakeLLM{}, &fakeStore{}, "m", fastPolicy())
+	// SetThesaurus NOT called — service.thesaurus is the zero-value nil.
+	svc.SetSynonymsConfig(true) // flag on; nil thesaurus must still be safe
+	got, err := svc.Synonyms(context.Background(), "happy")
+	require.NoError(t, err)
+	require.Nil(t, got, "nil thesaurus + flag on => nil, no panic (boot path before SetThesaurus)")
+}
+
+// writeMobyTempFile writes a one-line Moby-format dataset containing the
+// "happy" headword with 5 synonyms, to a temp file the test owns. Returns
+// the path; t.TempDir() cleans up at test exit.
+func writeMobyTempFile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := dir + "/mthesaur.txt"
+	require.NoError(t, os.WriteFile(path, []byte("happy,blessed,blissful,blithe,cheerful,content\n"), 0o600))
+	return path
 }
