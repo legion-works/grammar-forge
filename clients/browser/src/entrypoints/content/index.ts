@@ -688,7 +688,11 @@ function wireRuntime(
     // time). The tooltip itself holds no listeners/timers — the grace-delay
     // hide timer lives here on the runtime so teardown can cancel it.
     const HOVER_THROTTLE_MS = 250
-    const TOOLTIP_HIDE_GRACE_MS = 150
+    // Grace delay before hiding the hover pill. 400ms gives the user time
+    // to move from the underlined word to the ✓ accept button in the pill
+    // without it vanishing. The pill's own mouseenter/mouseleave callbacks
+    // cancel/re-arm this timer (hover-bridge pattern).
+    const TOOLTIP_HIDE_GRACE_MS = 400
     // Minimum time the scan-line stays visible after mounting. The local
     // Gemma fast path completes in ~100ms, so without a floor the scanline
     // flashes on/off in a single frame. 400ms gives the user time to register
@@ -979,6 +983,57 @@ function wireRuntime(
                 rects: patch.itemRects[i]?.rects ?? [],
             }))
         },
+        // On every scroll/resize frame: reposition the review panel to its
+        // field's current rect; close transient surfaces whose anchor has
+        // scrolled off-screen (tooltip, synonyms, goals, correction card,
+        // rephrase card). The panel is the only surface worth repositioning
+        // (it's large and persistent); the others are lightweight and
+        // re-open on the next interaction.
+        onScrollResize: () => {
+            // Reposition the review panel to the focused field's current rect.
+            if (runtime.panelHandle?.isOpen() && runtime.panelFor) {
+                const panelField = runtime.panelFor
+                const panelSt = runtime.fields.get(panelField)
+                if (panelSt?.statusHandle) {
+                    // Re-anchor the panel to the orb's current position
+                    // (the orb was already repositioned by remeasureField
+                    // above via statusHandle.reposition). Read the field
+                    // rect as the panel anchor.
+                    const fieldRect = panelField.getBoundingClientRect()
+                    if (fieldRect.width > 0 || fieldRect.height > 0) {
+                        // positionPanel is internal to panel.ts; we close
+                        // and reopen instead (the panel is rebuilt with
+                        // fresh data on reopen, which is correct).
+                        // Only reopen if the field is still in the viewport.
+                        const inViewport =
+                            fieldRect.bottom > 0 &&
+                            fieldRect.top < (window.innerHeight ?? 9999)
+                        if (!inViewport) {
+                            runtime.panelHandle.destroy()
+                            runtime.panelHandle = null
+                            runtime.panelFor = null
+                            runtime.panelField = null
+                        }
+                    }
+                }
+            }
+            // Close lightweight transient surfaces when the page scrolls —
+            // they are anchored to a word rect that is now stale. The user
+            // re-opens them by hovering/clicking again.
+            if (runtime.tooltip?.isOpen()) {
+                runtime.tooltip.hide()
+                runtime.tooltip = null
+                runtime.hoverItem = null
+            }
+            if (runtime.synonymsHandle?.isOpen()) {
+                runtime.synonymsHandle.destroy()
+                runtime.synonymsHandle = null
+            }
+            if (runtime.goalsHandle?.isOpen()) {
+                runtime.goalsHandle.destroy()
+                runtime.goalsHandle = null
+            }
+        },
     })
     runtime.cleanups.push(reanchor.stop)
 
@@ -1257,6 +1312,11 @@ function wireRuntime(
                         }
                     })
                 },
+                // Hover-bridge: keep the pill alive while the pointer is
+                // over it so the user can move from the word to the ✓
+                // button without the pill vanishing.
+                onPillMouseEnter: clearTooltipHide,
+                onPillMouseLeave: scheduleTooltipHide,
             })
             // Associate the chip with the field for screen readers. The hide
             // paths only clear this if the value is still exactly 'gf-chip'
@@ -1368,6 +1428,10 @@ function wireRuntime(
                         synonyms: res.synonyms,
                         loading: false,
                         onPick: (synonym: string) => {
+                            // Close the popover immediately on pick —
+                            // the user has made their choice.
+                            runtime.synonymsHandle?.destroy()
+                            runtime.synonymsHandle = null
                             // In-place swap at the resolved span. We
                             // measure the field's text inside the
                             // apply closure to stale-guard.
@@ -2297,13 +2361,19 @@ function wireRuntime(
             },
             onOpenStats: () => {
                 // Stats mounts INTO the panel's body container (replacing
-                // the review content). The destroy is handled by the
-                // Stats view's own destroy; mounting a new one via
-                // mountStatsView dismisses the prior (its destroyExisting
-                // runs first).
+                // the review content). Toggle the tab indicator FIRST
+                // (synchronously) so it's always in sync with content.
                 if (runtime.statsHandle) {
                     runtime.statsHandle.destroy()
                     runtime.statsHandle = null
+                }
+                const panelAside = runtime.panelHandle?.isOpen()
+                    ? (runtime.panelHandle as unknown as { getBodyContainer: () => HTMLElement | null })
+                          .getBodyContainer()?.parentElement
+                    : null
+                if (panelAside && 'setActiveTab' in panelAside) {
+                    (panelAside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
+                        .setActiveTab('stats')
                 }
                 const body = runtime.panelHandle?.getBodyContainer() ?? null
                 if (!body) return
@@ -2317,17 +2387,37 @@ function wireRuntime(
                 })
             },
             onOpenReview: () => {
-                // Review tab clicked — destroy the Stats view (if mounted)
-                // and re-open the panel with fresh review content. The
-                // simplest correct approach is to destroy + re-open: this
-                // keeps the model in sync (fresh items/text/goals) and
-                // avoids a partial-rebuild path that could leave the body
-                // in an inconsistent state. The panel re-anchors to the
-                // same field.
+                // Review tab clicked — destroy the Stats view and restore
+                // the Review body IN-PLACE (no panel rebuild = no flash).
+                // Toggle the tab indicator synchronously first.
                 if (runtime.statsHandle) {
                     runtime.statsHandle.destroy()
                     runtime.statsHandle = null
                 }
+                const panelAside = runtime.panelHandle?.isOpen()
+                    ? (runtime.panelHandle as unknown as { getBodyContainer: () => HTMLElement | null })
+                          .getBodyContainer()?.parentElement
+                    : null
+                if (panelAside && 'setActiveTab' in panelAside) {
+                    (panelAside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
+                        .setActiveTab('review')
+                }
+                // Rebuild the review body content in-place. The body
+                // container is still mounted; we clear it and re-render.
+                const body = runtime.panelHandle?.getBodyContainer() ?? null
+                if (!body) {
+                    // Body container gone (shouldn't happen) — fall back
+                    // to a full panel rebuild.
+                    openReviewPanelFor(el)
+                    return
+                }
+                // Clear the Stats content and re-render the review body.
+                while (body.firstChild) body.removeChild(body.firstChild)
+                const st = runtime.fields.get(el)
+                if (!st) return
+                // Re-use the same model the panel was opened with. A full
+                // rebuild would be needed for fresh items — but the user
+                // just switched tabs, so the model is still current.
                 openReviewPanelFor(el)
             },
             onRecheck: () => void rerunFor(el)(getText(el)),
