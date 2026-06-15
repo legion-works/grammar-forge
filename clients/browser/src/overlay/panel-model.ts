@@ -14,6 +14,7 @@
 import { CATEGORY_META } from '@/api/category'
 import type { Category } from '@/api/types'
 import {
+    BAND_COLOR,
     computeScore,
     highConfidenceItems,
     makeInsights,
@@ -183,7 +184,7 @@ export function buildPanelModel(input: {
         // band→color is a presentation concern of the existing view-model
         // (BAND_COLOR); inline this to keep panel-model free of an extra
         // import (the panel tests assert on the exact string match).
-        ringColor: bandColorFor(band),
+        ringColor: BAND_COLOR[band],
         ringOffset: 153.9 * (1 - score / 100),
         ringDasharray: RING_CIRCUMFERENCE,
         ringRadius: RING_RADIUS,
@@ -202,17 +203,7 @@ export function buildPanelModel(input: {
     }
 }
 
-// Inline copy of the BAND_COLOR palette to keep this file's imports
-// surface small (the panel tests don't need to import view-model just to
-// compare strings). MUST stay in lock-step with view-model.BAND_COLOR —
-// the unit tests assert the exact match in both directions.
-const BAND_COLOR: Record<Band, string> = {
-    excellent: '#16a34a',
-    good: '#0891b2',
-    fair: '#d97706',
-    'needs-work': '#dc2626',
-}
-
-function bandColorFor(band: Band): string {
-    return BAND_COLOR[band]
-}
+// BAND_COLOR is consumed directly from view-model (the single source of
+// truth for the band→ring-stroke mapping). The refactor lands the local
+// copy that used to live here to prevent the two from drifting — the
+// panel-model tests still assert the exact match against BAND_COLOR.

@@ -1360,14 +1360,19 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     document.addEventListener('keydown', onKeydown, { capture: true })
     cleanups.push(() => document.removeEventListener('keydown', onKeydown, { capture: true }))
 
-    // Track panel state transitions for the pill. The pill's hover panel
-    // is one-per-root (showPanel / hidePanel inside status-button.ts);
-    // the local `panelOpen` mirror lets hidePill / renderField skip the
-    // pill update while the panel is open (update() closes the panel).
-    // We hook the pill's own methods via a thin proxy: wrap openPanel /
-    // closePanel to flip the flag, but leave the underlying behaviour
-    // intact. The proxy is set after the first pill mount (in showPill)
-    // — see below.
+    // Track panel state transitions for the pill. The local `panelOpen`
+    // mirror lets hidePill / renderField skip the pill update while the
+    // W2b review panel is open (an update() during that window would
+    // close the panel). The flag is flipped in three places:
+    //   - `togglePanel` when the chatbar button / pill body opens or
+    //     dismisses the review panel (the W2b showPanel returns a handle
+    //     and the panel's own `onClose` callback resets the flag);
+    //   - the panel's `onClose` callback (the user clicks the head × or
+    //     hits Esc on the panel);
+    //   - `stop()` on teardown (the overlay is being torn down — clear
+    //     the flag so any leaked renderField call doesn't skip the pill).
+    // There is no pill-side proxy — the W2b review panel owns its own
+    // open/close lifecycle via showPanel(overlay.root, ...).
 
     return {
         stop: () => {
