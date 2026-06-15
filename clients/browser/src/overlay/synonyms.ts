@@ -85,6 +85,19 @@ export function offsetFromDblClick(
     event: MouseEvent,
     fieldEl: HTMLElement,
 ): number {
+    // For <textarea> and <input>, caretPositionFromPoint / caretRangeFromPoint
+    // return the textarea element itself (not a text node inside it), so
+    // range.setStart(fieldEl, 0) → range.setEnd(textarea, 0) → length 0 →
+    // offset 0 → always resolves the FIRST word. The reliable source for
+    // textarea/input is selectionStart: the browser selects the double-clicked
+    // word on dblclick, so selectionStart is the word's start offset.
+    if (
+        fieldEl instanceof HTMLTextAreaElement ||
+        fieldEl instanceof HTMLInputElement
+    ) {
+        const sel = fieldEl.selectionStart
+        return sel !== null ? sel : -1
+    }
     const doc = fieldEl.ownerDocument ?? document
     const x = event.clientX
     const y = event.clientY

@@ -144,6 +144,51 @@ describe('offsetFromDblClick', () => {
         expect(typeof n === 'number').toBe(true)
         field.remove()
     })
+
+    it('uses selectionStart for <textarea> (not caretPositionFromPoint which returns offset 0)', () => {
+        // Bug-fix: caretPositionFromPoint / caretRangeFromPoint return the
+        // textarea element itself (not a text node inside it) for <textarea>,
+        // so range.setStart(fieldEl, 0) → range.setEnd(textarea, 0) → length 0
+        // → offset 0 → always resolves the FIRST word ("I" in "I have a apple").
+        // The fix: for textarea/input, use selectionStart (the browser selects
+        // the double-clicked word on dblclick, so selectionStart is the word start).
+        const field = document.createElement('textarea')
+        field.value = 'I have a apple'
+        document.body.appendChild(field)
+        // Simulate the browser selecting "have" (offset 2..6) on dblclick.
+        field.setSelectionRange(2, 6)
+        const event = new MouseEvent('dblclick', { clientX: 1, clientY: 1 })
+        const n = offsetFromDblClick(event, field)
+        // Should return selectionStart (2), not 0 (first word).
+        expect(n).toBe(2)
+        field.remove()
+    })
+
+    it('uses selectionStart for <input> (same fix as textarea)', () => {
+        const field = document.createElement('input')
+        field.type = 'text'
+        field.value = 'hello world'
+        document.body.appendChild(field)
+        field.setSelectionRange(6, 11)
+        const event = new MouseEvent('dblclick', { clientX: 1, clientY: 1 })
+        const n = offsetFromDblClick(event, field)
+        expect(n).toBe(6)
+        field.remove()
+    })
+
+    it('resolveWordFromDblClick on a textarea returns the double-clicked word (not the first word)', () => {
+        // Integration test: the full path from dblclick → offset → word.
+        // "have" is at offset 2 in "I have a apple".
+        const field = document.createElement('textarea')
+        field.value = 'I have a apple'
+        document.body.appendChild(field)
+        field.setSelectionRange(2, 6)
+        const event = new MouseEvent('dblclick', { clientX: 1, clientY: 1 })
+        const resolved = resolveWordFromDblClick(event, 'I have a apple', field)
+        expect(resolved).not.toBeNull()
+        expect(resolved?.word).toBe('have')
+        field.remove()
+    })
 })
 
 function mkRoot(): ShadowRoot {
