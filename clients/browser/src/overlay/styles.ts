@@ -1146,6 +1146,31 @@ export const OVERLAY_CSS = `
   .gf-tip__dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
   .gf-tip__old { text-decoration: line-through; }
   .gf-tip__new { font-weight: 700; }
+  /* Quick-accept button inside the hover pill (DC: .gf-pillok). A small
+     green checkmark button that applies the suggestion without opening
+     the full card. pointer-events:auto is set inline by showTooltip when
+     onAccept is provided (the pill base is pointer-events:none). */
+  .gf-tip__accept {
+    margin-left: 4px;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(22, 163, 74, 0.16);
+    color: #16a34a;
+    cursor: pointer;
+    font: 700 12px/1 system-ui, -apple-system, sans-serif;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    pointer-events: auto;
+    transition: background 120ms ease-out, transform 120ms ease-out;
+  }
+  .gf-tip__accept:hover { background: rgba(22, 163, 74, 0.28); transform: scale(1.08); }
+  .gf-tip__accept:focus-visible { outline: 2px solid #16a34a; outline-offset: 1px; }
+  .gf-tip__old { text-decoration: line-through; }
+  .gf-tip__new { font-weight: 700; }
   .gf-tip__tail {
     position: absolute;
     top: 100%;

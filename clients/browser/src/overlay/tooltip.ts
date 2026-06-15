@@ -30,6 +30,12 @@ export interface TooltipOptions {
     diffCorrected: string
     /** True when the correction removes the text (no green side). */
     diffIsDeletion: boolean
+    /** Quick-accept callback — fires when the user clicks the ✓ button in
+     *  the hover pill. The orchestrator applies the primary replacement,
+     *  shows the Undo toast, and hides the tooltip. Optional: omit to
+     *  render the pill without the accept button (e.g. when the item has
+     *  no replacement). */
+    onAccept?: () => void
 }
 
 export interface TooltipHandle {
@@ -56,9 +62,27 @@ export function showTooltip(root: ShadowRoot, options: TooltipOptions): TooltipH
     tip.className = 'gf-tip'
     tip.id = 'gf-chip'
     tip.setAttribute('role', 'tooltip')
+    // When an accept button is present the pill needs pointer-events so
+    // the button is clickable. Without onAccept the pill stays inert.
+    if (options.onAccept) tip.style.pointerEvents = 'auto'
 
     const meta = CATEGORY_META[options.category]
     tip.innerHTML = renderInnerHTML(meta.badge, options)
+
+    // Wire the quick-accept button (rendered by renderInnerHTML when
+    // onAccept is provided). mousedown preventDefault keeps the field
+    // focused; click fires the accept callback.
+    if (options.onAccept) {
+        const btn = tip.querySelector<HTMLButtonElement>('.gf-tip__accept')
+        if (btn) {
+            btn.addEventListener('mousedown', (e) => e.preventDefault())
+            btn.addEventListener('click', (e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                options.onAccept!()
+            })
+        }
+    }
 
     positionTooltip(tip, options.anchorRect, view)
     root.appendChild(tip)
@@ -88,8 +112,15 @@ function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void 
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     tip.style.left = `${left}px`
     if (showAbove) {
-        tip.style.bottom = `${vh - anchor.top + ANCHOR_GAP}px`
-        tip.style.top = 'auto'
+        // Bug-fix: was `bottom: vh - anchor.top + ANCHOR_GAP` which is a
+        // CSS `bottom` value on a position:fixed element — that means
+        // "distance from viewport bottom", not "distance from viewport top".
+        // `vh - anchor.top + 6` = a large value that pushes the pill far
+        // off-screen. Use `top` instead: anchor.top - tipHeight - gap.
+        // We don't know tipHeight before layout, so use the estimate.
+        const estimatedTop = anchor.top - TOOLTIP_HEIGHT_ESTIMATE - ANCHOR_GAP
+        tip.style.top = `${Math.max(VIEWPORT_GUTTER, estimatedTop)}px`
+        tip.style.bottom = 'auto'
     } else {
         tip.style.top = `${anchor.bottom + ANCHOR_GAP}px`
         tip.style.bottom = 'auto'
@@ -98,12 +129,16 @@ function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void 
 
 function renderInnerHTML(badge: string, opts: TooltipOptions): string {
     // The diff fragment is already built (.gf-diff with __old/__arrow/
-    // __new) by diffInnerHTML; the tip just wraps it with the category
-    // dot and the downward caret (gf-tip__tail). The whole pill is
-    // pointer-events:none via the .gf-tip CSS rule — see styles.ts.
+    // __new) by diffInnerHTML; the tip wraps it with the category dot,
+    // an optional quick-accept button (DC: .gf-pillok, ✓ green button),
+    // and the downward caret (gf-tip__tail).
+    const acceptBtn = opts.onAccept && !opts.diffIsDeletion
+        ? `<button class="gf-tip__accept" type="button" title="Accept suggestion" aria-label="Accept suggestion">&#x2713;</button>`
+        : ''
     return (
         `<span class="gf-tip__dot" style="background:${badge}"></span>` +
         diffInnerHTML(opts.diffOriginal, opts.diffCorrected, opts.diffIsDeletion) +
+        acceptBtn +
         `<span class="gf-tip__tail" aria-hidden="true"></span>`
     )
 }

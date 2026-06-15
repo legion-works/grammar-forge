@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { dismissTooltipsIn, showTooltip } from '@/overlay/tooltip'
 
 function mkRoot(): ShadowRoot {
@@ -132,5 +132,80 @@ describe('showTooltip (preview pill)', () => {
         // just below the anchor (space permits) with a 6px gap.
         expect(tip.style.left).toBe('247px')
         expect(tip.style.top).toBe(`${customAnchor.bottom + 6}px`)
+    })
+
+    it('renders a .gf-tip__accept button when onAccept is provided (DC: .gf-pillok)', () => {
+        // DC reference: the hover pill includes a ✓ quick-accept button
+        // (gf-pillok) that applies the suggestion without opening the card.
+        const root = mkRoot()
+        const onAccept = vi.fn<() => void>()
+        showTooltip(root, {
+            anchorRect: ANCHOR,
+            category: 'grammar',
+            diffOriginal: 'was',
+            diffCorrected: 'were',
+            diffIsDeletion: false,
+            onAccept,
+        })
+        const tip = root.querySelector('.gf-tip') as HTMLElement
+        const btn = tip.querySelector('.gf-tip__accept') as HTMLButtonElement
+        expect(btn).not.toBeNull()
+        expect(btn.textContent?.trim()).toBe('✓')
+        btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(onAccept).toHaveBeenCalledOnce()
+    })
+
+    it('does NOT render .gf-tip__accept when onAccept is omitted (preview-only mode)', () => {
+        const root = mkRoot()
+        showTooltip(root, {
+            anchorRect: ANCHOR,
+            category: 'grammar',
+            diffOriginal: 'was',
+            diffCorrected: 'were',
+            diffIsDeletion: false,
+            // no onAccept
+        })
+        const tip = root.querySelector('.gf-tip') as HTMLElement
+        expect(tip.querySelector('.gf-tip__accept')).toBeNull()
+    })
+
+    it('does NOT render .gf-tip__accept for deletion-only corrections (no replacement to accept)', () => {
+        const root = mkRoot()
+        showTooltip(root, {
+            anchorRect: ANCHOR,
+            category: 'grammar',
+            diffOriginal: 'very',
+            diffCorrected: '',
+            diffIsDeletion: true,
+            onAccept: vi.fn<() => void>(),
+        })
+        const tip = root.querySelector('.gf-tip') as HTMLElement
+        expect(tip.querySelector('.gf-tip__accept')).toBeNull()
+    })
+
+    it('positions ABOVE the anchor when space below is insufficient (uses top, not bottom)', () => {
+        // Bug-fix: the old code used `style.bottom = vh - anchor.top + gap`
+        // on a position:fixed element. CSS `bottom` on fixed = distance from
+        // viewport bottom edge, so `vh - anchor.top + 6` is a large value
+        // that pushes the pill far off-screen. Fix: use `style.top` instead.
+        // jsdom innerHeight = 768. Place the anchor near the bottom so
+        // spaceBelow < TOOLTIP_HEIGHT_ESTIMATE (72px).
+        const root = mkRoot()
+        // anchor.bottom = 750, spaceBelow = 768 - 750 = 18 < 72 → showAbove
+        const nearBottomAnchor = new DOMRect(100, 730, 80, 20)
+        showTooltip(root, {
+            anchorRect: nearBottomAnchor,
+            category: 'grammar',
+            diffOriginal: 'was',
+            diffCorrected: 'were',
+            diffIsDeletion: false,
+        })
+        const tip = root.querySelector('.gf-tip') as HTMLElement
+        // Must use top (not bottom) and be above the anchor.
+        expect(tip.style.bottom).toBe('auto')
+        const topVal = parseInt(tip.style.top, 10)
+        expect(Number.isFinite(topVal)).toBe(true)
+        // The pill top must be above the anchor top (730).
+        expect(topVal).toBeLessThan(nearBottomAnchor.top)
     })
 })
