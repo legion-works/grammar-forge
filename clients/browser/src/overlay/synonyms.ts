@@ -249,34 +249,33 @@ export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): Synony
             options.onClose()
         }
     }
-    // Outside-click dismiss — delayed to ignore the same click that
-    // opened the popover. Composed-path aware (shadow-DOM safe).
-    let outsideClickArmed = false
-    const onOutsideMouseDown = (event: MouseEvent): void => {
-        if (!outsideClickArmed) return
+    // Outside-click (light-dismiss) — uses `pointerdown` matching the
+    // working panel pattern. `mousedown` misses pointer-events-only
+    // dismissals (e.g. Fastmail's compose area fires pointerdown but not
+    // always mousedown). composedPath() is shadow-DOM aware.
+    // Uses root.ownerDocument (not the bare `document` global) for
+    // correctness in content-script contexts.
+    let outsideListenerInstalled = false
+    const onOutsidePointerDown = (event: PointerEvent): void => {
+        if (!outsideListenerInstalled) return
         const path = event.composedPath()
         if (path.includes(pop)) return
         options.onClose()
     }
-    // Use the popover's own document (`root.ownerDocument`) rather than
-    // the bare `document` global. In a real extension / shadow-root
-    // context the field lives in a content-script document, and the
-    // orchestrator's other listeners are bound to that same document —
-    // a `document` global would target whatever the running script's
-    // lexical `document` happens to be, which is not always the same
-    // node. Both add + remove go through `doc` for symmetry. Behaviour
-    // is identical in jsdom (both resolve to the test's `document`).
     doc.addEventListener('keydown', onKeydown)
-    doc.addEventListener('mousedown', onOutsideMouseDown, true)
     const armTimer = view.setTimeout(() => {
-        outsideClickArmed = true
+        outsideListenerInstalled = true
+        doc.addEventListener('pointerdown', onOutsidePointerDown, true)
     }, 0)
 
     return {
         destroy: () => {
             view.clearTimeout(armTimer)
             doc.removeEventListener('keydown', onKeydown)
-            doc.removeEventListener('mousedown', onOutsideMouseDown, true)
+            if (outsideListenerInstalled) {
+                doc.removeEventListener('pointerdown', onOutsidePointerDown, true)
+                outsideListenerInstalled = false
+            }
             if (pop.isConnected) pop.remove()
         },
         isOpen: () => pop.isConnected,
