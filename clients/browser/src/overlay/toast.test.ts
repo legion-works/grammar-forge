@@ -148,6 +148,26 @@ describe('showToast', () => {
         expect(onDismiss).toHaveBeenCalledTimes(1)
     })
 
+    it('manual dismiss() cancels the auto-dismiss timer — timer callback is a no-op', () => {
+        const root = mkRoot()
+        const onDismiss = vi.fn<() => void>()
+        const h = showToast(root, {
+            message: 'Ignored',
+            onAction: () => {},
+            onDismiss,
+            durationMs: 500,
+        })
+        // Manual dismiss fires onDismiss once and clears the timer.
+        h.dismiss()
+        expect(onDismiss).toHaveBeenCalledTimes(1)
+        // Advance well past the original auto-dismiss — the cleared timer's
+        // callback must not fire into a detached node and must not
+        // double-report onDismiss.
+        vi.advanceTimersByTime(5000)
+        expect(onDismiss).toHaveBeenCalledTimes(1)
+        expect(root.querySelector('.gf-toast')).toBeNull()
+    })
+
     it('keeps only one toast per root (the new one replaces the old)', () => {
         const root = mkRoot()
         showToast(root, { message: 'A', onAction: () => {} })

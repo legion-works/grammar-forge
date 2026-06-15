@@ -63,6 +63,9 @@ const stub = (over: Partial<RenderableItem>): RenderableItem => ({
     diffIsDeletion: false,
     byteSpan: { start: 0, end: 0 },
     model: 'harper',
+    // W0 made status required on RenderableItem; tests default to 'open'
+    // (the only state that survives scoped-clear / visibleItems() filtering).
+    status: 'open',
     ...over,
 })
 

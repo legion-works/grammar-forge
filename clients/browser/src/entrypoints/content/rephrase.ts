@@ -146,6 +146,10 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                 // W1-4: the orchestrator owns the scope/tone state machine
                 // (W3 will re-issue rephrase() on changes). For now the
                 // card reflects the values used in the outgoing request.
+                // `scope` is hardcoded to 'sentence' — the scope state isn't
+                // persisted yet (deferred to W3 along with the re-issue
+                // wiring on onScopeChange); the segmented control will reflect
+                // whatever the orchestrator passes here.
                 scope: 'sentence',
                 tone: ((): 'neutral' | 'formal' | 'casual' => {
                     const t = s.rephraseTone
