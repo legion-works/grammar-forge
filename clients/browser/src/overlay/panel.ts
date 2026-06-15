@@ -73,6 +73,10 @@ export interface PanelOptions {
     /** Stats tab click — W2-4 wires the Stats view. The button is
      *  always rendered as a tab; clicking it fires this callback. */
     onOpenStats: () => void
+    /** Review tab click — fires when the user switches BACK from Stats to
+     *  Review. The orchestrator destroys the Stats view and re-renders the
+     *  review body content into the body container. */
+    onOpenReview: () => void
     /** Recheck button (head) — forces a fresh check of the field. */
     onRecheck: () => void
     /** Footer "Disable on this site" — flips the runtime-wide pause. */
@@ -185,6 +189,10 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
             options.onOpenStats()
             return
         }
+        if (action === 'open-review') {
+            options.onOpenReview()
+            return
+        }
         if (action === 'accept-all') {
             options.onAcceptAll()
             return
@@ -224,6 +232,26 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
     aside.addEventListener('click', onClick)
     aside.addEventListener('mousedown', onMouseDown)
 
+    // Outside-click (light-dismiss): a pointerdown outside the panel closes
+    // it. Delayed by one tick so the click that opened the panel (e.g. the
+    // orb click) doesn't immediately dismiss it. composedPath() is shadow-DOM
+    // aware — a click inside the panel's shadow subtree is correctly excluded.
+    // Clicks on the orb itself (which re-opens the panel) are also excluded
+    // because the orb's click handler fires onOpen → a new showPanel() which
+    // destroys this one first; the outside-click listener is removed in
+    // destroy() before the new panel mounts.
+    let outsideListenerInstalled = false
+    const onOutsidePointerDown = (event: PointerEvent): void => {
+        if (!aside.isConnected) return
+        const path = event.composedPath()
+        if (path.includes(aside)) return
+        options.onClose()
+    }
+    const outsideTimer = view.setTimeout(() => {
+        outsideListenerInstalled = true
+        doc.addEventListener('pointerdown', onOutsidePointerDown, true)
+    }, 0)
+
     // `bodyRef` mirrors the body element, but is nulled by destroy() so
     // `getBodyContainer()` returns null after teardown (the detached
     // .gf-panel__body element would otherwise be returned and a caller
@@ -234,6 +262,11 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
 
     return {
         destroy: () => {
+            view.clearTimeout(outsideTimer)
+            if (outsideListenerInstalled) {
+                doc.removeEventListener('pointerdown', onOutsidePointerDown, true)
+                outsideListenerInstalled = false
+            }
             aside.removeEventListener('click', onClick)
             aside.removeEventListener('mousedown', onMouseDown)
             if (aside.isConnected) aside.remove()
@@ -319,6 +352,7 @@ function renderChrome(
     const reviewTab = el(tabs, 'button', 'gf-tab is-active') as HTMLButtonElement
     reviewTab.type = 'button'
     reviewTab.setAttribute('role', 'tab')
+    reviewTab.setAttribute('data-action', 'open-review')
     reviewTab.textContent = 'Review'
     const statsTab = el(tabs, 'button', 'gf-tab') as HTMLButtonElement
     statsTab.type = 'button'

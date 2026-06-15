@@ -1123,6 +1123,18 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 statsHandle?.destroy()
                 statsHandle = mountStatsView(body, buildStatsViewDeps())
             },
+            onOpenReview: () => {
+                // Review tab clicked — destroy the Stats view and re-open
+                // the panel with fresh review content (same pattern as the
+                // browser orchestrator). Re-read st + anchor live so the
+                // panel gets fresh items/phase and the correct field rect.
+                statsHandle?.destroy()
+                statsHandle = null
+                const stNow = fields.get(el)
+                if (!stNow) return
+                const anchorNow = el.getBoundingClientRect()
+                openReviewPanel(el, stNow, anchorNow)
+            },
             onRecheck: () => void rerunFor(el)(getText(el)),
             onDisableSite: () => {
                 // W3-3b: per-site disable. The panel footer button

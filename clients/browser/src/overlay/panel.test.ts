@@ -48,6 +48,7 @@ function mkOptions(overrides: Partial<PanelOptions> = {}): PanelOptions {
         onAcceptItem: vi.fn<(i: RenderableItem) => void>(),
         onOpenGoals: vi.fn<() => void>(),
         onOpenStats: vi.fn<() => void>(),
+        onOpenReview: vi.fn<() => void>(),
         onRecheck: vi.fn<() => void>(),
         onDisableSite: vi.fn<() => void>(),
         onClose: vi.fn<() => void>(),
@@ -422,6 +423,34 @@ describe('showPanel (W2b review panel)', () => {
         const tab = root.querySelector('[data-action="open-stats"]') as HTMLElement
         tab.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
         expect(onOpenStats).toHaveBeenCalledOnce()
+    })
+
+    it('clicking the Review tab fires onOpenReview (Stats→Review switch)', () => {
+        // Bug-fix: the Review tab had no data-action, so clicking it was a
+        // no-op. The orchestrator's onOpenReview destroys the Stats view and
+        // re-renders the review body content.
+        const root = mkRoot()
+        const onOpenReview = vi.fn<() => void>()
+        showPanel(root, mkOptions({ onOpenReview }))
+        const tab = root.querySelector('[data-action="open-review"]') as HTMLElement
+        expect(tab).not.toBeNull()
+        tab.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(onOpenReview).toHaveBeenCalledOnce()
+    })
+
+    it('outside pointerdown fires onClose (light-dismiss)', async () => {
+        // Bug-fix: the review panel had no outside-click dismiss. A pointerdown
+        // outside the panel element must fire onClose.
+        // The arm timer is setTimeout(0) — wait for it with a real async tick.
+        const root = mkRoot()
+        const onClose = vi.fn<() => void>()
+        showPanel(root, mkOptions({ onClose }))
+        // Wait for the arm timer (setTimeout 0) to fire.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        // Pointerdown on document.body (outside the panel) → should close.
+        const outside = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true })
+        document.body.dispatchEvent(outside)
+        expect(onClose).toHaveBeenCalledOnce()
     })
 
     it('clicking "Disable on this site" fires onDisableSite', () => {

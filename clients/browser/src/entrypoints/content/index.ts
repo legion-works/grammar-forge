@@ -207,6 +207,19 @@ interface FieldState {
      * BEFORE the render that would re-flow the underlay).
      */
     scanlineHandle: ScanlineHandle | null
+    /**
+     * Timestamp (Date.now()) when the scan-line was last mounted for this
+     * field. Used to enforce a minimum visible duration (SCANLINE_MIN_MS)
+     * so a fast→done transition that completes in <100ms doesn't produce
+     * a barely-visible flicker. Null when no scan-line is/was mounted.
+     */
+    scanlineMountedAt: number | null
+    /**
+     * setTimeout handle for the deferred scan-line removal (enforces the
+     * minimum visible duration). Cleared on detach/teardown so the timer
+     * never fires against a detached field.
+     */
+    scanlineRemoveTimer: ReturnType<typeof setTimeout> | null
 }
 
 interface ActiveSuggestion {
@@ -676,6 +689,11 @@ function wireRuntime(
     // hide timer lives here on the runtime so teardown can cancel it.
     const HOVER_THROTTLE_MS = 250
     const TOOLTIP_HIDE_GRACE_MS = 150
+    // Minimum time the scan-line stays visible after mounting. The local
+    // Gemma fast path completes in ~100ms, so without a floor the scanline
+    // flashes on/off in a single frame. 400ms gives the user time to register
+    // the streaming hint without being distracting.
+    const SCANLINE_MIN_MS = 400
     // Minimum delay before reading a field's text after a paste, so rich editors
     // (Lexical/Discord) that apply the paste ASYNC have reconciled. Also the
     // floor for the paste-grace window (a user-configured grace below this would
@@ -1025,6 +1043,8 @@ function wireRuntime(
             phase: 'done',
             // W3-3 follow-up: scan-line is mounted on first `phase === 'fast'`.
             scanlineHandle: null,
+            scanlineMountedAt: null,
+            scanlineRemoveTimer: null,
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -1416,6 +1436,17 @@ function wireRuntime(
         // Cancel any pending paste-grace timer first so it can't fire a check
         // against a field that's leaving the DOM.
         clearPasteGrace(state)
+        // Cancel any pending deferred scan-line removal so it can't fire
+        // against a detached field's handle.
+        if (state.scanlineRemoveTimer !== null) {
+            clearTimeout(state.scanlineRemoveTimer)
+            state.scanlineRemoveTimer = null
+        }
+        if (state.scanlineHandle) {
+            removeScanline(state.scanlineHandle)
+            state.scanlineHandle = null
+            state.scanlineMountedAt = null
+        }
         state.restoreSpellcheck()
         // Destroy the per-field renderer. For overlay fields that's the
         // pooled DOM nodes inside the shared shadow root. For native fields
@@ -2222,6 +2253,20 @@ function wireRuntime(
                     removeDictWord: (word: string) => runtime.client.dictionaryRemove(word),
                 })
             },
+            onOpenReview: () => {
+                // Review tab clicked — destroy the Stats view (if mounted)
+                // and re-open the panel with fresh review content. The
+                // simplest correct approach is to destroy + re-open: this
+                // keeps the model in sync (fresh items/text/goals) and
+                // avoids a partial-rebuild path that could leave the body
+                // in an inconsistent state. The panel re-anchors to the
+                // same field.
+                if (runtime.statsHandle) {
+                    runtime.statsHandle.destroy()
+                    runtime.statsHandle = null
+                }
+                openReviewPanelFor(el)
+            },
             onRecheck: () => void rerunFor(el)(getText(el)),
             onDisableSite: togglePower,
             onClose: () => {
@@ -2274,11 +2319,40 @@ function wireRuntime(
             if (state.scanlineHandle && state.scanlineHandle.isMounted()) {
                 state.scanlineHandle.update(anchor)
             } else {
+                // Cancel any pending deferred removal before mounting a new one.
+                if (state.scanlineRemoveTimer !== null) {
+                    clearTimeout(state.scanlineRemoveTimer)
+                    state.scanlineRemoveTimer = null
+                }
                 state.scanlineHandle = mountScanline(runtime.overlay, anchor)
+                state.scanlineMountedAt = Date.now()
             }
         } else if (state.scanlineHandle) {
-            removeScanline(state.scanlineHandle)
-            state.scanlineHandle = null
+            // Enforce minimum visible duration: if the scan-line was mounted
+            // less than SCANLINE_MIN_MS ago, defer removal so the user sees
+            // the streaming hint for at least that long. The local Gemma fast
+            // path completes in ~100ms — without this floor the scanline
+            // flickers on/off in a single frame.
+            const elapsed = state.scanlineMountedAt !== null
+                ? Date.now() - state.scanlineMountedAt
+                : SCANLINE_MIN_MS
+            const remaining = SCANLINE_MIN_MS - elapsed
+            if (remaining > 0) {
+                if (state.scanlineRemoveTimer === null) {
+                    const handle = state.scanlineHandle
+                    state.scanlineRemoveTimer = setTimeout(() => {
+                        removeScanline(handle)
+                        state.scanlineRemoveTimer = null
+                        state.scanlineHandle = null
+                        state.scanlineMountedAt = null
+                    }, remaining)
+                }
+                // Don't null scanlineHandle yet — the deferred callback owns it.
+            } else {
+                removeScanline(state.scanlineHandle)
+                state.scanlineHandle = null
+                state.scanlineMountedAt = null
+            }
         }
         // W3-1: compute score + band via the view-model helpers. The
         // visible items run through `visibleItems` (LLM items dropped
@@ -2373,11 +2447,17 @@ function wireRuntime(
                 },
                 // W3-3 follow-up: scan-line destroyer so the attachment
                 // tears it down on detach/teardown. Mirrors the highlight
-                // + pill pattern.
+                // + pill pattern. Also clears the deferred-removal timer
+                // so it can't fire against a detached handle.
                 scanlineDestroy: () => {
+                    if (state.scanlineRemoveTimer !== null) {
+                        clearTimeout(state.scanlineRemoveTimer)
+                        state.scanlineRemoveTimer = null
+                    }
                     if (state.scanlineHandle) {
                         removeScanline(state.scanlineHandle)
                         state.scanlineHandle = null
+                        state.scanlineMountedAt = null
                     }
                 },
             })
