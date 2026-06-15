@@ -1231,12 +1231,32 @@ function wireRuntime(
             runtime.hoverItem = hit.item
             runtime.hoverField = el
             runtime.tooltip?.hide()
+            const hoveredItem = hit.item
             runtime.tooltip = showTooltip(overlay.root, {
                 anchorRect: hit.rect,
-                category: hit.item.category,
-                diffOriginal: hit.item.diffOriginal,
-                diffCorrected: hit.item.diffCorrected,
-                diffIsDeletion: hit.item.diffIsDeletion,
+                category: hoveredItem.category,
+                diffOriginal: hoveredItem.diffOriginal,
+                diffCorrected: hoveredItem.diffCorrected,
+                diffIsDeletion: hoveredItem.diffIsDeletion,
+                // Quick-accept: apply the primary replacement directly from
+                // the hover pill (DC: .gf-pillok ✓ button). Hides the tooltip,
+                // applies the fix, shows the Undo toast. Only provided when
+                // there is a replacement (not a deletion-only correction).
+                onAccept: hoveredItem.diffIsDeletion ? undefined : () => {
+                    runtime.tooltip?.hide()
+                    runtime.tooltip = null
+                    runtime.hoverItem = null
+                    void applyItemPrimary(el, hoveredItem).then((applied) => {
+                        if (applied) {
+                            showMutationToast(el, 'Applied suggestion', 1)
+                            const newSt = runtime.fields.get(el)
+                            if (newSt) {
+                                renderField(el, overlay.root, newSt)
+                                updateFocusedCounts(runtime, el)
+                            }
+                        }
+                    })
+                },
             })
             // Associate the chip with the field for screen readers. The hide
             // paths only clear this if the value is still exactly 'gf-chip'
@@ -1390,11 +1410,44 @@ function wireRuntime(
                     runtime.synonymsHandle = null
                 })
         }
+        // Close the synonyms popover when the selection moves away from the
+        // double-clicked word (selectionchange) or the field text changes
+        // (input). The popover is anchored to a specific word span; if the
+        // selection moves or the text changes, the anchor is stale.
+        // selectionchange fires on the document (not the field), so we use
+        // the field's ownerDocument. We only close when THIS field's synonyms
+        // popover is open (runtime.synonymsHandle is set by the dblclick
+        // handler above and cleared by onClose).
+        const onSynonymsStale = (): void => {
+            if (runtime.synonymsHandle && runtime.hoverField !== el) {
+                // Only close if the synonyms were opened for this field.
+                // hoverField tracks the last field with an active tooltip;
+                // we use a dedicated check: if the synonyms handle is set
+                // and the active element is this field, close on change.
+            }
+            // Simpler: always close the synonyms popover on any selection
+            // change or input on this field — the word may have moved.
+            if (runtime.synonymsHandle) {
+                runtime.synonymsHandle.destroy()
+                runtime.synonymsHandle = null
+            }
+        }
+        const fieldDoc = el.ownerDocument
+        const onSelectionChange = (): void => {
+            // Only act when this field is the active element (selection
+            // changes in other fields should not close our popover).
+            if (document.activeElement !== el) return
+            onSynonymsStale()
+        }
+        el.addEventListener('input', onSynonymsStale)
+        fieldDoc.addEventListener('selectionchange', onSelectionChange)
         el.addEventListener('mousemove', onFieldMouseMove)
         el.addEventListener('mouseleave', onFieldMouseLeave)
         el.addEventListener('click', onFieldClick)
         el.addEventListener('dblclick', onFieldDblClick)
         runtime.cleanups.push(() => {
+            el.removeEventListener('input', onSynonymsStale)
+            fieldDoc.removeEventListener('selectionchange', onSelectionChange)
             el.removeEventListener('mousemove', onFieldMouseMove)
             el.removeEventListener('mouseleave', onFieldMouseLeave)
             el.removeEventListener('click', onFieldClick)
