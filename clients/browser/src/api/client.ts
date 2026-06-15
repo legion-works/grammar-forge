@@ -5,6 +5,9 @@ import type {
     CorrectResponse,
     RephraseRequest,
     RephraseResponse,
+    StatsResponse,
+    SynonymsResponse,
+    ToneResponse,
 } from '@/api/types'
 
 // Rephrase round-trips a (possibly remote, possibly reasoning) LLM; the
@@ -238,5 +241,28 @@ export class BridgeClient {
 
     dictionaryRemove(word: string): Promise<void> {
         return this.del(`/dictionary/${encodeURIComponent(word)}`)
+    }
+
+    // ── Redesign endpoints (W2-foundation) ──────────────────────────────────
+    // The endpoint shapes are a runtime contract with the bridge:
+    //   GET  /stats    → StatsResponse
+    //   POST /tone     → ToneResponse  ({text, granularity?})
+    //   GET  /synonyms → SynonymsResponse (?word=X)
+    // They are added here as typed methods so every W2 surface can call them
+    // without re-deriving the URL/payload shape. Errors propagate via the
+    // shared `get`/`post` helpers (`bridge <path> <status>`).
+
+    stats(): Promise<StatsResponse> {
+        return this.get<StatsResponse>('/stats')
+    }
+
+    tone(text: string, granularity?: 'field' | 'sentence'): Promise<ToneResponse> {
+        const body: Record<string, unknown> = { text }
+        if (granularity) body.granularity = granularity
+        return this.post<ToneResponse>('/tone', body)
+    }
+
+    synonyms(word: string): Promise<SynonymsResponse> {
+        return this.get<SynonymsResponse>(`/synonyms?word=${encodeURIComponent(word)}`)
     }
 }
