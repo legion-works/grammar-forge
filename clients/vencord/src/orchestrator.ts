@@ -434,7 +434,19 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 debugLog('check done', { seq, items: st.items.length })
                 renderField(el, st)
             } catch (e) {
-                // Bridge unreachable: silent idle, no intrusive toast in v1.
+                // Bridge unreachable / stream errored — possibly AFTER the
+                // fast callback fired (correctStream delivered the fast
+                // frame, then the LLM leg rejected). The previous behaviour
+                // left `st.phase === 'fast'` and the review panel's
+                // streaming banner stuck on the next open. Mirror the
+                // browser's catch path (state.phase = 'done' + clear items
+                // + re-render) so the field is consistent AND the next
+                // panel open reads phase='done' and skips the banner.
+                if (seq === st.checkSeq) {
+                    st.items = []
+                    st.phase = 'done'
+                    renderField(el, st)
+                }
                 debugLog('check failed', e)
             }
         }
