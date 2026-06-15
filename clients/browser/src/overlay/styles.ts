@@ -1855,8 +1855,271 @@ export const OVERLAY_CSS = `
     opacity: 0.7;
   }
 
+  /* ============================================================
+   * Stats tab (.gf-stats) — retention surface mounted into the W2b
+   * review panel's body slot by stats-view.ts. Renders the four-card
+   * "this week" grid + the top-issues bar list + the personal-
+   * dictionary chip list. Sits in the same glass material as the
+   * panel it lives in (it inherits the parent); these rules govern
+   * the layout, typography, and chip/bar geometry only.
+   * ============================================================ */
+  .gf-stats {
+    padding: 12px 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .gf-stats__grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .gf-statcard {
+    padding: 11px 12px;
+    border-radius: 12px;
+    background: rgba(127, 127, 140, 0.08);
+    border: 1px solid rgba(127, 127, 140, 0.10);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .gf-statcard__value {
+    font: 700 20px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: inherit;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .gf-statcard__value.gf-skel {
+    width: 60%;
+    height: 20px;
+    border-radius: 6px;
+  }
+  .gf-statcard__label {
+    font: 600 10px/1.2 system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.65;
+  }
+  .gf-statcard__sub {
+    font: 400 11px/1.2 system-ui, sans-serif;
+    opacity: 0.65;
+    font-style: normal;
+  }
+  .gf-stats__sec {
+    font: 600 10.5px/1 system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.7;
+    margin: 4px 2px 6px;
+  }
+  .gf-stats__bars {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .gf-bar {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .gf-bar__label {
+    width: 74px;
+    font: 500 11.5px/1 system-ui, sans-serif;
+    opacity: 0.75;
+    flex: 0 0 auto;
+  }
+  .gf-bar__track {
+    flex: 1 1 auto;
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(127, 127, 140, 0.12);
+    overflow: hidden;
+  }
+  .gf-bar__fill {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    transition: width 240ms var(--gf-ease);
+  }
+  .gf-bar__count {
+    width: 24px;
+    text-align: right;
+    font: 600 11.5px/1 system-ui, sans-serif;
+    opacity: 0.7;
+    font-variant-numeric: tabular-nums;
+  }
+  .gf-dictchips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .gf-dictchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 25px;
+    padding: 0 5px 0 10px;
+    border-radius: 9999px;
+    background: rgba(127, 127, 140, 0.08);
+    border: 1px solid rgba(127, 127, 140, 0.18);
+    font: 500 12px/1 system-ui, sans-serif;
+    color: inherit;
+  }
+  .gf-dictchip__x {
+    appearance: none;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: inherit;
+    opacity: 0.6;
+    cursor: pointer;
+    font: 500 13px/1 system-ui, sans-serif;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: opacity 120ms ease-out, background 120ms ease-out;
+  }
+  .gf-dictchip__x:hover { opacity: 1; background: rgba(127, 127, 140, 0.16); }
+  .gf-dictchip__x:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-stats__empty {
+    font: 400 12px/1.35 system-ui, sans-serif;
+    opacity: 0.65;
+  }
+  .gf-stats__note {
+    font: 400 11px/1.45 system-ui, sans-serif;
+    opacity: 0.6;
+    margin-top: 6px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(127, 127, 140, 0.18);
+  }
+  .gf-stats__error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.18);
+    color: inherit;
+    font: 500 12px/1.3 system-ui, sans-serif;
+  }
+
+  /* ============================================================
+   * Synonyms popover (.gf-syn) — opens on double-click of a clean
+   * word. Renders a list of synonym rows (one per alternative).
+   * Mirrors the W2b popover surface contract: caller-measured
+   * anchorRect, no self-measure, opacity:1 default, transform-only
+   * entrance, glass material (inherits from the same glass the
+   * other popovers share via the OVERLAY_CSS surface).
+   * ============================================================ */
+  .gf-syn {
+    position: fixed;
+    pointer-events: auto;
+    z-index: 2147483647;
+    padding: 8px;
+    border-radius: 13px;
+    isolation: isolate;
+    contain: layout paint;
+    background: rgba(28, 28, 30, 0.78);
+    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
+    color: light-dark(#111, #f5f5f5);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+      0 1px 3px rgba(0, 0, 0, 0.14),
+      0 8px 24px rgba(0, 0, 0, 0.20);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    transform-origin: 50% 100%;
+    animation: gf-popover-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    opacity: 1;
+  }
+  .gf-syn__head {
+    font: 600 10px/1 system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.6;
+    padding: 3px 7px 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .gf-syn__list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 140px;
+  }
+  .gf-syn__row {
+    appearance: none;
+    width: 100%;
+    text-align: left;
+    padding: 7px 9px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: 500 13px/1 system-ui, sans-serif;
+    cursor: pointer;
+    transition: background 120ms ease-out;
+  }
+  .gf-syn__row:hover { background: rgba(127, 127, 140, 0.14); }
+  .gf-syn__row:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-syn__empty {
+    padding: 7px 9px;
+    font: 400 12px/1.35 system-ui, sans-serif;
+    opacity: 0.65;
+  }
+  .gf-syn__tail {
+    position: absolute;
+    left: 50%;
+    bottom: -5px;
+    transform: translateX(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: inherit;
+    border-right: 1px solid rgba(255, 255, 255, 0.10);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  }
+  .gf-syn__loading {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 11px;
+    font: 500 12px/1 system-ui, sans-serif;
+    opacity: 0.7;
+  }
+  .gf-syn__spinner {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 1.5px solid currentColor;
+    border-top-color: transparent;
+    opacity: 0.5;
+    animation: gf-spin 800ms linear infinite;
+  }
+  @keyframes gf-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Panel body slot — the W2-4 Stats view mounts into this
+   * container; the review content lives here too. Scrolling is
+   * delegated to the deepest child (.gf-panel__list or .gf-stats)
+   * so the body itself does not need its own overflow. */
+  .gf-panel__body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
   @media (prefers-reduced-transparency: reduce) {
-    .gf-panel-aside, .gf-goals-pop {
+    .gf-panel-aside, .gf-goals-pop, .gf-syn {
       background: color-mix(in oklab, #1c1c1e 92%, transparent);
       background: light-dark(
         color-mix(in oklab, #f5f5f5 92%, transparent),

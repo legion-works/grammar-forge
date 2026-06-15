@@ -87,6 +87,12 @@ export interface PanelHandle {
     destroy: () => void
     /** True while the panel is mounted in the shadow root. */
     isOpen: () => boolean
+    /** Get the body container — the slot that holds the review content
+     *  (banner + score + insights + actions + list). The W2-4 Stats view
+     *  mounts INTO this slot when the Stats tab is clicked: the orchestrator
+     *  calls `mountStatsView(panel.getBodyContainer(), deps)`. Returns
+     *  null after destroy(). */
+    getBodyContainer: () => HTMLElement | null
 }
 
 const VIEWPORT_GUTTER = 8
@@ -125,7 +131,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
         phase: options.phase,
     })
     const goalsLabel = formatFormality(options.goals.formality)
-    renderInto(aside, model, goalsLabel, options.onRephrase !== undefined)
+    const body = renderInto(aside, model, goalsLabel, options.onRephrase !== undefined)
 
     root.appendChild(aside)
     positionPanel(aside, options.anchorRect, view)
@@ -203,6 +209,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
             if (aside.isConnected) aside.remove()
         },
         isOpen: () => aside.isConnected,
+        getBodyContainer: () => body,
     }
 }
 
@@ -250,7 +257,7 @@ function renderInto(
     m: PanelModel,
     goalsLabel: string,
     hasRephrase: boolean,
-): void {
+): HTMLElement {
     // Head
     const head = el(aside, 'div', 'gf-panel__head')
     const logo = el(head, 'span', 'gf-panel__logo')
@@ -281,9 +288,17 @@ function renderInto(
     statsTab.setAttribute('data-action', 'open-stats')
     statsTab.textContent = 'Stats'
 
+    // Body slot — the review content (banner + score + insights + actions
+    // + list) lives inside this container. The W2-4 Stats view mounts INTO
+    // this same slot when the Stats tab is clicked (the orchestrator gets
+    // the container via `getBodyContainer()` and replaces the children).
+    // Keeping head + tabs + footer OUTSIDE the slot means the Stats view
+    // can render without a second copy of the head/chrome.
+    const body = el(aside, 'div', 'gf-panel__body')
+
     // Streaming banner
     if (m.showStreamingBanner) {
-        const banner = el(aside, 'div', 'gf-banner')
+        const banner = el(body, 'div', 'gf-banner')
         banner.setAttribute('aria-live', 'polite')
         const spinner = el(banner, 'span', 'gf-spinner')
         spinner.setAttribute('aria-hidden', 'true')
@@ -292,7 +307,7 @@ function renderInto(
     }
 
     // Score block: ring + band + count
-    const score = el(aside, 'div', 'gf-panel__score')
+    const score = el(body, 'div', 'gf-panel__score')
     score.appendChild(buildRingSvg(m))
     const right = el(score, 'div')
     const band = el(right, 'div', 'gf-band')
@@ -304,7 +319,7 @@ function renderInto(
         : `${String(m.suggestionCount)} suggestion${m.suggestionCount === 1 ? '' : 's'} as you type`
 
     // Insights
-    const insights = el(aside, 'div', 'gf-panel__insights')
+    const insights = el(body, 'div', 'gf-panel__insights')
     addStat(insights, 'Tone', null, toneHTML())
     addStat(insights, 'Readability', String(m.readabilityLabel), null)
     addStat(insights, 'Words', String(m.words), null)
@@ -312,7 +327,7 @@ function renderInto(
 
     // Bulk actions
     if (m.suggestionCount > 0) {
-        const actions = el(aside, 'div', 'gf-panel__actions')
+        const actions = el(body, 'div', 'gf-panel__actions')
         const acceptAll = el(actions, 'button', 'gf-panel__primary') as HTMLButtonElement
         acceptAll.type = 'button'
         acceptAll.setAttribute('data-action', 'accept-all')
@@ -333,7 +348,7 @@ function renderInto(
 
     // Grouped list (scrollable)
     if (m.groups.length > 0 || m.showMutedNote) {
-        const list = el(aside, 'div', 'gf-panel__list')
+        const list = el(body, 'div', 'gf-panel__list')
         for (const group of m.groups) {
             const g = el(list, 'div', 'gf-group')
             const head = el(g, 'div', 'gf-group__head')
@@ -401,6 +416,8 @@ function renderInto(
     disable.type = 'button'
     disable.setAttribute('data-action', 'disable-site')
     disable.textContent = 'Disable on this site'
+
+    return body
 }
 
 function el(parent: Node, tag: string, className?: string): HTMLElement {
