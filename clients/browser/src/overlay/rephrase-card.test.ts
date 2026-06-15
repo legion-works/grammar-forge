@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // Unit tests for the rephrase result card. The glass visual is not
 // unit-tested; we only verify that the card renders the rephrased text,
-// Apply / Apply-alt / Escape / close / one-per-root behave correctly.
+// Accept / accept-alt / scope / tone / regenerate / Escape / close /
+// one-per-root behave correctly.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     dismissRephraseCardsIn,
@@ -52,8 +53,13 @@ function mkOptions(overrides: Partial<RephraseCardOptions> = {}): RephraseCardOp
         original: 'the cats was here',
         rephrased: 'the cats were here',
         alternatives: ['the cat was here', 'the cats are here'],
-        onApply: vi.fn<(text: string) => void>(),
+        scope: 'sentence',
+        tone: 'neutral',
+        onAccept: vi.fn<(text: string) => void>(),
         onClose: vi.fn<() => void>(),
+        onScopeChange: vi.fn<(scope: 'sentence' | 'message') => void>(),
+        onToneChange: vi.fn<(tone: 'neutral' | 'formal' | 'casual') => void>(),
+        onRegenerate: vi.fn<() => void>(),
         ...overrides,
     }
 }
@@ -74,40 +80,40 @@ describe('showRephraseCard', () => {
         removePopoverStub()
     })
 
-    it('renders a .gf-rephrase-card with the rephrased text present', () => {
+    it('renders a .gf-rephrase card with the rephrased text present', () => {
         const opts = mkOptions()
         showRephraseCard(root, opts)
-        const card = root.querySelector('.gf-rephrase-card')
+        const card = root.querySelector('.gf-rephrase')
         expect(card).not.toBeNull()
         expect(card?.getAttribute('role')).toBe('dialog')
         expect(card?.getAttribute('aria-label')).toBe('Rephrase')
-        const text = card?.querySelector('.gf-rephrase-card__text')
+        const text = card?.querySelector('.gf-rephrase__text')
         expect(text?.textContent).toBe('the cats were here')
     })
 
-    it('Apply button calls onApply with the rephrased text', () => {
+    it('Accept button calls onAccept with the rephrased text', () => {
         const opts = mkOptions()
         const handle = showRephraseCard(root, opts)
-        const apply = root.querySelector<HTMLButtonElement>('[data-action="apply"]')
-        expect(apply).not.toBeNull()
-        apply?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-        expect(opts.onApply).toHaveBeenCalledExactlyOnceWith('the cats were here')
+        const accept = root.querySelector<HTMLButtonElement>('[data-action="accept"]')
+        expect(accept).not.toBeNull()
+        accept?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(opts.onAccept).toHaveBeenCalledExactlyOnceWith('the cats were here')
         expect(handle.isOpen()).toBe(false)
     })
 
-    it('an alternative button calls onApply with that alternative', () => {
+    it('an alternative chip calls onAccept with that alternative', () => {
         const opts = mkOptions()
         showRephraseCard(root, opts)
-        const alts = root.querySelectorAll<HTMLButtonElement>('[data-action="apply-alt"]')
+        const alts = root.querySelectorAll<HTMLButtonElement>('[data-action="accept-alt"]')
         expect(alts).toHaveLength(2)
         alts[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-        expect(opts.onApply).toHaveBeenCalledExactlyOnceWith('the cats are here')
+        expect(opts.onAccept).toHaveBeenCalledExactlyOnceWith('the cats are here')
     })
 
     it('Escape calls onClose and hides the card', () => {
         const opts = mkOptions()
         const handle = showRephraseCard(root, opts)
-        const card = root.querySelector('.gf-rephrase-card') as HTMLElement
+        const card = root.querySelector('.gf-rephrase') as HTMLElement
         card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
         expect(opts.onClose).toHaveBeenCalledOnce()
         expect(handle.isOpen()).toBe(false)
@@ -123,13 +129,13 @@ describe('showRephraseCard', () => {
         expect(handle.isOpen()).toBe(false)
     })
 
-    it('one-per-root: a second showRepraseCard replaces the prior', () => {
+    it('one-per-root: a second showRephraseCard replaces the prior', () => {
         const opts1 = mkOptions({ rephrased: 'first' })
         const opts2 = mkOptions({ rephrased: 'second' })
         showRephraseCard(root, opts1)
         showRephraseCard(root, opts2)
-        expect(root.querySelectorAll('.gf-rephrase-card')).toHaveLength(1)
-        const text = root.querySelector('.gf-rephrase-card__text')
+        expect(root.querySelectorAll('.gf-rephrase')).toHaveLength(1)
+        const text = root.querySelector('.gf-rephrase__text')
         expect(text?.textContent).toBe('second')
     })
 
@@ -137,22 +143,114 @@ describe('showRephraseCard', () => {
         const opts = mkOptions()
         const handle = showRephraseCard(root, opts)
         handle.hide()
-        expect(root.querySelector('.gf-rephrase-card')).toBeNull()
+        expect(root.querySelector('.gf-rephrase')).toBeNull()
         expect(handle.isOpen()).toBe(false)
     })
 
     it('dismissRephraseCardsIn removes every card in the root', () => {
         showRephraseCard(root, mkOptions())
         dismissRephraseCardsIn(root)
-        expect(root.querySelector('.gf-rephrase-card')).toBeNull()
+        expect(root.querySelector('.gf-rephrase')).toBeNull()
     })
 
     it('uses popover="manual" when the Popover API is available', () => {
         showRephraseCard(root, mkOptions())
-        const card = root.querySelector('.gf-rephrase-card') as HTMLElement
+        const card = root.querySelector('.gf-rephrase') as HTMLElement
         const hasPopoverApi = typeof (card as { showPopover?: unknown }).showPopover === 'function'
         const popoverAttr = hasPopoverApi ? card.getAttribute('popover') : null
         expect(popoverAttr).toBe('manual')
+    })
+})
+
+describe('rephrase card scope + tone controls', () => {
+    let root: ShadowRoot
+    beforeEach(() => {
+        root = mkRoot()
+        installPopoverStub()
+    })
+    afterEach(() => {
+        removePopoverStub()
+    })
+
+    it('renders the two scope seg buttons with the active one carrying .is-active', () => {
+        showRephraseCard(root, mkOptions({ scope: 'message' }))
+        const scopeBtns = root.querySelectorAll<HTMLButtonElement>('[data-action="scope"]')
+        expect(scopeBtns).toHaveLength(2)
+        const values = Array.from(scopeBtns).map((b) => b.dataset.value)
+        expect(values).toEqual(['sentence', 'message'])
+        const active = Array.from(scopeBtns).find((b) => b.classList.contains('is-active'))
+        expect(active?.dataset.value).toBe('message')
+    })
+
+    it('clicking a scope seg button fires onScopeChange with that scope and keeps the card open', () => {
+        const opts = mkOptions({ scope: 'sentence' })
+        const handle = showRephraseCard(root, opts)
+        const msgBtn = root.querySelector<HTMLButtonElement>(
+            '[data-action="scope"][data-value="message"]',
+        )
+        expect(msgBtn).not.toBeNull()
+        msgBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(opts.onScopeChange).toHaveBeenCalledExactlyOnceWith('message')
+        // The card stays open — the orchestrator replaces it with a pending then result.
+        expect(handle.isOpen()).toBe(true)
+    })
+
+    it('renders the three tone seg buttons with the active one carrying .is-active', () => {
+        showRephraseCard(root, mkOptions({ tone: 'formal' }))
+        const toneBtns = root.querySelectorAll<HTMLButtonElement>('[data-action="tone"]')
+        expect(toneBtns).toHaveLength(3)
+        const values = Array.from(toneBtns).map((b) => b.dataset.value)
+        expect(values).toEqual(['neutral', 'formal', 'casual'])
+        const active = Array.from(toneBtns).find((b) => b.classList.contains('is-active'))
+        expect(active?.dataset.value).toBe('formal')
+    })
+
+    it('clicking a tone seg button fires onToneChange with that tone', () => {
+        const opts = mkOptions({ tone: 'neutral' })
+        const handle = showRephraseCard(root, opts)
+        const casualBtn = root.querySelector<HTMLButtonElement>(
+            '[data-action="tone"][data-value="casual"]',
+        )
+        casualBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(opts.onToneChange).toHaveBeenCalledExactlyOnceWith('casual')
+        expect(handle.isOpen()).toBe(true)
+    })
+
+    it('clicking the Regenerate button fires onRegenerate', () => {
+        const opts = mkOptions()
+        const handle = showRephraseCard(root, opts)
+        const regen = root.querySelector<HTMLButtonElement>('[data-action="regenerate"]')
+        expect(regen).not.toBeNull()
+        regen?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(opts.onRegenerate).toHaveBeenCalledTimes(1)
+        // The card stays open — the orchestrator swaps in a pending card then
+        // a new result. The card itself is a render target, not a state owner.
+        expect(handle.isOpen()).toBe(true)
+    })
+})
+
+describe('rephrase card head', () => {
+    let root: ShadowRoot
+    beforeEach(() => {
+        root = mkRoot()
+        installPopoverStub()
+    })
+    afterEach(() => {
+        removePopoverStub()
+    })
+
+    it('shows the modelLabel as faint text in the head when provided', () => {
+        showRephraseCard(root, mkOptions({ modelLabel: 'Gemma' }))
+        const head = root.querySelector('.gf-rephrase__head')
+        expect(head).not.toBeNull()
+        const faint = head?.querySelector('.gf-faint')
+        expect(faint?.textContent).toContain('Gemma')
+    })
+
+    it('omits the modelLabel span when not provided', () => {
+        showRephraseCard(root, mkOptions())
+        const head = root.querySelector('.gf-rephrase__head')
+        expect(head?.querySelector('.gf-faint')).toBeNull()
     })
 })
 
@@ -166,23 +264,26 @@ describe('pending and error states', () => {
         removePopoverStub()
     })
 
-    it('showRephrasePending renders a spinner card with no action buttons', () => {
+    it('showRephrasePending renders a skeleton + "Generating" label', () => {
         const handle = showRephrasePending(root, {
             anchorRect: new DOMRect(),
             onClose: () => {},
+            modelLabel: 'Gemma',
         })
-        const card = root.querySelector('.gf-rephrase-card--pending')
+        const card = root.querySelector('.gf-rephrase--pending')
         expect(card).not.toBeNull()
-        expect(card!.querySelector('[data-action="apply"]')).toBeNull()
-        expect(card!.textContent).toContain('Rephrasing')
+        expect(card!.querySelector('[data-action="accept"]')).toBeNull()
+        expect(card!.querySelectorAll('.gf-skel').length).toBeGreaterThanOrEqual(2)
+        expect(card!.textContent).toContain('Generating')
+        expect(card!.textContent).toContain('Gemma')
         expect(handle.isOpen()).toBe(true)
     })
 
     it('a result card replaces a pending card (one-per-root)', () => {
         showRephrasePending(root, { anchorRect: new DOMRect(), onClose: () => {} })
         showRephraseCard(root, mkOptions({}))
-        expect(root.querySelectorAll('.gf-rephrase-card')).toHaveLength(1)
-        expect(root.querySelector('.gf-rephrase-card--pending')).toBeNull()
+        expect(root.querySelectorAll('.gf-rephrase')).toHaveLength(1)
+        expect(root.querySelector('.gf-rephrase--pending')).toBeNull()
     })
 
     it('showRephraseError renders the message and Retry fires onRetry', () => {
@@ -193,13 +294,11 @@ describe('pending and error states', () => {
             onRetry,
             onClose: () => {},
         })
-        const card = root.querySelector('.gf-rephrase-card--error')!
+        const card = root.querySelector('.gf-rephrase--error')!
         expect(card.textContent).toContain('Rephrase failed')
         const retry = card.querySelector<HTMLElement>('[data-action="retry"]')!
         retry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         expect(onRetry).toHaveBeenCalledTimes(1)
-        // retry closes the card (the caller is expected to re-show pending or
-        // a result via the rephrase flow).
-        expect(root.querySelector('.gf-rephrase-card--error')).toBeNull()
+        expect(root.querySelector('.gf-rephrase--error')).toBeNull()
     })
 })

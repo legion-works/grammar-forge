@@ -72,7 +72,12 @@ export function openRephraseFor(
                 original: res.original,
                 rephrased: res.rephrased,
                 alternatives: res.alternatives,
-                onApply: (chosen: string) => {
+                // W1-4: the card reflects the values used in the outgoing
+                // request; the orchestrator (W3) wires the state machine
+                // that re-issues rephrase() on scope/tone/regenerate.
+                scope: 'sentence',
+                tone: 'neutral',
+                onAccept: (chosen: string) => {
                     const live = getText(el)
                     if (live.slice(span.start, span.end) !== text) {
                         deps.debugLog('rephrase stale span; not applying')
@@ -81,6 +86,10 @@ export function openRephraseFor(
                     void applySlateFix(el, span, chosen, deps.debugLog).then(() => onAfterApply())
                 },
                 onClose: () => {},
+                onScopeChange: (scope) => deps.debugLog('rephrase scope change', scope),
+                onToneChange: (tone) => deps.debugLog('rephrase tone change', tone),
+                onRegenerate: () => deps.debugLog('rephrase regenerate'),
+                modelLabel: 'Gemma',
             })
             deps.debugLog('rephrase done', { alternatives: res.alternatives.length })
         })

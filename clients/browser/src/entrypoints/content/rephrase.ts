@@ -143,7 +143,16 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                 original: res.original,
                 rephrased: res.rephrased,
                 alternatives: res.alternatives,
-                onApply: (chosen: string) => {
+                // W1-4: the orchestrator owns the scope/tone state machine
+                // (W3 will re-issue rephrase() on changes). For now the
+                // card reflects the values used in the outgoing request.
+                scope: 'sentence',
+                tone: ((): 'neutral' | 'formal' | 'casual' => {
+                    const t = s.rephraseTone
+                    if (t === 'formal' || t === 'casual') return t
+                    return 'neutral'
+                })(),
+                onAccept: (chosen: string) => {
                     const live = getText(el)
                     if (live.slice(span.start, span.end) !== text) {
                         debugWarn('rephrase', 'selection span went stale; not applying')
@@ -154,6 +163,19 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                     })
                 },
                 onClose: () => {},
+                onScopeChange: (scope) => {
+                    // W1-4 stub: the orchestrator (W3) will re-issue
+                    // rephrase() with the new scope and replace the card
+                    // with pending → result. W1b only delivers the callback.
+                    debugWarn('rephrase', 'scope changed to', scope)
+                },
+                onToneChange: (tone) => {
+                    debugWarn('rephrase', 'tone changed to', tone)
+                },
+                onRegenerate: () => {
+                    debugWarn('rephrase', 'regenerate requested')
+                },
+                modelLabel: 'Gemma',
             })
         } catch (e) {
             debugWarn('rephrase', 'rephrase failed', e)
