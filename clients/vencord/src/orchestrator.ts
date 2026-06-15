@@ -1008,6 +1008,14 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // streaming LLM frame is still in flight, the panel shows
             // the streaming banner; once it lands, the LLM items appear.
             phase: st.phase,
+            // W3-3b follow-up: when the site is paused (togglePause flipped
+            // `paused` to true), the panel renders the paused empty-state
+            // — "GrammarForge is paused" + "Turn on for this site". The
+            // toggle button routes through onDisableSite → togglePause,
+            // same as the active-mode footer. Same `paused` source the
+            // pill reads for its `disabled: paused` flag, so orb-power
+            // state and panel-disabled state agree.
+            disabled: paused,
             // Panel clicks do not auto-close the panel (the user may
             // accept several suggestions before dismissing); the panel
             // stays open until × / Esc / onDisableSite. The apply

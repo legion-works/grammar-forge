@@ -450,6 +450,11 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             togglePower,
             pillPosition,
             initialCheckField,
+            // W3-3b follow-up: same `pausedCleanups` source the active
+            // runtime's status pill AND the paused pill read to decide
+            // which mount to show. Re-read at every panel open so a
+            // mid-session pause flip is reflected on the next showPanel.
+            () => pausedCleanups !== null,
             // W3-2: wireRuntime registers a callback that start's
             // settings watcher can call to refresh every field's render
             // + re-open the panel on a goals change. Wire it in BOTH
@@ -609,6 +614,13 @@ function wireRuntime(
     togglePower: () => void,
     pillPosition: PillPosition,
     initialCheckField: HTMLElement | null,
+    /** W3-3b follow-up: same `pausedCleanups` source the active runtime's
+     *  status pill AND the paused pill read to decide which mount to show.
+     *  start() owns `pausedCleanups` (wireRuntime can't see start()'s
+     *  scope), so it passes a getter. The panel's `disabled` prop reads
+     *  this to render the paused empty-state when the user opens the
+     *  panel while the site is paused. */
+    isPaused: () => boolean = () => false,
     /** W3-2: register a callback the start() settings watcher calls on
      *  a goals change. wireRuntime wires up the closure (it has access
      *  to `renderField` + `openReviewPanelFor` which live inside
@@ -2069,6 +2081,18 @@ function wireRuntime(
             text,
             goals: st.goals,
             phase: st.phase,
+            // W3-3b follow-up: when the site is paused (pausedCleanups is
+            // the single source the active runtime's orb AND the paused
+            // pill both check — see reconcile() + mountPausedModeLocal),
+            // the panel renders the paused empty-state with a "Turn on
+            // for this site" button. The button routes through
+            // onDisableSite → togglePower → setSettings(blockedSites),
+            // and the settings watcher reconciles by swapping the
+            // paused pill for the active runtime. Read via the `isPaused`
+            // getter wireRuntime received from start() so the two
+            // surfaces never disagree. Orb-power state and
+            // panel-disabled state always agree.
+            disabled: isPaused(),
             onAcceptAll: () => {
                 void applyAllFor(el).then(() => {
                     showMutationToast(el, 'Accepted all suggestions', visible.length)
