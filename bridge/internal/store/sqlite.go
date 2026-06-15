@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS edits (
     signal_ts     INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_edits_correction ON edits(correction_id);
+CREATE INDEX IF NOT EXISTS idx_edits_category   ON edits(category);
 CREATE INDEX IF NOT EXISTS idx_edits_signal ON edits(signal);
 CREATE TABLE IF NOT EXISTS tone_signals (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,12 +259,13 @@ func (s *SQLite) CountStatsExtended(ctx context.Context, now time.Time) (correct
 	// streak starts at the `now` day; a gap of >=1 day terminates the
 	// walk immediately.
 	streak := 0
-	for dayRows.Next() {
+	expected := nowDay.UnixMilli() / 86400000
+	chainBroken := false
+	for !chainBroken && dayRows.Next() {
 		var dayEpoch int64
 		if err := dayRows.Scan(&dayEpoch); err != nil {
 			return correction.StatsExtended{}, fmt.Errorf("scan streak day: %w", err)
 		}
-		expected := nowDay.UnixMilli() / 86400000
 		gap := int(expected - dayEpoch)
 		switch gap {
 		case 0:
@@ -278,13 +280,12 @@ func (s *SQLite) CountStatsExtended(ctx context.Context, now time.Time) (correct
 			// broke. The DESC ordering means the first non-matching row
 			// terminates the walk.
 			_ = dayRows.Close()
-			goto streakDone
+			chainBroken = true
 		}
 	}
 	if err := dayRows.Err(); err != nil {
 		return correction.StatsExtended{}, fmt.Errorf("rows streak days: %w", err)
 	}
-streakDone:
 	out.Streak = streak
 
 	// words_this_week — sum of whitespace-delimited word counts of
