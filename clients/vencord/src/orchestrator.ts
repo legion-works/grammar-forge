@@ -1737,6 +1737,17 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             s.itemRects = []
             s.hoverItemIndex = null
             s.highlightLayer?.reconcile([])
+            // W3-3 follow-up: a blur during phase='fast' would otherwise
+            // leave the streaming scan-line wrapper anchored to a stale
+            // field rect (the user is no longer looking at the field).
+            // Tear it down + reset phase so the next focus + check cycle
+            // starts clean. Consistent with detach + togglePause + the
+            // stream-error catch path. removeScanline is idempotent.
+            if (s.scanlineHandle) {
+                removeScanline(s.scanlineHandle)
+                s.scanlineHandle = null
+            }
+            s.phase = 'done'
         }
         el.addEventListener('blur', onFieldBlur)
         cleanups.push(() => el.removeEventListener('blur', onFieldBlur))
@@ -1778,6 +1789,19 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         st.highlightLayer = null
         openPopovers.get(el)?.hide()
         openPopovers.delete(el)
+        // W3-3 follow-up leak fix: the Vencord orchestrator never calls
+        // st.attachment.setHandles(), so the attachment's scanlineDestroy
+        // slot is undefined and st.attachment.detach() cannot reach the
+        // live scan-line. Teardown is explicit: a field that switches
+        // channels mid-fast-frame (no check in flight, so rerunFor's
+        // !el.isConnected branch never fires) would otherwise orphan a
+        // fixed-position wrapper inside the overlay host — a stuck sweep
+        // over Discord until stop(). removeScanline is idempotent so a
+        // re-detach is a no-op.
+        if (st.scanlineHandle) {
+            removeScanline(st.scanlineHandle)
+            st.scanlineHandle = null
+        }
         st.attachment.detach()
         trackedFields.delete(el)
         fields.delete(el)

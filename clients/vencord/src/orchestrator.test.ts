@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
 import { nextCheckSeq } from '@/lib/check-seq'
 import type { RenderableItem } from '@/lib/pipeline'
@@ -12,6 +12,48 @@ import {
     buildHoverPreviewText,
 } from './orchestrator'
 import { isWithinOverlay } from '@/overlay/shadow-host'
+import type { CorrectResponse } from '@/api/types'
+import { startOrchestrator, type OrchestratorApi } from './orchestrator'
+import type { GrammarForgeConfig } from './settings'
+
+// Mock the bridge client so correctStream calls onFast synchronously and
+// the final promise never resolves. The orchestrator's rerunFor path:
+//   1. onFast fires synchronously → st.phase = 'fast' → renderField
+//      mounts the scan-line (via the helper)
+//   2. await correctStream() suspends (never resolves) → the scan-line
+//      stays mounted → the field is in a 'fast' window with NO check in
+//      flight (the final hasn't returned).
+// This reproduces the exact leak the fix targets: a stale 'fast' phase
+// at detach time, with no rerunFor to clean it up. Before the fix, the
+// scan-line wrapper would orphan in the overlay host; after the fix,
+// detach() explicitly removes it.
+const neverResolving = new Promise<CorrectResponse>(() => {})
+const correctStreamMock = vi.fn<
+    (req: unknown, onFast: (res: CorrectResponse) => void) => Promise<CorrectResponse>
+>(async (_req, onFast) => {
+    onFast({ original: '', suggestions: [], score: 100 })
+    return neverResolving
+})
+
+vi.mock('@/api/client', () => ({
+    BridgeClient: class {
+        correctStream = correctStreamMock
+        signal = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
+        stats = vi.fn<() => Promise<unknown>>().mockResolvedValue({})
+        dictionaryList = vi.fn<() => Promise<{ words: string[] }>>().mockResolvedValue({ words: [] })
+        dictionaryRemove = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
+        dictionaryAdd = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
+        rephrase = vi.fn<() => Promise<unknown>>().mockResolvedValue({ suggestions: [] })
+        tone = vi.fn<() => Promise<unknown>>().mockResolvedValue({ tone: [] })
+        synonyms = vi.fn<() => Promise<unknown>>().mockResolvedValue({ synonyms: [] })
+        health = vi.fn<() => Promise<unknown>>().mockResolvedValue({ status: 'ok' })
+        correct = vi.fn<() => Promise<CorrectResponse>>().mockResolvedValue({
+            original: '',
+            suggestions: [],
+            score: 100,
+        })
+    },
+}))
 
 describe('inputGate', () => {
     it('schedules a check for plain typing', () => {
@@ -333,5 +375,147 @@ describe('rephrase flow — pending → result is a single user-perceived transi
         expect(cardAnchor!.top).toBe(pendingAnchor!.top)
         expect(cardAnchor!.width).toBe(pendingAnchor!.width)
         expect(cardAnchor!.height).toBe(pendingAnchor!.height)
+    })
+})
+
+describe('vencord orchestrator — detach removes the live scan-line (W3-3 leak fix)', () => {
+    // The leak the reviewer's review found: the Vencord orchestrator never
+    // calls st.attachment.setHandles(), so the attachment's scanlineDestroy
+    // slot is always undefined and st.attachment.detach() can't reach the
+    // scan-line. A field that switched channels mid-fast-frame (no check
+    // in flight, so rerunFor's !el.isConnected branch never fires) would
+    // orphan a fixed-position wrapper inside the overlay host — a stuck
+    // sweep over Discord until stop(). The fix is three explicit lines in
+    // detach(). This suite drives the orchestrator end-to-end and asserts
+    // the post-detach DOM is clean.
+    let api: OrchestratorApi
+    const cfg: GrammarForgeConfig = {
+        bridgeUrl: 'http://localhost',
+        realtimeDelayMs: 150,
+        acceptHotkey: 'ctrl+.',
+        rephraseHotkey: 'ctrl+/',
+        checkPastedText: false,
+        allowRemoteBridge: false,
+        debugLogging: false,
+        goals: { audience: 'general', formality: 'neutral' },
+    }
+
+    beforeEach(() => {
+        correctStreamMock.mockClear()
+    })
+    afterEach(() => {
+        api?.stop()
+        document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
+        document
+            .querySelectorAll('[data-grammarforge-scanline]')
+            .forEach((el) => el.remove())
+    })
+
+    it('removes the scan-line wrapper when a field with a live scan-line is detached', async () => {
+        api = startOrchestrator(() => cfg)
+
+        // A fake Discord composer that isDiscordComposer() accepts
+        // (role=textbox, contenteditable=true, ancestor class stem
+        // "channelTextArea").
+        const composer = document.createElement('div')
+        composer.setAttribute('role', 'textbox')
+        composer.setAttribute('contenteditable', 'true')
+        const wrapper = document.createElement('div')
+        wrapper.className = 'channelTextArea_inner'
+        wrapper.appendChild(composer)
+        document.body.appendChild(wrapper)
+
+        // Drain the field observer's initial sweep (two rAFs — the
+        // observer schedules on rAF, the orchestrator's attach runs in
+        // that rAF, and a second rAF is the safe bet for any nested
+        // microtasks).
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        // Trigger a check by dispatching a beforeinput event with the
+        // contenteditable inputType that inputGate() routes to 'check'.
+        composer.dispatchEvent(
+            new InputEvent('beforeinput', {
+                inputType: 'insertText',
+                bubbles: true,
+                cancelable: true,
+                data: 'a',
+            }),
+        )
+
+        // Wait for the 150ms debouncer + a couple of rAFs for the async
+        // chain (correctStream call → onFast synchronously → renderField
+        // → scanline mount).
+        await new Promise<void>((r) => setTimeout(r, 200))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        // The orchestrator's onFast fired → st.phase = 'fast' → renderField
+        // mounted the scan-line. Verify it's in the overlay host. The
+        // final promise is pending (neverResolving), so the scan-line is
+        // STILL mounted — exactly the leak condition.
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        expect(host).not.toBeNull()
+        const before = host?.shadowRoot?.querySelector('[data-grammarforge-scanline]')
+        expect(before).not.toBeNull()
+        // The bridge was called exactly once (the fast frame; the final
+        // never resolves so there's no second call). The seq guard inside
+        // rerunFor would have dropped a second one anyway.
+        expect(correctStreamMock).toHaveBeenCalledOnce()
+
+        // Detach: remove the field from the DOM. The orchestrator's field
+        // observer fires onFieldDetached → detach(el). Before the fix, the
+        // scan-line wrapper would orphan in the host (stuck sweep). After
+        // the fix, detach() explicitly removes it.
+        composer.remove()
+        wrapper.remove()
+
+        // Drain the field observer's detach rAF.
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        const after = host?.shadowRoot?.querySelector('[data-grammarforge-scanline]')
+        expect(after).toBeNull()
+    })
+
+    it('removes the scan-line on a real (non-detach) blur', async () => {
+        // The onFieldBlur nit: blurring the field while phase='fast' must
+        // also tear down the scan-line. Drives the same fast-frame
+        // setup, then blurs the composer (without removing it) and
+        // asserts the scan-line is gone.
+        api = startOrchestrator(() => cfg)
+
+        const composer = document.createElement('div')
+        composer.setAttribute('role', 'textbox')
+        composer.setAttribute('contenteditable', 'true')
+        const wrapper = document.createElement('div')
+        wrapper.className = 'channelTextArea_inner'
+        wrapper.appendChild(composer)
+        document.body.appendChild(wrapper)
+
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        composer.dispatchEvent(
+            new InputEvent('beforeinput', {
+                inputType: 'insertText',
+                bubbles: true,
+                cancelable: true,
+                data: 'a',
+            }),
+        )
+        await new Promise<void>((r) => setTimeout(r, 200))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        expect(host?.shadowRoot?.querySelector('[data-grammarforge-scanline]')).not.toBeNull()
+
+        // Focus, then blur to a target OUTSIDE the overlay host (genuine
+        // exit, not the focus-steal guard).
+        composer.focus()
+        composer.dispatchEvent(new FocusEvent('blur', { relatedTarget: null }))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        const after = host?.shadowRoot?.querySelector('[data-grammarforge-scanline]')
+        expect(after).toBeNull()
     })
 })
