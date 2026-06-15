@@ -54,6 +54,24 @@ export function createOverlayHost(doc: Document = document): OverlayHost {
     // children away from the viewport.
     host.style.cssText =
         'position: absolute; top: 0; left: 0; pointer-events: none; z-index: 2147483647;'
+    // W3-4: light + dark theme. The OVERLAY_CSS has two `:host([data-gf-theme=…])`
+    // scopes (light / dark) that swap the design tokens; the no-attribute
+    // default is the legacy `light-dark()` behaviour. Seed from the page
+    // (when accessed via the top-level Document) — if the host is created
+    // in a non-defaultDocument context (jsdom test fixture), fall back to
+    // 'light' so tests stay deterministic.
+    const themeMedia = doc.defaultView?.matchMedia?.('(prefers-color-scheme: dark)')
+    const initialTheme: 'light' | 'dark' = themeMedia?.matches ? 'dark' : 'light'
+    host.setAttribute('data-gf-theme', initialTheme)
+    // Watch for OS theme changes and update the host attribute in place.
+    // No teardown needed — the host is single-instance per runtime;
+    // teardownRuntime() removes the host, which takes the listener with
+    // it (the listener closure references this same host).
+    if (themeMedia && 'addEventListener' in themeMedia) {
+        themeMedia.addEventListener('change', (e) => {
+            host.setAttribute('data-gf-theme', e.matches ? 'dark' : 'light')
+        })
+    }
     // open mode is required so consumers (tests, future Floating-UI
     // integrations) can introspect the rendered DOM. close mode would
     // also work, but it makes E2E test introspection much harder.

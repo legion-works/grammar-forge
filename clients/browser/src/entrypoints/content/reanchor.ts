@@ -36,6 +36,12 @@ export interface ReanchorDeps {
      *  the rects; the orchestrator stitches the `item` references back in
      *  (it owns the items list; the reanchor module doesn't see it). */
     setFieldState: (el: HTMLElement, patch: { itemRects: ReanchorFieldRects[] }) => void
+    /** Called once per rAF when a scroll or resize fires. The orchestrator
+     *  uses this to reposition (or close) all open floating surfaces
+     *  (panel, popover, tooltip, synonyms, goals, rephrase card) that are
+     *  anchored to a field or word rect. Floating surfaces are position:fixed
+     *  and must be repositioned on every scroll/resize frame. */
+    onScrollResize?: () => void
 }
 
 export function mountReanchor(deps: ReanchorDeps): { stop: () => void; schedule: () => void } {
@@ -91,6 +97,10 @@ export function mountReanchor(deps: ReanchorDeps): { stop: () => void; schedule:
         requestAnimationFrame(() => {
             remeasureScheduled = false
             for (const el of deps.getTrackedFields()) remeasureField(el)
+            // Notify the orchestrator so it can reposition/close floating
+            // surfaces (panel, popover, tooltip, synonyms, goals, rephrase
+            // card) that are anchored to a field or word rect.
+            deps.onScrollResize?.()
         })
     }
     document.addEventListener('scroll', scheduleRemeasureAll, { capture: true, passive: true })

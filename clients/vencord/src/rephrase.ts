@@ -16,6 +16,7 @@ import { getText } from '@/input/text'
 import { applySlateFix, type ApplyTraceLogger } from '@/input/rich-editor-apply'
 import type { BridgeClient } from '@/api/client'
 import { showRephraseCard, showRephraseError, showRephrasePending } from '@/overlay/rephrase-card'
+import { showToast } from '@/overlay/toast'
 import { selectRephraseTarget, type RephraseSelection } from '@/hotkeys/rephrase-target'
 
 export interface RephraseScope {
@@ -48,6 +49,12 @@ export interface RephraseDeps {
     client: () => BridgeClient
     overlayRoot: ShadowRoot
     debugLog: ApplyTraceLogger
+    /** W3-3: tone seed from the user's goals (formal→'formal',
+     *  informal→'casual', neutral→'neutral'). The card lets the user
+     *  override per-request; this is the initial value. Optional for
+     *  back-compat with callers that pre-date the goals setting
+     *  (defaults to 'neutral'). */
+    defaultTone?: () => 'neutral' | 'formal' | 'casual'
 }
 
 export function openRephraseFor(
@@ -62,6 +69,9 @@ export function openRephraseFor(
         anchorRect: el.getBoundingClientRect(),
         onClose: () => {},
     })
+    // W3-3: use the goals-seeded default tone (formal/informal/neutral
+    // → formal/casual/neutral) for the card's initial value.
+    const seedTone = deps.defaultTone?.() ?? 'neutral'
     return deps
         .client()
         .rephrase({ text, source: 'vencord' })
@@ -72,15 +82,42 @@ export function openRephraseFor(
                 original: res.original,
                 rephrased: res.rephrased,
                 alternatives: res.alternatives,
-                onApply: (chosen: string) => {
+                scope: 'sentence',
+                tone: seedTone,
+                onAccept: (chosen: string) => {
                     const live = getText(el)
                     if (live.slice(span.start, span.end) !== text) {
                         deps.debugLog('rephrase stale span; not applying')
                         return
                     }
-                    void applySlateFix(el, span, chosen, deps.debugLog).then(() => onAfterApply())
+                    void applySlateFix(el, span, chosen, deps.debugLog).then((applied) => {
+                        if (applied) {
+                            // W3-3: every rephrase-accept gets an Undo toast.
+                            // The Undo re-applies the previous text — the
+                            // simplest path is to record an inverse edit
+                            // and route through planUndo (mirrors
+                            // applyItem's pattern).
+                            showToast(deps.overlayRoot, {
+                                message: 'Rephrased',
+                                actionLabel: 'Undo',
+                                onAction: () => {
+                                    void applySlateFix(
+                                        el,
+                                        span,
+                                        text,
+                                        deps.debugLog,
+                                    ).then(() => onAfterApply())
+                                },
+                            })
+                        }
+                        onAfterApply()
+                    })
                 },
                 onClose: () => {},
+                onScopeChange: (scope) => deps.debugLog('rephrase scope change', scope),
+                onToneChange: (tone) => deps.debugLog('rephrase tone change', tone),
+                onRegenerate: () => deps.debugLog('rephrase regenerate'),
+                modelLabel: 'Gemma',
             })
             deps.debugLog('rephrase done', { alternatives: res.alternatives.length })
         })

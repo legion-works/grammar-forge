@@ -321,6 +321,52 @@ export function SettingsForm() {
             </section>
 
             <section className="gf-options__section">
+                <h2>Writing goals</h2>
+                <div className="gf-options__row">
+                    <label htmlFor="gf-goals-audience">Audience</label>
+                    <select
+                        id="gf-goals-audience"
+                        value={settings.goals.audience}
+                        onChange={(e) =>
+                            void patch({
+                                goals: {
+                                    ...settings.goals,
+                                    audience: e.currentTarget.value as Settings['goals']['audience'],
+                                },
+                            })
+                        }
+                    >
+                        <option value="general">General</option>
+                        <option value="informed">Informed</option>
+                        <option value="expert">Expert</option>
+                    </select>
+                </div>
+                <div className="gf-options__row">
+                    <label htmlFor="gf-goals-formality">Formality</label>
+                    <select
+                        id="gf-goals-formality"
+                        value={settings.goals.formality}
+                        onChange={(e) =>
+                            void patch({
+                                goals: {
+                                    ...settings.goals,
+                                    formality: e.currentTarget
+                                        .value as Settings['goals']['formality'],
+                                },
+                            })
+                        }
+                    >
+                        <option value="informal">Informal</option>
+                        <option value="neutral">Neutral</option>
+                        <option value="formal">Formal</option>
+                    </select>
+                </div>
+                <p className="gf-options__hint">
+                    Informal mutes style suggestions. Formal seeds rephrase tone.
+                </p>
+            </section>
+
+            <section className="gf-options__section">
                 <h2>Rephrase</h2>
                 <div className="gf-options__row">
                     <label htmlFor="gf-reph-tone">Tone</label>

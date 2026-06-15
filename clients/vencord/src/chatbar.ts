@@ -16,6 +16,12 @@ const HIDE_PILL_DELAY_MS = 300
 const ICON_PATH =
     'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z'
 
+// Power glyph (24×24, currentColor stroke). W3-3b: the chatbar icon swaps
+// to this glyph when the site is paused — the user sees a single
+// "this is off" affordance that mirrors the orb's power state.
+const POWER_ICON_PATH =
+    'M12 4 L12 12 M7.5 6.5 A7 7 0 1 0 16.5 6.5'
+
 const DEFAULT_SUMMARY: { count: number; byCategory: Record<string, number>; paused: boolean } = {
     count: 0,
     byCategory: {},
@@ -100,6 +106,11 @@ function ChatBarButtonRoot(props: ChatBarButtonRootProps) {
             onMouseEnter: onEnter,
             onMouseLeave: onLeave,
             'aria-label': tooltip,
+            // Mark this wrapper so the blur handler in the orchestrator can
+            // detect "focus moved to the GF chatbar button" and skip the
+            // items-clear. Without this, clicking the chatbar button blurs
+            // the composer → items cleared → panel opens empty.
+            'data-grammarforge-ui': 'chatbar',
         },
         React.createElement(
             ChatBarButton,
@@ -108,16 +119,27 @@ function ChatBarButtonRoot(props: ChatBarButtonRootProps) {
                 onClick,
                 buttonProps: { 'aria-label': tooltip },
             },
+            // W3-3b: when paused, the chatbar icon swaps to the power
+            // glyph (matches the orb's disabled state) instead of the
+            // pencil-with-low-opacity affordance. Both are visually
+            // distinct from the active state; the power glyph wins for
+            // a single, unambiguous "this is off" signal.
             React.createElement(
                 'svg',
                 {
                     viewBox: '0 0 24 24',
                     height: 20,
                     width: 20,
-                    fill: 'currentColor',
-                    style: summary.paused ? { opacity: 0.5 } : undefined,
+                    fill: 'none',
+                    stroke: 'currentColor',
+                    'stroke-width': 2.2,
+                    'stroke-linecap': 'round',
+                    'stroke-linejoin': 'round',
+                    style: summary.paused ? { opacity: 0.85 } : undefined,
                 },
-                React.createElement('path', { d: ICON_PATH }),
+                React.createElement('path', {
+                    d: summary.paused ? POWER_ICON_PATH : ICON_PATH,
+                }),
             ),
         ),
         showBadge

@@ -241,6 +241,195 @@ describe('BridgeClient.dictionary', () => {
     })
 })
 
+describe('BridgeClient.stats', () => {
+    it('GETs /stats and returns the typed StatsResponse with redesign fields', async () => {
+        const payload = {
+            corrections: 10,
+            edits_total: 20,
+            edits_accepted: 15,
+            edits_rejected: 3,
+            edits_ignored: 2,
+            acceptance_rate: 0.75,
+            top_issues: { spelling: 3, grammar: 2 },
+            streak: 4,
+            words_this_week: 120,
+        }
+        vi.stubGlobal(
+            'fetch',
+            vi.fn<typeof fetch>().mockResolvedValue(
+                new Response(JSON.stringify(payload), {
+                    status: 200,
+                    headers: { 'content-type': 'application/json' },
+                }),
+            ),
+        )
+        const c = new BridgeClient('http://localhost:8000', true)
+        const res = await c.stats()
+        expect(res.corrections).toBe(10)
+        expect(res.streak).toBe(4)
+        expect(res.words_this_week).toBe(120)
+        expect(res.top_issues['spelling']).toBe(3)
+        expect(res.top_issues['grammar']).toBe(2)
+        expect(res.acceptance_rate).toBe(0.75)
+        expect(String((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0])).toBe(
+            'http://localhost:8000/stats',
+        )
+    })
+    it('throws on a non-200 from /stats', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn<typeof fetch>().mockResolvedValue(new Response('boom', { status: 500 })),
+        )
+        const c = new BridgeClient('http://localhost:8000', true)
+        await expect(c.stats()).rejects.toThrow(/stats.*500/)
+    })
+    it('refuses a non-local URL when allowRemote is false', async () => {
+        const c = new BridgeClient('http://evil.com', false)
+        await expect(c.stats()).rejects.toThrow(/local/i)
+    })
+})
+
+describe('BridgeClient.tone', () => {
+    it('POSTs /tone with text and optional granularity and returns the typed ToneResponse', async () => {
+        const payload = {
+            tags: [
+                { tag: 'formal', score: 0.9 },
+                { tag: 'neutral', score: 0.1 },
+            ],
+        }
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+            new Response(JSON.stringify(payload), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            }),
+        )
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', true)
+        const res = await c.tone('Hello world.', 'field')
+        expect(res.tags[0]!.tag).toBe('formal')
+        expect(res.tags[0]!.score).toBe(0.9)
+        expect(res.sentences).toBeUndefined()
+        const call = fetchMock.mock.calls[0]!
+        expect(String(call[0])).toBe('http://localhost:8000/tone')
+        expect((call[1] as RequestInit).method).toBe('POST')
+        const body = JSON.parse((call[1] as RequestInit).body as string)
+        expect(body.text).toBe('Hello world.')
+        expect(body.granularity).toBe('field')
+    })
+    it('omits granularity when not provided', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+            new Response(JSON.stringify({ tags: [] }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            }),
+        )
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', true)
+        await c.tone('Hi')
+        const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string)
+        expect(body.text).toBe('Hi')
+        expect(body.granularity).toBeUndefined()
+    })
+    it('parses per-sentence tags when the bridge returns them', async () => {
+        const payload = {
+            tags: [{ tag: 'neutral', score: 1 }],
+            sentences: [
+                {
+                    span: { start: 0, end: 5 },
+                    tags: [{ tag: 'formal', score: 0.7 }],
+                },
+            ],
+        }
+        vi.stubGlobal(
+            'fetch',
+            vi.fn<typeof fetch>().mockResolvedValue(
+                new Response(JSON.stringify(payload), {
+                    status: 200,
+                    headers: { 'content-type': 'application/json' },
+                }),
+            ),
+        )
+        const c = new BridgeClient('http://localhost:8000', true)
+        const res = await c.tone('Hello world.', 'sentence')
+        expect(res.sentences).toHaveLength(1)
+        expect(res.sentences![0]!.span.start).toBe(0)
+        expect(res.sentences![0]!.tags[0]!.tag).toBe('formal')
+    })
+    it('throws on a non-200 from /tone', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn<typeof fetch>().mockResolvedValue(new Response('boom', { status: 503 })),
+        )
+        const c = new BridgeClient('http://localhost:8000', true)
+        await expect(c.tone('Hi')).rejects.toThrow(/tone.*503/)
+    })
+})
+
+describe('BridgeClient.synonyms', () => {
+    it('GETs /synonyms?word=X and returns the typed SynonymsResponse', async () => {
+        const payload = { word: 'happy', synonyms: ['glad', 'joyful'] }
+        vi.stubGlobal(
+            'fetch',
+            vi.fn<typeof fetch>().mockResolvedValue(
+                new Response(JSON.stringify(payload), {
+                    status: 200,
+                    headers: { 'content-type': 'application/json' },
+                }),
+            ),
+        )
+        const c = new BridgeClient('http://localhost:8000', true)
+        const res = await c.synonyms('happy')
+        expect(res.word).toBe('happy')
+        expect(res.synonyms).toEqual(['glad', 'joyful'])
+        expect(String((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0])).toBe(
+            'http://localhost:8000/synonyms?word=happy',
+        )
+    })
+    it('URL-encodes multi-word queries', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn<typeof fetch>().mockResolvedValue(
+                new Response(JSON.stringify({ word: 'pro bono', synonyms: [] }), {
+                    status: 200,
+                    headers: { 'content-type': 'application/json' },
+                }),
+            ),
+        )
+        const c = new BridgeClient('http://localhost:8000', true)
+        const res = await c.synonyms('pro bono')
+        expect(res.word).toBe('pro bono')
+        expect(String((fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0])).toBe(
+            'http://localhost:8000/synonyms?word=pro%20bono',
+        )
+    })
+    it('returns an empty array when the bridge returns no synonyms', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn<typeof fetch>().mockResolvedValue(
+                new Response(JSON.stringify({ word: 'zzz', synonyms: [] }), {
+                    status: 200,
+                    headers: { 'content-type': 'application/json' },
+                }),
+            ),
+        )
+        const c = new BridgeClient('http://localhost:8000', true)
+        const res = await c.synonyms('zzz')
+        expect(res.synonyms).toEqual([])
+    })
+    it('throws on a non-200 from /synonyms', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn<typeof fetch>().mockResolvedValue(new Response('boom', { status: 404 })),
+        )
+        const c = new BridgeClient('http://localhost:8000', true)
+        await expect(c.synonyms('happy')).rejects.toThrow(/synonyms.*404/)
+    })
+    it('refuses a non-local URL when allowRemote is false', async () => {
+        const c = new BridgeClient('http://evil.com', false)
+        await expect(c.synonyms('happy')).rejects.toThrow(/local/i)
+    })
+})
+
 const FINAL = {
     original: 'I has a cat',
     suggestions: [

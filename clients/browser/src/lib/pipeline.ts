@@ -7,7 +7,7 @@
 import { deriveCategory, type CATEGORY_META } from '@/api/category'
 import { verifyByteSpan, verifyByteSpanWithCache } from '@/api/offset'
 import { wordLevelDiff } from '@/lib/word-diff'
-import type { BridgeSuggestion, Category, CorrectResponse } from '@/api/types'
+import type { BridgeSuggestion, Category, CorrectResponse, ItemStatus } from '@/api/types'
 
 /** A renderable correction item — one highlight + one popover. */
 export interface RenderableItem {
@@ -46,6 +46,14 @@ export interface RenderableItem {
     model: BridgeSuggestion['model']
     /** Bridge rule id (kept for signal context). */
     ruleId?: string
+    /** Bridge confidence in [0, 1]. Drives the correction-card confidence bar
+     *  band (High ≥ 0.90, Medium ≥ 0.75, Low < 0.75). Undefined for LLM items
+     *  the bridge did not score — those render with no bar (treated as
+     *  high-confidence by the bulk accept). */
+    confidence?: number
+    /** Lifecycle status. New items default to `'open'`. Accepted/dismissed
+     *  items are filtered out of `visibleItems()` and the card nav math. */
+    status: ItemStatus
     /** True for fast-path preview frames (no id, Apply disabled until the
      *  final frame replaces the item). Set per-frame by the caller, never
      *  inferred from a missing id (a failed log also yields id-less FINAL
@@ -152,6 +160,8 @@ export function buildRenderableItems(
             byteSpan: { start: s.span.start, end: s.span.end },
             model: s.model,
             ruleId: s.ruleId,
+            confidence: s.confidence,
+            status: 'open',
             preview: opts.preview || undefined,
         })
     }
