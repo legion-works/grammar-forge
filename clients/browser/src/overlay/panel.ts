@@ -145,9 +145,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
     // a second mount); only the body changes. Both render paths share
     // the chrome via `renderChrome()`.
     const body = options.disabled
-        ? renderChrome(aside, goalsLabel, (bodyEl) =>
-              renderDisabledBodyContent(bodyEl, options.onDisableSite),
-          )
+        ? renderChrome(aside, goalsLabel, (bodyEl) => renderDisabledBodyContent(bodyEl))
         : renderChrome(aside, goalsLabel, (bodyEl) =>
               renderReviewBodyContent(
                   bodyEl,
@@ -350,10 +348,7 @@ function renderChrome(
  *  same callback that disables the site re-enables it). The chrome
  *  (head + tabs + footer) is rendered by `renderChrome`; this function
  *  only populates the body slot. */
-function renderDisabledBodyContent(
-    body: HTMLElement,
-    onDisableSite: () => void,
-): void {
+function renderDisabledBodyContent(body: HTMLElement): void {
     const wrap = el(body, 'div', 'gf-panel__paused')
     const icon = el(wrap, 'span', 'gf-panel__paused-icon')
     icon.setAttribute('aria-hidden', 'true')
@@ -367,14 +362,9 @@ function renderDisabledBodyContent(
     btn.type = 'button'
     btn.setAttribute('data-action', 'disable-site')
     btn.textContent = 'Turn on for this site'
-    // onDisableSite is the orchestrator's togglePower — used by both
-    // the "Disable" and "Turn on" branches (symmetric flip). Kept
-    // unused here at the JS level; the click handler in the panel's
-    // delegated `onClick` dispatches data-action="disable-site" to
-    // `options.onDisableSite()`. The button is reachable WITHOUT a
-    // reference to onDisableSite in this body, but the type signature
-    // documents the contract.
-    void onDisableSite
+    // The click is dispatched by the panel's delegated `onClick` (see
+    // showPanel) via `data-action="disable-site"` → options.onDisableSite
+    // — no per-button listener is wired here.
 }
 
 /** Fill a body slot with the full review content (banner + score +

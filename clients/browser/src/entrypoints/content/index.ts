@@ -640,10 +640,9 @@ function wireRuntime(
         }
         if (runtime.panelHandle && runtime.panelFor) {
             const el = runtime.panelFor
-            const anchor = el.getBoundingClientRect()
             runtime.panelHandle.destroy()
             runtime.panelHandle = null
-            openReviewPanelFor(el, anchor)
+            openReviewPanelFor(el)
         }
     })
     runtime.cleanups.push(() => setRefreshOnGoalsChange(null))
@@ -2047,7 +2046,7 @@ function wireRuntime(
     // already fresh; we read it via the field's own rect (the orb is
     // anchored to the field's bottom-right corner) and pass that to
     // showPanel.
-    function openReviewPanelFor(el: HTMLElement, anchorOverride?: DOMRect): void {
+    function openReviewPanelFor(el: HTMLElement): void {
         const st = runtime.fields.get(el)
         if (!st) return
         // Close any prior panel (defensive — showPanel's destroyExisting
@@ -2059,9 +2058,11 @@ function wireRuntime(
         }
         const text = getText(el)
         const visible = visibleItems(st.items, st.phase, st.goals)
-        const anchor = anchorOverride ?? st.statusHandle?.reposition
-            ? el.getBoundingClientRect()
-            : el.getBoundingClientRect()
+        // Measure the field LIVE at open time. Never accept a captured
+        // rect from across an async boundary (e.g. onAcceptItem
+        // re-opening after applyItemPrimary + renderField reflowed the
+        // field) — a detached/stale rect lands the panel off-screen.
+        const anchor = el.getBoundingClientRect()
         const options: PanelOptions = {
             anchorRect: anchor,
             items: st.items,
@@ -2116,7 +2117,7 @@ function wireRuntime(
                             if (runtime.panelHandle) {
                                 runtime.panelHandle.destroy()
                                 runtime.panelHandle = null
-                                openReviewPanelFor(el, anchor)
+                                openReviewPanelFor(el)
                             }
                         }
                     }
