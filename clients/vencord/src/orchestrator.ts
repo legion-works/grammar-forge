@@ -292,6 +292,10 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     let pillAnchor: DOMRect | null = null
     let panelOpen = false
     let reviewPanel: PanelHandle | null = null
+    /** The field the review panel is currently open for. Used by renderField
+     *  to refresh the panel body in-place when a check resolves with new items
+     *  (mirrors browser orchestrator's runtime.panelFor). */
+    let panelFor: HTMLElement | null = null
     // W3-3: completion of the W2b panel callback wiring. The W2b NIT2
     // (panel.ts exported onOpenGoals/onOpenStats but the orchestrator
     // stubbed them) gets these real surfaces here. One handle per overlay
@@ -375,6 +379,18 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             }
             debugLog('render', { items: 0, pillUpdated: zeroPillUpdated, panelOpen })
             notify()
+            // Panel refresh (zero items → empty state): if the review panel
+            // is open for this field, rebuild the body in-place so the
+            // "No issues remaining" empty state appears immediately.
+            if (panelFor === el && reviewPanel?.isOpen()) {
+                reviewPanel.restoreReviewBody(
+                    st.items,
+                    getText(el),
+                    getConfig().goals,
+                    st.phase ?? 'done',
+                    false, // Vencord has no rephrase button in the panel
+                )
+            }
             return
         }
         // Highlight/hit-test the WORD range (hlStart/hlEnd), not the raw edit
@@ -426,6 +442,20 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             panelOpen,
         })
         notify()
+        // Panel refresh: if the review panel is open for this field, rebuild
+        // its body in-place with the fresh items/score so applied suggestions
+        // disappear and the score ring + insights update.
+        // Stale-guard: only refresh when panelFor === el AND the panel is
+        // still mounted (mirrors browser orchestrator's renderField hook).
+        if (panelFor === el && reviewPanel?.isOpen()) {
+            reviewPanel.restoreReviewBody(
+                st.items,
+                getText(el),
+                getConfig().goals,
+                st.phase ?? 'done',
+                false, // Vencord has no rephrase button in the panel
+            )
+        }
     }
 
     const rerunFor =
@@ -1018,6 +1048,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         const opts = buildReviewPanelOptions(el, st, anchor)
         reviewPanel = showPanel(overlay.root, opts)
         panelOpen = true
+        panelFor = el
     }
 
     const closeReviewPanel = (): void => {
@@ -1033,6 +1064,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         synonymsHandle?.destroy()
         synonymsHandle = null
         panelOpen = false
+        panelFor = null
     }
 
     /** Build the W2b review panel options for the given field state. The
