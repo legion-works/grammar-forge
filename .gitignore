@@ -95,3 +95,7 @@ eval/jfleg*.results.json
 eval/benchmarks/**
 !eval/benchmarks/.gitkeep
 
+
+# Internal design docs + handoff pack -- kept local, not published
+.opencode/
+GrammarForge.zip
