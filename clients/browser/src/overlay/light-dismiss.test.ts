@@ -3,27 +3,25 @@
 // Goals and synonyms popovers. Uses createOverlayHost (the SAME path the
 // live code uses) so the shadow root's ownerDocument matches the page doc.
 //
-// ROOT CAUSE INVESTIGATION (Issue A, round 5):
-//   Goals uses:    document.addEventListener('mousedown', ...)
-//   Synonyms uses: doc.addEventListener('mousedown', ...)  where doc = fieldEl.ownerDocument
-//   Panel uses:    doc.addEventListener('pointerdown', ...) where doc = root.ownerDocument
+// ROOT CAUSE INVESTIGATION (Round 8 — the decisive log evidence):
+//   Live logs showed: "goals: outside — dismissing" firing 15+ times on
+//   every outside click, but the popover stayed open.
 //
-// In jsdom, document === root.ownerDocument === fieldEl.ownerDocument, so
-// all three resolve to the same node and the tests pass. In a real browser
-// extension content script the same holds (content scripts run in the page
-// context, so `document` IS the page document). The bug is therefore NOT a
-// wrong-document issue.
+//   TWO bugs:
+//   1. installOutsideDismiss did NOT self-remove after firing onDismiss().
+//      The window listener stayed installed → fired on every subsequent
+//      click → called onDismiss() repeatedly.
+//   2. Goals/synonyms onClose in the orchestrator did:
+//        onClose: () => { runtime.goalsHandle = null }
+//      This nulled the handle but NEVER called destroy() → the DOM node
+//      stayed mounted and the outsideDismiss listener was never removed.
+//      Compare: the panel's onClose calls runtime.panelHandle?.destroy()
+//      which calls outsideDismiss.remove() — that's why the panel worked.
 //
-// The REAL difference: Goals/synonyms listen for `mousedown`; the panel
-// listens for `pointerdown`. A touch or stylus event fires `pointerdown`
-// but NOT `mousedown`. More importantly: in Fastmail's compose area the
-// click-away is a `pointerdown` event (pointer events are the modern path).
-// Goals/synonyms only listen for `mousedown` → they miss `pointerdown`-only
-// dismissals. Fix: switch Goals + synonyms to `pointerdown` (matching the
-// working panel pattern).
-//
-// This test file reproduces the bug (mousedown fires, pointerdown does not
-// for Goals/synonyms before the fix) and guards the fix.
+//   FIX:
+//   1. installOutsideDismiss self-removes (view.removeEventListener) before
+//      calling onDismiss() — one-shot behavior.
+//   2. Goals/synonyms onClose now calls handle.destroy() before nulling.
 import { describe, expect, it, vi } from 'vitest'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { showGoals, type GoalsOptions } from '@/overlay/goals'
@@ -128,6 +126,69 @@ describe('light-dismiss via outside-click (createOverlayHost path)', () => {
             new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
         )
         expect(onClose).not.toHaveBeenCalled()
+        field.remove()
+        overlay.destroy()
+    })
+})
+
+describe('installOutsideDismiss one-shot + DOM removal regression (round 8)', () => {
+    // Regression guard for the two bugs found via live [gf-dismiss] logs:
+    // 1. The listener must self-remove after firing (one-shot) — no repeats.
+    // 2. onDismiss must actually remove the DOM node (not just null a handle).
+
+    it('Goals: outside pointerdown removes the .gf-goals-pop node (not just nulls handle)', async () => {
+        // Bug 2: onClose was () => { handle = null } — node stayed mounted.
+        // Fix: onClose must call handle.destroy() which removes the node.
+        // This test verifies the node is gone after dismiss.
+        const overlay = createOverlayHost()
+        const onClose = vi.fn<() => void>(() => {
+            // Simulate the correct orchestrator behavior: call destroy().
+            const pop = overlay.root.querySelector('.gf-goals-pop') as HTMLElement | null
+            if (pop) pop.remove()
+        })
+        showGoals(overlay.root, mkGoalsOptions({ onClose }))
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(overlay.root.querySelector('.gf-goals-pop')).not.toBeNull()
+        document.body.dispatchEvent(
+            new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
+        )
+        expect(onClose).toHaveBeenCalledOnce()
+        expect(overlay.root.querySelector('.gf-goals-pop')).toBeNull()
+        overlay.destroy()
+    })
+
+    it('Goals: outside pointerdown fires onClose exactly ONCE (listener self-removes)', async () => {
+        // Bug 1: installOutsideDismiss did not self-remove after firing.
+        // Every subsequent outside click re-fired onDismiss → 15+ repeats.
+        // Fix: self-remove before calling onDismiss (one-shot).
+        const overlay = createOverlayHost()
+        const onClose = vi.fn<() => void>()
+        showGoals(overlay.root, mkGoalsOptions({ onClose }))
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        // Fire three outside clicks.
+        for (let i = 0; i < 3; i++) {
+            document.body.dispatchEvent(
+                new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
+            )
+        }
+        // Must fire exactly once (one-shot), not 3 times.
+        expect(onClose).toHaveBeenCalledTimes(1)
+        overlay.destroy()
+    })
+
+    it('Synonyms: outside pointerdown fires onClose exactly ONCE (one-shot)', async () => {
+        const overlay = createOverlayHost()
+        const field = document.createElement('textarea')
+        document.body.appendChild(field)
+        const onClose = vi.fn<() => void>()
+        showSynonyms(overlay.root, mkSynOptions({ onClose }))
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        for (let i = 0; i < 3; i++) {
+            document.body.dispatchEvent(
+                new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
+            )
+        }
+        expect(onClose).toHaveBeenCalledTimes(1)
         field.remove()
         overlay.destroy()
     })

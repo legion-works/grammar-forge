@@ -67,6 +67,13 @@ export function installOutsideDismiss(
             pathLen: path.length,
             target: (event.target as Element | null)?.className ?? '?',
         })
+        // Self-remove BEFORE calling onDismiss so the listener can't fire
+        // again if onDismiss synchronously triggers another pointerdown
+        // (e.g. a re-render that re-opens the surface). This also prevents
+        // the "fires 15+ times" repeat: without self-removal, every
+        // subsequent outside click re-fires onDismiss on a stale surface.
+        view.removeEventListener('pointerdown', onPointerDown, { capture: true })
+        installed = false
         onDismiss()
     }
 

@@ -1124,14 +1124,45 @@ function wireRuntime(
         // was absent), then set it to "false" when the setting is on. We never
         // clobber a page-set value permanently — the restore runs on detach AND
         // on settings-driven teardown.
+        //
+        // ROBUST SUPPRESSION (#2): set BOTH the IDL property AND the content
+        // attribute. Some host frameworks (GitHub's React) re-render the element
+        // and reset the attribute back to "true" — a MutationObserver watches
+        // the `spellcheck` attribute and re-asserts "false" whenever the host
+        // overrides it. The observer is disconnected on detach.
         const originalSpellcheck = el.getAttribute('spellcheck')
+        const assertSpellcheckFalse = (): void => {
+            // Set both the IDL property and the content attribute so the
+            // browser's spellcheck engine sees the suppression regardless
+            // of which path the host framework reads.
+            ;(el as HTMLElement & { spellcheck: boolean }).spellcheck = false
+            el.setAttribute('spellcheck', 'false')
+        }
         const restoreSpellcheck = (): void => {
             if (originalSpellcheck === null) el.removeAttribute('spellcheck')
             else el.setAttribute('spellcheck', originalSpellcheck)
+            ;(el as HTMLElement & { spellcheck: boolean }).spellcheck =
+                originalSpellcheck !== 'false'
         }
         state.restoreSpellcheck = restoreSpellcheck
-        if (s.suppressNativeSpellcheck) el.setAttribute('spellcheck', 'false')
-        runtime.cleanups.push(restoreSpellcheck)
+        let spellcheckObserver: MutationObserver | null = null
+        if (s.suppressNativeSpellcheck) {
+            assertSpellcheckFalse()
+            // Watch for host re-renders that reset spellcheck="true".
+            spellcheckObserver = new MutationObserver((mutations) => {
+                for (const m of mutations) {
+                    if (m.attributeName === 'spellcheck' &&
+                        el.getAttribute('spellcheck') !== 'false') {
+                        assertSpellcheckFalse()
+                    }
+                }
+            })
+            spellcheckObserver.observe(el, { attributes: true, attributeFilter: ['spellcheck'] })
+        }
+        runtime.cleanups.push(() => {
+            spellcheckObserver?.disconnect()
+            restoreSpellcheck()
+        })
 
         // Release this field's paste-grace timer on a settings-driven teardown.
         // teardownRuntime() iterates runtime.cleanups but does NOT walk the
@@ -1412,6 +1443,7 @@ function wireRuntime(
                     /* replaced on the loaded re-mount */
                 },
                 onClose: () => {
+                    runtime.synonymsHandle?.destroy()
                     runtime.synonymsHandle = null
                 },
             })
@@ -1474,6 +1506,7 @@ function wireRuntime(
                             })
                         },
                         onClose: () => {
+                            runtime.synonymsHandle?.destroy()
                             runtime.synonymsHandle = null
                         },
                     })
@@ -2365,6 +2398,12 @@ function wireRuntime(
                         st.goals = next
                     },
                     onClose: () => {
+                        // Must call destroy() (not just null the handle) so
+                        // the DOM node is removed and the outsideDismiss
+                        // listener is uninstalled. Nulling without destroy()
+                        // left the node visible and the listener firing on
+                        // every subsequent click (the "15+ repeats" bug).
+                        runtime.goalsHandle?.destroy()
                         runtime.goalsHandle = null
                     },
                 })
@@ -2451,6 +2490,17 @@ function wireRuntime(
     }
 
     function renderField(el: HTMLElement, root: ShadowRoot, state: FieldState): void {
+        // Re-assert spellcheck suppression on every render. Some host
+        // frameworks (GitHub's React) re-render the element and reset
+        // spellcheck="true". The MutationObserver at attach time catches
+        // most cases; this is the belt-and-braces re-assert for any
+        // re-render that happens between observer callbacks.
+        if (getSettings().suppressNativeSpellcheck) {
+            if (el.getAttribute('spellcheck') !== 'false') {
+                ;(el as HTMLElement & { spellcheck: boolean }).spellcheck = false
+                el.setAttribute('spellcheck', 'false')
+            }
+        }
         // Reset the hit-test rects every render; repopulated below when there
         // are suggestions. Cleared first so the count===0 early-return leaves
         // no stale rects for the hover/click hit-test to match.
