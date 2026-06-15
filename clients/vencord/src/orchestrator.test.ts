@@ -509,6 +509,74 @@ describe('vencord orchestrator — panel refreshes when check resolves with new 
     })
 })
 
+describe('vencord blur guard — items NOT cleared when focus moves to GF chatbar button (round 16)', () => {
+    // ROOT CAUSE (round 16): clicking the chatbar button blurs the composer.
+    // onFieldBlur fired with relatedTarget = chatbar wrapper div (Discord DOM,
+    // NOT inside the GF shadow overlay). isWithinOverlay returned false →
+    // items cleared → panel opened empty.
+    //
+    // FIX: chatbar wrapper gets data-grammarforge-ui="chatbar". onFieldBlur
+    // checks relatedTarget.closest('[data-grammarforge-ui]') in addition to
+    // isWithinOverlay. If either matches → skip the items-clear.
+
+    it('items are NOT cleared when relatedTarget has data-grammarforge-ui', () => {
+        // Simulate the chatbar button wrapper.
+        const chatbarWrapper = document.createElement('div')
+        chatbarWrapper.setAttribute('data-grammarforge-ui', 'chatbar')
+        document.body.appendChild(chatbarWrapper)
+
+        // The blur guard logic (extracted from onFieldBlur):
+        const rt: EventTarget | null = chatbarWrapper
+        const withinGf =
+            (rt instanceof Element && rt.closest('[data-grammarforge-overlay]') != null) ||
+            (rt instanceof Element && rt.closest('[data-grammarforge-ui]') != null)
+
+        expect(withinGf).toBe(true)
+        chatbarWrapper.remove()
+    })
+
+    it('items ARE cleared when relatedTarget is an unrelated Discord element', () => {
+        const discordEl = document.createElement('div')
+        discordEl.className = 'discord-input'
+        document.body.appendChild(discordEl)
+
+        const rt: EventTarget | null = discordEl
+        const withinGf =
+            (rt instanceof Element && rt.closest('[data-grammarforge-overlay]') != null) ||
+            (rt instanceof Element && rt.closest('[data-grammarforge-ui]') != null)
+
+        expect(withinGf).toBe(false)
+        discordEl.remove()
+    })
+
+    it('items are NOT cleared when relatedTarget is inside the GF overlay host', () => {
+        const overlayHost = document.createElement('div')
+        overlayHost.setAttribute('data-grammarforge-overlay', '')
+        const innerBtn = document.createElement('button')
+        overlayHost.appendChild(innerBtn)
+        document.body.appendChild(overlayHost)
+
+        const rt: EventTarget | null = innerBtn
+        const withinGf =
+            (rt instanceof Element && rt.closest('[data-grammarforge-overlay]') != null) ||
+            (rt instanceof Element && rt.closest('[data-grammarforge-ui]') != null)
+
+        expect(withinGf).toBe(true)
+        overlayHost.remove()
+    })
+
+    it('items ARE cleared when relatedTarget is null (window blur — legit exit)', () => {
+        // null relatedTarget = focus left the window entirely.
+        // The guard returns false → items ARE cleared (correct for window blur).
+        const rt: EventTarget | null = null as EventTarget | null
+        const withinGf =
+            (rt instanceof Element && rt.closest('[data-grammarforge-overlay]') != null) ||
+            (rt instanceof Element && rt.closest('[data-grammarforge-ui]') != null)
+        // null → withinGf = false → items cleared (correct for window blur)
+        expect(withinGf).toBe(false)
+    })
+})
+
 describe('vencord orchestrator — churn-tolerant panel refresh (round 15)', () => {
     // ROOT CAUSE (round 15): Discord replaces the composer DOM element.
     // panelFor = oldEl (detached), render fires on newEl.

@@ -401,11 +401,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 const panelForDetached = panelFor !== null && !fields.has(panelFor)
                 if (panelFor === el || panelForDetached) {
                     if (panelForDetached) {
-                        debugLog('panel churn rebind', {
-                            oldUid: panelFor ? getElUid(panelFor) : null,
-                            newUid: getElUid(el),
-                            items: st.items.length,
-                        })
+                        debugLog(`panel churn rebind oldUid=${panelFor ? getElUid(panelFor) : 'none'} newUid=${getElUid(el)} items=${st.items.length}`)
                         panelFor = el
                     }
                     reviewPanel.restoreReviewBody(
@@ -416,11 +412,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                         false,
                     )
                 } else {
-                    debugLog('panel refresh skipped (churn?)', {
-                        renderUid: getElUid(el),
-                        panelForUid: panelFor ? getElUid(panelFor) : null,
-                        items: st.items.length,
-                    })
+                    debugLog(`panel refresh skipped renderUid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} items=${st.items.length}`)
                 }
             }
             return
@@ -485,11 +477,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             const panelForDetached = panelFor !== null && !fields.has(panelFor)
             if (panelFor === el || panelForDetached) {
                 if (panelForDetached) {
-                    debugLog('panel churn rebind', {
-                        oldUid: panelFor ? getElUid(panelFor) : null,
-                        newUid: getElUid(el),
-                        items: st.items.length,
-                    })
+                    debugLog(`panel churn rebind oldUid=${panelFor ? getElUid(panelFor) : 'none'} newUid=${getElUid(el)} items=${st.items.length}`)
                     panelFor = el
                 }
                 reviewPanel.restoreReviewBody(
@@ -500,11 +488,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     false,
                 )
             } else {
-                debugLog('panel refresh skipped (churn?)', {
-                    renderUid: getElUid(el),
-                    panelForUid: panelFor ? getElUid(panelFor) : null,
-                    items: st.items.length,
-                })
+                debugLog(`panel refresh skipped renderUid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} items=${st.items.length}`)
             }
         }
     }
@@ -1111,11 +1095,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // the field has been detached (fields.get returns undefined).
         const liveSt = fields.get(el) ?? st
         const opts = buildReviewPanelOptions(el, liveSt, anchor)
-        debugLog('panel open', {
-            uid: getElUid(el),
-            items: liveSt.items.length,
-            phase: liveSt.phase,
-        })
+        debugLog(`panel open uid=${getElUid(el)} items=${liveSt.items.length} phase=${liveSt.phase ?? 'done'}`)
         reviewPanel = showPanel(overlay.root, opts)
         panelOpen = true
         panelFor = el
@@ -1565,11 +1545,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         trackedFields.add(el)
         lastActiveField = el
         // Instrument: log element uid at attach so churn is visible in logs.
-        debugLog('composer attach', {
-            uid: getElUid(el),
-            panelForUid: panelFor ? getElUid(panelFor) : null,
-            panelOpen,
-        })
+        debugLog(`composer attach uid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} panelOpen=${String(panelOpen)}`)
         notify()
 
         // Release this field's paste-grace timer on global teardown. The
@@ -1840,13 +1816,21 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // had the debug focus tracer (onFieldFocusOut above). Add the
         // real one. Vencord is contenteditable-only (no native path).
         const onFieldBlur = (e: FocusEvent): void => {
-            // When the user clicks a suggestion in our popover, the browser
-            // fires a11y focus onto the Apply button (inside our shadow-DOM
-            // overlay). The composer's blur event fires with relatedTarget
-            // retargeted to the overlay host. Guard against this: if focus
-            // moved INTO our own overlay, keep all highlights and the popover
-            // — this is a focus STEAL we triggered, not a genuine field-exit.
-            if (isWithinOverlay(e.relatedTarget)) return
+            // Guard: skip the items-clear when focus moves to GF's own UI.
+            // Two cases:
+            // 1. Focus moved into the GF shadow overlay (popover Apply button,
+            //    review panel, etc.) — relatedTarget is retargeted to the
+            //    overlay host, caught by isWithinOverlay.
+            // 2. Focus moved to the GF chatbar button (Discord's DOM, NOT
+            //    inside the shadow overlay) — relatedTarget is the chatbar
+            //    wrapper div which carries data-grammarforge-ui="chatbar".
+            //    Without this guard, clicking the chatbar button blurs the
+            //    composer → items cleared → panel opens empty.
+            const rt = e.relatedTarget
+            const withinGf = isWithinOverlay(rt) ||
+                (rt instanceof Element && rt.closest('[data-grammarforge-ui]') != null)
+            debugLog(`blur within-gf=${String(withinGf)} items=${String(fields.get(el)?.items.length ?? 0)} clearItems=${String(!withinGf)}`)
+            if (withinGf) return
             const s = fields.get(el)
             if (!s) return
             // Hide the hover tooltip on genuine field exit (mirrors browser
@@ -1926,12 +1910,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         trackedFields.delete(el)
         fields.delete(el)
         // Instrument: log element uid at detach so churn is visible in logs.
-        debugLog('composer detach', {
-            uid: getElUid(el),
-            panelForUid: panelFor ? getElUid(panelFor) : null,
-            panelOpen,
-            wasPanelFor: panelFor === el,
-        })
+        debugLog(`composer detach uid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} panelOpen=${String(panelOpen)} wasPanelFor=${String(panelFor === el)}`)
         // When the panel's field is detached (churn), keep panelFor pointing
         // to the detached element so the churn-rebind in renderField can
         // detect it via !fields.has(panelFor). Do NOT null panelFor here —

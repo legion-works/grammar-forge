@@ -106,6 +106,11 @@ function ChatBarButtonRoot(props: ChatBarButtonRootProps) {
             onMouseEnter: onEnter,
             onMouseLeave: onLeave,
             'aria-label': tooltip,
+            // Mark this wrapper so the blur handler in the orchestrator can
+            // detect "focus moved to the GF chatbar button" and skip the
+            // items-clear. Without this, clicking the chatbar button blurs
+            // the composer → items cleared → panel opens empty.
+            'data-grammarforge-ui': 'chatbar',
         },
         React.createElement(
             ChatBarButton,
