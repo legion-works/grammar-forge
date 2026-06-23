@@ -40,6 +40,7 @@ import { createDetailsState, type DetailsState } from "./details-state";
 import { detectPromptPinSupport } from "./feature-detect";
 import { logDebug } from "./debug";
 import { buildStatusLine } from "./status-line";
+import { lineLooksUnfinished, type GhostRenderer } from "./ghost-overlay";
 import { CATEGORY_FG } from "./category-palette";
 import type { PromptRef, TuiApi } from "./opencode-types";
 import type { PanelController, PanelView } from "./details-panel-view";
@@ -173,6 +174,17 @@ interface RephraseState {
     ref: PromptRef;
 }
 
+interface CompletionState {
+    /** Monotonic counter bumped on each new completion request; stale-seq guard. */
+    seq: number;
+    /** The continuation text returned by the bridge. Non-empty while a ghost is visible. */
+    continuation: string;
+    /** The prompt ref captured at request time (ref-identity guard). */
+    ref: PromptRef;
+    /** The cursor offset at request time so the ghost anchor is fixed. */
+    atOffset: number;
+}
+
 interface RefState {
     items: RenderableItem[];
     /** Precomputed display spans parallel to `items`, computed once at
@@ -186,6 +198,10 @@ interface RefState {
     activeExtmarkIds: number[];
     /** Non-null while a rephrase is in-flight or showing a result card. */
     rephrase: RephraseState | null;
+    /** Non-null while a completion ghost is visible. */
+    completion: CompletionState | null;
+    /** Separate debounce timer for the completion pause detector. */
+    completionTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface JumpResult {
@@ -254,6 +270,8 @@ function emptyRefState(): RefState {
         extmarkTypeId: null,
         activeExtmarkIds: [],
         rephrase: null,
+        completion: null,
+        completionTimer: null,
     };
 }
 
@@ -284,6 +302,9 @@ export interface OrchestratorDeps {
      * the test path (vitest runs under Node, not Bun).
      */
     panelRenderer?: () => PanelController;
+    /** Ghost text render controller — Path A self-render, wired by
+     *  tui-entry.tsx. Path B swaps to promptRef.ghostText at one call-site. */
+    ghostRenderer?: GhostRenderer;
 }
 
 /** Minimal shape of the item the panel needs to build its view-model.
@@ -322,6 +343,16 @@ export function startOrchestrator(
     const correctFn = deps?.correct ?? ((req: CorrectRequest) => client.correct(req));
     const rephraseFn = deps?.rephrase ?? ((req: RephraseRequest) => client.rephrase(req));
     const completeFn = deps?.complete ?? ((req: CompleteRequest) => client.complete(req));
+
+    // Ghost render callback — wired by tui-entry.tsx via deps.ghostRenderer.
+    // Path A: self-render overlay. Path B: one-line swap to promptRef.ghostText.
+    // See ghost-overlay.ts for the render interface.
+    const renderGhost = (text: string, atOffset: number): void => {
+        deps?.ghostRenderer?.renderGhost(text, atOffset);
+    };
+    const clearGhost = (): void => {
+        deps?.ghostRenderer?.clearGhost();
+    };
 
     // Style id cache: category → styleId. Lazy; one registerStyle per
     // category the first time we see it.
@@ -590,6 +621,29 @@ export function startOrchestrator(
             return;
         }
         scheduleCheck(ref);
+
+        // ── Completion pause detector ─────────────────────────────────
+        // Separate debounce from the grammar re-check. Only fires when
+        // completion is enabled, the line looks unfinished, and we are
+        // NOT pinned or rephrasing (mutually exclusive states).
+        if (state.completionTimer !== null) {
+            clearTimeout(state.completionTimer);
+            state.completionTimer = null;
+        }
+        if (
+            settings.completionEnabled &&
+            lineLooksUnfinished(text) &&
+            detailsState.pinnedIndex() === null &&
+            state.rephrase === null
+        ) {
+            const capturedRef = ref;
+            const capturedText = text;
+            const capturedOffset = ref.cursorOffset ?? text.length;
+            state.completionTimer = setTimeout(() => {
+                state.completionTimer = null;
+                void requestCompletion(capturedRef, capturedText, capturedOffset);
+            }, settings.completionDebounceMs);
+        }
     };
 
     const applyAll = (): void => {
@@ -650,6 +704,7 @@ export function startOrchestrator(
     // constraint: only controller.setView() → PanelComponent's local signal drives
     // re-renders. An in-component setInterval would queue updates that never flush.
     let rephraseSeq = 0;
+    let completionSeq = 0;
     let spinnerTimer: ReturnType<typeof setInterval> | null = null;
 
     // Helper: get the panel controller if available (injected via panelRenderer).
@@ -811,6 +866,53 @@ export function startOrchestrator(
         const ctrl = rephraseController;
         if (ctrl) ctrl.setView(null);
         pushStatusLine();
+    };
+
+    // ── Completion state machine ──────────────────────────────────────────
+    const requestCompletion = async (
+        ref: PromptRef,
+        text: string,
+        atOffset: number,
+    ): Promise<void> => {
+        if (!settings.completionEnabled) return;
+        const seq = ++completionSeq;
+        logDebug("completion request", { textLen: text.length, atOffset, seq });
+        try {
+            const res = await completeFn({ text, source: SIGNAL_SOURCE });
+            // Stale-seq guard.
+            if (seq !== completionSeq) {
+                logDebug("completion dropped (stale seq)", { seq });
+                return;
+            }
+            // Ref-identity guard.
+            const liveRef = api.prompt?.ref();
+            if (liveRef !== ref) {
+                logDebug("completion dropped (ref swap)", {});
+                return;
+            }
+            // Don't show if suppressed by now (pin appeared, rephrase started).
+            if (detailsState.pinnedIndex() !== null || state.rephrase !== null) {
+                logDebug("completion suppressed (pinned or rephrasing)", {});
+                return;
+            }
+            const continuation = res.continuation;
+            if (!continuation || continuation.length === 0) {
+                logDebug("completion empty — no ghost", {});
+                return;
+            }
+            logDebug("completion result", { contLen: continuation.length });
+            state.completion = { seq, continuation, ref, atOffset };
+            // Push to status-line.
+            pushStatusLine();
+            // Render ghost overlay.
+            renderGhost(continuation, atOffset);
+        } catch (e) {
+            if (seq === completionSeq) {
+                logDebug("completion error", {
+                    message: e instanceof Error ? e.message : String(e),
+                });
+            }
+        }
     };
 
     // Apply-all + rephrase layer — always on, no gate.
