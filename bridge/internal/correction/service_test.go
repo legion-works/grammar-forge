@@ -361,6 +361,31 @@ func TestRephraseUsesOverrideAndReturnsAlternatives(t *testing.T) {
 	require.Len(t, out.Alternatives, 2) // 3 total - 1 primary
 }
 
+func TestServiceCompleteHappyPath(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, fakeLLM{out: " fox jumps over the lazy dog."}, st, "m", fastPolicy())
+	got, err := svc.Complete(context.Background(), "The quick brown")
+	require.NoError(t, err)
+	require.Equal(t, "fox jumps over the lazy dog.", got)
+	require.Equal(t, int64(0), st.count, "complete must NOT log to the store")
+}
+
+func TestServiceCompleteLLMError(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	_, err := svc.Complete(context.Background(), "x")
+	require.Error(t, err)
+	require.Equal(t, int64(0), st.count, "complete must NOT log on backend error")
+}
+
+func TestServiceCompleteNilLLM(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, nil, st, "m", fastPolicy())
+	_, err := svc.Complete(context.Background(), "x")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm")
+}
+
 // pickyPB is a chat-style PromptBuilder for the picky-mode tests. It differs
 // from fakePB in two ways:
 //   - Build returns a chat_instruct prompt (so the grammar path is reachable
