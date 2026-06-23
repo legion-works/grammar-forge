@@ -3,6 +3,8 @@ import {
     resolveSettings,
     suggestionsToDecorations,
     startOrchestrator,
+    jumpNext,
+    jumpPrev,
     type Decoration,
     type OrchestratorDeps,
 } from "./orchestrator";
@@ -2549,5 +2551,65 @@ describe("startOrchestrator", () => {
         expect(toasts.some((t) => t.variant === "info")).toBe(true);
 
         stop();
+    });
+
+    describe("reviewJump", () => {
+        function makeItems(n: number): Array<{ category: string }> {
+            return Array.from({ length: n }, (_, _i) => ({ category: "grammar" }));
+        }
+
+        test("next: pins item after cursor (wraps)", () => {
+            const items = makeItems(3);
+            const displaySpans = [
+                { start: 5, end: 9 },
+                { start: 15, end: 19 },
+                { start: 25, end: 29 },
+            ];
+            const result = jumpNext(10, items, displaySpans);
+            expect(result).toEqual({ pinIndex: 1, cursorOffset: 15 });
+        });
+
+        test("next: wraps to first item when cursor is past last item", () => {
+            const items = makeItems(3);
+            const displaySpans = [
+                { start: 5, end: 9 },
+                { start: 15, end: 19 },
+                { start: 25, end: 29 },
+            ];
+            const result = jumpNext(30, items, displaySpans);
+            expect(result).toEqual({ pinIndex: 0, cursorOffset: 5 });
+        });
+
+        test("next: returns null for empty items", () => {
+            const result = jumpNext(0, [], []);
+            expect(result).toBeNull();
+        });
+
+        test("prev: pins item before cursor (wraps)", () => {
+            const items = makeItems(3);
+            const displaySpans = [
+                { start: 5, end: 9 },
+                { start: 15, end: 19 },
+                { start: 25, end: 29 },
+            ];
+            const result = jumpPrev(10, items, displaySpans);
+            expect(result).toEqual({ pinIndex: 0, cursorOffset: 5 });
+        });
+
+        test("prev: wraps to last item when cursor is before first item", () => {
+            const items = makeItems(3);
+            const displaySpans = [
+                { start: 5, end: 9 },
+                { start: 15, end: 19 },
+                { start: 25, end: 29 },
+            ];
+            const result = jumpPrev(3, items, displaySpans);
+            expect(result).toEqual({ pinIndex: 2, cursorOffset: 25 });
+        });
+
+        test("prev: returns null for empty items", () => {
+            const result = jumpPrev(0, [], []);
+            expect(result).toBeNull();
+        });
     });
 });

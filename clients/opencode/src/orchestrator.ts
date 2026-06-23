@@ -164,6 +164,62 @@ interface RefState {
     rephrase: RephraseState | null;
 }
 
+interface JumpResult {
+    pinIndex: number;
+    cursorOffset: number;
+}
+
+/**
+ * Find the next item after the cursor offset (end-exclusive search; wraps).
+ * Returns null when there are no items.
+ */
+export function jumpNext(
+    cursorOffset: number,
+    items: Array<{ category?: string }>,
+    displaySpans: Array<{ start: number; end: number }>,
+): JumpResult | null {
+    if (items.length === 0) return null;
+    const ascending = items
+        .map((_, i) => i)
+        .sort((a, b) => (displaySpans[a]?.start ?? 0) - (displaySpans[b]?.start ?? 0));
+    for (const idx of ascending) {
+        const span = displaySpans[idx];
+        if (!span) continue;
+        // Item starts after the cursor → first match wins.
+        if (span.start > cursorOffset) {
+            return { pinIndex: idx, cursorOffset: span.start };
+        }
+    }
+    // Wrap: return the first item (by display order).
+    const firstIdx = ascending[0]!;
+    return { pinIndex: firstIdx, cursorOffset: displaySpans[firstIdx]?.start ?? 0 };
+}
+
+/**
+ * Find the previous item before the cursor offset (wraps to last).
+ */
+export function jumpPrev(
+    cursorOffset: number,
+    items: Array<{ category?: string }>,
+    displaySpans: Array<{ start: number; end: number }>,
+): JumpResult | null {
+    if (items.length === 0) return null;
+    const descending = items
+        .map((_, i) => i)
+        .sort((a, b) => (displaySpans[b]?.end ?? 0) - (displaySpans[a]?.end ?? 0));
+    for (const idx of descending) {
+        const span = displaySpans[idx];
+        if (!span) continue;
+        // Item ends before the cursor → first match wins.
+        if (span.end < cursorOffset) {
+            return { pinIndex: idx, cursorOffset: span.start };
+        }
+    }
+    // Wrap: return the last item (by display order).
+    const lastIdx = descending[0]!;
+    return { pinIndex: lastIdx, cursorOffset: displaySpans[lastIdx]?.start ?? 0 };
+}
+
 function emptyRefState(): RefState {
     return {
         items: [],
@@ -698,6 +754,54 @@ export function startOrchestrator(
         ],
     });
 
+    // Ungated review-jump layer — always active. Provides ctrl+g / ctrl+shift+g
+    // to jump to the next/previous issue relative to the cursor. This layer has
+    // LOWER priority than the gated details layer so that when pinned, the gated
+    // bindings (return/x/ctrl+n/ctrl+p/esc) take precedence over the ungated
+    // review-jump. However, ctrl+g/ctrl+shift+g are NOT in the gated layer,
+    // so they never collide — review-jump AND pinned-layer commands are both
+    // available while pinned.
+    const reviewNext = (): void => {
+        const ref = api.prompt?.ref();
+        if (!ref) return;
+        if (state.items.length === 0) return;
+        if (ref.text !== state.checkedText) {
+            // Text drifted — no safe hit-test; schedule a check and retry.
+            scheduleCheck(ref);
+            return;
+        }
+        const offset = ref.cursorOffset ?? 0;
+        const result = jumpNext(offset, state.items, state.displaySpans);
+        if (result === null) return;
+        detailsState.pin(result.pinIndex);
+        ref.setCursorOffset?.(result.cursorOffset);
+    };
+    const reviewPrev = (): void => {
+        const ref = api.prompt?.ref();
+        if (!ref) return;
+        if (state.items.length === 0) return;
+        if (ref.text !== state.checkedText) {
+            scheduleCheck(ref);
+            return;
+        }
+        const offset = ref.cursorOffset ?? 0;
+        const result = jumpPrev(offset, state.items, state.displaySpans);
+        if (result === null) return;
+        detailsState.pin(result.pinIndex);
+        ref.setCursorOffset?.(result.cursorOffset);
+    };
+    const disposeReviewLayer = api.keymap.registerLayer({
+        priority: 400, // lower than the details layer (500) so gated bindings win
+        commands: [
+            { name: "grammarforge.review.next", title: "GrammarForge: next issue", run: reviewNext },
+            { name: "grammarforge.review.prev", title: "GrammarForge: previous issue", run: reviewPrev },
+        ],
+        bindings: [
+            { key: settings.nextIssueHotkey, cmd: "grammarforge.review.next" },
+            { key: settings.prevIssueHotkey, cmd: "grammarforge.review.prev" },
+        ],
+    });
+
     // Rephrase result/loading layer — gated: active whenever state.rephrase !== null.
     // enter accepts (no-op if still loading), esc cancels in both modes.
     const disposeRephraseLayer = api.keymap.registerLayer({
@@ -1070,6 +1174,7 @@ export function startOrchestrator(
         if (unsubscribeCursorChange) unsubscribeCursorChange();
         disposeAcceptLayer();
         disposeRephraseLayer();
+        disposeReviewLayer();
         if (disposeDetailsLayer) disposeDetailsLayer();
         onDispose();
         clearActiveExtmarks();
