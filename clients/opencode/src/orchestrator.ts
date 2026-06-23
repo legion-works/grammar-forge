@@ -584,6 +584,16 @@ export function startOrchestrator(
             }
             // NOTE: Underlines are NOT cleared here — they reconcile on
             // the debounced re-check (avoids flicker).
+            // ── WS-C: Eagerly clear completion ghost on edit ──────
+            if (state.completion !== null) {
+                completionSeq++; // invalidate in-flight
+                if (state.completionTimer !== null) {
+                    clearTimeout(state.completionTimer);
+                    state.completionTimer = null;
+                }
+                state.completion = null;
+                clearGhost();
+            }
             pushStatusLine();
         }
 
@@ -603,6 +613,16 @@ export function startOrchestrator(
                 state.rephrase = null;
                 const ctrl = rephraseController;
                 if (ctrl) ctrl.setView(null);
+            }
+            // Clear completion ghost on ref-swap.
+            if (state.completion !== null) {
+                completionSeq++;
+                if (state.completionTimer !== null) {
+                    clearTimeout(state.completionTimer);
+                    state.completionTimer = null;
+                }
+                state.completion = null;
+                clearGhost();
             }
         }
         const text = ref.text;

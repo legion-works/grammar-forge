@@ -3432,5 +3432,132 @@ describe("startOrchestrator", () => {
             // With no completion state, enabled should return false.
             expect(enabledFn!()).toBe(false);
         });
+
+        test("onChange: eagerly clears completion ghost on edit (A8 + WS-C)", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            const clearCalls: unknown[] = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+            });
+
+            // Trigger completion.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+            expect(clearCalls).toHaveLength(0);
+
+            // Now edit — onChange fires with different text.
+            ref.text = "The quick brown fox";
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(0);
+
+            // Ghost should be cleared via the A8 eager-dismiss block.
+            expect(clearCalls).toHaveLength(1);
+            vi.useRealTimers();
+        });
+
+        test("onChange: clears completion ghost on ref-swap", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            const clearCalls: unknown[] = [];
+            let onChangeCb: () => void = () => undefined;
+            const refA = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            let currentRef: typeof refA = refA;
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => currentRef,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+            });
+
+            // Trigger completion.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+            expect(clearCalls).toHaveLength(0);
+
+            // Swap ref — simulate route remount.
+            currentRef = {
+                text: "New prompt",
+                current: { input: "New prompt", parts: [] },
+                cursorOffset: 10,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(0);
+
+            // Ghost should be cleared on ref-swap.
+            expect(clearCalls).toHaveLength(1);
+            vi.useRealTimers();
+        });
     });
 });
