@@ -3219,5 +3219,218 @@ describe("startOrchestrator", () => {
             expect(ghostCalls).toHaveLength(0);
             vi.useRealTimers();
         });
+
+        test("completion keymap layer: accept calls replaceRange and clears ghost", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string; atOffset: number }> = [];
+            const clearCalls: unknown[] = [];
+            const replaceCalls: Array<{ start: number; end: number; text: string }> = [];
+            const layers = new Map<string, { commands?: Array<{ name: string; run: () => void }> }>();
+            let onChangeCb: () => void = () => undefined;
+
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: (start: number, end: number, text: string) => {
+                    replaceCalls.push({ start, end, text });
+                },
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        priority: number;
+                        enabled?: () => boolean;
+                        commands?: Array<{ name: string; title: string; run: () => void }>;
+                        bindings?: Array<{ key: string; cmd: string }>;
+                    }) => {
+                        const layerId = `layer-${layers.size}`;
+                        layers.set(layerId, layer);
+                        return () => layers.delete(layerId);
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps over" }),
+                ghostRenderer: {
+                    renderGhost: (text, atOffset) => ghostCalls.push({ text, atOffset }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+            });
+
+            // Trigger completion.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+
+            // Find the completion layer and execute the accept command.
+            let acceptFn: (() => void) | undefined;
+            for (const [, layer] of layers) {
+                if (layer.commands) {
+                    for (const cmd of layer.commands) {
+                        if (cmd.name === "grammarforge.completion.accept") {
+                            acceptFn = cmd.run;
+                        }
+                    }
+                }
+            }
+            expect(acceptFn).toBeDefined();
+            acceptFn!();
+
+            // Assert replaceRange was called with correct args.
+            expect(replaceCalls).toHaveLength(1);
+            expect(replaceCalls[0]!.start).toBe(15);
+            expect(replaceCalls[0]!.end).toBe(15);
+            expect(replaceCalls[0]!.text).toBe("fox jumps over");
+
+            vi.useRealTimers();
+        });
+
+        test("completion keymap layer: dismiss clears state and ghost", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            const clearCalls: unknown[] = [];
+            const layers = new Map<string, { commands?: Array<{ name: string; run: () => void }> }>();
+            let onChangeCb: () => void = () => undefined;
+
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        priority: number;
+                        enabled?: () => boolean;
+                        commands?: Array<{ name: string; title: string; run: () => void }>;
+                    }) => {
+                        const layerId = `layer-${layers.size}`;
+                        layers.set(layerId, layer);
+                        return () => layers.delete(layerId);
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+            });
+
+            // Trigger completion.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+
+            // Find the completion layer and execute the dismiss command.
+            let dismissFn: (() => void) | undefined;
+            for (const [, layer] of layers) {
+                if (layer.commands) {
+                    for (const cmd of layer.commands) {
+                        if (cmd.name === "grammarforge.completion.dismiss") {
+                            dismissFn = cmd.run;
+                        }
+                    }
+                }
+            }
+            expect(dismissFn).toBeDefined();
+            expect(clearCalls).toHaveLength(0);
+            dismissFn!();
+            expect(clearCalls).toHaveLength(1);
+
+            vi.useRealTimers();
+        });
+
+        test("completion keymap layer: enabled gate is false when no ghost", () => {
+            const layers = new Map<string, { enabled?: () => boolean }>();
+            const ref = {
+                text: "",
+                current: { input: "", parts: [] },
+                cursorOffset: 0,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: () => () => undefined,
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        priority: number;
+                        enabled?: () => boolean;
+                    }) => {
+                        const layerId = `layer-${layers.size}`;
+                        layers.set(layerId, layer);
+                        return () => layers.delete(layerId);
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: false }, {});
+
+            // Find the completion layer and check enabled() returns false.
+            let enabledFn: (() => boolean) | undefined;
+            for (const [, layer] of layers) {
+                if (layer.enabled) {
+                    // The completion layer is identifiable by its enabled gate.
+                    enabledFn = layer.enabled;
+                }
+            }
+            // All keymap layers are registered; completion has enabled defined.
+            expect(enabledFn).toBeDefined();
+            // With no completion state, enabled should return false.
+            expect(enabledFn!()).toBe(false);
+        });
     });
 });

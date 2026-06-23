@@ -915,6 +915,39 @@ export function startOrchestrator(
         }
     };
 
+    const acceptCompletion = (): void => {
+        const comp = state.completion;
+        if (!comp) return;
+        const liveRef = api.prompt?.ref();
+        if (!liveRef || liveRef !== comp.ref) {
+            state.completion = null;
+            clearGhost();
+            return;
+        }
+        // Pure insertion at the end — replaceRange with equal start/end
+        // inserts the ghost text at that position.
+        const continuation = comp.continuation;
+        liveRef.replaceRange(comp.atOffset, comp.atOffset, continuation);
+        logDebug("completion accepted", { atOffset: comp.atOffset, len: continuation.length });
+        state.completion = null;
+        clearGhost();
+        // Trigger a grammar re-check on the now-extended text.
+        onChange();
+    };
+
+    const dismissCompletion = (): void => {
+        if (!state.completion) return;
+        logDebug("completion dismissed", {});
+        completionSeq++; // invalidate any in-flight request
+        state.completion = null;
+        if (state.completionTimer !== null) {
+            clearTimeout(state.completionTimer);
+            state.completionTimer = null;
+        }
+        clearGhost();
+        pushStatusLine();
+    };
+
     // Apply-all + rephrase layer — always on, no gate.
     const disposeAcceptLayer = api.keymap.registerLayer({
         priority: 500,
@@ -933,6 +966,29 @@ export function startOrchestrator(
         bindings: [
             { key: settings.applyAllHotkey, cmd: "grammarforge.applyAll" },
             { key: settings.rephraseHotkey, cmd: "grammarforge.rephrase" },
+        ],
+    });
+
+    // Completion ghost layer — gated: active only while a ghost is visible.
+    // ⇧Tab accepts, esc dismisses. When no ghost, keys pass through to host.
+    const disposeCompletionLayer = api.keymap.registerLayer({
+        priority: 500,
+        enabled: () => state.completion !== null,
+        commands: [
+            {
+                name: "grammarforge.completion.accept",
+                title: "GrammarForge: accept completion ghost",
+                run: acceptCompletion,
+            },
+            {
+                name: "grammarforge.completion.dismiss",
+                title: "GrammarForge: dismiss completion ghost",
+                run: dismissCompletion,
+            },
+        ],
+        bindings: [
+            { key: "shift+tab", cmd: "grammarforge.completion.accept" },
+            { key: "escape", cmd: "grammarforge.completion.dismiss" },
         ],
     });
 
@@ -1526,6 +1582,7 @@ export function startOrchestrator(
         if (unsubscribeCursorChange) unsubscribeCursorChange();
         disposeAcceptLayer();
         disposeRephraseLayer();
+        disposeCompletionLayer();
         disposeReviewLayer();
         if (disposeDetailsLayer) disposeDetailsLayer();
         onDispose();
