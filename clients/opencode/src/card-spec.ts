@@ -20,6 +20,8 @@
 import { CATEGORY_FG } from "./category-palette";
 import type { DetailsViewModel } from "./details-panel";
 import type { RephraseResultView } from "./details-panel-view";
+import { wrapLines } from "./display-width";
+import type { SegmentWidthFn } from "./display-width";
 
 export type SegmentColorKey = "category" | "delete" | "insert" | "dim";
 
@@ -110,12 +112,20 @@ export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", 
 /** Accent color for the rephrase card border (single source of truth). */
 export const REPHRASE_ACCENT_HEX = "#8b5cf6"; // style-purple — distinct from category colors
 
-/** Max display width for original/rephrased text before truncation. */
-const REPHRASE_TEXT_MAX = 40;
+/** Inner card width in display columns (CARD_W − 2 border − 2 pad). */
+const INNER_WIDTH = 40;
+/** Max visible content rows before scrolling (excluding header + hints). */
+export const MAX_CONTENT_ROWS = 8;
 
-function truncateText(text: string, max: number): string {
-    if (text.length <= max) return text;
-    return text.slice(0, max - 1) + "…";
+/** Word-wrap text into lines (display-width aware). Returns the lines
+ *  and the total display height (lines count). */
+function wrapText(
+    text: string,
+    innerWidth: number,
+    displayWidthOf: SegmentWidthFn,
+): { lines: string[]; height: number } {
+    const lines = wrapLines(text, innerWidth, displayWidthOf);
+    return { lines, height: lines.length };
 }
 
 /** Build a CardSpec for the rephrase-loading state.
@@ -146,34 +156,50 @@ export function buildRephraseLoadingCardSpec(frame: number): CardSpec {
 
 /** Build a CardSpec for the rephrase-result state.
  *  PURE — no I/O. Shows original → rephrased with accept/reject hints. */
-export function buildRephraseResultCardSpec(view: RephraseResultView): CardSpec {
-    const orig = truncateText(view.original, REPHRASE_TEXT_MAX);
-    const repl = truncateText(view.rephrased, REPHRASE_TEXT_MAX);
+export function buildRephraseResultCardSpec(
+    view: RephraseResultView,
+    displayWidthOf: (s: string) => number,
+): CardSpec & { contentRows: number } {
+    const { lines: origLines } = wrapText(view.original, INNER_WIDTH, displayWidthOf);
+    const { lines: replLines } = wrapText(view.rephrased, INNER_WIDTH, displayWidthOf);
+    const totalContentRows = origLines.length + replLines.length + 1; // +1 for arrow row
+    const cappedRows = Math.min(totalContentRows, MAX_CONTENT_ROWS);
+    const overflows = totalContentRows > MAX_CONTENT_ROWS;
+
+    const rows: CardRow[] = [
+        {
+            segments: [{
+                text: "✎ Rephrase",
+                colorKey: "category",
+                fg: REPHRASE_ACCENT_HEX,
+                bold: true,
+            }],
+        },
+    ];
+    // Original lines (dim)
+    for (const line of origLines) {
+        rows.push({ segments: [{ text: line, colorKey: "delete", fg: DIM_HEX }] });
+    }
+    // Arrow + first rephrased line
+    rows.push({
+        segments: [
+            { text: " → ", colorKey: "dim", fg: DIM_HEX },
+            { text: replLines[0] ?? "", colorKey: "insert", fg: INSERT_HEX },
+        ],
+    });
+    // Remaining rephrased lines
+    for (let i = 1; i < replLines.length; i++) {
+        rows.push({ segments: [{ text: replLines[i]!, colorKey: "insert", fg: INSERT_HEX }] });
+    }
+    // Hints row
+    const hintText = overflows
+        ? "⏎ apply · esc reject · ctrl+/ regenerate · PgUp/PgDn scroll ↓ more"
+        : "⏎ apply · esc reject · ctrl+/ regenerate";
+    rows.push({ segments: [{ text: hintText, colorKey: "dim", fg: DIM_HEX }] });
+
     return {
         borderColor: REPHRASE_ACCENT_HEX,
-        rows: [
-            {
-                segments: [
-                    {
-                        text: "✎ Rephrase",
-                        colorKey: "category",
-                        fg: REPHRASE_ACCENT_HEX,
-                        bold: true,
-                    },
-                ],
-            },
-            {
-                segments: [{ text: orig, colorKey: "delete", fg: DIM_HEX }],
-            },
-            {
-                segments: [
-                    { text: " → ", colorKey: "dim", fg: DIM_HEX },
-                    { text: repl, colorKey: "insert", fg: INSERT_HEX },
-                ],
-            },
-            {
-                segments: [{ text: "⏎ apply · esc reject", colorKey: "dim", fg: DIM_HEX }],
-            },
-        ],
+        rows,
+        contentRows: cappedRows,
     };
 }

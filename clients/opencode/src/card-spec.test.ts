@@ -206,6 +206,8 @@ describe("buildRephraseLoadingCardSpec", () => {
 });
 
 describe("buildRephraseResultCardSpec", () => {
+    const stubW = (s: string) => s.length;
+
     const makeView = (original: string, rephrased: string) => ({
         kind: "rephrase-result" as const,
         original,
@@ -214,74 +216,69 @@ describe("buildRephraseResultCardSpec", () => {
     });
 
     test("returns a spec with the rephrase accent border color", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
         expect(spec.borderColor).toBe(REPHRASE_ACCENT_HEX);
     });
 
-    test("has 4 rows: title, original, arrow+rephrased, hints", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        expect(spec.rows).toHaveLength(4);
+    test("has at least 4 rows: title, original lines, arrow+rephrased, hints", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
+        expect(spec.rows.length).toBeGreaterThanOrEqual(4);
     });
 
     test("title row: bold accent-colored '✎ Rephrase'", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
         const title = spec.rows[0]!.segments[0]!;
         expect(title.text).toBe("✎ Rephrase");
         expect(title.bold).toBe(true);
         expect(title.fg).toBe(REPHRASE_ACCENT_HEX);
     });
 
-    test("original row: contains the original text", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello world", "hi there"));
+    test("original lines: contain the original text (possibly wrapped)", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello world", "hi there"), stubW);
+        // Original text is in rows[1] (first original line)
         const origSeg = spec.rows[1]!.segments[0]!;
         expect(origSeg.text).toBe("hello world");
     });
 
     test("arrow+rephrased row: contains arrow and rephrased text", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        const row = spec.rows[2]!;
-        const texts = row.segments.map((s) => s.text);
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
+        // Find the arrow row (the one with dim colorKey and contains "→")
+        const arrowRow = spec.rows.find((r) =>
+            r.segments.some((s) => s.text.includes("→")),
+        );
+        expect(arrowRow).toBeDefined();
+        const texts = arrowRow!.segments.map((s) => s.text);
         expect(texts.join("")).toContain("→");
         expect(texts.join("")).toContain("hi there");
     });
 
     test("rephrased text segment has insert colorKey (green)", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        const row = spec.rows[2]!;
-        const replSeg = row.segments.find((s) => s.text === "hi there");
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
+        const allSegments = spec.rows.flatMap((r) => r.segments);
+        const replSeg = allSegments.find((s) => s.text === "hi there");
         expect(replSeg).toBeDefined();
         expect(replSeg!.colorKey).toBe("insert");
     });
 
     test("hints row: contains accept and reject hints", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        const hints = spec.rows[3]!.segments[0]!;
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
+        const hintsRow = spec.rows[spec.rows.length - 1]!;
+        const hints = hintsRow.segments[0]!;
         expect(hints.text).toContain("apply");
         expect(hints.text).toContain("reject");
         expect(hints.colorKey).toBe("dim");
     });
 
-    test("long original text is truncated with ellipsis", () => {
-        const longText = "a".repeat(60);
-        const spec = buildRephraseResultCardSpec(makeView(longText, "short"));
-        const origSeg = spec.rows[1]!.segments[0]!;
-        expect(origSeg.text.length).toBeLessThanOrEqual(41); // 40 chars + ellipsis
-        expect(origSeg.text.endsWith("…")).toBe(true);
-    });
-
-    test("long rephrased text is truncated with ellipsis", () => {
-        const longText = "b".repeat(60);
-        const spec = buildRephraseResultCardSpec(makeView("short", longText));
-        const row = spec.rows[2]!;
-        const replSeg = row.segments.find((s) => s.colorKey === "insert")!;
-        expect(replSeg.text.length).toBeLessThanOrEqual(41);
-        expect(replSeg.text.endsWith("…")).toBe(true);
-    });
-
-    test("short text is NOT truncated", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        const origSeg = spec.rows[1]!.segments[0]!;
-        expect(origSeg.text).toBe("hello");
+    test("long text wraps, not truncated (no ellipsis)", () => {
+        const text = "In hindsight we should have merged the fix last week because the bug was already known and the patch was ready to ship";
+        const spec = buildRephraseResultCardSpec(makeView(text, text), stubW);
+        // No "…" truncation in any row
+        for (const row of spec.rows) {
+            for (const seg of row.segments) {
+                expect(seg.text).not.toContain("…");
+            }
+        }
+        expect(spec.contentRows).toBeGreaterThan(1);
     });
 
     test("REGRESSION GUARD: every segment.text is a non-empty string", () => {
@@ -291,7 +288,7 @@ describe("buildRephraseResultCardSpec", () => {
             makeView("x", "y"),
         ];
         for (const view of cases) {
-            const spec = buildRephraseResultCardSpec(view);
+            const spec = buildRephraseResultCardSpec(view, stubW);
             for (const row of spec.rows) {
                 for (const seg of row.segments) {
                     expect(typeof seg.text).toBe("string");

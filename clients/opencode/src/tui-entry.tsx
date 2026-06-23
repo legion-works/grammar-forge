@@ -49,6 +49,7 @@ import {
 } from "./card-spec";
 import { clampAnchor } from "./overlay-anchor";
 import { logDebug } from "./debug";
+import { makeDisplayWidth, bunSegmentWidth } from "./display-width";
 
 const ID = "grammarforge";
 
@@ -141,7 +142,7 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                         if (current.kind === "rephrase-loading") {
                             spec = buildRephraseLoadingCardSpec(current.frame);
                         } else if (current.kind === "rephrase-result") {
-                            spec = buildRephraseResultCardSpec(current);
+                            spec = buildRephraseResultCardSpec(current, makeDisplayWidth(bunSegmentWidth));
                         } else {
                             // kind === "suggestion"
                             const vm = buildDetailsViewModel(
@@ -163,8 +164,10 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                         const dims = dimensions();
                         const screenW = dims.width;
                         const screenH = dims.height;
-                        // Card height varies by kind: loading=3 rows+border, result=6 rows+border.
-                        const cardH = current.kind === "rephrase-result" ? 6 : CARD_H;
+                        // Card height varies by kind.
+                        const cardH = current.kind === "rephrase-result"
+                            ? (spec as unknown as { contentRows: number }).contentRows + 4
+                            : CARD_H;
                         const clamped = anchor
                             ? clampAnchor(anchor, CARD_W, cardH, screenW, screenH)
                             : null;
