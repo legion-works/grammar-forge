@@ -1,28 +1,14 @@
-/** Status-line state discriminated union. */
-export type StatusLineState =
-    | { kind: "flagged"; issueCount: number; categories: string[] }
-    | { kind: "pinned"; issueCount: number; pinnedIndex: number; pinnedTotal: number }
-    | { kind: "rephrase-loading" }
-    | { kind: "rephrase-result" }
-    | { kind: "clear" };
-
-export interface StatusLineKeys {
-    nextIssueKey: string;
-    prevIssueKey: string;
-    applyAllKey: string;
-    rephraseKey: string;
-    cycleNextKey: string;
-    cyclePrevKey: string;
-}
-
 export interface StatusLineInput {
     state: "flagged" | "pinned" | "rephrase-loading" | "rephrase-result" | "clear";
     issueCount?: number;
     categories?: string[];
     pinnedIndex?: number;
     nextIssueKey?: string;
+    prevIssueKey?: string;
     applyAllKey?: string;
     rephraseKey?: string;
+    cycleNextKey?: string;
+    cyclePrevKey?: string;
 }
 
 /** Category → single-block tick. */
@@ -50,7 +36,9 @@ export function buildStatusLine(input: StatusLineInput): string {
         case "pinned": {
             const idx = input.pinnedIndex ?? 0;
             const total = input.issueCount ?? 0;
-            return `‹ ${idx}/${total} › · ctrl+n ctrl+p cycle · return apply · x ignore · esc close`;
+            const cn = input.cycleNextKey ?? "ctrl+n";
+            const cp = input.cyclePrevKey ?? "ctrl+p";
+            return `‹ ${idx}/${total} › · ${cn} ${cp} cycle · return apply · x ignore · esc close`;
         }
         case "rephrase-loading": {
             return "✎ rephrasing…";

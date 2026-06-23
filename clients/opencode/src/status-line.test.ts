@@ -18,7 +18,7 @@ describe("buildStatusLine", () => {
         expect(result).toContain("ctrl+/ rephrase");
     });
 
-    test("PINNED: shows index/total", () => {
+    test("PINNED: shows index/total with bound cycle keys", () => {
         const input: StatusLineInput = {
             state: "pinned",
             issueCount: 8,
@@ -27,9 +27,24 @@ describe("buildStatusLine", () => {
             nextIssueKey: "ctrl+g",
             applyAllKey: "ctrl+.",
             rephraseKey: "ctrl+/",
+            cycleNextKey: "ctrl+n",
+            cyclePrevKey: "ctrl+p",
         };
         const result = buildStatusLine(input);
         expect(result).toContain("‹ 3/8 ›");
+        expect(result).toContain("ctrl+n ctrl+p cycle");
+    });
+
+    test("PINNED: uses non-default bound keys", () => {
+        const input: StatusLineInput = {
+            state: "pinned",
+            issueCount: 5,
+            pinnedIndex: 2,
+            cycleNextKey: "]",
+            cyclePrevKey: "[",
+        };
+        const result = buildStatusLine(input);
+        expect(result).toContain("] [ cycle");
     });
 
     test("REPHRASE-LOADING: shows spinner", () => {

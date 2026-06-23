@@ -77,6 +77,11 @@ export interface PanelController {
     subscribe: (cb: (next: PanelView | null) => void) => () => void;
     /** Tear down all subscribers. Called on plugin dispose. */
     dispose: () => void;
+    // ── Status-line (A6) ─────────────────────────────────────────────
+    /** Push a status-line text update. */
+    setStatusText: (text: string) => void;
+    /** Subscribe to status-line text updates. */
+    subscribeStatus: (cb: (text: string) => void) => () => void;
     // ── Mouse callbacks (A7) — set by the orchestrator ────────────────
     onApply?: () => void;
     onIgnore?: () => void;
@@ -91,6 +96,7 @@ export interface PanelController {
 
 export function createDetailsPanelController(): PanelController {
     const subscribers = new Set<(next: PanelView | null) => void>();
+    const statusSubscribers = new Set<(text: string) => void>();
     return {
         setView(next) {
             for (const cb of subscribers) {
@@ -105,6 +111,18 @@ export function createDetailsPanelController(): PanelController {
         },
         dispose() {
             subscribers.clear();
+            statusSubscribers.clear();
+        },
+        setStatusText(text) {
+            for (const cb of statusSubscribers) {
+                cb(text);
+            }
+        },
+        subscribeStatus(cb) {
+            statusSubscribers.add(cb);
+            return () => {
+                statusSubscribers.delete(cb);
+            };
         },
     };
 }

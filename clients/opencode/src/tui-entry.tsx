@@ -102,10 +102,15 @@ export default plugin;
 // setView fanout pushes the payload into localView via subscribe.
 function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
     const [localView, setLocalView] = createSignal<PanelView | null>(null);
+    const [statusText, setStatusText] = createSignal("");
     const unsubscribe = props.controller.subscribe((next) => {
         setLocalView(next);
     });
-    onCleanup(unsubscribe);
+    const unsubscribeStatus = props.controller.subscribeStatus(setStatusText);
+    onCleanup(() => {
+        unsubscribe();
+        unsubscribeStatus();
+    });
     // useTerminalDimensions() is a reactive accessor from @opentui/solid.
     // It returns { width, height } in terminal cells. Used for edge clamping.
     const dimensions = useTerminalDimensions();
@@ -117,6 +122,14 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                 non-null initial output or it prunes the entry and
                 the component is never mounted (gotcha 3). */}
             <box width={0} height={0} />
+            {/* Status-line (A6) — always-on dim row under the prompt. */}
+            <Show when={statusText()} keyed>
+                {(t) => (
+                    <box flexDirection="row">
+                        <text fg="#6b7280">{t}</text>
+                    </box>
+                )}
+            </Show>
             {/* Floating overlay: Portal renders at the render root,
                 escaping the slot's cropping layout. AbsoluteCard
                 uses position="absolute" + zIndex to float above

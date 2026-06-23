@@ -402,6 +402,8 @@ describe("startOrchestrator", () => {
                 setView: () => undefined,
                 subscribe: () => () => undefined,
                 dispose: () => undefined,
+                setStatusText: () => undefined,
+                subscribeStatus: () => () => undefined,
             }),
         });
         expect(commandHandlers.has("grammarforge.applyAll")).toBe(true);
@@ -469,6 +471,8 @@ describe("startOrchestrator", () => {
                 setView: () => undefined,
                 subscribe: () => () => undefined,
                 dispose: () => undefined,
+                setStatusText: () => undefined,
+                subscribeStatus: () => () => undefined,
             }),
         });
         // The orchestrator does NOT register slots — the single
@@ -1781,6 +1785,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -2148,6 +2154,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -2221,6 +2229,206 @@ describe("startOrchestrator", () => {
         expect(s.rephraseHotkey).toBe("ctrl+r");
     });
 
+    test("rephrase: accept applies SELECTED alternative (not always primary)", async () => {
+        const { commandHandlers, pendingRephrase, replaceRangeCalls, stop } = makeRephraseEnv();
+
+        // Start rephrase.
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        // Resolve with alternatives.
+        pendingRephrase[0]!({
+            original: "He go to school",
+            rephrased: "He goes to school",       // primary (index 0)
+            alternatives: ["He is going to school", "He went to school"],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Cycle to alternative #1 (the second variant: "He is going to school").
+        const cycleAltNext = commandHandlers.get("grammarforge.rephrase.cycleAltNext") as () => void;
+        expect(cycleAltNext).toBeDefined();
+        cycleAltNext();
+
+        // Now accept — should apply "He is going to school" (alt index 1), NOT the primary.
+        const acceptFn = commandHandlers.get("grammarforge.rephrase.accept") as () => void;
+        acceptFn();
+
+        expect(replaceRangeCalls.length).toBe(1);
+        expect(replaceRangeCalls[0]![2]).toBe("He is going to school");
+
+        stop();
+    });
+
+    // ─── A8: Eager dismiss on edit ─────────────────────────────────────
+
+    test("A8 eager-dismiss: onChange textChanged clears pinned card immediately", async () => {
+        const text = "I has a apple";
+        let onCursorChangeCb = (): void => undefined;
+        let onChangeCb = (): void => undefined;
+        const setViewCalls: Array<import("./details-panel-view").PanelView | null> = [];
+        let resolveCorrect!: (res: unknown) => void;
+
+        let currentRef = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 3,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        };
+
+        const api = {
+            prompt: {
+                ref: () => currentRef,
+                onChange: (cb: () => void) => {
+                    onChangeCb = cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    void layer.commands;
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+            panelRenderer: () => ({
+                setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
+                subscribe: () => () => undefined,
+                dispose: () => undefined,
+                setStatusText: () => undefined,
+                subscribeStatus: () => () => undefined,
+            }),
+        } as unknown as OrchestratorDeps);
+
+        // Wait for the initial debounced check.
+        await new Promise((r) => setTimeout(r, 30));
+        expect(resolveCorrect).toBeDefined();
+        resolveCorrect!({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Pin index 0 by moving cursor to offset 3 (inside "has").
+        currentRef.cursorOffset = 3;
+        onCursorChangeCb();
+
+        // Should be pinned now.
+        const pinnedViews = setViewCalls.filter((v) => v?.kind === "suggestion");
+        expect(pinnedViews.length).toBeGreaterThanOrEqual(1);
+
+        // Now simulate a text edit: change ref.text AND fire onChange.
+        currentRef.text = "I has an apple";
+        onChangeCb();
+
+        // The pinned card should be IMMEDIATELY cleared (eager).
+        const lastView = setViewCalls[setViewCalls.length - 1];
+        expect(lastView).toBeNull();
+
+        stop();
+    });
+
+    test("A8 eager-dismiss: underlines NOT cleared eagerly (reconcile on re-check)", async () => {
+        const text = "I has a apple";
+        let onChangeCb = (): void => undefined;
+        let resolveCorrect!: (res: unknown) => void;
+        const deletedExtmarks: number[] = [];
+
+        let currentRef = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 3,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: (id: number) => {
+                    deletedExtmarks.push(id);
+                    return true;
+                },
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        };
+
+        const api = {
+            prompt: {
+                ref: () => currentRef,
+                onChange: (cb: () => void) => {
+                    onChangeCb = cb;
+                    return () => undefined;
+                },
+                onCursorChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    void layer.commands;
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        await new Promise((r) => setTimeout(r, 30));
+        resolveCorrect!({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Extmarks should have been created.
+        const deletedBefore = deletedExtmarks.length;
+
+        // Simulate text edit.
+        currentRef.text = "I has an apple";
+        onChangeCb();
+
+        // Underlines NOT eagerly cleared — extmarks remain.
+        expect(deletedExtmarks.length).toBe(deletedBefore);
+
+        stop();
+    });
+
     // ─── BLOCKER 2: ignorePinned keeps displaySpans aligned with items ─────────
 
     test("ignorePinned: ignoring middle item keeps displaySpans aligned with surviving items", async () => {
@@ -2279,6 +2487,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -2403,6 +2613,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -2507,6 +2719,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {

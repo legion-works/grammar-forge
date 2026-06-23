@@ -202,8 +202,7 @@ export function wrapLines(
                 // Slice by display width: walk graphemes until we hit maxWidth.
                 let sliceWidth = 0;
                 let sliceEnd = 0;
-                const seg = new Intl.Segmenter("en", { granularity: "grapheme" });
-                for (const part of seg.segment(currentLine)) {
+                for (const part of graphemeSegmenter.segment(currentLine)) {
                     const pw = part.segment === "\n" ? 1 : displayWidthOf(part.segment);
                     if (sliceWidth + pw > maxWidth) break;
                     sliceWidth += pw;

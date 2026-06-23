@@ -37,6 +37,7 @@ import { maskPastePlaceholders } from "./paste-mask";
 import { createDetailsState, type DetailsState } from "./details-state";
 import { detectPromptPinSupport } from "./feature-detect";
 import { logDebug } from "./debug";
+import { buildStatusLine } from "./status-line";
 import { CATEGORY_FG } from "./category-palette";
 import type { PromptRef, TuiApi } from "./opencode-types";
 import type { PanelController, PanelView } from "./details-panel-view";
@@ -407,6 +408,7 @@ export function startOrchestrator(
             state.checkedText = "";
             clearActiveExtmarks();
             detailsState.itemsChanged(0);
+            pushStatusLine();
             logDebug("check empty (empty buffer, no suggestions)", {});
             return;
         }
@@ -479,6 +481,7 @@ export function startOrchestrator(
                 })),
             });
             renderDecorations(ref, state.items);
+            pushStatusLine();
             // Identity-swap detection (secondary): if items.count is the
             // same as before but the pinned item's (hlStart, hlEnd,
             // replacement) signature changed, the pin is now stale —
@@ -525,6 +528,7 @@ export function startOrchestrator(
             }
             // NOTE: Underlines are NOT cleared here — they reconcile on
             // the debounced re-check (avoids flicker).
+            pushStatusLine();
         }
 
         if (ref !== trackedRef) {
@@ -626,6 +630,9 @@ export function startOrchestrator(
     // Helper: get the panel controller if available (injected via panelRenderer).
     // We need it for rephrase setView calls outside the detailsState subscription.
     let rephraseController: PanelController | null = null;
+    // A6: pushStatusLine is defined inside the controller block; holder ref
+    // so runCheck + rephrase callbacks can call it.
+    let pushStatusLine: () => void = () => undefined;
 
     const stopSpinner = (): void => {
         if (spinnerTimer !== null) {
@@ -648,6 +655,7 @@ export function startOrchestrator(
         clearActiveExtmarks();
         const seq = ++rephraseSeq;
         state.rephrase = { mode: "loading", original: text, alternatives: [], altIndex: 0, scrollOffset: 0, seq, ref };
+        pushStatusLine();
         let frame = 0;
         const ctrl = rephraseController;
         if (ctrl) {
@@ -718,6 +726,7 @@ export function startOrchestrator(
                         scrollOffset: 0,
                         displayStart: 0,
                     });
+                    pushStatusLine();
                 }
             } catch (e) {
                 if (state.rephrase?.seq === seq) {
@@ -755,7 +764,11 @@ export function startOrchestrator(
             if (ctrl) ctrl.setView(null);
             return;
         }
-        const rephrased = state.rephrase.rephrased ?? "";
+        // Apply the SELECTED alternative, not always the primary.
+        const rephrased =
+            state.rephrase.altIndex === 0
+                ? (state.rephrase.rephrased ?? "")
+                : (state.rephrase.alternatives[state.rephrase.altIndex - 1] ?? "");
         const end = displayWidthOf(ref.text);
         ref.replaceRange(0, end, rephrased);
         state.rephrase = null;
@@ -763,6 +776,7 @@ export function startOrchestrator(
         stopSpinner();
         onChange();
         api.ui.toast({ message: "Rephrased", variant: "success" });
+        pushStatusLine();
     };
 
     const rephraseReject = (): void => {
@@ -771,6 +785,7 @@ export function startOrchestrator(
         state.rephrase = null;
         const ctrl = rephraseController;
         if (ctrl) ctrl.setView(null);
+        pushStatusLine();
     };
 
     // Apply-all + rephrase layer — always on, no gate.
@@ -889,41 +904,89 @@ export function startOrchestrator(
                     });
                 },
             },
-            {
-                name: "grammarforge.rephrase.cycleAltPrev",
-                title: "GrammarForge: previous alternative",
-                run: () => {
-                    if (state.rephrase?.mode !== "result") return;
-                    const total = 1 + state.rephrase.alternatives.length;
-                    if (total <= 1) return;
-                    const prevIdx = ((state.rephrase.altIndex - 1) % total + total) % total;
-                    state.rephrase.altIndex = prevIdx;
-                    const ctrl = rephraseController;
-                    if (!ctrl) return;
-                    const currentText = prevIdx === 0
-                        ? state.rephrase.rephrased!
-                        : state.rephrase.alternatives[prevIdx - 1]!;
-                    ctrl.setView({
-                        kind: "rephrase-result",
-                        original: state.rephrase.original,
-                        rephrased: currentText,
-                        alternatives: state.rephrase.alternatives,
-                        altIndex: prevIdx,
-                        altTotal: total,
-                        scrollOffset: state.rephrase.scrollOffset,
-                        displayStart: 0,
-                    });
+                {
+                    name: "grammarforge.rephrase.cycleAltPrev",
+                    title: "GrammarForge: previous alternative",
+                    run: () => {
+                        if (state.rephrase?.mode !== "result") return;
+                        const total = 1 + state.rephrase.alternatives.length;
+                        if (total <= 1) return;
+                        const prevIdx = ((state.rephrase.altIndex - 1) % total + total) % total;
+                        state.rephrase.altIndex = prevIdx;
+                        const ctrl = rephraseController;
+                        if (!ctrl) return;
+                        const currentText = prevIdx === 0
+                            ? state.rephrase.rephrased!
+                            : state.rephrase.alternatives[prevIdx - 1]!;
+                        ctrl.setView({
+                            kind: "rephrase-result",
+                            original: state.rephrase.original,
+                            rephrased: currentText,
+                            alternatives: state.rephrase.alternatives,
+                            altIndex: prevIdx,
+                            altTotal: total,
+                            scrollOffset: state.rephrase.scrollOffset,
+                            displayStart: 0,
+                        });
+                    },
                 },
-            },
-        ],
-        bindings: [
-            { key: "return", cmd: "grammarforge.rephrase.accept" },
-            { key: "escape", cmd: "grammarforge.rephrase.reject" },
-            { key: "ctrl+/", cmd: "grammarforge.rephrase.regenerate" },
-            { key: "down", cmd: "grammarforge.rephrase.cycleAltNext" },
-            { key: "up", cmd: "grammarforge.rephrase.cycleAltPrev" },
-            { key: "tab", cmd: "grammarforge.rephrase.cycleAltNext" },
-        ],
+                {
+                    name: "grammarforge.rephrase.scrollUp",
+                    title: "GrammarForge: scroll rephrase up",
+                    run: () => {
+                        if (state.rephrase?.mode !== "result") return;
+                        state.rephrase.scrollOffset = Math.max(0, state.rephrase.scrollOffset - 1);
+                        const ctrl = rephraseController;
+                        if (!ctrl) return;
+                        const currentText = state.rephrase.altIndex === 0
+                            ? state.rephrase.rephrased!
+                            : state.rephrase.alternatives[state.rephrase.altIndex - 1]!;
+                        ctrl.setView({
+                            kind: "rephrase-result",
+                            original: state.rephrase.original,
+                            rephrased: currentText,
+                            alternatives: state.rephrase.alternatives,
+                            altIndex: state.rephrase.altIndex,
+                            altTotal: 1 + state.rephrase.alternatives.length,
+                            scrollOffset: state.rephrase.scrollOffset,
+                            displayStart: 0,
+                        });
+                    },
+                },
+                {
+                    name: "grammarforge.rephrase.scrollDown",
+                    title: "GrammarForge: scroll rephrase down",
+                    run: () => {
+                        if (state.rephrase?.mode !== "result") return;
+                        state.rephrase.scrollOffset = state.rephrase.scrollOffset + 1;
+                        const ctrl = rephraseController;
+                        if (!ctrl) return;
+                        const currentText = state.rephrase.altIndex === 0
+                            ? state.rephrase.rephrased!
+                            : state.rephrase.alternatives[state.rephrase.altIndex - 1]!;
+                        ctrl.setView({
+                            kind: "rephrase-result",
+                            original: state.rephrase.original,
+                            rephrased: currentText,
+                            alternatives: state.rephrase.alternatives,
+                            altIndex: state.rephrase.altIndex,
+                            altTotal: 1 + state.rephrase.alternatives.length,
+                            scrollOffset: state.rephrase.scrollOffset,
+                            displayStart: 0,
+                        });
+                    },
+                },
+            ],
+            bindings: [
+                { key: "return", cmd: "grammarforge.rephrase.accept" },
+                { key: "escape", cmd: "grammarforge.rephrase.reject" },
+                { key: "ctrl+/", cmd: "grammarforge.rephrase.regenerate" },
+                { key: "down", cmd: "grammarforge.rephrase.cycleAltNext" },
+                { key: "up", cmd: "grammarforge.rephrase.cycleAltPrev" },
+                { key: "tab", cmd: "grammarforge.rephrase.cycleAltNext" },
+                { key: "pageup", cmd: "grammarforge.rephrase.scrollUp" },
+                { key: "pagedown", cmd: "grammarforge.rephrase.scrollDown" },
+            ],
     });
 
     // Details layer — gated by enabled. When nothing is pinned, the
@@ -1226,6 +1289,44 @@ export function startOrchestrator(
         }
         controller.onRephraseAccept = rephraseAccept;
         controller.onRephraseReject = rephraseReject;
+
+        // ── A6: Status-line push helper ──────────────────────────────
+        pushStatusLine = (): void => {
+            const itemCount = state.items.length;
+            const categories = [...new Set(state.items.map((it) => it.category))];
+            const rephrase = state.rephrase;
+            const pinnedIdx = detailsState.pinnedIndex();
+
+            if (rephrase?.mode === "loading") {
+                controller.setStatusText(buildStatusLine({ state: "rephrase-loading" }));
+            } else if (rephrase?.mode === "result") {
+                controller.setStatusText(buildStatusLine({ state: "rephrase-result" }));
+            } else if (pinnedIdx !== null && itemCount > 0) {
+                controller.setStatusText(
+                    buildStatusLine({
+                        state: "pinned",
+                        issueCount: itemCount,
+                        pinnedIndex: pinnedIdx + 1,
+                        cycleNextKey: settings.cycleNextHotkey,
+                        cyclePrevKey: settings.cyclePrevHotkey,
+                    }),
+                );
+            } else if (itemCount > 0) {
+                controller.setStatusText(
+                    buildStatusLine({
+                        state: "flagged",
+                        issueCount: itemCount,
+                        categories,
+                        nextIssueKey: settings.nextIssueHotkey,
+                        applyAllKey: settings.applyAllHotkey,
+                        rephraseKey: settings.rephraseHotkey,
+                    }),
+                );
+            } else {
+                controller.setStatusText(buildStatusLine({ state: "clear" }));
+            }
+        };
+
         // The transition push: build the current panel payload and
         // hand it to the controller's setter. The setter is what
         // updates the solid signal that PanelComponent reads via
@@ -1235,6 +1336,7 @@ export function startOrchestrator(
             if (index === null || index >= state.items.length) {
                 logDebug("unpin transition", { from: index });
                 controller.setView(null);
+                pushStatusLine();
                 return;
             }
             const item = state.items[index]!;
@@ -1270,6 +1372,7 @@ export function startOrchestrator(
                 cycleNextKey: settings.cycleNextHotkey,
                 cyclePrevKey: settings.cyclePrevHotkey,
             });
+            pushStatusLine();
         };
         unsubscribeDetailsTransition = detailsState.subscribe(pushFromDetailsState);
     }

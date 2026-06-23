@@ -21,7 +21,6 @@ import { CATEGORY_FG } from "./category-palette";
 import type { DetailsViewModel } from "./details-panel";
 import type { RephraseResultView } from "./details-panel-view";
 import { wrapLines } from "./display-width";
-import type { SegmentWidthFn } from "./display-width";
 
 export type SegmentColorKey = "category" | "delete" | "insert" | "dim";
 
@@ -117,17 +116,6 @@ const INNER_WIDTH = 40;
 /** Max visible content rows before scrolling (excluding header + hints). */
 export const MAX_CONTENT_ROWS = 8;
 
-/** Word-wrap text into lines (display-width aware). Returns the lines
- *  and the total display height (lines count). */
-function wrapText(
-    text: string,
-    innerWidth: number,
-    displayWidthOf: SegmentWidthFn,
-): { lines: string[]; height: number } {
-    const lines = wrapLines(text, innerWidth, displayWidthOf);
-    return { lines, height: lines.length };
-}
-
 /** Build a CardSpec for the rephrase-loading state.
  *  PURE — no I/O. The spinner glyph cycles by frame index. */
 export function buildRephraseLoadingCardSpec(frame: number): CardSpec {
@@ -155,17 +143,40 @@ export function buildRephraseLoadingCardSpec(frame: number): CardSpec {
 }
 
 /** Build a CardSpec for the rephrase-result state.
- *  PURE — no I/O. Shows original → rephrased with accept/reject hints. */
+ *  PURE — no I/O. Shows original → rephrased with accept/reject hints.
+ *  When content exceeds MAX_CONTENT_ROWS, rows are windowed by scrollOffset;
+ *  PgUp/PgDn hint is shown; a "↓ more" affordance appears on the last visible
+ *  content row when more rows remain below. */
 export function buildRephraseResultCardSpec(
     view: RephraseResultView,
     displayWidthOf: (s: string) => number,
 ): CardSpec & { contentRows: number } {
-    const { lines: origLines } = wrapText(view.original, INNER_WIDTH, displayWidthOf);
-    const { lines: replLines } = wrapText(view.rephrased, INNER_WIDTH, displayWidthOf);
-    const totalContentRows = origLines.length + replLines.length + 1; // +1 for arrow row
-    const cappedRows = Math.min(totalContentRows, MAX_CONTENT_ROWS);
-    const overflows = totalContentRows > MAX_CONTENT_ROWS;
+    const origLines = wrapLines(view.original, INNER_WIDTH, displayWidthOf);
+    const replLines = wrapLines(view.rephrased, INNER_WIDTH, displayWidthOf);
 
+    // Build the full content row list (title row is separate).
+    const contentRows: CardRow[] = [];
+    for (const line of origLines) {
+        contentRows.push({ segments: [{ text: line, colorKey: "delete", fg: DIM_HEX }] });
+    }
+    // Arrow + first rephrased line
+    contentRows.push({
+        segments: [
+            { text: " → ", colorKey: "dim", fg: DIM_HEX },
+            { text: replLines[0] ?? "", colorKey: "insert", fg: INSERT_HEX },
+        ],
+    });
+    for (let i = 1; i < replLines.length; i++) {
+        contentRows.push({ segments: [{ text: replLines[i]!, colorKey: "insert", fg: INSERT_HEX }] });
+    }
+
+    const totalContent = contentRows.length;
+    const maxScroll = Math.max(0, totalContent - MAX_CONTENT_ROWS);
+    const so = Math.max(0, Math.min(view.scrollOffset, maxScroll));
+    const visibleContent = contentRows.slice(so, so + MAX_CONTENT_ROWS);
+    const hasMoreBelow = so + MAX_CONTENT_ROWS < totalContent;
+
+    // Title row
     const rows: CardRow[] = [
         {
             segments: [{
@@ -176,30 +187,30 @@ export function buildRephraseResultCardSpec(
             }],
         },
     ];
-    // Original lines (dim)
-    for (const line of origLines) {
-        rows.push({ segments: [{ text: line, colorKey: "delete", fg: DIM_HEX }] });
+
+    // Windowed content rows — append " ↓ more" to the last visible row when more below.
+    for (let i = 0; i < visibleContent.length; i++) {
+        const row = visibleContent[i]!;
+        if (hasMoreBelow && i === visibleContent.length - 1) {
+            const lastSeg = row.segments[row.segments.length - 1]!;
+            row.segments = [
+                ...row.segments.slice(0, -1),
+                { ...lastSeg, text: lastSeg.text + " ↓ more" },
+            ];
+        }
+        rows.push(row);
     }
-    // Arrow + first rephrased line
-    rows.push({
-        segments: [
-            { text: " → ", colorKey: "dim", fg: DIM_HEX },
-            { text: replLines[0] ?? "", colorKey: "insert", fg: INSERT_HEX },
-        ],
-    });
-    // Remaining rephrased lines
-    for (let i = 1; i < replLines.length; i++) {
-        rows.push({ segments: [{ text: replLines[i]!, colorKey: "insert", fg: INSERT_HEX }] });
-    }
-    // Hints row
-    const hintText = overflows
-        ? "⏎ apply · esc reject · ctrl+/ regenerate · PgUp/PgDn scroll ↓ more"
+
+    // Hints row: show scroll key hints when there IS overflow (even if not visible).
+    const hasOverflow = totalContent > MAX_CONTENT_ROWS;
+    const hintText = hasOverflow
+        ? "⏎ apply · esc reject · ctrl+/ regenerate · PgUp/PgDn scroll"
         : "⏎ apply · esc reject · ctrl+/ regenerate";
     rows.push({ segments: [{ text: hintText, colorKey: "dim", fg: DIM_HEX }] });
 
     return {
         borderColor: REPHRASE_ACCENT_HEX,
         rows,
-        contentRows: cappedRows,
+        contentRows: visibleContent.length,
     };
 }
