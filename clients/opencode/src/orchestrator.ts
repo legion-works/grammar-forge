@@ -21,6 +21,8 @@ import { buildRenderableItems, isSpanStillValid, type RenderableItem } from "@/l
 import { createSignalQueue } from "@/signal/queue";
 import { resolveCommonSettings } from "@/storage/settings-core";
 import type {
+    CompleteRequest,
+    CompleteResponse,
     CorrectRequest,
     CorrectResponse,
     RephraseRequest,
@@ -265,6 +267,10 @@ export interface OrchestratorDeps {
      *  leave undefined; the orchestrator defaults to client.rephrase.
      *  Tests inject a deferred stub to exercise the stale-seq guard. */
     rephrase?: (req: RephraseRequest) => Promise<RephraseResponse>;
+    /** Completion injection seam — mirrors `rephrase?`. Production
+     *  callers leave undefined; the orchestrator defaults to
+     *  client.complete. Tests inject a deferred stub. */
+    complete?: (req: CompleteRequest) => Promise<CompleteResponse>;
     /**
      * Details-panel controller factory. Returns a PanelController whose
      * setView pushes pin/unpin transitions into a solid signal that
@@ -315,6 +321,7 @@ export function startOrchestrator(
     const signalQueue = createSignalQueue({ send: (events) => client.signal(events) });
     const correctFn = deps?.correct ?? ((req: CorrectRequest) => client.correct(req));
     const rephraseFn = deps?.rephrase ?? ((req: RephraseRequest) => client.rephrase(req));
+    const completeFn = deps?.complete ?? ((req: CompleteRequest) => client.complete(req));
 
     // Style id cache: category → styleId. Lazy; one registerStyle per
     // category the first time we see it.
