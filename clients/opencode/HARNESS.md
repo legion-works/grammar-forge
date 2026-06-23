@@ -63,3 +63,11 @@ The steps below are documented but have NOT been confirmed:
   tested against a running build.
 - Actual underline rendering — requires a running OpenCode with the prompt
   facade patch applied.
+
+## v1 deferrals (2026-06-23 review)
+
+- **A7 granular per-row clickable apply/ignore spans**: card-level `onMouseDown` stays.
+  Per-row split targets (click "⏎ apply" vs "x ignore" independently) needs live
+  `@opentui/solid` mouse event verification on `<text>` elements.
+- **A4 suggestion-card diff-row wrapping**: suggestion card still renders single-line
+  diffs (rare case). Rephrase card wrapping is implemented.
