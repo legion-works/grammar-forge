@@ -64,7 +64,6 @@ func (fakePB) BuildComplete(text string) Prompt {
 	return Prompt{System: "continue", User: text, Template: TemplateChatInstruct}
 }
 
-
 type fakeStore struct {
 	lastEvent  Event
 	lastSignal Signal
