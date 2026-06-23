@@ -653,6 +653,7 @@ export function startOrchestrator(
         if (
             settings.completionEnabled &&
             lineLooksUnfinished(text) &&
+            (ref.cursorOffset ?? text.length) === text.length &&
             detailsState.pinnedIndex() === null &&
             state.rephrase === null
         ) {

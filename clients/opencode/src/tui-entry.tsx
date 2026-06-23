@@ -286,56 +286,67 @@ function GhostComponent(props: { api: TuiApi }) {
 
     // Wire the solid signal into the ghost-overlay module so the
     // orchestrator's imperative renderGhost/clearGhost calls push here.
+    // Idempotent — second slot mount is a no-op (only one slot active
+    // at a time, but both home_prompt_right and session_prompt_right
+    // call this).
     initGhostSignal(
         () => ghost(),
         (v) => setGhost(() => v),
     );
 
-    const current = ghost();
-    if (!current) return null;
-
-    const anchor = props.api.prompt?.ref()?.offsetToScreen?.(current.atOffset) ?? null;
-    const dims = dimensions();
-    const screenW = dims.width;
-    const screenH = dims.height;
-    const ghostW = Math.min(80, Math.max(10, screenW - (anchor?.x ?? 0) - 1));
-    const clamped = anchor
-        ? clampAnchor(anchor, ghostW, 1 /* single row */, screenW, screenH)
-        : null;
-    if (!clamped) return null;
-
-    logDebug("ghost overlay rendered", {
-        text: current.text.substring(0, 30),
-        atOffset: current.atOffset,
-        clampedLeft: clamped.left,
-        clampedTop: clamped.top,
-    });
-
+    // SolidJS: the component body runs ONCE. A signal read here (ghost())
+    // is NOT reactive — it would return null at mount and never re-render.
+    // Use <Show when={ghost()} keyed> to create a reactive scope that
+    // re-executes when the signal changes. Same pattern as PanelComponent's
+    // <Show when={localView()} keyed> at L170.
     return (
-        <Portal
-            ref={(container: {}) => {
-                const c = container as {
-                    position: string;
-                    left: number;
-                    top: number;
-                    zIndex: number;
-                };
-                c.position = "absolute";
-                c.left = 0;
-                c.top = 0;
-                c.zIndex = GHOST_Z_INDEX;
+        <Show when={ghost()} keyed>
+            {(current) => {
+                const anchor = props.api.prompt?.ref()?.offsetToScreen?.(current.atOffset) ?? null;
+                const dims = dimensions();
+                const screenW = dims.width;
+                const screenH = dims.height;
+                const ghostW = Math.min(80, Math.max(10, screenW - (anchor?.x ?? 0) - 1));
+                const clamped = anchor
+                    ? clampAnchor(anchor, ghostW, 1 /* single row */, screenW, screenH)
+                    : null;
+                if (!clamped) return null;
+
+                logDebug("ghost overlay rendered", {
+                    text: current.text.substring(0, 30),
+                    atOffset: current.atOffset,
+                    clampedLeft: clamped.left,
+                    clampedTop: clamped.top,
+                });
+
+                return (
+                    <Portal
+                        ref={(container: {}) => {
+                            const c = container as {
+                                position: string;
+                                left: number;
+                                top: number;
+                                zIndex: number;
+                            };
+                            c.position = "absolute";
+                            c.left = 0;
+                            c.top = 0;
+                            c.zIndex = GHOST_Z_INDEX;
+                        }}
+                    >
+                        <box
+                            position="absolute"
+                            zIndex={GHOST_Z_INDEX}
+                            left={clamped.left}
+                            top={clamped.top}
+                            width={ghostW}
+                            height={1}
+                        >
+                            <text fg="#6b7280">{current.text}</text>
+                        </box>
+                    </Portal>
+                );
             }}
-        >
-            <box
-                position="absolute"
-                zIndex={GHOST_Z_INDEX}
-                left={clamped.left}
-                top={clamped.top}
-                width={ghostW}
-                height={1}
-            >
-                <text fg="#6b7280">{current.text}</text>
-            </box>
-        </Portal>
+        </Show>
     );
 }

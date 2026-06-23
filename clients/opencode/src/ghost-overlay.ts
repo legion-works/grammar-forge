@@ -47,11 +47,18 @@ export interface GhostPayload {
 let ghostSignalGet: (() => GhostPayload | null) | null = null;
 let ghostSignalSet: ((v: GhostPayload | null) => void) | null = null;
 
-/** Called once by tui-entry.tsx to wire the solid signal. */
+/**
+ * Called at GhostComponent mount to wire the solid signal.
+ * Idempotent — second mount is a no-op (only one slot active at a time,
+ * but both home_prompt_right and session_prompt_right call this; the
+ * first mount wins and the overwrite is harmless since only one slot is
+ * ever mounted simultaneously).
+ */
 export function initGhostSignal(
     get: () => GhostPayload | null,
     set: (v: GhostPayload | null) => void,
 ): void {
+    if (ghostSignalGet) return; // already wired — idempotent guard
     ghostSignalGet = get;
     ghostSignalSet = set;
 }
@@ -59,9 +66,4 @@ export function initGhostSignal(
 /** Imperative push from the orchestrator — called by renderGhost. */
 export function pushGhostPayload(payload: GhostPayload | null): void {
     ghostSignalSet?.(payload);
-}
-
-/** Get the current ghost payload (for the GhostComponent reactive read). */
-export function getGhostPayload(): GhostPayload | null {
-    return ghostSignalGet?.() ?? null;
 }
