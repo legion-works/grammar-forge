@@ -1,6 +1,8 @@
 import { isLocalBridgeUrl } from '@/api/url'
 import { parseSSEStream } from '@/api/sse'
 import type {
+    CompleteRequest,
+    CompleteResponse,
     CorrectRequest,
     CorrectResponse,
     RephraseRequest,
@@ -264,5 +266,20 @@ export class BridgeClient {
 
     synonyms(word: string): Promise<SynonymsResponse> {
         return this.get<SynonymsResponse>(`/synonyms?word=${encodeURIComponent(word)}`)
+    }
+
+    complete(req: CompleteRequest): Promise<CompleteResponse> {
+        try {
+            this.guard()
+        } catch (e) {
+            return Promise.reject(e)
+        }
+        const body: Record<string, unknown> = {
+            text: req.text,
+            source: req.source,
+        }
+        if (req.max_tokens !== undefined) body.max_tokens = req.max_tokens
+        if (req.temperature !== undefined) body.temperature = req.temperature
+        return this.post<CompleteResponse>('/complete', body, REPHRASE_TIMEOUT_MS)
     }
 }
