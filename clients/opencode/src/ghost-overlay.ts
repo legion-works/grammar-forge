@@ -33,3 +33,35 @@ export interface GhostRenderer {
     renderGhost(text: string, atOffset: number): void;
     clearGhost(): void;
 }
+
+export interface GhostPayload {
+    text: string;
+    atOffset: number;
+}
+
+// SolidJS signal holder — populated by tui-entry.tsx:GhostComponent.
+// The signal is the bridge between the orchestrator's imperative calls
+// and the JSX component's reactive render. Same pattern as PanelController.
+// Using `any` types to avoid importing solid-js in this pure-logic module;
+// the actual signal types are resolved in tui-entry.tsx.
+let ghostSignalGet: (() => GhostPayload | null) | null = null;
+let ghostSignalSet: ((v: GhostPayload | null) => void) | null = null;
+
+/** Called once by tui-entry.tsx to wire the solid signal. */
+export function initGhostSignal(
+    get: () => GhostPayload | null,
+    set: (v: GhostPayload | null) => void,
+): void {
+    ghostSignalGet = get;
+    ghostSignalSet = set;
+}
+
+/** Imperative push from the orchestrator — called by renderGhost. */
+export function pushGhostPayload(payload: GhostPayload | null): void {
+    ghostSignalSet?.(payload);
+}
+
+/** Get the current ghost payload (for the GhostComponent reactive read). */
+export function getGhostPayload(): GhostPayload | null {
+    return ghostSignalGet?.() ?? null;
+}

@@ -48,6 +48,7 @@ import {
     buildRephraseResultCardSpec,
 } from "./card-spec";
 import { clampAnchor } from "./overlay-anchor";
+import { initGhostSignal, pushGhostPayload, type GhostPayload } from "./ghost-overlay";
 import { logDebug } from "./debug";
 import { makeDisplayWidth, bunSegmentWidth } from "./display-width";
 
@@ -63,7 +64,15 @@ const tui: TuiPlugin = async (api: TuiApi) => {
     logDebug("tui() entered", { id: ID });
     const controller: PanelController = createDetailsPanelController();
     const panelRenderer = (): PanelController => controller;
-    const stop = startOrchestrator(api, undefined, { panelRenderer });
+    const ghostRenderer = {
+        renderGhost: (text: string, atOffset: number) => {
+            pushGhostPayload({ text, atOffset });
+        },
+        clearGhost: () => {
+            pushGhostPayload(null);
+        },
+    };
+    const stop = startOrchestrator(api, undefined, { panelRenderer, ghostRenderer });
     api.lifecycle.onDispose(() => {
         logDebug("plugin teardown: orchestrator stop + controller dispose");
         stop();
@@ -74,11 +83,21 @@ const tui: TuiPlugin = async (api: TuiApi) => {
             slots: {
                 home_prompt_right: () => {
                     logDebug("slot fn home_prompt_right invoked");
-                    return <PanelComponent controller={controller} api={api} />;
+                    return (
+                        <>
+                            <PanelComponent controller={controller} api={api} />
+                            <GhostComponent api={api} />
+                        </>
+                    );
                 },
                 session_prompt_right: () => {
                     logDebug("slot fn session_prompt_right invoked");
-                    return <PanelComponent controller={controller} api={api} />;
+                    return (
+                        <>
+                            <PanelComponent controller={controller} api={api} />
+                            <GhostComponent api={api} />
+                        </>
+                    );
                 },
             },
         });
@@ -249,5 +268,74 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                 </Show>
             </Portal>
         </>
+    );
+}
+
+// ── Ghost completion overlay (Path A self-render) ──────────────────────
+// TODO(Path B): swap this entire component for promptRef.ghostText.
+//   When the native @opentui/core primitive is available, replace the
+//   <Portal> + <box> below with a one-liner:
+//     api.prompt?.ref()?.ghostText?.set(text, { atOffset })
+//   The orchestrator's trigger/accept/cancel logic stays unchanged.
+
+const GHOST_Z_INDEX = 3500; // below the suggestion card (4000)
+
+function GhostComponent(props: { api: TuiApi }) {
+    const [ghost, setGhost] = createSignal<GhostPayload | null>(null);
+    const dimensions = useTerminalDimensions();
+
+    // Wire the solid signal into the ghost-overlay module so the
+    // orchestrator's imperative renderGhost/clearGhost calls push here.
+    initGhostSignal(
+        () => ghost(),
+        (v) => setGhost(() => v),
+    );
+
+    const current = ghost();
+    if (!current) return null;
+
+    const anchor = props.api.prompt?.ref()?.offsetToScreen?.(current.atOffset) ?? null;
+    const dims = dimensions();
+    const screenW = dims.width;
+    const screenH = dims.height;
+    const ghostW = Math.min(80, Math.max(10, screenW - (anchor?.x ?? 0) - 1));
+    const clamped = anchor
+        ? clampAnchor(anchor, ghostW, 1 /* single row */, screenW, screenH)
+        : null;
+    if (!clamped) return null;
+
+    logDebug("ghost overlay rendered", {
+        text: current.text.substring(0, 30),
+        atOffset: current.atOffset,
+        clampedLeft: clamped.left,
+        clampedTop: clamped.top,
+    });
+
+    return (
+        <Portal
+            ref={(container: {}) => {
+                const c = container as {
+                    position: string;
+                    left: number;
+                    top: number;
+                    zIndex: number;
+                };
+                c.position = "absolute";
+                c.left = 0;
+                c.top = 0;
+                c.zIndex = GHOST_Z_INDEX;
+            }}
+        >
+            <box
+                position="absolute"
+                zIndex={GHOST_Z_INDEX}
+                left={clamped.left}
+                top={clamped.top}
+                width={ghostW}
+                height={1}
+            >
+                <text fg="#6b7280">{current.text}</text>
+            </box>
+        </Portal>
     );
 }
