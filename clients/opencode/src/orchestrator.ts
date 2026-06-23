@@ -44,8 +44,8 @@ import type { PanelController, PanelView } from "./details-panel-view";
 const SIGNAL_SOURCE = "opencode";
 
 const DEFAULT_APPLY_ALL_HOTKEY = "ctrl+.";
-const DEFAULT_CYCLE_NEXT_HOTKEY = "/";
-const DEFAULT_CYCLE_PREV_HOTKEY = ".";
+const DEFAULT_CYCLE_NEXT_HOTKEY = "ctrl+n";
+const DEFAULT_CYCLE_PREV_HOTKEY = "ctrl+p";
 const DEFAULT_REPHRASE_HOTKEY = "ctrl+/";
 
 export interface GrammarForgeSettings {

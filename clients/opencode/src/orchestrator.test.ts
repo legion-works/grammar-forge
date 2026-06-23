@@ -13,8 +13,8 @@ describe("resolveSettings", () => {
         expect(s.bridgeUrl).toBe("http://localhost:8000");
         expect(s.realtimeDelayMs).toBe(500);
         expect(s.applyAllHotkey).toBe("ctrl+.");
-        expect(s.cycleNextHotkey).toBe("/");
-        expect(s.cyclePrevHotkey).toBe(".");
+        expect(s.cycleNextHotkey).toBe("ctrl+n");
+        expect(s.cyclePrevHotkey).toBe("ctrl+p");
         expect(s.allowRemoteBridge).toBe(false);
     });
     test("honors valid overrides and strips trailing slash", () => {
@@ -33,6 +33,12 @@ describe("resolveSettings", () => {
         expect(s.cyclePrevHotkey).toBe("[");
         expect(s.allowRemoteBridge).toBe(true);
     });
+    test("cycle defaults are ctrl+n / ctrl+p (not / and .)", () => {
+        const s = resolveSettings({});
+        expect(s.cycleNextHotkey).toBe("ctrl+n");
+        expect(s.cyclePrevHotkey).toBe("ctrl+p");
+    });
+
     test("garbage values fall back to defaults", () => {
         const s = resolveSettings({
             bridgeUrl: 42,
@@ -45,8 +51,8 @@ describe("resolveSettings", () => {
         expect(s.bridgeUrl).toBe("http://localhost:8000");
         expect(s.realtimeDelayMs).toBe(500);
         expect(s.applyAllHotkey).toBe("ctrl+.");
-        expect(s.cycleNextHotkey).toBe("/");
-        expect(s.cyclePrevHotkey).toBe(".");
+        expect(s.cycleNextHotkey).toBe("ctrl+n");
+        expect(s.cyclePrevHotkey).toBe("ctrl+p");
         expect(s.allowRemoteBridge).toBe(false);
     });
 });
@@ -698,12 +704,11 @@ describe("startOrchestrator", () => {
         const detailsKeys = (detailsLayer?.bindings ?? []).map((b) => b.key);
         expect(detailsKeys).toContain("return");
         expect(detailsKeys).toContain("x");
-        // Cycle keys are now "." and "/" (not "n"/"p"/",").
-        expect(detailsKeys).toContain(".");
-        expect(detailsKeys).toContain("/");
-        expect(detailsKeys).not.toContain("n");
-        expect(detailsKeys).not.toContain("p");
-        expect(detailsKeys).not.toContain(",");
+        // Cycle keys are now ctrl+n/ctrl+p (not "/"/".").
+        expect(detailsKeys).toContain("ctrl+n");
+        expect(detailsKeys).toContain("ctrl+p");
+        expect(detailsKeys).not.toContain("/");
+        expect(detailsKeys).not.toContain(".");
         expect(detailsKeys).toContain("escape");
         const applyAllLayer = layers.find((l) =>
             (l.commands ?? []).some((c) => c.name === "grammarforge.applyAll"),
@@ -1330,14 +1335,13 @@ describe("startOrchestrator", () => {
         const cycleNextBinding = bindings.find((b) => b.cmd === "grammarforge.details.cycleNext");
         const cyclePrevBinding = bindings.find((b) => b.cmd === "grammarforge.details.cyclePrev");
 
-        expect(cycleNextBinding?.key).toBe("/");
-        expect(cyclePrevBinding?.key).toBe(".");
+        expect(cycleNextBinding?.key).toBe("ctrl+n");
+        expect(cyclePrevBinding?.key).toBe("ctrl+p");
 
-        // "n", "p", and "," must not appear as binding keys.
+        // "/", "." must not appear as binding keys.
         const allKeys = bindings.map((b) => b.key);
-        expect(allKeys).not.toContain("n");
-        expect(allKeys).not.toContain("p");
-        expect(allKeys).not.toContain(",");
+        expect(allKeys).not.toContain("/");
+        expect(allKeys).not.toContain(".");
 
         stop();
     });
