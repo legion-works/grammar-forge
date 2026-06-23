@@ -77,6 +77,16 @@ export interface PanelController {
     subscribe: (cb: (next: PanelView | null) => void) => () => void;
     /** Tear down all subscribers. Called on plugin dispose. */
     dispose: () => void;
+    // ── Mouse callbacks (A7) — set by the orchestrator ────────────────
+    onApply?: () => void;
+    onIgnore?: () => void;
+    onUnpin?: () => void;
+    onCycleNext?: () => void;
+    onCyclePrev?: () => void;
+    onRephraseAccept?: () => void;
+    onRephraseReject?: () => void;
+    onScrollUp?: () => void;
+    onScrollDown?: () => void;
 }
 
 export function createDetailsPanelController(): PanelController {

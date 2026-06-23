@@ -211,6 +211,15 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                 paddingTop={0}
                                 paddingBottom={0}
                                 flexDirection="column"
+                                onMouseDown={() => {
+                                    // A7: Click on the card → apply the pinned suggestion.
+                                    // Degrades gracefully when terminal doesn't report mouse.
+                                    if (current.kind === "suggestion") {
+                                        props.controller.onApply?.();
+                                    } else if (current.kind === "rephrase-result") {
+                                        props.controller.onRephraseAccept?.();
+                                    }
+                                }}
                             >
                                 {spec.rows.map((row) => (
                                     <box flexDirection="row">

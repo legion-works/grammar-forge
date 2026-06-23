@@ -506,6 +506,27 @@ export function startOrchestrator(
     const onChange = (): void => {
         const ref = api.prompt?.ref();
         if (!ref) return;
+
+        // ── A8: Eager dismiss on edit ──────────────────────────────────
+        // Clear the active suggestion surfaces IMMEDIATELY — before the
+        // debounced re-check resolves. Never show a stale suggestion
+        // while the user is actively editing.
+        const textChanged = ref.text !== state.checkedText;
+        if (textChanged) {
+            // Clear the pinned correction card.
+            detailsState.unpin();
+            // Clear any in-flight or showing rephrase.
+            if (state.rephrase !== null) {
+                rephraseSeq++;
+                stopSpinner();
+                state.rephrase = null;
+                const ctrl = rephraseController;
+                if (ctrl) ctrl.setView(null);
+            }
+            // NOTE: Underlines are NOT cleared here — they reconcile on
+            // the debounced re-check (avoids flicker).
+        }
+
         if (ref !== trackedRef) {
             clearActiveExtmarks();
             state.checkSeq += 1;
@@ -910,6 +931,14 @@ export function startOrchestrator(
     // return/x/cycleNext/cyclePrev/escape stay free for the host's own
     // behavior. When a pin exists, the bindings become active.
     let disposeDetailsLayer: (() => void) | null = null;
+    // Holder references for the detail handler functions — defined inside
+    // the cursorPinSupported gate below, wired into the panel controller
+    // later for A7 mouse support.
+    let applyPinned: () => void = () => undefined;
+    let ignorePinned: () => void = () => undefined;
+    let cycleNext: () => void = () => undefined;
+    let cyclePrev: () => void = () => undefined;
+    let unpin: () => void = () => undefined;
     if (cursorPinSupported) {
         logDebug("details keymap layer: registered", {
             commands: [
@@ -922,7 +951,7 @@ export function startOrchestrator(
             bindings: ["return", "x", settings.cycleNextHotkey, settings.cyclePrevHotkey, "escape"],
             enabled: () => detailsState.pinnedIndex() !== null,
         });
-        const applyPinned = (): void => {
+        applyPinned = (): void => {
             logDebug("keymap: applyPinned invoked", {
                 pinnedIndex: detailsState.pinnedIndex(),
             });
@@ -968,7 +997,7 @@ export function startOrchestrator(
             detailsState.itemsChanged(0);
             onChange();
         };
-        const ignorePinned = (): void => {
+        ignorePinned = (): void => {
             const ref = api.prompt?.ref();
             const pinIndex = detailsState.pinnedIndex();
             logDebug("keymap: ignorePinned invoked", { pinnedIndex: pinIndex });
@@ -1000,7 +1029,7 @@ export function startOrchestrator(
                 detailsState.itemsChanged(0);
             }
         };
-        const cycleNext = (): void => {
+        cycleNext = (): void => {
             logDebug("keymap: cycleNext invoked", {
                 pinnedIndex: detailsState.pinnedIndex(),
                 itemCount: state.items.length,
@@ -1015,7 +1044,7 @@ export function startOrchestrator(
                 api.prompt?.ref()?.setCursorOffset?.(state.displaySpans[idx]!.start);
             }
         };
-        const cyclePrev = (): void => {
+        cyclePrev = (): void => {
             logDebug("keymap: cyclePrev invoked", {
                 pinnedIndex: detailsState.pinnedIndex(),
                 itemCount: state.items.length,
@@ -1030,7 +1059,7 @@ export function startOrchestrator(
                 api.prompt?.ref()?.setCursorOffset?.(state.displaySpans[idx]!.start);
             }
         };
-        const unpin = (): void => {
+        unpin = (): void => {
             logDebug("keymap: unpin invoked", { pinnedIndex: detailsState.pinnedIndex() });
             detailsState.unpin();
         };
@@ -1184,6 +1213,19 @@ export function startOrchestrator(
         // Wire the rephrase controller reference so the rephrase state machine
         // can call controller.setView() for loading/result cards.
         rephraseController = controller;
+        // ── A7: Wire mouse callbacks on the panel controller ──────────
+        // The handler functions (applyPinned, ignorePinned, etc.) are defined
+        // inside the cursorPinSupported gate above. Wire them only when
+        // cursorPinSupported is true (they're already guarded internally).
+        if (cursorPinSupported) {
+            controller.onApply = applyPinned;
+            controller.onIgnore = ignorePinned;
+            controller.onUnpin = unpin;
+            controller.onCycleNext = cycleNext;
+            controller.onCyclePrev = cyclePrev;
+        }
+        controller.onRephraseAccept = rephraseAccept;
+        controller.onRephraseReject = rephraseReject;
         // The transition push: build the current panel payload and
         // hand it to the controller's setter. The setter is what
         // updates the solid signal that PanelComponent reads via
