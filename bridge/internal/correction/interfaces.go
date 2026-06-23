@@ -62,6 +62,11 @@ type PromptBuilder interface {
 	// an empty User as the skip signal (the service short-circuits, like
 	// BuildStyle) since GRMR cannot do tone tagging.
 	BuildTone(req ToneRequest) Prompt
+	// BuildComplete renders a generative-continuation prompt. Completion is
+	// inherently a chat task; even GRMR-native backends receive a chat_instruct
+	// prompt as a best-effort fallback (the model is correction-tuned, not
+	// completion-tuned, so quality is on the operator).
+	BuildComplete(text string) Prompt
 }
 
 // Prompt is a backend-agnostic prompt; the LLMClient renders it to the wire.
