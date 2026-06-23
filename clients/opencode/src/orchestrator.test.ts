@@ -39,6 +39,17 @@ describe("resolveSettings", () => {
         expect(s.cyclePrevHotkey).toBe("ctrl+p");
     });
 
+    test("nextIssueHotkey / prevIssueHotkey settings (default ctrl+g / ctrl+shift+g)", () => {
+        const s = resolveSettings({});
+        expect(s.nextIssueHotkey).toBe("ctrl+g");
+        expect(s.prevIssueHotkey).toBe("ctrl+shift+g");
+    });
+    test("nextIssueHotkey / prevIssueHotkey are rebindable", () => {
+        const s = resolveSettings({ nextIssueHotkey: "ctrl+n", prevIssueHotkey: "ctrl+p" });
+        expect(s.nextIssueHotkey).toBe("ctrl+n");
+        expect(s.prevIssueHotkey).toBe("ctrl+p");
+    });
+
     test("garbage values fall back to defaults", () => {
         const s = resolveSettings({
             bridgeUrl: 42,

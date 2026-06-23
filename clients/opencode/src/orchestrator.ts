@@ -47,6 +47,8 @@ const DEFAULT_APPLY_ALL_HOTKEY = "ctrl+.";
 const DEFAULT_CYCLE_NEXT_HOTKEY = "ctrl+n";
 const DEFAULT_CYCLE_PREV_HOTKEY = "ctrl+p";
 const DEFAULT_REPHRASE_HOTKEY = "ctrl+/";
+const DEFAULT_NEXT_ISSUE_HOTKEY = "ctrl+g";
+const DEFAULT_PREV_ISSUE_HOTKEY = "ctrl+shift+g";
 
 export interface GrammarForgeSettings {
     bridgeUrl: string;
@@ -55,6 +57,8 @@ export interface GrammarForgeSettings {
     cycleNextHotkey: string;
     cyclePrevHotkey: string;
     rephraseHotkey: string;
+    nextIssueHotkey: string;
+    prevIssueHotkey: string;
     allowRemoteBridge: boolean;
 }
 
@@ -77,6 +81,14 @@ export function resolveSettings(
     const rephraseHotkeyRaw =
         typeof raw.rephraseHotkey === "string" ? raw.rephraseHotkey.trim().toLowerCase() : "";
     const rephraseHotkey = rephraseHotkeyRaw === "" ? DEFAULT_REPHRASE_HOTKEY : rephraseHotkeyRaw;
+    const nextIssueHotkeyRaw =
+        typeof raw.nextIssueHotkey === "string" ? raw.nextIssueHotkey.trim().toLowerCase() : "";
+    const nextIssueHotkey =
+        nextIssueHotkeyRaw === "" ? DEFAULT_NEXT_ISSUE_HOTKEY : nextIssueHotkeyRaw;
+    const prevIssueHotkeyRaw =
+        typeof raw.prevIssueHotkey === "string" ? raw.prevIssueHotkey.trim().toLowerCase() : "";
+    const prevIssueHotkey =
+        prevIssueHotkeyRaw === "" ? DEFAULT_PREV_ISSUE_HOTKEY : prevIssueHotkeyRaw;
     return {
         bridgeUrl: common.bridgeUrl,
         realtimeDelayMs: common.realtimeDelayMs,
@@ -84,6 +96,8 @@ export function resolveSettings(
         cycleNextHotkey,
         cyclePrevHotkey,
         rephraseHotkey,
+        nextIssueHotkey,
+        prevIssueHotkey,
         allowRemoteBridge: common.allowRemoteBridge,
     };
 }
