@@ -93,6 +93,13 @@ const styleSystemPrompt = "You are a writing style assistant. Suggest STYLE and 
 	"café, naïve, résumé exactly). Return ONLY the improved text — no explanation, " +
 	"quotes, or preamble."
 
+// completeSystemPrompt is the chat_instruct instruction for generative
+// continuation. It is DISTINCT from both systemPrompt (minimal-edit grammar)
+// and rephraseSystemPrompt (fluency rewrite): completion asks the model to
+// naturally extend the user's text, not to correct or restyle it.
+const completeSystemPrompt = "Continue the following text naturally. " +
+	"Return ONLY the continuation, no explanation."
+
 // toneSystemPrompt is the chat_instruct instruction for tone analysis. Keep the
 // tag list in sync with correction.ToneTags.
 const toneSystemPrompt = "You are a tone analysis assistant. Analyze the tone of the user's text. " +
@@ -501,5 +508,19 @@ func (b *Builder) BuildTone(req correction.ToneRequest) correction.Prompt {
 	return correction.Prompt{
 		User:     "",
 		Template: correction.TemplateGRMRNative,
+	}
+}
+
+// BuildComplete renders a continuation request into a Prompt. Completion is
+// inherently a chat task — even on GRMR-native (correction-tuned) we emit a
+// chat_instruct prompt with the completeSystemPrompt as a best-effort
+// fallback. The LLM client handles both templates, and the complete system
+// prompt has no model-family-specific format (unlike the GRMR native envelope
+// which is only valid for correction).
+func (b *Builder) BuildComplete(text string) correction.Prompt {
+	return correction.Prompt{
+		System:   completeSystemPrompt,
+		User:     text,
+		Template: correction.TemplateChatInstruct,
 	}
 }

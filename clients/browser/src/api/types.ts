@@ -59,6 +59,18 @@ export interface RephraseResponse {
     alternatives: string[]
 }
 
+export interface CompleteRequest {
+    text: string
+    /** Max tokens for the continuation. Default on the bridge side: 64. */
+    max_tokens?: number
+    temperature?: number
+    source: string
+}
+
+export interface CompleteResponse {
+    continuation: string
+}
+
 // ── Redesign response types (W2-foundation) ─────────────────────────────────
 
 /** GET /stats — extended stats payload driving the panel score ring, streak

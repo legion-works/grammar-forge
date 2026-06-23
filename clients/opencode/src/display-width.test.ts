@@ -4,6 +4,7 @@ import {
     displaySpanFromCodeUnits,
     displaySpansForItems,
     makeDisplayWidth,
+    wrapLines,
 } from "./display-width";
 
 // Deterministic stub mirroring Bun.stringWidth semantics for the cases we
@@ -180,6 +181,41 @@ describe("buildDisplayOffsetLookup / displaySpansForItems — parity with per-sp
         ];
         const expected = spans.map((s) => displaySpanFromCodeUnits(text, s, width));
         expect(displaySpansForItems(text, spans, width)).toEqual(expected);
+    });
+});
+
+describe("wrapLines", () => {
+    const w = makeDisplayWidth(stubSegmentWidth);
+
+    test("short line no wrap", () => {
+        expect(wrapLines("hello", 10, w)).toEqual(["hello"]);
+    });
+
+    test("wraps at word boundary", () => {
+        expect(wrapLines("hello world", 6, w)).toEqual(["hello", "world"]);
+    });
+
+    test("mid-word break when no space", () => {
+        expect(wrapLines("abcdefghij", 4, w)).toEqual(["abcd", "efgh", "ij"]);
+    });
+
+    test("CJK: break at any character", () => {
+        // 你=2 wide, 好=2 wide, 世=2 wide, 界=2 wide = 8 total
+        // max 3 → each char wraps individually (2 wide cannot fit two)
+        expect(wrapLines("你好世界", 3, w)).toEqual(["你", "好", "世", "界"]);
+    });
+
+    test("CJK: two chars fit when maxWidth allows", () => {
+        // Each CJK char is 2 wide; maxWidth 5 allows 2 chars (2+2=4 <= 5)
+        expect(wrapLines("你好世界", 5, w)).toEqual(["你好", "世界"]);
+    });
+
+    test("newline forces break", () => {
+        expect(wrapLines("a\nb", 10, w)).toEqual(["a", "b"]);
+    });
+
+    test("empty string", () => {
+        expect(wrapLines("", 10, w)).toEqual([""]);
     });
 });
 

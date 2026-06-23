@@ -38,6 +38,9 @@ type Config struct {
 	// ToneEnabled gates the /tone endpoint (default false — no accidental paid
 	// calls until the clients ship; enable explicitly in the deploy compose).
 	ToneEnabled bool
+	// CompleteEnabled gates the /complete endpoint (default false — no accidental
+	// paid calls until the clients ship; enable explicitly in the deploy compose).
+	CompleteEnabled bool
 	// ToneMinChars: field-granularity tone requests below this many bytes return
 	// empty without calling the LLM (defense-in-depth; on-demand sentence
 	// requests are exempt). 0 = no floor.
@@ -266,6 +269,7 @@ func Load(getenv Getenv) Config {
 		ToneAPIKey:    get("GF_TONE_API_KEY", ""),
 		ToneEnabled:   getBool("GF_TONE_ENABLED", false),
 		ToneMinChars:  getInt("GF_TONE_MIN_CHARS", 80),
+		CompleteEnabled: getBool("GF_COMPLETE_ENABLED", false),
 		ToneCacheSize: getInt("GF_TONE_CACHE_SIZE", 512),
 
 		GECToRModelDir:            get("GF_GECTOR_MODEL_DIR", "/models/gector"),

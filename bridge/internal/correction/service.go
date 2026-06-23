@@ -89,6 +89,9 @@ type Service struct {
 	toneCache          *toneCache
 	toneEnabled        bool
 	toneMinChars       int
+	// completeEnabled gates the /complete endpoint (default false). Mirrors
+	// toneEnabled: off until the operator enables it in the deploy compose.
+	completeEnabled bool
 	// Synonyms (Moby Thesaurus II, public domain). The thesaurus is loaded
 	// once at startup into a frozen lookup map; nil = uninitialised, and
 	// the lookup short-circuits to nil without panicking. synonymsEnabled
@@ -236,6 +239,12 @@ func (s *Service) SetToneConfig(enabled bool, minChars int) {
 
 // ToneEnabled reports whether the /tone endpoint is enabled.
 func (s *Service) ToneEnabled() bool { return s.toneEnabled }
+
+// SetCompleteEnabled sets the /complete endpoint gate.
+func (s *Service) SetCompleteEnabled(enabled bool) { s.completeEnabled = enabled }
+
+// CompleteEnabled reports whether the /complete endpoint is enabled.
+func (s *Service) CompleteEnabled() bool { return s.completeEnabled }
 
 // SetThesaurus injects the loaded Moby thesaurus. nil is a valid value —
 // it disables synonyms without removing the route, mirroring the

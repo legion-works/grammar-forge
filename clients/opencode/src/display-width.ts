@@ -159,3 +159,64 @@ export function displaySpansForItems(
         end: lookup.offsetAt(span.end, "end"),
     }));
 }
+
+/**
+ * Word-wrap `text` into lines no wider than `maxWidth` display columns.
+ * Uses `displayWidthOf` (grapheme + wide-char aware). Breaks at spaces
+ * when possible; falls back to hard break at maxWidth for CJK / long words.
+ * Newlines force line boundaries.
+ */
+export function wrapLines(
+    text: string,
+    maxWidth: number,
+    displayWidthOf: (value: string) => number,
+): string[] {
+    const lines: string[] = [];
+    const paragraphs = text.split("\n");
+    for (const para of paragraphs) {
+        if (para === "") {
+            lines.push("");
+            continue;
+        }
+        const words = para.split(" ");
+        let currentLine = "";
+        let currentWidth = 0;
+        for (const word of words) {
+            const wordWidth = displayWidthOf(word);
+            if (currentWidth === 0) {
+                currentLine = word;
+                currentWidth = wordWidth;
+            } else {
+                const withSpace = currentWidth + 1 + wordWidth;
+                if (withSpace <= maxWidth) {
+                    currentLine += " " + word;
+                    currentWidth = withSpace;
+                } else {
+                    lines.push(currentLine);
+                    currentLine = word;
+                    currentWidth = wordWidth;
+                }
+            }
+            // Hard-break a single word that's wider than maxWidth.
+            while (currentWidth > maxWidth) {
+                // Slice by display width: walk graphemes until we hit maxWidth.
+                let sliceWidth = 0;
+                let sliceEnd = 0;
+                for (const part of graphemeSegmenter.segment(currentLine)) {
+                    const pw = part.segment === "\n" ? 1 : displayWidthOf(part.segment);
+                    if (sliceWidth + pw > maxWidth) break;
+                    sliceWidth += pw;
+                    sliceEnd = part.index + part.segment.length;
+                }
+                if (sliceEnd === 0) sliceEnd = 1; // safety: at least one char
+                lines.push(currentLine.slice(0, sliceEnd));
+                currentLine = currentLine.slice(sliceEnd);
+                currentWidth = displayWidthOf(currentLine);
+            }
+        }
+        if (currentLine !== "" || words.length === 0) {
+            lines.push(currentLine);
+        }
+    }
+    return lines;
+}

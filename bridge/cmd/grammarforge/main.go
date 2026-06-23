@@ -180,6 +180,7 @@ func main() {
 	// optional dedicated backend (GF_TONE_* -> falls back to rephrase -> llm).
 	svc.SetToneCache(cfg.ToneCacheSize)
 	svc.SetToneConfig(cfg.ToneEnabled, cfg.ToneMinChars)
+	svc.SetCompleteEnabled(cfg.CompleteEnabled)
 	if cfg.ToneProvider != "" {
 		svc.SetToneDefaultBackend(&correction.RephraseBackend{
 			Provider: cfg.ToneProvider,

@@ -58,6 +58,10 @@ export interface RephraseResultView {
     kind: "rephrase-result";
     original: string;
     rephrased: string;
+    alternatives: string[];   // NEW: all variants
+    altIndex: number;         // NEW: which alternative is shown
+    altTotal: number;         // NEW: total variants (1 + alternatives.length)
+    scrollOffset: number;     // NEW: line scroll (A4)
     displayStart: number;
 }
 
@@ -73,10 +77,24 @@ export interface PanelController {
     subscribe: (cb: (next: PanelView | null) => void) => () => void;
     /** Tear down all subscribers. Called on plugin dispose. */
     dispose: () => void;
+    // ── Status-line (A6) ─────────────────────────────────────────────
+    /** Push a status-line text update. */
+    setStatusText: (text: string) => void;
+    /** Subscribe to status-line text updates. */
+    subscribeStatus: (cb: (text: string) => void) => () => void;
+    // ── Mouse callbacks (A7) — set by the orchestrator ────────────────
+    onApply?: () => void;
+    onIgnore?: () => void;
+    onUnpin?: () => void;
+    onCycleNext?: () => void;
+    onCyclePrev?: () => void;
+    onRephraseAccept?: () => void;
+    onRephraseReject?: () => void;
 }
 
 export function createDetailsPanelController(): PanelController {
     const subscribers = new Set<(next: PanelView | null) => void>();
+    const statusSubscribers = new Set<(text: string) => void>();
     return {
         setView(next) {
             for (const cb of subscribers) {
@@ -91,6 +109,18 @@ export function createDetailsPanelController(): PanelController {
         },
         dispose() {
             subscribers.clear();
+            statusSubscribers.clear();
+        },
+        setStatusText(text) {
+            for (const cb of statusSubscribers) {
+                cb(text);
+            }
+        },
+        subscribeStatus(cb) {
+            statusSubscribers.add(cb);
+            return () => {
+                statusSubscribers.delete(cb);
+            };
         },
     };
 }

@@ -1,8 +1,10 @@
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
     resolveSettings,
     suggestionsToDecorations,
     startOrchestrator,
+    jumpNext,
+    jumpPrev,
     type Decoration,
     type OrchestratorDeps,
 } from "./orchestrator";
@@ -13,8 +15,8 @@ describe("resolveSettings", () => {
         expect(s.bridgeUrl).toBe("http://localhost:8000");
         expect(s.realtimeDelayMs).toBe(500);
         expect(s.applyAllHotkey).toBe("ctrl+.");
-        expect(s.cycleNextHotkey).toBe("/");
-        expect(s.cyclePrevHotkey).toBe(".");
+        expect(s.cycleNextHotkey).toBe("ctrl+n");
+        expect(s.cyclePrevHotkey).toBe("ctrl+p");
         expect(s.allowRemoteBridge).toBe(false);
     });
     test("honors valid overrides and strips trailing slash", () => {
@@ -33,6 +35,23 @@ describe("resolveSettings", () => {
         expect(s.cyclePrevHotkey).toBe("[");
         expect(s.allowRemoteBridge).toBe(true);
     });
+    test("cycle defaults are ctrl+n / ctrl+p (not / and .)", () => {
+        const s = resolveSettings({});
+        expect(s.cycleNextHotkey).toBe("ctrl+n");
+        expect(s.cyclePrevHotkey).toBe("ctrl+p");
+    });
+
+    test("nextIssueHotkey / prevIssueHotkey settings (default ctrl+g / ctrl+shift+g)", () => {
+        const s = resolveSettings({});
+        expect(s.nextIssueHotkey).toBe("ctrl+g");
+        expect(s.prevIssueHotkey).toBe("ctrl+shift+g");
+    });
+    test("nextIssueHotkey / prevIssueHotkey are rebindable", () => {
+        const s = resolveSettings({ nextIssueHotkey: "ctrl+n", prevIssueHotkey: "ctrl+p" });
+        expect(s.nextIssueHotkey).toBe("ctrl+n");
+        expect(s.prevIssueHotkey).toBe("ctrl+p");
+    });
+
     test("garbage values fall back to defaults", () => {
         const s = resolveSettings({
             bridgeUrl: 42,
@@ -45,9 +64,30 @@ describe("resolveSettings", () => {
         expect(s.bridgeUrl).toBe("http://localhost:8000");
         expect(s.realtimeDelayMs).toBe(500);
         expect(s.applyAllHotkey).toBe("ctrl+.");
-        expect(s.cycleNextHotkey).toBe("/");
-        expect(s.cyclePrevHotkey).toBe(".");
+        expect(s.cycleNextHotkey).toBe("ctrl+n");
+        expect(s.cyclePrevHotkey).toBe("ctrl+p");
         expect(s.allowRemoteBridge).toBe(false);
+    });
+
+    test("completionEnabled defaults to false (opt-in)", () => {
+        const s = resolveSettings({});
+        expect(s.completionEnabled).toBe(false);
+    });
+    test("completionEnabled is rebindable", () => {
+        const s = resolveSettings({ completionEnabled: true });
+        expect(s.completionEnabled).toBe(true);
+    });
+    test("completionDebounceMs defaults to 600", () => {
+        const s = resolveSettings({});
+        expect(s.completionDebounceMs).toBe(600);
+    });
+    test("completionDebounceMs is rebindable", () => {
+        const s = resolveSettings({ completionDebounceMs: 300 });
+        expect(s.completionDebounceMs).toBe(300);
+    });
+    test("completionDebounceMs coerces non-number to default", () => {
+        const s = resolveSettings({ completionDebounceMs: "fast" });
+        expect(s.completionDebounceMs).toBe(600);
     });
 });
 
@@ -383,6 +423,8 @@ describe("startOrchestrator", () => {
                 setView: () => undefined,
                 subscribe: () => () => undefined,
                 dispose: () => undefined,
+                setStatusText: () => undefined,
+                subscribeStatus: () => () => undefined,
             }),
         });
         expect(commandHandlers.has("grammarforge.applyAll")).toBe(true);
@@ -450,6 +492,8 @@ describe("startOrchestrator", () => {
                 setView: () => undefined,
                 subscribe: () => () => undefined,
                 dispose: () => undefined,
+                setStatusText: () => undefined,
+                subscribeStatus: () => () => undefined,
             }),
         });
         // The orchestrator does NOT register slots — the single
@@ -698,12 +742,11 @@ describe("startOrchestrator", () => {
         const detailsKeys = (detailsLayer?.bindings ?? []).map((b) => b.key);
         expect(detailsKeys).toContain("return");
         expect(detailsKeys).toContain("x");
-        // Cycle keys are now "." and "/" (not "n"/"p"/",").
-        expect(detailsKeys).toContain(".");
-        expect(detailsKeys).toContain("/");
-        expect(detailsKeys).not.toContain("n");
-        expect(detailsKeys).not.toContain("p");
-        expect(detailsKeys).not.toContain(",");
+        // Cycle keys are now ctrl+n/ctrl+p (not "/"/".").
+        expect(detailsKeys).toContain("ctrl+n");
+        expect(detailsKeys).toContain("ctrl+p");
+        expect(detailsKeys).not.toContain("/");
+        expect(detailsKeys).not.toContain(".");
         expect(detailsKeys).toContain("escape");
         const applyAllLayer = layers.find((l) =>
             (l.commands ?? []).some((c) => c.name === "grammarforge.applyAll"),
@@ -1330,14 +1373,13 @@ describe("startOrchestrator", () => {
         const cycleNextBinding = bindings.find((b) => b.cmd === "grammarforge.details.cycleNext");
         const cyclePrevBinding = bindings.find((b) => b.cmd === "grammarforge.details.cyclePrev");
 
-        expect(cycleNextBinding?.key).toBe("/");
-        expect(cyclePrevBinding?.key).toBe(".");
+        expect(cycleNextBinding?.key).toBe("ctrl+n");
+        expect(cyclePrevBinding?.key).toBe("ctrl+p");
 
-        // "n", "p", and "," must not appear as binding keys.
+        // "/", "." must not appear as binding keys.
         const allKeys = bindings.map((b) => b.key);
-        expect(allKeys).not.toContain("n");
-        expect(allKeys).not.toContain("p");
-        expect(allKeys).not.toContain(",");
+        expect(allKeys).not.toContain("/");
+        expect(allKeys).not.toContain(".");
 
         stop();
     });
@@ -1764,6 +1806,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -2131,6 +2175,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -2204,6 +2250,206 @@ describe("startOrchestrator", () => {
         expect(s.rephraseHotkey).toBe("ctrl+r");
     });
 
+    test("rephrase: accept applies SELECTED alternative (not always primary)", async () => {
+        const { commandHandlers, pendingRephrase, replaceRangeCalls, stop } = makeRephraseEnv();
+
+        // Start rephrase.
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+
+        // Resolve with alternatives.
+        pendingRephrase[0]!({
+            original: "He go to school",
+            rephrased: "He goes to school",       // primary (index 0)
+            alternatives: ["He is going to school", "He went to school"],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Cycle to alternative #1 (the second variant: "He is going to school").
+        const cycleAltNext = commandHandlers.get("grammarforge.rephrase.cycleAltNext") as () => void;
+        expect(cycleAltNext).toBeDefined();
+        cycleAltNext();
+
+        // Now accept — should apply "He is going to school" (alt index 1), NOT the primary.
+        const acceptFn = commandHandlers.get("grammarforge.rephrase.accept") as () => void;
+        acceptFn();
+
+        expect(replaceRangeCalls.length).toBe(1);
+        expect(replaceRangeCalls[0]![2]).toBe("He is going to school");
+
+        stop();
+    });
+
+    // ─── A8: Eager dismiss on edit ─────────────────────────────────────
+
+    test("A8 eager-dismiss: onChange textChanged clears pinned card immediately", async () => {
+        const text = "I has a apple";
+        let onCursorChangeCb = (): void => undefined;
+        let onChangeCb = (): void => undefined;
+        const setViewCalls: Array<import("./details-panel-view").PanelView | null> = [];
+        let resolveCorrect!: (res: unknown) => void;
+
+        let currentRef = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 3,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: () => true,
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        };
+
+        const api = {
+            prompt: {
+                ref: () => currentRef,
+                onChange: (cb: () => void) => {
+                    onChangeCb = cb;
+                    return () => undefined;
+                },
+                onCursorChange: (cb: () => void) => {
+                    onCursorChangeCb = cb;
+                    return () => undefined;
+                },
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    void layer.commands;
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+            panelRenderer: () => ({
+                setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
+                subscribe: () => () => undefined,
+                dispose: () => undefined,
+                setStatusText: () => undefined,
+                subscribeStatus: () => () => undefined,
+            }),
+        } as unknown as OrchestratorDeps);
+
+        // Wait for the initial debounced check.
+        await new Promise((r) => setTimeout(r, 30));
+        expect(resolveCorrect).toBeDefined();
+        resolveCorrect!({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Pin index 0 by moving cursor to offset 3 (inside "has").
+        currentRef.cursorOffset = 3;
+        onCursorChangeCb();
+
+        // Should be pinned now.
+        const pinnedViews = setViewCalls.filter((v) => v?.kind === "suggestion");
+        expect(pinnedViews.length).toBeGreaterThanOrEqual(1);
+
+        // Now simulate a text edit: change ref.text AND fire onChange.
+        currentRef.text = "I has an apple";
+        onChangeCb();
+
+        // The pinned card should be IMMEDIATELY cleared (eager).
+        const lastView = setViewCalls[setViewCalls.length - 1];
+        expect(lastView).toBeNull();
+
+        stop();
+    });
+
+    test("A8 eager-dismiss: underlines NOT cleared eagerly (reconcile on re-check)", async () => {
+        const text = "I has a apple";
+        let onChangeCb = (): void => undefined;
+        let resolveCorrect!: (res: unknown) => void;
+        const deletedExtmarks: number[] = [];
+
+        let currentRef = {
+            text,
+            current: { input: text, parts: [] },
+            cursorOffset: 3,
+            extmarks: {
+                registerType: () => 1,
+                create: () => 1,
+                getAllForTypeId: () => [],
+                delete: (id: number) => {
+                    deletedExtmarks.push(id);
+                    return true;
+                },
+            },
+            getTextRange: (s: number, e: number) => text.slice(s, e),
+            replaceRange: () => undefined,
+            focus: () => undefined,
+        };
+
+        const api = {
+            prompt: {
+                ref: () => currentRef,
+                onChange: (cb: () => void) => {
+                    onChangeCb = cb;
+                    return () => undefined;
+                },
+                onCursorChange: () => () => undefined,
+            },
+            keymap: {
+                registerLayer: (layer: {
+                    commands?: Array<{ name: string; run: () => unknown }>;
+                }) => {
+                    void layer.commands;
+                    return () => undefined;
+                },
+            },
+            ui: { toast: () => undefined },
+            theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+            lifecycle: { onDispose: () => () => undefined },
+        } as unknown as Parameters<typeof startOrchestrator>[0];
+
+        const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+            correct: () =>
+                new Promise<unknown>((resolve) => {
+                    resolveCorrect = resolve;
+                }),
+        } as unknown as OrchestratorDeps);
+
+        await new Promise((r) => setTimeout(r, 30));
+        resolveCorrect!({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+            ],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        // Extmarks should have been created.
+        const deletedBefore = deletedExtmarks.length;
+
+        // Simulate text edit.
+        currentRef.text = "I has an apple";
+        onChangeCb();
+
+        // Underlines NOT eagerly cleared — extmarks remain.
+        expect(deletedExtmarks.length).toBe(deletedBefore);
+
+        stop();
+    });
+
     // ─── BLOCKER 2: ignorePinned keeps displaySpans aligned with items ─────────
 
     test("ignorePinned: ignoring middle item keeps displaySpans aligned with surviving items", async () => {
@@ -2262,6 +2508,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -2386,6 +2634,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -2490,6 +2740,8 @@ describe("startOrchestrator", () => {
             setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
             subscribe: () => () => undefined,
             dispose: () => undefined,
+            setStatusText: () => undefined,
+            subscribeStatus: () => () => undefined,
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -2534,5 +2786,1032 @@ describe("startOrchestrator", () => {
         expect(toasts.some((t) => t.variant === "info")).toBe(true);
 
         stop();
+    });
+
+    describe("reviewJump", () => {
+        function makeItems(n: number): Array<{ category: string }> {
+            return Array.from({ length: n }, (_, _i) => ({ category: "grammar" }));
+        }
+
+        test("next: pins item after cursor (wraps)", () => {
+            const items = makeItems(3);
+            const displaySpans = [
+                { start: 5, end: 9 },
+                { start: 15, end: 19 },
+                { start: 25, end: 29 },
+            ];
+            const result = jumpNext(10, items, displaySpans);
+            expect(result).toEqual({ pinIndex: 1, cursorOffset: 15 });
+        });
+
+        test("next: wraps to first item when cursor is past last item", () => {
+            const items = makeItems(3);
+            const displaySpans = [
+                { start: 5, end: 9 },
+                { start: 15, end: 19 },
+                { start: 25, end: 29 },
+            ];
+            const result = jumpNext(30, items, displaySpans);
+            expect(result).toEqual({ pinIndex: 0, cursorOffset: 5 });
+        });
+
+        test("next: returns null for empty items", () => {
+            const result = jumpNext(0, [], []);
+            expect(result).toBeNull();
+        });
+
+        test("prev: pins item before cursor (wraps)", () => {
+            const items = makeItems(3);
+            const displaySpans = [
+                { start: 5, end: 9 },
+                { start: 15, end: 19 },
+                { start: 25, end: 29 },
+            ];
+            const result = jumpPrev(10, items, displaySpans);
+            expect(result).toEqual({ pinIndex: 0, cursorOffset: 5 });
+        });
+
+        test("prev: wraps to last item when cursor is before first item", () => {
+            const items = makeItems(3);
+            const displaySpans = [
+                { start: 5, end: 9 },
+                { start: 15, end: 19 },
+                { start: 25, end: 29 },
+            ];
+            const result = jumpPrev(3, items, displaySpans);
+            expect(result).toEqual({ pinIndex: 2, cursorOffset: 25 });
+        });
+
+        test("prev: returns null for empty items", () => {
+            const result = jumpPrev(0, [], []);
+            expect(result).toBeNull();
+        });
+    });
+
+    // ─── Completion trigger + gating ───────────────────────────────────
+
+    describe("completion", () => {
+        const baseApi = () => ({
+            keymap: {
+                registerLayer: () => () => undefined,
+            },
+            ui: { toast: () => undefined },
+            theme: {
+                syntax: () => ({
+                    registerStyle: () => 1,
+                    getStyleId: () => 1,
+                }),
+            },
+            lifecycle: { onDispose: () => () => undefined },
+        });
+
+        test("completionEnabled=false → no completeFn call, no timer", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string; atOffset: number }> = [];
+            const clearCalls: unknown[] = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: false }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text, atOffset) => ghostCalls.push({ text, atOffset }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+            });
+
+            // Fire onChange — it will skip because completionEnabled is false.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(700);
+            expect(ghostCalls).toHaveLength(0);
+            vi.useRealTimers();
+        });
+
+        test("completionEnabled=true + unfinished line → fires after debounce", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string; atOffset: number }> = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 600 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text, atOffset) => ghostCalls.push({ text, atOffset }),
+                    clearGhost: () => {},
+                },
+            });
+
+            // Fire onChange — timer starts.
+            onChangeCb();
+            // Advance past the debounce.
+            await vi.advanceTimersByTimeAsync(700);
+            // Allow async requestCompletion to resolve.
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+            expect(ghostCalls[0]!.text).toBe("fox jumps");
+            expect(ghostCalls[0]!.atOffset).toBe(15);
+            vi.useRealTimers();
+        });
+
+        test("completion: terminal punctuation does not trigger", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "Hello world.",
+                current: { input: "Hello world.", parts: [] },
+                cursorOffset: 12,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true }, {
+                complete: async () => ({ continuation: "xxx" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => {},
+                },
+            });
+
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(700);
+            expect(ghostCalls).toHaveLength(0);
+            vi.useRealTimers();
+        });
+
+        test("completion: short text (<3 chars) does not trigger", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "ab",
+                current: { input: "ab", parts: [] },
+                cursorOffset: 2,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true }, {
+                complete: async () => ({ continuation: "c" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => {},
+                },
+            });
+
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(700);
+            expect(ghostCalls).toHaveLength(0);
+            vi.useRealTimers();
+        });
+
+        test("completion: caret NOT at end suppresses trigger (mid-text pause)", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 5, // mid-text, not at end (text.length = 15)
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => {},
+                },
+            });
+
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(0); // suppressed: caret not at end
+            vi.useRealTimers();
+        });
+
+        test("completion: caret-at-end + unfinished line → triggers", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15, // at end (text.length = 15)
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => {},
+                },
+            });
+
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1); // triggers: caret at end
+            expect(ghostCalls[0]!.text).toBe("fox jumps");
+            vi.useRealTimers();
+        });
+
+        test("completion: edit resets debounce — ghost appears after new debounce", async () => {
+            // Simulate: user starts typing, pauses briefly, types more.
+            // The ghost should appear after the final pause, not the first.
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = { text: "abc", current: { input: "abc", parts: [] }, cursorOffset: 3,
+                extmarks: { registerType: () => 1, create: () => 1, getAllForTypeId: () => [], delete: () => true },
+                getTextRange: () => "", replaceRange: () => undefined, focus: () => undefined, setCursorOffset: () => undefined };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => { onChangeCb = cb; return () => undefined; },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 600, realtimeDelayMs: 5000 }, {
+                correct: async () => ({ original: "", suggestions: [], score: 100 }),
+                complete: async () => ({ continuation: "fox" }),
+                ghostRenderer: { renderGhost: (text) => ghostCalls.push({ text }), clearGhost: () => {} },
+            });
+
+            // First pause.
+            onChangeCb();
+            // Advance 300ms (half the 600ms debounce) — no ghost yet.
+            await vi.advanceTimersByTimeAsync(300);
+            expect(ghostCalls).toHaveLength(0);
+
+            // User continues typing — reset debounce.
+            ref.text = "abcd"; ref.cursorOffset = 4;
+            onChangeCb();
+            // Advance past the NEW 600ms debounce from the reset point.
+            await vi.advanceTimersByTimeAsync(650);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+            expect(ghostCalls[0]!.text).toBe("fox");
+            vi.useRealTimers();
+        });
+
+        test("completion: stale-seq guard drops in-flight result when newer request fires", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            // Use a call counter so each complete() call returns a SEPARATE promise.
+            const pending: Array<(v: { continuation: string }) => void> = [];
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            const stop = startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: () =>
+                    new Promise<{ continuation: string }>((resolve) => {
+                        pending.push(resolve);
+                    }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => {},
+                },
+            });
+
+            // Trigger first completion.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            // Change text and trigger second completion — this bumps completionSeq.
+            ref.text = "The quick brown fox";
+            ref.cursorOffset = 19;
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            // Two requests should be pending.
+            expect(pending).toHaveLength(2);
+            // Resolve the FIRST (stale) request.
+            pending[0]!({ continuation: "stale" });
+            await vi.advanceTimersByTimeAsync(0);
+            // Stale result should be dropped.
+            expect(ghostCalls).toHaveLength(0);
+            // Resolve the second (current) request.
+            pending[1]!({ continuation: "fox jumps" });
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+            expect(ghostCalls[0]!.text).toBe("fox jumps");
+            stop();
+            vi.useRealTimers();
+        });
+
+        test("completion: result not rendered if pinned or rephrasing by the time it arrives", async () => {
+            // This is tested indirectly — the requestCompletion function checks
+            // detailsState.pinnedIndex() and state.rephrase before rendering.
+            // For now, verify that a completeFn returning empty continuation doesn't render.
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => {},
+                },
+            });
+
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(0);
+            vi.useRealTimers();
+        });
+
+        test("suppression: ghost NOT rendered when rephrase starts before completion resolves", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            const commandHandlers = new Map<string, () => unknown>();
+            let onChangeCb: () => void = () => undefined;
+            let resolveComplete: ((v: { continuation: string }) => void) | null = null;
+
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        commands?: Array<{ name: string; run: () => void }>;
+                    }) => {
+                        if (layer.commands) {
+                            for (const cmd of layer.commands) {
+                                commandHandlers.set(cmd.name, cmd.run);
+                            }
+                        }
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: () =>
+                    new Promise<{ continuation: string }>((resolve) => {
+                        resolveComplete = resolve;
+                    }),
+                rephrase: () => new Promise(() => {}), // never resolves
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => {},
+                },
+                panelRenderer: () => ({
+                    setView: () => {},
+                    subscribe: () => () => undefined,
+                    dispose: () => undefined,
+                    setStatusText: () => {},
+                    subscribeStatus: () => () => undefined,
+                }),
+            });
+
+            // Trigger completion debounce.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            // Completion is now in-flight (awaiting completeFn).
+            // Start rephrase — this sets state.rephrase immediately.
+            const rephraseCmd = commandHandlers.get("grammarforge.rephrase");
+            expect(rephraseCmd).toBeDefined();
+            rephraseCmd!();
+            // Now resolve the completion.
+            expect(resolveComplete).not.toBeNull();
+            resolveComplete!({ continuation: "fox jumps" });
+            await vi.advanceTimersByTimeAsync(0);
+            // Ghost should NOT be rendered because rephrase is active.
+            expect(ghostCalls).toHaveLength(0);
+            vi.useRealTimers();
+        });
+
+        test("suppression: ghost NOT rendered when pin occurs before completion resolves", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            let onChangeCb: () => void = () => undefined;
+            let onCursorCb: (() => void) | null = null;
+            let resolveComplete: ((v: { continuation: string }) => void) | null = null;
+
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                    onCursorChange: (cb: () => void) => {
+                        onCursorCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            // Phase 1: populate items via correctFn so pin has a target.
+            // Inject a correctFn that returns one item with a span covering cursorOffset.
+            const correctItem = {
+                span: { start: 2, end: 5 },
+                replacement: "the",
+                model: "gector" as const,
+                category: "grammar",
+            };
+
+            startOrchestrator(api, {
+                completionEnabled: true,
+                completionDebounceMs: 100,
+                realtimeDelayMs: 10,
+            }, {
+                correct: () =>
+                    new Promise((resolve) => {
+                        // Resolve immediately with items for pin-target.
+                        resolve({
+                            original: "The quick brown",
+                            score: 90,
+                            suggestions: [{ id: 1, ...correctItem }],
+                        });
+                    }),
+                complete: () =>
+                    new Promise<{ continuation: string }>((resolve) => {
+                        resolveComplete = resolve;
+                    }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => {},
+                },
+            });
+
+            // Fire onChange to populate items (grammar check).
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(20); // past realtimeDelayMs=10
+            await vi.advanceTimersByTimeAsync(0);
+            // Now items are populated.
+
+            // Fire onChange again to start completion debounce.
+            // (text is same, so no A8 eager dismiss — just the timer restart)
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(110); // past completionDebounceMs=100
+            // Completion is now in-flight (awaiting completeFn).
+
+            // Pin: fire onCursorChange with cursor over the item's span.
+            // The item at index 0 has hlStart=2, hlEnd=5. cursorOffset at end=5
+            // of span [2,5) would not match (end-inclusive: ≤). At offset=4 it matches.
+            ref.cursorOffset = 4;
+            expect(onCursorCb).not.toBeNull();
+            onCursorCb!();
+
+            // Now resolve the completion.
+            expect(resolveComplete).not.toBeNull();
+            resolveComplete!({ continuation: "fox jumps" });
+            await vi.advanceTimersByTimeAsync(0);
+            // Ghost should NOT be rendered because pin is active.
+            expect(ghostCalls).toHaveLength(0);
+            vi.useRealTimers();
+        });
+
+        test("completion keymap layer: accept calls replaceRange and clears ghost", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string; atOffset: number }> = [];
+            const clearCalls: unknown[] = [];
+            const replaceCalls: Array<{ start: number; end: number; text: string }> = [];
+            const layers = new Map<string, { commands?: Array<{ name: string; run: () => void }> }>();
+            let onChangeCb: () => void = () => undefined;
+
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: (start: number, end: number, text: string) => {
+                    replaceCalls.push({ start, end, text });
+                },
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        priority: number;
+                        enabled?: () => boolean;
+                        commands?: Array<{ name: string; title: string; run: () => void }>;
+                        bindings?: Array<{ key: string; cmd: string }>;
+                    }) => {
+                        const layerId = `layer-${layers.size}`;
+                        layers.set(layerId, layer);
+                        return () => layers.delete(layerId);
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps over" }),
+                ghostRenderer: {
+                    renderGhost: (text, atOffset) => ghostCalls.push({ text, atOffset }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+            });
+
+            // Trigger completion.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+
+            // Find the completion layer and execute the accept command.
+            let acceptFn: (() => void) | undefined;
+            for (const [, layer] of layers) {
+                if (layer.commands) {
+                    for (const cmd of layer.commands) {
+                        if (cmd.name === "grammarforge.completion.accept") {
+                            acceptFn = cmd.run;
+                        }
+                    }
+                }
+            }
+            expect(acceptFn).toBeDefined();
+            acceptFn!();
+
+            // Assert replaceRange was called with correct args.
+            expect(replaceCalls).toHaveLength(1);
+            expect(replaceCalls[0]!.start).toBe(15);
+            expect(replaceCalls[0]!.end).toBe(15);
+            expect(replaceCalls[0]!.text).toBe("fox jumps over");
+
+            vi.useRealTimers();
+        });
+
+        test("completion keymap layer: dismiss clears state and ghost", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            const clearCalls: unknown[] = [];
+            const layers = new Map<string, { commands?: Array<{ name: string; run: () => void }> }>();
+            let onChangeCb: () => void = () => undefined;
+
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        priority: number;
+                        enabled?: () => boolean;
+                        commands?: Array<{ name: string; title: string; run: () => void }>;
+                    }) => {
+                        const layerId = `layer-${layers.size}`;
+                        layers.set(layerId, layer);
+                        return () => layers.delete(layerId);
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+            });
+
+            // Trigger completion.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+
+            // Find the completion layer and execute the dismiss command.
+            let dismissFn: (() => void) | undefined;
+            for (const [, layer] of layers) {
+                if (layer.commands) {
+                    for (const cmd of layer.commands) {
+                        if (cmd.name === "grammarforge.completion.dismiss") {
+                            dismissFn = cmd.run;
+                        }
+                    }
+                }
+            }
+            expect(dismissFn).toBeDefined();
+            expect(clearCalls).toHaveLength(0);
+            dismissFn!();
+            expect(clearCalls).toHaveLength(1);
+
+            vi.useRealTimers();
+        });
+
+        test("completion keymap layer: enabled gate is false when no ghost", () => {
+            const layers = new Map<string, { enabled?: () => boolean }>();
+            const ref = {
+                text: "",
+                current: { input: "", parts: [] },
+                cursorOffset: 0,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: () => () => undefined,
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        priority: number;
+                        enabled?: () => boolean;
+                    }) => {
+                        const layerId = `layer-${layers.size}`;
+                        layers.set(layerId, layer);
+                        return () => layers.delete(layerId);
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: false }, {});
+
+            // Find the completion layer and check enabled() returns false.
+            let enabledFn: (() => boolean) | undefined;
+            for (const [, layer] of layers) {
+                if (layer.enabled) {
+                    // The completion layer is identifiable by its enabled gate.
+                    enabledFn = layer.enabled;
+                }
+            }
+            // All keymap layers are registered; completion has enabled defined.
+            expect(enabledFn).toBeDefined();
+            // With no completion state, enabled should return false.
+            expect(enabledFn!()).toBe(false);
+        });
+
+        test("onChange: eagerly clears completion ghost on edit (A8 + WS-C)", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            const clearCalls: unknown[] = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+            });
+
+            // Trigger completion.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+            expect(clearCalls).toHaveLength(0);
+
+            // Now edit — onChange fires with different text.
+            ref.text = "The quick brown fox";
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(0);
+
+            // Ghost should be cleared via the A8 eager-dismiss block.
+            expect(clearCalls).toHaveLength(1);
+            vi.useRealTimers();
+        });
+
+        test("onChange: clears completion ghost on ref-swap", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            const clearCalls: unknown[] = [];
+            let onChangeCb: () => void = () => undefined;
+            const refA = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            let currentRef: typeof refA = refA;
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => currentRef,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+            });
+
+            // Trigger completion.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+            expect(clearCalls).toHaveLength(0);
+
+            // Swap ref — simulate route remount.
+            currentRef = {
+                text: "New prompt",
+                current: { input: "New prompt", parts: [] },
+                cursorOffset: 10,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(0);
+
+            // Ghost should be cleared on ref-swap.
+            expect(clearCalls).toHaveLength(1);
+            vi.useRealTimers();
+        });
     });
 });

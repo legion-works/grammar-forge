@@ -21,6 +21,8 @@ import { buildRenderableItems, isSpanStillValid, type RenderableItem } from "@/l
 import { createSignalQueue } from "@/signal/queue";
 import { resolveCommonSettings } from "@/storage/settings-core";
 import type {
+    CompleteRequest,
+    CompleteResponse,
     CorrectRequest,
     CorrectResponse,
     RephraseRequest,
@@ -37,6 +39,8 @@ import { maskPastePlaceholders } from "./paste-mask";
 import { createDetailsState, type DetailsState } from "./details-state";
 import { detectPromptPinSupport } from "./feature-detect";
 import { logDebug } from "./debug";
+import { buildStatusLine } from "./status-line";
+import { lineLooksUnfinished, type GhostRenderer } from "./ghost-overlay";
 import { CATEGORY_FG } from "./category-palette";
 import type { PromptRef, TuiApi } from "./opencode-types";
 import type { PanelController, PanelView } from "./details-panel-view";
@@ -44,9 +48,13 @@ import type { PanelController, PanelView } from "./details-panel-view";
 const SIGNAL_SOURCE = "opencode";
 
 const DEFAULT_APPLY_ALL_HOTKEY = "ctrl+.";
-const DEFAULT_CYCLE_NEXT_HOTKEY = "/";
-const DEFAULT_CYCLE_PREV_HOTKEY = ".";
+const DEFAULT_CYCLE_NEXT_HOTKEY = "ctrl+n";
+const DEFAULT_CYCLE_PREV_HOTKEY = "ctrl+p";
 const DEFAULT_REPHRASE_HOTKEY = "ctrl+/";
+const DEFAULT_COMPLETION_ENABLED = false;
+const DEFAULT_COMPLETION_DEBOUNCE_MS = 600;
+const DEFAULT_NEXT_ISSUE_HOTKEY = "ctrl+g";
+const DEFAULT_PREV_ISSUE_HOTKEY = "ctrl+shift+g";
 
 export interface GrammarForgeSettings {
     bridgeUrl: string;
@@ -55,7 +63,15 @@ export interface GrammarForgeSettings {
     cycleNextHotkey: string;
     cyclePrevHotkey: string;
     rephraseHotkey: string;
+    nextIssueHotkey: string;
+    prevIssueHotkey: string;
     allowRemoteBridge: boolean;
+    /** Enable Copilot-style inline ghost-text completion. Default false
+     *  (opt-in — the bridge /complete endpoint is also default-off). */
+    completionEnabled: boolean;
+    /** Debounce delay in ms before a completion request fires on pause.
+     *  Separate from realtimeDelayMs (the grammar re-check debounce). */
+    completionDebounceMs: number;
 }
 
 export function resolveSettings(
@@ -77,6 +93,22 @@ export function resolveSettings(
     const rephraseHotkeyRaw =
         typeof raw.rephraseHotkey === "string" ? raw.rephraseHotkey.trim().toLowerCase() : "";
     const rephraseHotkey = rephraseHotkeyRaw === "" ? DEFAULT_REPHRASE_HOTKEY : rephraseHotkeyRaw;
+    const nextIssueHotkeyRaw =
+        typeof raw.nextIssueHotkey === "string" ? raw.nextIssueHotkey.trim().toLowerCase() : "";
+    const nextIssueHotkey =
+        nextIssueHotkeyRaw === "" ? DEFAULT_NEXT_ISSUE_HOTKEY : nextIssueHotkeyRaw;
+    const prevIssueHotkeyRaw =
+        typeof raw.prevIssueHotkey === "string" ? raw.prevIssueHotkey.trim().toLowerCase() : "";
+    const prevIssueHotkey =
+        prevIssueHotkeyRaw === "" ? DEFAULT_PREV_ISSUE_HOTKEY : prevIssueHotkeyRaw;
+    const completionEnabled =
+        typeof raw.completionEnabled === "boolean" ? raw.completionEnabled : DEFAULT_COMPLETION_ENABLED;
+    const completionDebounceMsRaw =
+        typeof raw.completionDebounceMs === "number" ? raw.completionDebounceMs : NaN;
+    const completionDebounceMs =
+        Number.isFinite(completionDebounceMsRaw) && completionDebounceMsRaw > 0
+            ? completionDebounceMsRaw
+            : DEFAULT_COMPLETION_DEBOUNCE_MS;
     return {
         bridgeUrl: common.bridgeUrl,
         realtimeDelayMs: common.realtimeDelayMs,
@@ -84,7 +116,11 @@ export function resolveSettings(
         cycleNextHotkey,
         cyclePrevHotkey,
         rephraseHotkey,
+        nextIssueHotkey,
+        prevIssueHotkey,
         allowRemoteBridge: common.allowRemoteBridge,
+        completionEnabled,
+        completionDebounceMs,
     };
 }
 
@@ -125,6 +161,9 @@ interface RephraseState {
     mode: "loading" | "result";
     original: string;
     rephrased?: string;
+    alternatives: string[];   // NEW: all variants (primary index 0 = rephrased)
+    altIndex: number;         // NEW: which alternative is currently shown (0 = primary)
+    scrollOffset: number;     // NEW: line scroll offset for tall rephrase cards (A4)
     /** Monotonic sequence number — incremented on each new rephrase
      *  invocation and on reject/cancel. In-flight async callbacks
      *  compare against this to detect stale results. */
@@ -133,6 +172,17 @@ interface RephraseState {
      *  Used to detect ref swaps (route remounts) and discard stale
      *  results that arrived for a different prompt instance. */
     ref: PromptRef;
+}
+
+interface CompletionState {
+    /** Monotonic counter bumped on each new completion request; stale-seq guard. */
+    seq: number;
+    /** The continuation text returned by the bridge. Non-empty while a ghost is visible. */
+    continuation: string;
+    /** The prompt ref captured at request time (ref-identity guard). */
+    ref: PromptRef;
+    /** The cursor offset at request time so the ghost anchor is fixed. */
+    atOffset: number;
 }
 
 interface RefState {
@@ -148,6 +198,66 @@ interface RefState {
     activeExtmarkIds: number[];
     /** Non-null while a rephrase is in-flight or showing a result card. */
     rephrase: RephraseState | null;
+    /** Non-null while a completion ghost is visible. */
+    completion: CompletionState | null;
+    /** Separate debounce timer for the completion pause detector. */
+    completionTimer: ReturnType<typeof setTimeout> | null;
+}
+
+interface JumpResult {
+    pinIndex: number;
+    cursorOffset: number;
+}
+
+/**
+ * Find the next item after the cursor offset (end-exclusive search; wraps).
+ * Returns null when there are no items.
+ */
+export function jumpNext(
+    cursorOffset: number,
+    items: Array<{ category?: string }>,
+    displaySpans: Array<{ start: number; end: number }>,
+): JumpResult | null {
+    if (items.length === 0) return null;
+    const ascending = items
+        .map((_, i) => i)
+        .sort((a, b) => (displaySpans[a]?.start ?? 0) - (displaySpans[b]?.start ?? 0));
+    for (const idx of ascending) {
+        const span = displaySpans[idx];
+        if (!span) continue;
+        // Item starts after the cursor → first match wins.
+        if (span.start > cursorOffset) {
+            return { pinIndex: idx, cursorOffset: span.start };
+        }
+    }
+    // Wrap: return the first item (by display order).
+    const firstIdx = ascending[0]!;
+    return { pinIndex: firstIdx, cursorOffset: displaySpans[firstIdx]?.start ?? 0 };
+}
+
+/**
+ * Find the previous item before the cursor offset (wraps to last).
+ */
+export function jumpPrev(
+    cursorOffset: number,
+    items: Array<{ category?: string }>,
+    displaySpans: Array<{ start: number; end: number }>,
+): JumpResult | null {
+    if (items.length === 0) return null;
+    const descending = items
+        .map((_, i) => i)
+        .sort((a, b) => (displaySpans[b]?.end ?? 0) - (displaySpans[a]?.end ?? 0));
+    for (const idx of descending) {
+        const span = displaySpans[idx];
+        if (!span) continue;
+        // Item ends before the cursor → first match wins.
+        if (span.end < cursorOffset) {
+            return { pinIndex: idx, cursorOffset: span.start };
+        }
+    }
+    // Wrap: return the last item (by display order).
+    const lastIdx = descending[0]!;
+    return { pinIndex: lastIdx, cursorOffset: displaySpans[lastIdx]?.start ?? 0 };
 }
 
 function emptyRefState(): RefState {
@@ -160,6 +270,8 @@ function emptyRefState(): RefState {
         extmarkTypeId: null,
         activeExtmarkIds: [],
         rephrase: null,
+        completion: null,
+        completionTimer: null,
     };
 }
 
@@ -173,6 +285,10 @@ export interface OrchestratorDeps {
      *  leave undefined; the orchestrator defaults to client.rephrase.
      *  Tests inject a deferred stub to exercise the stale-seq guard. */
     rephrase?: (req: RephraseRequest) => Promise<RephraseResponse>;
+    /** Completion injection seam — mirrors `rephrase?`. Production
+     *  callers leave undefined; the orchestrator defaults to
+     *  client.complete. Tests inject a deferred stub. */
+    complete?: (req: CompleteRequest) => Promise<CompleteResponse>;
     /**
      * Details-panel controller factory. Returns a PanelController whose
      * setView pushes pin/unpin transitions into a solid signal that
@@ -186,6 +302,9 @@ export interface OrchestratorDeps {
      * the test path (vitest runs under Node, not Bun).
      */
     panelRenderer?: () => PanelController;
+    /** Ghost text render controller — Path A self-render, wired by
+     *  tui-entry.tsx. Path B swaps to promptRef.ghostText at one call-site. */
+    ghostRenderer?: GhostRenderer;
 }
 
 /** Minimal shape of the item the panel needs to build its view-model.
@@ -223,6 +342,17 @@ export function startOrchestrator(
     const signalQueue = createSignalQueue({ send: (events) => client.signal(events) });
     const correctFn = deps?.correct ?? ((req: CorrectRequest) => client.correct(req));
     const rephraseFn = deps?.rephrase ?? ((req: RephraseRequest) => client.rephrase(req));
+    const completeFn = deps?.complete ?? ((req: CompleteRequest) => client.complete(req));
+
+    // Ghost render callback — wired by tui-entry.tsx via deps.ghostRenderer.
+    // Path A: self-render overlay. Path B: one-line swap to promptRef.ghostText.
+    // See ghost-overlay.ts for the render interface.
+    const renderGhost = (text: string, atOffset: number): void => {
+        deps?.ghostRenderer?.renderGhost(text, atOffset);
+    };
+    const clearGhost = (): void => {
+        deps?.ghostRenderer?.clearGhost();
+    };
 
     // Style id cache: category → styleId. Lazy; one registerStyle per
     // category the first time we see it.
@@ -334,6 +464,7 @@ export function startOrchestrator(
             state.checkedText = "";
             clearActiveExtmarks();
             detailsState.itemsChanged(0);
+            pushStatusLine();
             logDebug("check empty (empty buffer, no suggestions)", {});
             return;
         }
@@ -406,6 +537,7 @@ export function startOrchestrator(
                 })),
             });
             renderDecorations(ref, state.items);
+            pushStatusLine();
             // Identity-swap detection (secondary): if items.count is the
             // same as before but the pinned item's (hlStart, hlEnd,
             // replacement) signature changed, the pin is now stale —
@@ -433,6 +565,38 @@ export function startOrchestrator(
     const onChange = (): void => {
         const ref = api.prompt?.ref();
         if (!ref) return;
+
+        // ── A8: Eager dismiss on edit ──────────────────────────────────
+        // Clear the active suggestion surfaces IMMEDIATELY — before the
+        // debounced re-check resolves. Never show a stale suggestion
+        // while the user is actively editing.
+        const textChanged = ref.text !== state.checkedText;
+        if (textChanged) {
+            // Clear the pinned correction card.
+            detailsState.unpin();
+            // Clear any in-flight or showing rephrase.
+            if (state.rephrase !== null) {
+                rephraseSeq++;
+                stopSpinner();
+                state.rephrase = null;
+                const ctrl = rephraseController;
+                if (ctrl) ctrl.setView(null);
+            }
+            // NOTE: Underlines are NOT cleared here — they reconcile on
+            // the debounced re-check (avoids flicker).
+            // ── WS-C: Eagerly clear completion ghost on edit ──────
+            if (state.completion !== null) {
+                completionSeq++; // invalidate in-flight
+                if (state.completionTimer !== null) {
+                    clearTimeout(state.completionTimer);
+                    state.completionTimer = null;
+                }
+                state.completion = null;
+                clearGhost();
+            }
+            pushStatusLine();
+        }
+
         if (ref !== trackedRef) {
             clearActiveExtmarks();
             state.checkSeq += 1;
@@ -449,6 +613,16 @@ export function startOrchestrator(
                 state.rephrase = null;
                 const ctrl = rephraseController;
                 if (ctrl) ctrl.setView(null);
+            }
+            // Clear completion ghost on ref-swap.
+            if (state.completion !== null) {
+                completionSeq++;
+                if (state.completionTimer !== null) {
+                    clearTimeout(state.completionTimer);
+                    state.completionTimer = null;
+                }
+                state.completion = null;
+                clearGhost();
             }
         }
         const text = ref.text;
@@ -467,6 +641,30 @@ export function startOrchestrator(
             return;
         }
         scheduleCheck(ref);
+
+        // ── Completion pause detector ─────────────────────────────────
+        // Separate debounce from the grammar re-check. Only fires when
+        // completion is enabled, the line looks unfinished, and we are
+        // NOT pinned or rephrasing (mutually exclusive states).
+        if (state.completionTimer !== null) {
+            clearTimeout(state.completionTimer);
+            state.completionTimer = null;
+        }
+        if (
+            settings.completionEnabled &&
+            lineLooksUnfinished(text) &&
+            (ref.cursorOffset ?? text.length) === text.length &&
+            detailsState.pinnedIndex() === null &&
+            state.rephrase === null
+        ) {
+            const capturedRef = ref;
+            const capturedText = text;
+            const capturedOffset = ref.cursorOffset ?? text.length;
+            state.completionTimer = setTimeout(() => {
+                state.completionTimer = null;
+                void requestCompletion(capturedRef, capturedText, capturedOffset);
+            }, settings.completionDebounceMs);
+        }
     };
 
     const applyAll = (): void => {
@@ -527,11 +725,15 @@ export function startOrchestrator(
     // constraint: only controller.setView() → PanelComponent's local signal drives
     // re-renders. An in-component setInterval would queue updates that never flush.
     let rephraseSeq = 0;
+    let completionSeq = 0;
     let spinnerTimer: ReturnType<typeof setInterval> | null = null;
 
     // Helper: get the panel controller if available (injected via panelRenderer).
     // We need it for rephrase setView calls outside the detailsState subscription.
     let rephraseController: PanelController | null = null;
+    // A6: pushStatusLine is defined inside the controller block; holder ref
+    // so runCheck + rephrase callbacks can call it.
+    let pushStatusLine: () => void = () => undefined;
 
     const stopSpinner = (): void => {
         if (spinnerTimer !== null) {
@@ -553,7 +755,8 @@ export function startOrchestrator(
         detailsState.unpin();
         clearActiveExtmarks();
         const seq = ++rephraseSeq;
-        state.rephrase = { mode: "loading", original: text, seq, ref };
+        state.rephrase = { mode: "loading", original: text, alternatives: [], altIndex: 0, scrollOffset: 0, seq, ref };
+        pushStatusLine();
         let frame = 0;
         const ctrl = rephraseController;
         if (ctrl) {
@@ -568,7 +771,7 @@ export function startOrchestrator(
         }, 100);
         void (async () => {
             try {
-                const res = await rephraseFn({ text, source: SIGNAL_SOURCE });
+                const res = await rephraseFn({ text, source: SIGNAL_SOURCE, alternatives: 3 });
                 // Belt-and-suspenders: drop if seq stale OR the live ref no longer
                 // matches the captured ref (onChange ref-swap normally already cleared
                 // state.rephrase, but this guard handles any ordering where onChange
@@ -600,14 +803,31 @@ export function startOrchestrator(
                     return;
                 }
                 logDebug("rephrase result", { origLen: text.length, newLen: rephrased.length });
-                state.rephrase = { mode: "result", original: text, rephrased, seq, ref };
+                const alternatives = (res.alternatives ?? []).filter(
+                    (a) => a && a !== rephrased,
+                );
+                state.rephrase = {
+                    mode: "result",
+                    original: text,
+                    rephrased,
+                    alternatives,
+                    altIndex: 0,
+                    scrollOffset: 0,
+                    seq,
+                    ref,
+                };
                 if (ctrl) {
                     ctrl.setView({
                         kind: "rephrase-result",
                         original: text,
                         rephrased,
+                        alternatives,
+                        altIndex: 0,
+                        altTotal: 1 + alternatives.length,
+                        scrollOffset: 0,
                         displayStart: 0,
                     });
+                    pushStatusLine();
                 }
             } catch (e) {
                 if (state.rephrase?.seq === seq) {
@@ -645,7 +865,11 @@ export function startOrchestrator(
             if (ctrl) ctrl.setView(null);
             return;
         }
-        const rephrased = state.rephrase.rephrased ?? "";
+        // Apply the SELECTED alternative, not always the primary.
+        const rephrased =
+            state.rephrase.altIndex === 0
+                ? (state.rephrase.rephrased ?? "")
+                : (state.rephrase.alternatives[state.rephrase.altIndex - 1] ?? "");
         const end = displayWidthOf(ref.text);
         ref.replaceRange(0, end, rephrased);
         state.rephrase = null;
@@ -653,6 +877,7 @@ export function startOrchestrator(
         stopSpinner();
         onChange();
         api.ui.toast({ message: "Rephrased", variant: "success" });
+        pushStatusLine();
     };
 
     const rephraseReject = (): void => {
@@ -661,6 +886,87 @@ export function startOrchestrator(
         state.rephrase = null;
         const ctrl = rephraseController;
         if (ctrl) ctrl.setView(null);
+        pushStatusLine();
+    };
+
+    // ── Completion state machine ──────────────────────────────────────────
+    const requestCompletion = async (
+        ref: PromptRef,
+        text: string,
+        atOffset: number,
+    ): Promise<void> => {
+        if (!settings.completionEnabled) return;
+        const seq = ++completionSeq;
+        logDebug("completion request", { textLen: text.length, atOffset, seq });
+        try {
+            const res = await completeFn({ text, source: SIGNAL_SOURCE });
+            // Stale-seq guard.
+            if (seq !== completionSeq) {
+                logDebug("completion dropped (stale seq)", { seq });
+                return;
+            }
+            // Ref-identity guard.
+            const liveRef = api.prompt?.ref();
+            if (liveRef !== ref) {
+                logDebug("completion dropped (ref swap)", {});
+                return;
+            }
+            // Don't show if suppressed by now (pin appeared, rephrase started).
+            if (detailsState.pinnedIndex() !== null || state.rephrase !== null) {
+                logDebug("completion suppressed (pinned or rephrasing)", {});
+                return;
+            }
+            const continuation = res.continuation;
+            if (!continuation || continuation.length === 0) {
+                logDebug("completion empty — no ghost", {});
+                return;
+            }
+            logDebug("completion result", { contLen: continuation.length });
+            state.completion = { seq, continuation, ref, atOffset };
+            // Push to status-line.
+            pushStatusLine();
+            // Render ghost overlay.
+            renderGhost(continuation, atOffset);
+        } catch (e) {
+            if (seq === completionSeq) {
+                logDebug("completion error", {
+                    message: e instanceof Error ? e.message : String(e),
+                });
+            }
+        }
+    };
+
+    const acceptCompletion = (): void => {
+        const comp = state.completion;
+        if (!comp) return;
+        const liveRef = api.prompt?.ref();
+        if (!liveRef || liveRef !== comp.ref) {
+            state.completion = null;
+            clearGhost();
+            return;
+        }
+        // Pure insertion at the end — replaceRange with equal start/end
+        // inserts the ghost text at that position.
+        const continuation = comp.continuation;
+        liveRef.replaceRange(comp.atOffset, comp.atOffset, continuation);
+        logDebug("completion accepted", { atOffset: comp.atOffset, len: continuation.length });
+        state.completion = null;
+        clearGhost();
+        // Trigger a grammar re-check on the now-extended text.
+        onChange();
+    };
+
+    const dismissCompletion = (): void => {
+        if (!state.completion) return;
+        logDebug("completion dismissed", {});
+        completionSeq++; // invalidate any in-flight request
+        state.completion = null;
+        if (state.completionTimer !== null) {
+            clearTimeout(state.completionTimer);
+            state.completionTimer = null;
+        }
+        clearGhost();
+        pushStatusLine();
     };
 
     // Apply-all + rephrase layer — always on, no gate.
@@ -684,6 +990,77 @@ export function startOrchestrator(
         ],
     });
 
+    // Completion ghost layer — gated: active only while a ghost is visible.
+    // ⇧Tab accepts, esc dismisses. When no ghost, keys pass through to host.
+    const disposeCompletionLayer = api.keymap.registerLayer({
+        priority: 500,
+        enabled: () => state.completion !== null,
+        commands: [
+            {
+                name: "grammarforge.completion.accept",
+                title: "GrammarForge: accept completion ghost",
+                run: acceptCompletion,
+            },
+            {
+                name: "grammarforge.completion.dismiss",
+                title: "GrammarForge: dismiss completion ghost",
+                run: dismissCompletion,
+            },
+        ],
+        bindings: [
+            { key: "shift+tab", cmd: "grammarforge.completion.accept" },
+            { key: "escape", cmd: "grammarforge.completion.dismiss" },
+        ],
+    });
+
+    // Ungated review-jump layer — always active. Provides ctrl+g / ctrl+shift+g
+    // to jump to the next/previous issue relative to the cursor. This layer has
+    // LOWER priority than the gated details layer so that when pinned, the gated
+    // bindings (return/x/ctrl+n/ctrl+p/esc) take precedence over the ungated
+    // review-jump. However, ctrl+g/ctrl+shift+g are NOT in the gated layer,
+    // so they never collide — review-jump AND pinned-layer commands are both
+    // available while pinned.
+    const reviewNext = (): void => {
+        const ref = api.prompt?.ref();
+        if (!ref) return;
+        if (state.items.length === 0) return;
+        if (ref.text !== state.checkedText) {
+            // Text drifted — no safe hit-test; schedule a check and retry.
+            scheduleCheck(ref);
+            return;
+        }
+        const offset = ref.cursorOffset ?? 0;
+        const result = jumpNext(offset, state.items, state.displaySpans);
+        if (result === null) return;
+        detailsState.pin(result.pinIndex);
+        ref.setCursorOffset?.(result.cursorOffset);
+    };
+    const reviewPrev = (): void => {
+        const ref = api.prompt?.ref();
+        if (!ref) return;
+        if (state.items.length === 0) return;
+        if (ref.text !== state.checkedText) {
+            scheduleCheck(ref);
+            return;
+        }
+        const offset = ref.cursorOffset ?? 0;
+        const result = jumpPrev(offset, state.items, state.displaySpans);
+        if (result === null) return;
+        detailsState.pin(result.pinIndex);
+        ref.setCursorOffset?.(result.cursorOffset);
+    };
+    const disposeReviewLayer = api.keymap.registerLayer({
+        priority: 400, // lower than the details layer (500) so gated bindings win
+        commands: [
+            { name: "grammarforge.review.next", title: "GrammarForge: next issue", run: reviewNext },
+            { name: "grammarforge.review.prev", title: "GrammarForge: previous issue", run: reviewPrev },
+        ],
+        bindings: [
+            { key: settings.nextIssueHotkey, cmd: "grammarforge.review.next" },
+            { key: settings.prevIssueHotkey, cmd: "grammarforge.review.prev" },
+        ],
+    });
+
     // Rephrase result/loading layer — gated: active whenever state.rephrase !== null.
     // enter accepts (no-op if still loading), esc cancels in both modes.
     const disposeRephraseLayer = api.keymap.registerLayer({
@@ -700,11 +1077,120 @@ export function startOrchestrator(
                 title: "GrammarForge: reject rephrase",
                 run: rephraseReject,
             },
-        ],
-        bindings: [
-            { key: "return", cmd: "grammarforge.rephrase.accept" },
-            { key: "escape", cmd: "grammarforge.rephrase.reject" },
-        ],
+            {
+                name: "grammarforge.rephrase.regenerate",
+                title: "GrammarForge: regenerate rephrase",
+                run: rephrase,
+            },
+            {
+                name: "grammarforge.rephrase.cycleAltNext",
+                title: "GrammarForge: next alternative",
+                run: () => {
+                    if (state.rephrase?.mode !== "result") return;
+                    const total = 1 + state.rephrase.alternatives.length;
+                    if (total <= 1) return;
+                    const nextIdx = ((state.rephrase.altIndex + 1) % total + total) % total;
+                    state.rephrase.altIndex = nextIdx;
+                    const ctrl = rephraseController;
+                    if (!ctrl) return;
+                    const currentText = nextIdx === 0
+                        ? state.rephrase.rephrased!
+                        : state.rephrase.alternatives[nextIdx - 1]!;
+                    ctrl.setView({
+                        kind: "rephrase-result",
+                        original: state.rephrase.original,
+                        rephrased: currentText,
+                        alternatives: state.rephrase.alternatives,
+                        altIndex: nextIdx,
+                        altTotal: total,
+                        scrollOffset: state.rephrase.scrollOffset,
+                        displayStart: 0,
+                    });
+                },
+            },
+                {
+                    name: "grammarforge.rephrase.cycleAltPrev",
+                    title: "GrammarForge: previous alternative",
+                    run: () => {
+                        if (state.rephrase?.mode !== "result") return;
+                        const total = 1 + state.rephrase.alternatives.length;
+                        if (total <= 1) return;
+                        const prevIdx = ((state.rephrase.altIndex - 1) % total + total) % total;
+                        state.rephrase.altIndex = prevIdx;
+                        const ctrl = rephraseController;
+                        if (!ctrl) return;
+                        const currentText = prevIdx === 0
+                            ? state.rephrase.rephrased!
+                            : state.rephrase.alternatives[prevIdx - 1]!;
+                        ctrl.setView({
+                            kind: "rephrase-result",
+                            original: state.rephrase.original,
+                            rephrased: currentText,
+                            alternatives: state.rephrase.alternatives,
+                            altIndex: prevIdx,
+                            altTotal: total,
+                            scrollOffset: state.rephrase.scrollOffset,
+                            displayStart: 0,
+                        });
+                    },
+                },
+                {
+                    name: "grammarforge.rephrase.scrollUp",
+                    title: "GrammarForge: scroll rephrase up",
+                    run: () => {
+                        if (state.rephrase?.mode !== "result") return;
+                        state.rephrase.scrollOffset = Math.max(0, state.rephrase.scrollOffset - 1);
+                        const ctrl = rephraseController;
+                        if (!ctrl) return;
+                        const currentText = state.rephrase.altIndex === 0
+                            ? state.rephrase.rephrased!
+                            : state.rephrase.alternatives[state.rephrase.altIndex - 1]!;
+                        ctrl.setView({
+                            kind: "rephrase-result",
+                            original: state.rephrase.original,
+                            rephrased: currentText,
+                            alternatives: state.rephrase.alternatives,
+                            altIndex: state.rephrase.altIndex,
+                            altTotal: 1 + state.rephrase.alternatives.length,
+                            scrollOffset: state.rephrase.scrollOffset,
+                            displayStart: 0,
+                        });
+                    },
+                },
+                {
+                    name: "grammarforge.rephrase.scrollDown",
+                    title: "GrammarForge: scroll rephrase down",
+                    run: () => {
+                        if (state.rephrase?.mode !== "result") return;
+                        state.rephrase.scrollOffset = state.rephrase.scrollOffset + 1;
+                        const ctrl = rephraseController;
+                        if (!ctrl) return;
+                        const currentText = state.rephrase.altIndex === 0
+                            ? state.rephrase.rephrased!
+                            : state.rephrase.alternatives[state.rephrase.altIndex - 1]!;
+                        ctrl.setView({
+                            kind: "rephrase-result",
+                            original: state.rephrase.original,
+                            rephrased: currentText,
+                            alternatives: state.rephrase.alternatives,
+                            altIndex: state.rephrase.altIndex,
+                            altTotal: 1 + state.rephrase.alternatives.length,
+                            scrollOffset: state.rephrase.scrollOffset,
+                            displayStart: 0,
+                        });
+                    },
+                },
+            ],
+            bindings: [
+                { key: "return", cmd: "grammarforge.rephrase.accept" },
+                { key: "escape", cmd: "grammarforge.rephrase.reject" },
+                { key: "ctrl+/", cmd: "grammarforge.rephrase.regenerate" },
+                { key: "down", cmd: "grammarforge.rephrase.cycleAltNext" },
+                { key: "up", cmd: "grammarforge.rephrase.cycleAltPrev" },
+                { key: "tab", cmd: "grammarforge.rephrase.cycleAltNext" },
+                { key: "pageup", cmd: "grammarforge.rephrase.scrollUp" },
+                { key: "pagedown", cmd: "grammarforge.rephrase.scrollDown" },
+            ],
     });
 
     // Details layer — gated by enabled. When nothing is pinned, the
@@ -712,6 +1198,14 @@ export function startOrchestrator(
     // return/x/cycleNext/cyclePrev/escape stay free for the host's own
     // behavior. When a pin exists, the bindings become active.
     let disposeDetailsLayer: (() => void) | null = null;
+    // Holder references for the detail handler functions — defined inside
+    // the cursorPinSupported gate below, wired into the panel controller
+    // later for A7 mouse support.
+    let applyPinned: () => void = () => undefined;
+    let ignorePinned: () => void = () => undefined;
+    let cycleNext: () => void = () => undefined;
+    let cyclePrev: () => void = () => undefined;
+    let unpin: () => void = () => undefined;
     if (cursorPinSupported) {
         logDebug("details keymap layer: registered", {
             commands: [
@@ -724,7 +1218,7 @@ export function startOrchestrator(
             bindings: ["return", "x", settings.cycleNextHotkey, settings.cyclePrevHotkey, "escape"],
             enabled: () => detailsState.pinnedIndex() !== null,
         });
-        const applyPinned = (): void => {
+        applyPinned = (): void => {
             logDebug("keymap: applyPinned invoked", {
                 pinnedIndex: detailsState.pinnedIndex(),
             });
@@ -770,7 +1264,7 @@ export function startOrchestrator(
             detailsState.itemsChanged(0);
             onChange();
         };
-        const ignorePinned = (): void => {
+        ignorePinned = (): void => {
             const ref = api.prompt?.ref();
             const pinIndex = detailsState.pinnedIndex();
             logDebug("keymap: ignorePinned invoked", { pinnedIndex: pinIndex });
@@ -802,7 +1296,7 @@ export function startOrchestrator(
                 detailsState.itemsChanged(0);
             }
         };
-        const cycleNext = (): void => {
+        cycleNext = (): void => {
             logDebug("keymap: cycleNext invoked", {
                 pinnedIndex: detailsState.pinnedIndex(),
                 itemCount: state.items.length,
@@ -817,7 +1311,7 @@ export function startOrchestrator(
                 api.prompt?.ref()?.setCursorOffset?.(state.displaySpans[idx]!.start);
             }
         };
-        const cyclePrev = (): void => {
+        cyclePrev = (): void => {
             logDebug("keymap: cyclePrev invoked", {
                 pinnedIndex: detailsState.pinnedIndex(),
                 itemCount: state.items.length,
@@ -832,7 +1326,7 @@ export function startOrchestrator(
                 api.prompt?.ref()?.setCursorOffset?.(state.displaySpans[idx]!.start);
             }
         };
-        const unpin = (): void => {
+        unpin = (): void => {
             logDebug("keymap: unpin invoked", { pinnedIndex: detailsState.pinnedIndex() });
             detailsState.unpin();
         };
@@ -986,6 +1480,59 @@ export function startOrchestrator(
         // Wire the rephrase controller reference so the rephrase state machine
         // can call controller.setView() for loading/result cards.
         rephraseController = controller;
+        // ── A7: Wire mouse callbacks on the panel controller ──────────
+        // The handler functions (applyPinned, ignorePinned, etc.) are defined
+        // inside the cursorPinSupported gate above. Wire them only when
+        // cursorPinSupported is true (they're already guarded internally).
+        if (cursorPinSupported) {
+            controller.onApply = applyPinned;
+            controller.onIgnore = ignorePinned;
+            controller.onUnpin = unpin;
+            controller.onCycleNext = cycleNext;
+            controller.onCyclePrev = cyclePrev;
+        }
+        controller.onRephraseAccept = rephraseAccept;
+        controller.onRephraseReject = rephraseReject;
+
+        // ── A6: Status-line push helper ──────────────────────────────
+        pushStatusLine = (): void => {
+            const itemCount = state.items.length;
+            const categories = [...new Set(state.items.map((it) => it.category))];
+            const rephrase = state.rephrase;
+            const pinnedIdx = detailsState.pinnedIndex();
+
+            if (state.completion !== null) {
+                controller.setStatusText(buildStatusLine({ state: "completion" }));
+            } else if (rephrase?.mode === "loading") {
+                controller.setStatusText(buildStatusLine({ state: "rephrase-loading" }));
+            } else if (rephrase?.mode === "result") {
+                controller.setStatusText(buildStatusLine({ state: "rephrase-result" }));
+            } else if (pinnedIdx !== null && itemCount > 0) {
+                controller.setStatusText(
+                    buildStatusLine({
+                        state: "pinned",
+                        issueCount: itemCount,
+                        pinnedIndex: pinnedIdx + 1,
+                        cycleNextKey: settings.cycleNextHotkey,
+                        cyclePrevKey: settings.cyclePrevHotkey,
+                    }),
+                );
+            } else if (itemCount > 0) {
+                controller.setStatusText(
+                    buildStatusLine({
+                        state: "flagged",
+                        issueCount: itemCount,
+                        categories,
+                        nextIssueKey: settings.nextIssueHotkey,
+                        applyAllKey: settings.applyAllHotkey,
+                        rephraseKey: settings.rephraseHotkey,
+                    }),
+                );
+            } else {
+                controller.setStatusText(buildStatusLine({ state: "clear" }));
+            }
+        };
+
         // The transition push: build the current panel payload and
         // hand it to the controller's setter. The setter is what
         // updates the solid signal that PanelComponent reads via
@@ -995,6 +1542,7 @@ export function startOrchestrator(
             if (index === null || index >= state.items.length) {
                 logDebug("unpin transition", { from: index });
                 controller.setView(null);
+                pushStatusLine();
                 return;
             }
             const item = state.items[index]!;
@@ -1030,6 +1578,7 @@ export function startOrchestrator(
                 cycleNextKey: settings.cycleNextHotkey,
                 cyclePrevKey: settings.cyclePrevHotkey,
             });
+            pushStatusLine();
         };
         unsubscribeDetailsTransition = detailsState.subscribe(pushFromDetailsState);
     }
@@ -1056,6 +1605,8 @@ export function startOrchestrator(
         if (unsubscribeCursorChange) unsubscribeCursorChange();
         disposeAcceptLayer();
         disposeRephraseLayer();
+        disposeCompletionLayer();
+        disposeReviewLayer();
         if (disposeDetailsLayer) disposeDetailsLayer();
         onDispose();
         clearActiveExtmarks();

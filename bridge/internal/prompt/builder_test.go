@@ -55,6 +55,30 @@ func TestBuildRephraseChat(t *testing.T) {
 	require.Equal(t, "He go to store.", p.User)
 }
 
+func TestBuildCompleteChat(t *testing.T) {
+	b := New("chat_instruct")
+	p := b.BuildComplete("The quick brown")
+	require.Equal(t, correction.TemplateChatInstruct, p.Template)
+	require.NotEmpty(t, p.System, "complete chat prompt must have a system prompt")
+	require.Contains(t, strings.ToLower(p.System), "continue",
+		"complete system prompt must instruct the model to continue")
+	require.Contains(t, strings.ToLower(p.System), "no explanation",
+		"complete system prompt must forbid explanation/preamble")
+	require.Equal(t, "The quick brown", p.User)
+}
+
+func TestBuildCompleteGRMRNative(t *testing.T) {
+	// GRMR-native is correction-tuned, not completion-tuned. Completion is
+	// inherently a chat task, so we fall back to the chat_instruct template with
+	// the completeSystemPrompt — best-effort (model quality is what it is).
+	b := New("grmr_native")
+	p := b.BuildComplete("finish this")
+	require.Equal(t, correction.TemplateChatInstruct, p.Template,
+		"GRMR-native completion must use chat_instruct (best-effort fallback)")
+	require.NotEmpty(t, p.System, "complete fallback prompt must have a system prompt")
+	require.Equal(t, "finish this", p.User)
+}
+
 // Tone/style must be threaded into the prompt when set. Empty tone/style
 // must NOT add "tone:" / "style:" fragments to the prompt.
 func TestBuildRephraseToneStyle(t *testing.T) {

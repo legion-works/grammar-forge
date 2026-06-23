@@ -57,6 +57,13 @@ func (fakePB) BuildTone(_ ToneRequest) Prompt {
 	return Prompt{User: "", Template: TemplateGRMRNative}
 }
 
+// BuildComplete for fakePB: completion is inherently a chat task, so even on
+// the GRMR-native fake we emit a chat_instruct prompt (mirroring the real
+// Builder). Tests that care about the complete system prompt use pickyPB.
+func (fakePB) BuildComplete(text string) Prompt {
+	return Prompt{System: "continue", User: text, Template: TemplateChatInstruct}
+}
+
 type fakeStore struct {
 	lastEvent  Event
 	lastSignal Signal
@@ -353,6 +360,31 @@ func TestRephraseUsesOverrideAndReturnsAlternatives(t *testing.T) {
 	require.Len(t, out.Alternatives, 2) // 3 total - 1 primary
 }
 
+func TestServiceCompleteHappyPath(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, fakeLLM{out: " fox jumps over the lazy dog."}, st, "m", fastPolicy())
+	got, err := svc.Complete(context.Background(), "The quick brown")
+	require.NoError(t, err)
+	require.Equal(t, "fox jumps over the lazy dog.", got)
+	require.Equal(t, int64(0), st.count, "complete must NOT log to the store")
+}
+
+func TestServiceCompleteLLMError(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	_, err := svc.Complete(context.Background(), "x")
+	require.Error(t, err)
+	require.Equal(t, int64(0), st.count, "complete must NOT log on backend error")
+}
+
+func TestServiceCompleteNilLLM(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, nil, st, "m", fastPolicy())
+	_, err := svc.Complete(context.Background(), "x")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm")
+}
+
 // pickyPB is a chat-style PromptBuilder for the picky-mode tests. It differs
 // from fakePB in two ways:
 //   - Build returns a chat_instruct prompt (so the grammar path is reachable
@@ -400,6 +432,10 @@ func (pickyPB) BuildWithSpellingHints(req Request, hints []Suggestion) Prompt {
 // own tests; this stub just satisfies the interface.
 func (pickyPB) BuildTone(req ToneRequest) Prompt {
 	return Prompt{User: req.Text, System: "tone", Template: TemplateChatInstruct}
+}
+
+func (pickyPB) BuildComplete(text string) Prompt {
+	return Prompt{System: "continue", User: text, Template: TemplateChatInstruct}
 }
 
 // spikePB is a chat-style PromptBuilder for the GF_FAST_HINTS tests. It
@@ -450,6 +486,10 @@ func (p *spikePB) BuildWithSpellingHints(req Request, hints []Suggestion) Prompt
 // BuildTone for spikePB: chat-style, non-empty User. Mirrors pickyPB.
 func (p *spikePB) BuildTone(req ToneRequest) Prompt {
 	return Prompt{User: req.Text, System: "tone", Template: TemplateChatInstruct}
+}
+
+func (p *spikePB) BuildComplete(text string) Prompt {
+	return Prompt{System: "continue", User: text, Template: TemplateChatInstruct}
 }
 
 // scriptedLLM returns grammarOut on grammar-shaped calls (System contains

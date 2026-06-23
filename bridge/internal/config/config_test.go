@@ -331,6 +331,18 @@ func TestFastHintsDefaultsOffAndReadsEnv(t *testing.T) {
 		"GF_FAST_HINTS=false must explicitly disable, not fall through to the default")
 }
 
+func TestLoadCompleteConfig(t *testing.T) {
+	// defaults: off
+	c := Load(func(string) (string, bool) { return "", false })
+	require.False(t, c.CompleteEnabled, "GF_COMPLETE_ENABLED must default to false")
+
+	env := map[string]string{
+		"GF_COMPLETE_ENABLED": "true",
+	}
+	c2 := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	require.True(t, c2.CompleteEnabled)
+}
+
 func TestLoadToneConfig(t *testing.T) {
 	// defaults
 	c := Load(func(string) (string, bool) { return "", false })

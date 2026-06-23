@@ -451,6 +451,38 @@ function sseResponse(body: string): Response {
     })
 }
 
+describe('BridgeClient.complete', () => {
+    it('POSTs /complete and returns continuation on success', async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+            new Response(
+                JSON.stringify({ continuation: 'fox jumps over' }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+        )
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', true)
+        const res = await c.complete({ text: 'The quick brown', source: 'test' })
+        expect(res.continuation).toBe('fox jumps over')
+        expect(fetchMock).toHaveBeenCalledOnce()
+        const call = fetchMock.mock.calls[0]!
+        expect(String(call[0])).toBe('http://localhost:8000/complete')
+    })
+
+    it('rejects when bridge returns error status', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn<typeof fetch>().mockResolvedValue(new Response('boom', { status: 500 })),
+        )
+        const c = new BridgeClient('http://localhost:8000', true)
+        await expect(c.complete({ text: 'x', source: 'test' })).rejects.toThrow(/complete.*500/)
+    })
+
+    it('rejects when remote bridge not allowed', async () => {
+        const c = new BridgeClient('http://evil.com', false)
+        await expect(c.complete({ text: 'x', source: 'test' })).rejects.toThrow(/local/i)
+    })
+})
+
 describe('BridgeClient.correctStream', () => {
     it('delivers the fast frame then resolves with final', async () => {
         vi.stubGlobal(

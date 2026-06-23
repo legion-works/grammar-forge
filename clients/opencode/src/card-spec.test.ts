@@ -5,6 +5,7 @@ import {
     buildRephraseResultCardSpec,
     SPINNER_FRAMES,
     REPHRASE_ACCENT_HEX,
+    MAX_CONTENT_ROWS,
 } from "./card-spec";
 import { buildDetailsViewModel } from "./details-panel";
 import { CATEGORY_FG } from "./category-palette";
@@ -206,82 +207,83 @@ describe("buildRephraseLoadingCardSpec", () => {
 });
 
 describe("buildRephraseResultCardSpec", () => {
+    const stubW = (s: string) => s.length;
+
     const makeView = (original: string, rephrased: string) => ({
         kind: "rephrase-result" as const,
         original,
         rephrased,
+        alternatives: [] as string[],
+        altIndex: 0,
+        altTotal: 1,
+        scrollOffset: 0,
         displayStart: 0,
     });
 
     test("returns a spec with the rephrase accent border color", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
         expect(spec.borderColor).toBe(REPHRASE_ACCENT_HEX);
     });
 
-    test("has 4 rows: title, original, arrow+rephrased, hints", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        expect(spec.rows).toHaveLength(4);
+    test("has at least 4 rows: title, original lines, arrow+rephrased, hints", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
+        expect(spec.rows.length).toBeGreaterThanOrEqual(4);
     });
 
     test("title row: bold accent-colored '✎ Rephrase'", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
         const title = spec.rows[0]!.segments[0]!;
         expect(title.text).toBe("✎ Rephrase");
         expect(title.bold).toBe(true);
         expect(title.fg).toBe(REPHRASE_ACCENT_HEX);
     });
 
-    test("original row: contains the original text", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello world", "hi there"));
+    test("original lines: contain the original text (possibly wrapped)", () => {
+        const spec = buildRephraseResultCardSpec(makeView("hello world", "hi there"), stubW);
+        // Original text is in rows[1] (first original line)
         const origSeg = spec.rows[1]!.segments[0]!;
         expect(origSeg.text).toBe("hello world");
     });
 
     test("arrow+rephrased row: contains arrow and rephrased text", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        const row = spec.rows[2]!;
-        const texts = row.segments.map((s) => s.text);
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
+        // Find the arrow row (the one with dim colorKey and contains "→")
+        const arrowRow = spec.rows.find((r) =>
+            r.segments.some((s) => s.text.includes("→")),
+        );
+        expect(arrowRow).toBeDefined();
+        const texts = arrowRow!.segments.map((s) => s.text);
         expect(texts.join("")).toContain("→");
         expect(texts.join("")).toContain("hi there");
     });
 
     test("rephrased text segment has insert colorKey (green)", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        const row = spec.rows[2]!;
-        const replSeg = row.segments.find((s) => s.text === "hi there");
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
+        const allSegments = spec.rows.flatMap((r) => r.segments);
+        const replSeg = allSegments.find((s) => s.text === "hi there");
         expect(replSeg).toBeDefined();
         expect(replSeg!.colorKey).toBe("insert");
     });
 
     test("hints row: contains accept and reject hints", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        const hints = spec.rows[3]!.segments[0]!;
+        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
+        const hintsRow = spec.rows[spec.rows.length - 1]!;
+        const hints = hintsRow.segments[0]!;
         expect(hints.text).toContain("apply");
         expect(hints.text).toContain("reject");
         expect(hints.colorKey).toBe("dim");
     });
 
-    test("long original text is truncated with ellipsis", () => {
-        const longText = "a".repeat(60);
-        const spec = buildRephraseResultCardSpec(makeView(longText, "short"));
-        const origSeg = spec.rows[1]!.segments[0]!;
-        expect(origSeg.text.length).toBeLessThanOrEqual(41); // 40 chars + ellipsis
-        expect(origSeg.text.endsWith("…")).toBe(true);
-    });
-
-    test("long rephrased text is truncated with ellipsis", () => {
-        const longText = "b".repeat(60);
-        const spec = buildRephraseResultCardSpec(makeView("short", longText));
-        const row = spec.rows[2]!;
-        const replSeg = row.segments.find((s) => s.colorKey === "insert")!;
-        expect(replSeg.text.length).toBeLessThanOrEqual(41);
-        expect(replSeg.text.endsWith("…")).toBe(true);
-    });
-
-    test("short text is NOT truncated", () => {
-        const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"));
-        const origSeg = spec.rows[1]!.segments[0]!;
-        expect(origSeg.text).toBe("hello");
+    test("long text wraps, not truncated (no ellipsis)", () => {
+        const text = "In hindsight we should have merged the fix last week because the bug was already known and the patch was ready to ship";
+        const spec = buildRephraseResultCardSpec(makeView(text, text), stubW);
+        // No "…" truncation in any row
+        for (const row of spec.rows) {
+            for (const seg of row.segments) {
+                expect(seg.text).not.toContain("…");
+            }
+        }
+        expect(spec.contentRows).toBeGreaterThan(1);
     });
 
     test("REGRESSION GUARD: every segment.text is a non-empty string", () => {
@@ -291,7 +293,7 @@ describe("buildRephraseResultCardSpec", () => {
             makeView("x", "y"),
         ];
         for (const view of cases) {
-            const spec = buildRephraseResultCardSpec(view);
+            const spec = buildRephraseResultCardSpec(view, stubW);
             for (const row of spec.rows) {
                 for (const seg of row.segments) {
                     expect(typeof seg.text).toBe("string");
@@ -299,5 +301,54 @@ describe("buildRephraseResultCardSpec", () => {
                 }
             }
         }
+    });
+
+    test("overflow WINDOWING: >MAX_CONTENT_ROWS text → capped visible rows + '↓ more' affordance", () => {
+        // Create text that produces many wrapped lines (>8 = MAX_CONTENT_ROWS).
+        // Use distinct numbered lines so we can verify scrolling changes the visible content.
+        const longText = Array.from({ length: 12 }, (_, i) => `Line ${i + 1}: ${"x".repeat(30)}`).join("\n");
+        const view = makeView(longText, "short");
+
+        // At scrollOffset=0, contentRows should be capped at MAX_CONTENT_ROWS (8).
+        const spec0 = buildRephraseResultCardSpec({ ...view, scrollOffset: 0 }, stubW);
+        expect(spec0.contentRows).toBeLessThanOrEqual(MAX_CONTENT_ROWS);
+        expect(spec0.contentRows).toBe(8);
+
+        // The hints row should show PgUp/PgDn when there IS overflow.
+        const hintsRow0 = spec0.rows[spec0.rows.length - 1]!;
+        const hints0 = hintsRow0.segments[0]!;
+        expect(hints0.text).toContain("PgUp/PgDn");
+
+        // The last visible content row should have " ↓ more" appended.
+        // Content rows start at index 1 (title is index 0).
+        const lastContentRow0 = spec0.rows[spec0.rows.length - 2]!; // before hints
+        const lastSeg0 = lastContentRow0.segments[lastContentRow0.segments.length - 1]!;
+        expect(lastSeg0.text).toContain("↓ more");
+
+        // At scrollOffset=1, we should see different content.
+        const spec1 = buildRephraseResultCardSpec({ ...view, scrollOffset: 1 }, stubW);
+        expect(spec1.contentRows).toBe(8);
+
+        // The first content row at offset 0 should show "Line 1:"
+        const firstContentRow0 = spec0.rows[1]!;
+        expect(firstContentRow0.segments[0]!.text).toContain("Line 1:");
+
+        // The first content row at offset 1 should show "Line 2:" (scrolled past line 1)
+        const firstContentRow1 = spec1.rows[1]!;
+        expect(firstContentRow1.segments[0]!.text).toContain("Line 2:");
+
+        // Scroll fully to the end: should still have rows (the last page).
+        // At maxScroll, visibleContent = contentRows.slice(maxScroll, maxScroll+8),
+        // which may still be 8 rows if totalContent >= maxScroll+8.
+        const specEnd = buildRephraseResultCardSpec({ ...view, scrollOffset: 100 }, stubW);
+        // contentRows is at most MAX_CONTENT_ROWS and at least 1.
+        expect(specEnd.contentRows).toBeGreaterThan(0);
+        expect(specEnd.contentRows).toBeLessThanOrEqual(MAX_CONTENT_ROWS);
+
+        // Text with no overflow: <= MAX_CONTENT_ROWS content rows has no PgUp/PgDn hint.
+        const shortView = makeView("hello", "hi");
+        const specShort = buildRephraseResultCardSpec(shortView, stubW);
+        const hintsRowShort = specShort.rows[specShort.rows.length - 1]!;
+        expect(hintsRowShort.segments[0]!.text).not.toContain("PgUp/PgDn");
     });
 });

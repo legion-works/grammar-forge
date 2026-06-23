@@ -48,7 +48,9 @@ import {
     buildRephraseResultCardSpec,
 } from "./card-spec";
 import { clampAnchor } from "./overlay-anchor";
+import { initGhostSignal, pushGhostPayload, type GhostPayload } from "./ghost-overlay";
 import { logDebug } from "./debug";
+import { makeDisplayWidth, bunSegmentWidth } from "./display-width";
 
 const ID = "grammarforge";
 
@@ -62,7 +64,15 @@ const tui: TuiPlugin = async (api: TuiApi) => {
     logDebug("tui() entered", { id: ID });
     const controller: PanelController = createDetailsPanelController();
     const panelRenderer = (): PanelController => controller;
-    const stop = startOrchestrator(api, undefined, { panelRenderer });
+    const ghostRenderer = {
+        renderGhost: (text: string, atOffset: number) => {
+            pushGhostPayload({ text, atOffset });
+        },
+        clearGhost: () => {
+            pushGhostPayload(null);
+        },
+    };
+    const stop = startOrchestrator(api, undefined, { panelRenderer, ghostRenderer });
     api.lifecycle.onDispose(() => {
         logDebug("plugin teardown: orchestrator stop + controller dispose");
         stop();
@@ -73,11 +83,21 @@ const tui: TuiPlugin = async (api: TuiApi) => {
             slots: {
                 home_prompt_right: () => {
                     logDebug("slot fn home_prompt_right invoked");
-                    return <PanelComponent controller={controller} api={api} />;
+                    return (
+                        <>
+                            <PanelComponent controller={controller} api={api} />
+                            <GhostComponent api={api} />
+                        </>
+                    );
                 },
                 session_prompt_right: () => {
                     logDebug("slot fn session_prompt_right invoked");
-                    return <PanelComponent controller={controller} api={api} />;
+                    return (
+                        <>
+                            <PanelComponent controller={controller} api={api} />
+                            <GhostComponent api={api} />
+                        </>
+                    );
                 },
             },
         });
@@ -101,10 +121,15 @@ export default plugin;
 // setView fanout pushes the payload into localView via subscribe.
 function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
     const [localView, setLocalView] = createSignal<PanelView | null>(null);
+    const [statusText, setStatusText] = createSignal("");
     const unsubscribe = props.controller.subscribe((next) => {
         setLocalView(next);
     });
-    onCleanup(unsubscribe);
+    const unsubscribeStatus = props.controller.subscribeStatus(setStatusText);
+    onCleanup(() => {
+        unsubscribe();
+        unsubscribeStatus();
+    });
     // useTerminalDimensions() is a reactive accessor from @opentui/solid.
     // It returns { width, height } in terminal cells. Used for edge clamping.
     const dimensions = useTerminalDimensions();
@@ -116,6 +141,14 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                 non-null initial output or it prunes the entry and
                 the component is never mounted (gotcha 3). */}
             <box width={0} height={0} />
+            {/* Status-line (A6) — always-on dim row under the prompt. */}
+            <Show when={statusText()} keyed>
+                {(t) => (
+                    <box flexDirection="row">
+                        <text fg="#6b7280">{t}</text>
+                    </box>
+                )}
+            </Show>
             {/* Floating overlay: Portal renders at the render root,
                 escaping the slot's cropping layout. AbsoluteCard
                 uses position="absolute" + zIndex to float above
@@ -141,7 +174,7 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                         if (current.kind === "rephrase-loading") {
                             spec = buildRephraseLoadingCardSpec(current.frame);
                         } else if (current.kind === "rephrase-result") {
-                            spec = buildRephraseResultCardSpec(current);
+                            spec = buildRephraseResultCardSpec(current, makeDisplayWidth(bunSegmentWidth));
                         } else {
                             // kind === "suggestion"
                             const vm = buildDetailsViewModel(
@@ -163,8 +196,10 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                         const dims = dimensions();
                         const screenW = dims.width;
                         const screenH = dims.height;
-                        // Card height varies by kind: loading=3 rows+border, result=6 rows+border.
-                        const cardH = current.kind === "rephrase-result" ? 6 : CARD_H;
+                        // Card height varies by kind.
+                        const cardH = current.kind === "rephrase-result"
+                            ? (spec as unknown as { contentRows: number }).contentRows + 4
+                            : CARD_H;
                         const clamped = anchor
                             ? clampAnchor(anchor, CARD_W, cardH, screenW, screenH)
                             : null;
@@ -208,6 +243,15 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                 paddingTop={0}
                                 paddingBottom={0}
                                 flexDirection="column"
+                                onMouseDown={() => {
+                                    // A7: Click on the card → apply the pinned suggestion.
+                                    // Degrades gracefully when terminal doesn't report mouse.
+                                    if (current.kind === "suggestion") {
+                                        props.controller.onApply?.();
+                                    } else if (current.kind === "rephrase-result") {
+                                        props.controller.onRephraseAccept?.();
+                                    }
+                                }}
                             >
                                 {spec.rows.map((row) => (
                                     <box flexDirection="row">
@@ -224,5 +268,85 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                 </Show>
             </Portal>
         </>
+    );
+}
+
+// ── Ghost completion overlay (Path A self-render) ──────────────────────
+// TODO(Path B): swap this entire component for promptRef.ghostText.
+//   When the native @opentui/core primitive is available, replace the
+//   <Portal> + <box> below with a one-liner:
+//     api.prompt?.ref()?.ghostText?.set(text, { atOffset })
+//   The orchestrator's trigger/accept/cancel logic stays unchanged.
+
+const GHOST_Z_INDEX = 3500; // below the suggestion card (4000)
+
+function GhostComponent(props: { api: TuiApi }) {
+    const [ghost, setGhost] = createSignal<GhostPayload | null>(null);
+    const dimensions = useTerminalDimensions();
+
+    // Wire the solid signal into the ghost-overlay module so the
+    // orchestrator's imperative renderGhost/clearGhost calls push here.
+    // Idempotent — second slot mount is a no-op (only one slot active
+    // at a time, but both home_prompt_right and session_prompt_right
+    // call this).
+    initGhostSignal(
+        () => ghost(),
+        (v) => setGhost(() => v),
+    );
+
+    // SolidJS: the component body runs ONCE. A signal read here (ghost())
+    // is NOT reactive — it would return null at mount and never re-render.
+    // Use <Show when={ghost()} keyed> to create a reactive scope that
+    // re-executes when the signal changes. Same pattern as PanelComponent's
+    // <Show when={localView()} keyed> at L170.
+    return (
+        <Show when={ghost()} keyed>
+            {(current) => {
+                const anchor = props.api.prompt?.ref()?.offsetToScreen?.(current.atOffset) ?? null;
+                const dims = dimensions();
+                const screenW = dims.width;
+                const screenH = dims.height;
+                const ghostW = Math.min(80, Math.max(10, screenW - (anchor?.x ?? 0) - 1));
+                const clamped = anchor
+                    ? clampAnchor(anchor, ghostW, 1 /* single row */, screenW, screenH)
+                    : null;
+                if (!clamped) return null;
+
+                logDebug("ghost overlay rendered", {
+                    text: current.text.substring(0, 30),
+                    atOffset: current.atOffset,
+                    clampedLeft: clamped.left,
+                    clampedTop: clamped.top,
+                });
+
+                return (
+                    <Portal
+                        ref={(container: {}) => {
+                            const c = container as {
+                                position: string;
+                                left: number;
+                                top: number;
+                                zIndex: number;
+                            };
+                            c.position = "absolute";
+                            c.left = 0;
+                            c.top = 0;
+                            c.zIndex = GHOST_Z_INDEX;
+                        }}
+                    >
+                        <box
+                            position="absolute"
+                            zIndex={GHOST_Z_INDEX}
+                            left={clamped.left}
+                            top={clamped.top}
+                            width={ghostW}
+                            height={1}
+                        >
+                            <text fg="#6b7280">{current.text}</text>
+                        </box>
+                    </Portal>
+                );
+            }}
+        </Show>
     );
 }
