@@ -48,6 +48,8 @@ const DEFAULT_APPLY_ALL_HOTKEY = "ctrl+.";
 const DEFAULT_CYCLE_NEXT_HOTKEY = "ctrl+n";
 const DEFAULT_CYCLE_PREV_HOTKEY = "ctrl+p";
 const DEFAULT_REPHRASE_HOTKEY = "ctrl+/";
+const DEFAULT_COMPLETION_ENABLED = false;
+const DEFAULT_COMPLETION_DEBOUNCE_MS = 600;
 const DEFAULT_NEXT_ISSUE_HOTKEY = "ctrl+g";
 const DEFAULT_PREV_ISSUE_HOTKEY = "ctrl+shift+g";
 
@@ -61,6 +63,12 @@ export interface GrammarForgeSettings {
     nextIssueHotkey: string;
     prevIssueHotkey: string;
     allowRemoteBridge: boolean;
+    /** Enable Copilot-style inline ghost-text completion. Default false
+     *  (opt-in — the bridge /complete endpoint is also default-off). */
+    completionEnabled: boolean;
+    /** Debounce delay in ms before a completion request fires on pause.
+     *  Separate from realtimeDelayMs (the grammar re-check debounce). */
+    completionDebounceMs: number;
 }
 
 export function resolveSettings(
@@ -90,6 +98,14 @@ export function resolveSettings(
         typeof raw.prevIssueHotkey === "string" ? raw.prevIssueHotkey.trim().toLowerCase() : "";
     const prevIssueHotkey =
         prevIssueHotkeyRaw === "" ? DEFAULT_PREV_ISSUE_HOTKEY : prevIssueHotkeyRaw;
+    const completionEnabled =
+        typeof raw.completionEnabled === "boolean" ? raw.completionEnabled : DEFAULT_COMPLETION_ENABLED;
+    const completionDebounceMsRaw =
+        typeof raw.completionDebounceMs === "number" ? raw.completionDebounceMs : NaN;
+    const completionDebounceMs =
+        Number.isFinite(completionDebounceMsRaw) && completionDebounceMsRaw > 0
+            ? completionDebounceMsRaw
+            : DEFAULT_COMPLETION_DEBOUNCE_MS;
     return {
         bridgeUrl: common.bridgeUrl,
         realtimeDelayMs: common.realtimeDelayMs,
@@ -100,6 +116,8 @@ export function resolveSettings(
         nextIssueHotkey,
         prevIssueHotkey,
         allowRemoteBridge: common.allowRemoteBridge,
+        completionEnabled,
+        completionDebounceMs,
     };
 }
 

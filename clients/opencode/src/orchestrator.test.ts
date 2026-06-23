@@ -68,6 +68,27 @@ describe("resolveSettings", () => {
         expect(s.cyclePrevHotkey).toBe("ctrl+p");
         expect(s.allowRemoteBridge).toBe(false);
     });
+
+    test("completionEnabled defaults to false (opt-in)", () => {
+        const s = resolveSettings({});
+        expect(s.completionEnabled).toBe(false);
+    });
+    test("completionEnabled is rebindable", () => {
+        const s = resolveSettings({ completionEnabled: true });
+        expect(s.completionEnabled).toBe(true);
+    });
+    test("completionDebounceMs defaults to 600", () => {
+        const s = resolveSettings({});
+        expect(s.completionDebounceMs).toBe(600);
+    });
+    test("completionDebounceMs is rebindable", () => {
+        const s = resolveSettings({ completionDebounceMs: 300 });
+        expect(s.completionDebounceMs).toBe(300);
+    });
+    test("completionDebounceMs coerces non-number to default", () => {
+        const s = resolveSettings({ completionDebounceMs: "fast" });
+        expect(s.completionDebounceMs).toBe(600);
+    });
 });
 
 describe("suggestionsToDecorations", () => {
