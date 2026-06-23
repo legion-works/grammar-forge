@@ -90,8 +90,6 @@ export interface PanelController {
     onCyclePrev?: () => void;
     onRephraseAccept?: () => void;
     onRephraseReject?: () => void;
-    onScrollUp?: () => void;
-    onScrollDown?: () => void;
 }
 
 export function createDetailsPanelController(): PanelController {

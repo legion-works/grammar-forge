@@ -5,6 +5,7 @@ import {
     buildRephraseResultCardSpec,
     SPINNER_FRAMES,
     REPHRASE_ACCENT_HEX,
+    MAX_CONTENT_ROWS,
 } from "./card-spec";
 import { buildDetailsViewModel } from "./details-panel";
 import { CATEGORY_FG } from "./category-palette";
@@ -300,5 +301,54 @@ describe("buildRephraseResultCardSpec", () => {
                 }
             }
         }
+    });
+
+    test("overflow WINDOWING: >MAX_CONTENT_ROWS text → capped visible rows + '↓ more' affordance", () => {
+        // Create text that produces many wrapped lines (>8 = MAX_CONTENT_ROWS).
+        // Use distinct numbered lines so we can verify scrolling changes the visible content.
+        const longText = Array.from({ length: 12 }, (_, i) => `Line ${i + 1}: ${"x".repeat(30)}`).join("\n");
+        const view = makeView(longText, "short");
+
+        // At scrollOffset=0, contentRows should be capped at MAX_CONTENT_ROWS (8).
+        const spec0 = buildRephraseResultCardSpec({ ...view, scrollOffset: 0 }, stubW);
+        expect(spec0.contentRows).toBeLessThanOrEqual(MAX_CONTENT_ROWS);
+        expect(spec0.contentRows).toBe(8);
+
+        // The hints row should show PgUp/PgDn when there IS overflow.
+        const hintsRow0 = spec0.rows[spec0.rows.length - 1]!;
+        const hints0 = hintsRow0.segments[0]!;
+        expect(hints0.text).toContain("PgUp/PgDn");
+
+        // The last visible content row should have " ↓ more" appended.
+        // Content rows start at index 1 (title is index 0).
+        const lastContentRow0 = spec0.rows[spec0.rows.length - 2]!; // before hints
+        const lastSeg0 = lastContentRow0.segments[lastContentRow0.segments.length - 1]!;
+        expect(lastSeg0.text).toContain("↓ more");
+
+        // At scrollOffset=1, we should see different content.
+        const spec1 = buildRephraseResultCardSpec({ ...view, scrollOffset: 1 }, stubW);
+        expect(spec1.contentRows).toBe(8);
+
+        // The first content row at offset 0 should show "Line 1:"
+        const firstContentRow0 = spec0.rows[1]!;
+        expect(firstContentRow0.segments[0]!.text).toContain("Line 1:");
+
+        // The first content row at offset 1 should show "Line 2:" (scrolled past line 1)
+        const firstContentRow1 = spec1.rows[1]!;
+        expect(firstContentRow1.segments[0]!.text).toContain("Line 2:");
+
+        // Scroll fully to the end: should still have rows (the last page).
+        // At maxScroll, visibleContent = contentRows.slice(maxScroll, maxScroll+8),
+        // which may still be 8 rows if totalContent >= maxScroll+8.
+        const specEnd = buildRephraseResultCardSpec({ ...view, scrollOffset: 100 }, stubW);
+        // contentRows is at most MAX_CONTENT_ROWS and at least 1.
+        expect(specEnd.contentRows).toBeGreaterThan(0);
+        expect(specEnd.contentRows).toBeLessThanOrEqual(MAX_CONTENT_ROWS);
+
+        // Text with no overflow: <= MAX_CONTENT_ROWS content rows has no PgUp/PgDn hint.
+        const shortView = makeView("hello", "hi");
+        const specShort = buildRephraseResultCardSpec(shortView, stubW);
+        const hintsRowShort = specShort.rows[specShort.rows.length - 1]!;
+        expect(hintsRowShort.segments[0]!.text).not.toContain("PgUp/PgDn");
     });
 });
