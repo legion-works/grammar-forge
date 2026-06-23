@@ -212,6 +212,10 @@ describe("buildRephraseResultCardSpec", () => {
         kind: "rephrase-result" as const,
         original,
         rephrased,
+        alternatives: [] as string[],
+        altIndex: 0,
+        altTotal: 1,
+        scrollOffset: 0,
         displayStart: 0,
     });
 

@@ -58,6 +58,10 @@ export interface RephraseResultView {
     kind: "rephrase-result";
     original: string;
     rephrased: string;
+    alternatives: string[];   // NEW: all variants
+    altIndex: number;         // NEW: which alternative is shown
+    altTotal: number;         // NEW: total variants (1 + alternatives.length)
+    scrollOffset: number;     // NEW: line scroll (A4)
     displayStart: number;
 }
 

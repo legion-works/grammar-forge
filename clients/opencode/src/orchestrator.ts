@@ -139,6 +139,9 @@ interface RephraseState {
     mode: "loading" | "result";
     original: string;
     rephrased?: string;
+    alternatives: string[];   // NEW: all variants (primary index 0 = rephrased)
+    altIndex: number;         // NEW: which alternative is currently shown (0 = primary)
+    scrollOffset: number;     // NEW: line scroll offset for tall rephrase cards (A4)
     /** Monotonic sequence number — incremented on each new rephrase
      *  invocation and on reject/cancel. In-flight async callbacks
      *  compare against this to detect stale results. */
@@ -623,7 +626,7 @@ export function startOrchestrator(
         detailsState.unpin();
         clearActiveExtmarks();
         const seq = ++rephraseSeq;
-        state.rephrase = { mode: "loading", original: text, seq, ref };
+        state.rephrase = { mode: "loading", original: text, alternatives: [], altIndex: 0, scrollOffset: 0, seq, ref };
         let frame = 0;
         const ctrl = rephraseController;
         if (ctrl) {
@@ -638,7 +641,7 @@ export function startOrchestrator(
         }, 100);
         void (async () => {
             try {
-                const res = await rephraseFn({ text, source: SIGNAL_SOURCE });
+                const res = await rephraseFn({ text, source: SIGNAL_SOURCE, alternatives: 3 });
                 // Belt-and-suspenders: drop if seq stale OR the live ref no longer
                 // matches the captured ref (onChange ref-swap normally already cleared
                 // state.rephrase, but this guard handles any ordering where onChange
@@ -670,12 +673,28 @@ export function startOrchestrator(
                     return;
                 }
                 logDebug("rephrase result", { origLen: text.length, newLen: rephrased.length });
-                state.rephrase = { mode: "result", original: text, rephrased, seq, ref };
+                const alternatives = (res.alternatives ?? []).filter(
+                    (a) => a && a !== rephrased,
+                );
+                state.rephrase = {
+                    mode: "result",
+                    original: text,
+                    rephrased,
+                    alternatives,
+                    altIndex: 0,
+                    scrollOffset: 0,
+                    seq,
+                    ref,
+                };
                 if (ctrl) {
                     ctrl.setView({
                         kind: "rephrase-result",
                         original: text,
                         rephrased,
+                        alternatives,
+                        altIndex: 0,
+                        altTotal: 1 + alternatives.length,
+                        scrollOffset: 0,
                         displayStart: 0,
                     });
                 }
@@ -818,10 +837,71 @@ export function startOrchestrator(
                 title: "GrammarForge: reject rephrase",
                 run: rephraseReject,
             },
+            {
+                name: "grammarforge.rephrase.regenerate",
+                title: "GrammarForge: regenerate rephrase",
+                run: rephrase,
+            },
+            {
+                name: "grammarforge.rephrase.cycleAltNext",
+                title: "GrammarForge: next alternative",
+                run: () => {
+                    if (state.rephrase?.mode !== "result") return;
+                    const total = 1 + state.rephrase.alternatives.length;
+                    if (total <= 1) return;
+                    const nextIdx = ((state.rephrase.altIndex + 1) % total + total) % total;
+                    state.rephrase.altIndex = nextIdx;
+                    const ctrl = rephraseController;
+                    if (!ctrl) return;
+                    const currentText = nextIdx === 0
+                        ? state.rephrase.rephrased!
+                        : state.rephrase.alternatives[nextIdx - 1]!;
+                    ctrl.setView({
+                        kind: "rephrase-result",
+                        original: state.rephrase.original,
+                        rephrased: currentText,
+                        alternatives: state.rephrase.alternatives,
+                        altIndex: nextIdx,
+                        altTotal: total,
+                        scrollOffset: state.rephrase.scrollOffset,
+                        displayStart: 0,
+                    });
+                },
+            },
+            {
+                name: "grammarforge.rephrase.cycleAltPrev",
+                title: "GrammarForge: previous alternative",
+                run: () => {
+                    if (state.rephrase?.mode !== "result") return;
+                    const total = 1 + state.rephrase.alternatives.length;
+                    if (total <= 1) return;
+                    const prevIdx = ((state.rephrase.altIndex - 1) % total + total) % total;
+                    state.rephrase.altIndex = prevIdx;
+                    const ctrl = rephraseController;
+                    if (!ctrl) return;
+                    const currentText = prevIdx === 0
+                        ? state.rephrase.rephrased!
+                        : state.rephrase.alternatives[prevIdx - 1]!;
+                    ctrl.setView({
+                        kind: "rephrase-result",
+                        original: state.rephrase.original,
+                        rephrased: currentText,
+                        alternatives: state.rephrase.alternatives,
+                        altIndex: prevIdx,
+                        altTotal: total,
+                        scrollOffset: state.rephrase.scrollOffset,
+                        displayStart: 0,
+                    });
+                },
+            },
         ],
         bindings: [
             { key: "return", cmd: "grammarforge.rephrase.accept" },
             { key: "escape", cmd: "grammarforge.rephrase.reject" },
+            { key: "ctrl+/", cmd: "grammarforge.rephrase.regenerate" },
+            { key: "down", cmd: "grammarforge.rephrase.cycleAltNext" },
+            { key: "up", cmd: "grammarforge.rephrase.cycleAltPrev" },
+            { key: "tab", cmd: "grammarforge.rephrase.cycleAltNext" },
         ],
     });
 

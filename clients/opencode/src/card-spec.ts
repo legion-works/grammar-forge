@@ -169,7 +169,7 @@ export function buildRephraseResultCardSpec(
     const rows: CardRow[] = [
         {
             segments: [{
-                text: "✎ Rephrase",
+                text: `✎ Rephrase${view.altTotal > 1 ? ` ‹ ${view.altIndex + 1}/${view.altTotal} ›` : ""}`,
                 colorKey: "category",
                 fg: REPHRASE_ACCENT_HEX,
                 bold: true,
