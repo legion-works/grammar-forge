@@ -39,6 +39,11 @@ type CorrectionService interface {
 	// clients opt in via GF_TONE_ENABLED.
 	AnalyzeTone(ctx context.Context, req correction.ToneRequest) (correction.ToneResult, error)
 	ToneEnabled() bool
+	// Complete is the generative-continuation entry point. CompleteEnabled
+	// gates the /complete route (404 when off) so the endpoint is off the
+	// wire until clients opt in via GF_COMPLETE_ENABLED.
+	Complete(ctx context.Context, text string) (string, error)
+	CompleteEnabled() bool
 	// Synonyms is the offline thesaurus lookup backing GET /synonyms. The
 	// endpoint stays on the wire regardless of SynonymsEnabled — the flag
 	// only controls whether a non-empty result is possible. Unknown words
@@ -88,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /correct/stream", s.handleCorrectStream)
 	mux.HandleFunc("POST /rephrase", s.handleRephrase)
 	mux.HandleFunc("POST /tone", s.handleTone)
+	mux.HandleFunc("POST /complete", s.handleComplete)
 	mux.HandleFunc("POST /signal", s.handleSignal)
 	mux.HandleFunc("GET /stats", s.handleStats)
 	mux.HandleFunc("GET /synonyms", s.handleSynonyms)

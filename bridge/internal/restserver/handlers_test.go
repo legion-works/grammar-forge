@@ -43,6 +43,9 @@ type fakeService struct {
 	synonymsOut     []string
 	synonymsErr     error
 	lastSynWord     string
+	completeEnabled bool
+	completeOut     string
+	completeErr     error
 }
 
 func (f *fakeService) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
@@ -93,6 +96,11 @@ func (f *fakeService) Synonyms(_ context.Context, word string) ([]string, error)
 	return f.synonymsOut, f.synonymsErr
 }
 func (f *fakeService) SynonymsEnabled() bool { return f.synonymsEnabled }
+
+func (f *fakeService) Complete(_ context.Context, text string) (string, error) {
+	return f.completeOut, f.completeErr
+}
+func (f *fakeService) CompleteEnabled() bool { return f.completeEnabled }
 
 func serve(svc CorrectionService) http.Handler { return New(Config{}, svc).Handler() }
 
@@ -810,6 +818,65 @@ func TestToneEmptyText(t *testing.T) {
 	svc := &fakeService{toneEnabled: true}
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/tone", strings.NewReader(`{"text":""}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// --- /complete handler tests ---
+
+func TestCompleteOK(t *testing.T) {
+	svc := &fakeService{
+		completeEnabled: true,
+		completeOut:     "fox jumps over the lazy dog.",
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/complete", strings.NewReader(`{"text":"The quick brown"}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got completeResult
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, "fox jumps over the lazy dog.", got.Continuation)
+}
+
+// 404 when the feature is disabled — keeps the route off the wire for
+// clients that haven't opted in.
+func TestCompleteDisabled(t *testing.T) {
+	svc := &fakeService{completeEnabled: false}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/complete", strings.NewReader(`{"text":"hi"}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestCompleteBadJSON(t *testing.T) {
+	svc := &fakeService{completeEnabled: true}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/complete", strings.NewReader(`{`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// Empty text is a 400 (no model call). max_tokens/temperature remain optional.
+func TestCompleteEmptyText(t *testing.T) {
+	svc := &fakeService{completeEnabled: true}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/complete", strings.NewReader(`{"text":""}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestCompleteLLMError(t *testing.T) {
+	svc := &fakeService{completeEnabled: true, completeErr: context.DeadlineExceeded}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/complete", strings.NewReader(`{"text":"x"}`))
+	serve(svc).ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadGateway, rr.Code)
+}
+
+func TestCompleteRejectsTrailingGarbage(t *testing.T) {
+	svc := &fakeService{completeEnabled: true}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/complete", strings.NewReader(`{"text":"hello"} trailing`))
 	serve(svc).ServeHTTP(rr, req)
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 }

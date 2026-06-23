@@ -24,6 +24,21 @@ type signalRequest struct {
 	Signal string `json:"signal"`
 }
 
+// completeRequest is the JSON shape of POST /complete. MaxTokens and
+// Temperature are optional (accepted for forward-compatibility; the v1
+// LLM client uses its own defaults — completionBudget for max_tokens, 0
+// for temperature). Text is required.
+type completeRequest struct {
+	Text        string  `json:"text"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+}
+
+// completeResult is the JSON shape of the /complete response.
+type completeResult struct {
+	Continuation string `json:"continuation"`
+}
+
 // rephraseRequest is the JSON shape of POST /rephrase. Tone/Style/Source are
 // optional; only Text is required. Alternatives is the requested variant
 // count (0 = service default). Override, when present, routes the call to a
@@ -369,6 +384,34 @@ func (s *Server) handleRephrase(w http.ResponseWriter, r *http.Request) {
 		Rephrased:    result.Rephrased,
 		Alternatives: alts,
 	})
+}
+
+// handleComplete decodes a completion request, delegates to the service, and
+// translates errors to HTTP status. The handler does no business logic —
+// the service is the source of truth for the LLM call and the response
+// shape. Status codes: 200 success, 400 bad JSON or empty text, 404 disabled,
+// 502 LLM backend error.
+func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request) {
+	if !s.svc.CompleteEnabled() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "complete disabled"})
+		return
+	}
+	var req completeRequest
+	if err := decodeStrict(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if req.Text == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text is required"})
+		return
+	}
+	result, err := s.svc.Complete(r.Context(), req.Text)
+	if err != nil {
+		s.log.Error("complete failed", "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "complete backend unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, completeResult{Continuation: result})
 }
 
 // handleTone decodes a tone request and delegates to the service. 404 when the
