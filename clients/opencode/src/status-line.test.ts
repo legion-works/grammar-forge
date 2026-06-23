@@ -60,6 +60,14 @@ describe("buildStatusLine", () => {
         expect(result).toContain("reject");
     });
 
+    test("COMPLETION: shows ghost hint", () => {
+        const input: StatusLineInput = { state: "completion" };
+        const result = buildStatusLine(input);
+        expect(result).toContain("completion ready");
+        expect(result).toContain("⇧Tab accept");
+        expect(result).toContain("esc dismiss");
+    });
+
     test("clear: shows no issues", () => {
         const input: StatusLineInput = { state: "clear" };
         const result = buildStatusLine(input);

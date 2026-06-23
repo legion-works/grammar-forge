@@ -1500,7 +1500,9 @@ export function startOrchestrator(
             const rephrase = state.rephrase;
             const pinnedIdx = detailsState.pinnedIndex();
 
-            if (rephrase?.mode === "loading") {
+            if (state.completion !== null) {
+                controller.setStatusText(buildStatusLine({ state: "completion" }));
+            } else if (rephrase?.mode === "loading") {
                 controller.setStatusText(buildStatusLine({ state: "rephrase-loading" }));
             } else if (rephrase?.mode === "result") {
                 controller.setStatusText(buildStatusLine({ state: "rephrase-result" }));

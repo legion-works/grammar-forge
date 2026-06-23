@@ -1,5 +1,5 @@
 export interface StatusLineInput {
-    state: "flagged" | "pinned" | "rephrase-loading" | "rephrase-result" | "clear";
+    state: "flagged" | "pinned" | "rephrase-loading" | "rephrase-result" | "completion" | "clear";
     issueCount?: number;
     categories?: string[];
     pinnedIndex?: number;
@@ -45,6 +45,9 @@ export function buildStatusLine(input: StatusLineInput): string {
         }
         case "rephrase-result": {
             return "⏎ apply · esc reject · ctrl+/ regenerate · ↑↓ cycle";
+        }
+        case "completion": {
+            return "✎ completion ready · ⇧Tab accept · esc dismiss";
         }
         case "clear": {
             return "✓ no issues";
