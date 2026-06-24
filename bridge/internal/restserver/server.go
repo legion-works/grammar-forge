@@ -42,7 +42,7 @@ type CorrectionService interface {
 	// Complete is the generative-continuation entry point. CompleteEnabled
 	// gates the /complete route (404 when off) so the endpoint is off the
 	// wire until clients opt in via GF_COMPLETE_ENABLED.
-	Complete(ctx context.Context, text string) (string, error)
+	Complete(ctx context.Context, text string, source correction.Source) (string, error)
 	CompleteEnabled() bool
 	// Synonyms is the offline thesaurus lookup backing GET /synonyms. The
 	// endpoint stays on the wire regardless of SynonymsEnabled — the flag

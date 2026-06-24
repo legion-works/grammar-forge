@@ -65,8 +65,10 @@ type PromptBuilder interface {
 	// BuildComplete renders a generative-continuation prompt. Completion is
 	// inherently a chat task; even GRMR-native backends receive a chat_instruct
 	// prompt as a best-effort fallback (the model is correction-tuned, not
-	// completion-tuned, so quality is on the operator).
-	BuildComplete(text string) Prompt
+	// completion-tuned, so quality is on the operator). The source scopes the
+	// completion style — OpenCode gets a coding-agent-instruction prompt; every
+	// other client gets standard prose continuation.
+	BuildComplete(text string, source Source) Prompt
 }
 
 // Prompt is a backend-agnostic prompt; the LLMClient renders it to the wire.

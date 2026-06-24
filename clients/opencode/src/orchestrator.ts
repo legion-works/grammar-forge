@@ -40,7 +40,7 @@ import { createDetailsState, type DetailsState } from "./details-state";
 import { detectPromptPinSupport } from "./feature-detect";
 import { logDebug } from "./debug";
 import { buildStatusLine } from "./status-line";
-import { lineLooksUnfinished, type GhostRenderer } from "./ghost-overlay";
+import { joinContinuation, lineLooksUnfinished, type GhostRenderer } from "./ghost-overlay";
 import { CATEGORY_FG } from "./category-palette";
 import type { PromptRef, TuiApi } from "./opencode-types";
 import type { PanelController, PanelView } from "./details-panel-view";
@@ -468,6 +468,17 @@ export function startOrchestrator(
             logDebug("check empty (empty buffer, no suggestions)", {});
             return;
         }
+        // Skip the bridge round-trip when the text is identical to what we last
+        // checked — items/displaySpans/decorations are already valid for it.
+        // This fires when an edit returns the buffer to a previously-checked
+        // value (e.g. type a char then backspace it), which would otherwise
+        // re-hit /correct redundantly. Safe because EVERY path that clears the
+        // decorations also resets checkedText to "" (ref-swap, empty buffer,
+        // apply), so a non-empty checkedText === text guarantees live state.
+        if (text === state.checkedText) {
+            logDebug("check skipped (text unchanged since last check)", {});
+            return;
+        }
         // Mask paste placeholders so the bridge sees neutral whitespace instead
         // of placeholder tokens like "[Pasted ~5 lines]". Equal-length replacement
         // preserves all downstream offsets — no remapping needed. ONLY bridgeText
@@ -565,6 +576,13 @@ export function startOrchestrator(
     const onChange = (): void => {
         const ref = api.prompt?.ref();
         if (!ref) return;
+        // DIAG (gated): every onChange entry. A flood here = the host is
+        // re-firing onChange in a loop (e.g. an edit/decoration feedback).
+        logDebug("onChange entered", {
+            textLen: ref.text.length,
+            tracked: ref === trackedRef,
+            itemCount: state.items.length,
+        });
 
         // ── A8: Eager dismiss on edit ──────────────────────────────────
         // Clear the active suggestion surfaces IMMEDIATELY — before the
@@ -626,6 +644,22 @@ export function startOrchestrator(
             }
         }
         const text = ref.text;
+        if (text === "") {
+            // An empty buffer (cleared or submitted) must NEVER retain a
+            // completion ghost/status. The eager-dismiss block above only fires
+            // when textChanged, but on a FAST submit the ghost can be armed
+            // before the grammar check recorded checkedText (the two debounces
+            // are independent) — so checkedText is still "" → textChanged is
+            // false → the eager-clear is skipped and the ghost goes stale,
+            // surfacing as "completion ready" on an empty prompt. Clear it
+            // unconditionally here; the canonical item/extmark/status teardown
+            // still happens below (or in the debounced empty runCheck).
+            if (clearCompletionGhost()) {
+                // Refresh immediately so the stale "completion ready" status
+                // blanks now, not 500ms later when the debounced check fires.
+                pushStatusLine();
+            }
+        }
         if (text === "" && state.items.length > 0 && state.checkedText !== "") {
             for (const it of state.items) {
                 if (typeof it.id !== "number") continue;
@@ -638,6 +672,9 @@ export function startOrchestrator(
             state.checkedText = "";
             clearActiveExtmarks();
             detailsState.itemsChanged(0);
+            // Refresh the status line — checkedText is now "" so this blanks the
+            // stale "N issues" instead of leaving it on screen after the clear.
+            pushStatusLine();
             return;
         }
         scheduleCheck(ref);
@@ -727,6 +764,14 @@ export function startOrchestrator(
     let rephraseSeq = 0;
     let completionSeq = 0;
     let spinnerTimer: ReturnType<typeof setInterval> | null = null;
+    // 1-entry completion cache: the last (text → continuation) the bridge
+    // returned. Serves an identical re-request from cache instead of re-hitting
+    // /complete (the slow LLM endpoint) — fires e.g. when an edit returns the
+    // buffer to a previously-completed value (type a char then backspace), or
+    // when the user dismisses then the same line re-arms. Empty continuations
+    // are NOT cached (so a transient empty result can be retried).
+    let lastCompletionText: string | null = null;
+    let lastCompletionResult: string | null = null;
 
     // Helper: get the panel controller if available (injected via panelRenderer).
     // We need it for rephrase setView calls outside the detailsState subscription.
@@ -897,6 +942,20 @@ export function startOrchestrator(
     ): Promise<void> => {
         if (!settings.completionEnabled) return;
         const seq = ++completionSeq;
+        // Cache hit: identical text already completed — render from cache with
+        // no API call. Re-apply the live suppression guards (a pin/rephrase may
+        // have appeared since the cache was filled).
+        if (text === lastCompletionText && lastCompletionResult !== null) {
+            if (detailsState.pinnedIndex() !== null || state.rephrase !== null) {
+                logDebug("completion cache hit suppressed (pinned or rephrasing)", {});
+                return;
+            }
+            logDebug("completion cache hit (no API call)", { contLen: lastCompletionResult.length });
+            state.completion = { seq, continuation: lastCompletionResult, ref, atOffset };
+            pushStatusLine();
+            renderGhost(lastCompletionResult, atOffset);
+            return;
+        }
         logDebug("completion request", { textLen: text.length, atOffset, seq });
         try {
             const res = await completeFn({ text, source: SIGNAL_SOURCE });
@@ -916,11 +975,21 @@ export function startOrchestrator(
                 logDebug("completion suppressed (pinned or rephrasing)", {});
                 return;
             }
-            const continuation = res.continuation;
-            if (!continuation || continuation.length === 0) {
+            const rawContinuation = res.continuation;
+            if (!rawContinuation || rawContinuation.length === 0) {
                 logDebug("completion empty — no ghost", {});
                 return;
             }
+            // The bridge TrimSpaces the continuation, so "the" + "lazy dog."
+            // would render/insert as "thelazy dog.". joinContinuation re-inserts
+            // the joining space when both sides are word-ish (not for punctuation
+            // continuations). atOffset is the caret (end of text), so inserting
+            // the joined text there reads correctly.
+            const continuation = joinContinuation(text, rawContinuation);
+            // Cache the JOINED result so an identical re-request skips the API
+            // and renders/accepts identically.
+            lastCompletionText = text;
+            lastCompletionResult = continuation;
             logDebug("completion result", { contLen: continuation.length });
             state.completion = { seq, continuation, ref, atOffset };
             // Push to status-line.
@@ -956,16 +1025,25 @@ export function startOrchestrator(
         onChange();
     };
 
-    const dismissCompletion = (): void => {
-        if (!state.completion) return;
-        logDebug("completion dismissed", {});
+    // Clear any showing/in-flight completion ghost WITHOUT touching the status
+    // line (callers that already push status — e.g. the pin transition — avoid a
+    // double push). Returns true if a ghost was actually cleared.
+    const clearCompletionGhost = (): boolean => {
+        const had = state.completion !== null || state.completionTimer !== null;
         completionSeq++; // invalidate any in-flight request
         state.completion = null;
         if (state.completionTimer !== null) {
             clearTimeout(state.completionTimer);
             state.completionTimer = null;
         }
-        clearGhost();
+        if (had) clearGhost();
+        return had;
+    };
+
+    const dismissCompletion = (): void => {
+        if (!state.completion) return;
+        logDebug("completion dismissed", {});
+        clearCompletionGhost();
         pushStatusLine();
     };
 
@@ -1500,6 +1578,9 @@ export function startOrchestrator(
             const categories = [...new Set(state.items.map((it) => it.category))];
             const rephrase = state.rephrase;
             const pinnedIdx = detailsState.pinnedIndex();
+            // DIAG (gated): every status push. A flood here with no user
+            // input = a status/view fanout feedback loop.
+            logDebug("pushStatusLine", { itemCount, pinnedIdx, hasRephrase: rephrase !== null });
 
             if (state.completion !== null) {
                 controller.setStatusText(buildStatusLine({ state: "completion" }));
@@ -1528,8 +1609,13 @@ export function startOrchestrator(
                         rephraseKey: settings.rephraseHotkey,
                     }),
                 );
-            } else {
+            } else if (state.checkedText !== "") {
+                // A non-empty buffer was checked and found clean → "✓ no issues".
                 controller.setStatusText(buildStatusLine({ state: "clear" }));
+            } else {
+                // Empty buffer (or nothing checked yet) — show no status line at
+                // all. "✓ no issues" on an empty prompt is misleading noise.
+                controller.setStatusText("");
             }
         };
 
@@ -1546,6 +1632,11 @@ export function startOrchestrator(
                 return;
             }
             const item = state.items[index]!;
+            // A suggestion card and a completion ghost must never show at once
+            // (both bind esc, and they'd overlap). Pinning ALWAYS wins — clear
+            // any ghost here, the single chokepoint for every pin path (auto-pin
+            // on cursor-rest, ctrl+g/ctrl+shift+g review-jump, ctrl+n/ctrl+p cycle).
+            clearCompletionGhost();
             // Compute the display-start offset for the overlay anchor.
             // We need the live ref text to convert code-unit span to
             // display-width offset. If the ref is gone, fall back to 0

@@ -92,6 +92,9 @@ type Service struct {
 	// completeEnabled gates the /complete endpoint (default false). Mirrors
 	// toneEnabled: off until the operator enables it in the deploy compose.
 	completeEnabled bool
+	// completeCache memoizes continuations per source+text (no fast path on
+	// the completion endpoint, so the cache is the only LLM-call elision).
+	completeCache *completeCache
 	// Synonyms (Moby Thesaurus II, public domain). The thesaurus is loaded
 	// once at startup into a frozen lookup map; nil = uninitialised, and
 	// the lookup short-circuits to nil without panicking. synonymsEnabled
@@ -242,6 +245,10 @@ func (s *Service) ToneEnabled() bool { return s.toneEnabled }
 
 // SetCompleteEnabled sets the /complete endpoint gate.
 func (s *Service) SetCompleteEnabled(enabled bool) { s.completeEnabled = enabled }
+
+// SetCompleteCache enables the per-source+text completion cache with the given
+// capacity (0 disables). Mirrors the tone cache wiring.
+func (s *Service) SetCompleteCache(size int) { s.completeCache = newCompleteCache(size) }
 
 // CompleteEnabled reports whether the /complete endpoint is enabled.
 func (s *Service) CompleteEnabled() bool { return s.completeEnabled }

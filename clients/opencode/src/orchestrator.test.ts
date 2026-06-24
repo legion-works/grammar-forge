@@ -422,9 +422,11 @@ describe("startOrchestrator", () => {
             panelRenderer: () => ({
                 setView: () => undefined,
                 subscribe: () => () => undefined,
+                currentView: () => null,
                 dispose: () => undefined,
                 setStatusText: () => undefined,
                 subscribeStatus: () => () => undefined,
+                currentStatus: () => "",
             }),
         });
         expect(commandHandlers.has("grammarforge.applyAll")).toBe(true);
@@ -491,9 +493,11 @@ describe("startOrchestrator", () => {
             panelRenderer: () => ({
                 setView: () => undefined,
                 subscribe: () => () => undefined,
+                currentView: () => null,
                 dispose: () => undefined,
                 setStatusText: () => undefined,
                 subscribeStatus: () => () => undefined,
+                currentStatus: () => "",
             }),
         });
         // The orchestrator does NOT register slots — the single
@@ -2956,7 +2960,8 @@ describe("startOrchestrator", () => {
             // Allow async requestCompletion to resolve.
             await vi.advanceTimersByTimeAsync(0);
             expect(ghostCalls).toHaveLength(1);
-            expect(ghostCalls[0]!.text).toBe("fox jumps");
+            // joinContinuation adds the join space (text ends in a word char).
+            expect(ghostCalls[0]!.text).toBe(" fox jumps");
             expect(ghostCalls[0]!.atOffset).toBe(15);
             vi.useRealTimers();
         });
@@ -3136,7 +3141,7 @@ describe("startOrchestrator", () => {
             await vi.advanceTimersByTimeAsync(150);
             await vi.advanceTimersByTimeAsync(0);
             expect(ghostCalls).toHaveLength(1); // triggers: caret at end
-            expect(ghostCalls[0]!.text).toBe("fox jumps");
+            expect(ghostCalls[0]!.text).toBe(" fox jumps"); // join space added
             vi.useRealTimers();
         });
 
@@ -3176,7 +3181,7 @@ describe("startOrchestrator", () => {
             await vi.advanceTimersByTimeAsync(650);
             await vi.advanceTimersByTimeAsync(0);
             expect(ghostCalls).toHaveLength(1);
-            expect(ghostCalls[0]!.text).toBe("fox");
+            expect(ghostCalls[0]!.text).toBe(" fox"); // join space added ("abcd" + "fox")
             vi.useRealTimers();
         });
 
@@ -3242,7 +3247,7 @@ describe("startOrchestrator", () => {
             pending[1]!({ continuation: "fox jumps" });
             await vi.advanceTimersByTimeAsync(0);
             expect(ghostCalls).toHaveLength(1);
-            expect(ghostCalls[0]!.text).toBe("fox jumps");
+            expect(ghostCalls[0]!.text).toBe(" fox jumps"); // join space added
             stop();
             vi.useRealTimers();
         });
@@ -3353,9 +3358,11 @@ describe("startOrchestrator", () => {
                 panelRenderer: () => ({
                     setView: () => {},
                     subscribe: () => () => undefined,
+                    currentView: () => null,
                     dispose: () => undefined,
                     setStatusText: () => {},
                     subscribeStatus: () => () => undefined,
+                    currentStatus: () => "",
                 }),
             });
 
@@ -3550,11 +3557,13 @@ describe("startOrchestrator", () => {
             expect(acceptFn).toBeDefined();
             acceptFn!();
 
-            // Assert replaceRange was called with correct args.
+            // Assert replaceRange was called with correct args. The inserted
+            // text carries the join space ("The quick brown" + "fox jumps over"
+            // → " fox jumps over") so accept inserts readable text, not glued.
             expect(replaceCalls).toHaveLength(1);
             expect(replaceCalls[0]!.start).toBe(15);
             expect(replaceCalls[0]!.end).toBe(15);
-            expect(replaceCalls[0]!.text).toBe("fox jumps over");
+            expect(replaceCalls[0]!.text).toBe(" fox jumps over");
 
             vi.useRealTimers();
         });
@@ -3743,6 +3752,83 @@ describe("startOrchestrator", () => {
             vi.useRealTimers();
         });
 
+        test("onChange: empty buffer clears a stale ghost even when checkedText is still empty (fast submit)", async () => {
+            // Repro: the ghost arms before the grammar check records checkedText
+            // (independent debounces), so checkedText is still "". On submit the
+            // buffer empties; textChanged ("" !== "") is FALSE, so the eager
+            // block is skipped — the empty-text guard must still clear the ghost
+            // and blank the status (else "completion ready" shows on an empty
+            // prompt).
+            vi.useFakeTimers();
+            const clearCalls: unknown[] = [];
+            const statusCalls: string[] = [];
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                text: "continue",
+                current: { input: "continue", parts: [] },
+                cursorOffset: 8,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                    onCursorChange: () => () => undefined,
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(
+                api,
+                { completionEnabled: true, completionDebounceMs: 100, realtimeDelayMs: 5000 },
+                {
+                    // Grammar check never resolves → checkedText stays "".
+                    correct: () => new Promise<never>(() => {}),
+                    complete: async () => ({ continuation: "the program" }),
+                    ghostRenderer: {
+                        renderGhost: () => {},
+                        clearGhost: () => clearCalls.push(undefined),
+                    },
+                    panelRenderer: () => ({
+                        setView: () => undefined,
+                        subscribe: () => () => undefined,
+                        currentView: () => null,
+                        dispose: () => undefined,
+                        setStatusText: (t: string) => statusCalls.push(t),
+                        subscribeStatus: () => () => undefined,
+                        currentStatus: () => "",
+                    }),
+                },
+            );
+
+            // Arm the completion ghost (checkedText still "" — grammar pending).
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            expect(statusCalls.at(-1)).toContain("completion"); // ghost showing
+
+            // Submit: buffer empties. textChanged is "" !== "" → false.
+            ref.text = "";
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(0);
+
+            // Ghost cleared AND status blanked despite the false textChanged.
+            expect(clearCalls.length).toBeGreaterThanOrEqual(1);
+            expect(statusCalls.at(-1)).toBe("");
+            vi.useRealTimers();
+        });
+
         test("onChange: clears completion ghost on ref-swap", async () => {
             vi.useFakeTimers();
             const ghostCalls: Array<{ text: string }> = [];
@@ -3811,6 +3897,80 @@ describe("startOrchestrator", () => {
 
             // Ghost should be cleared on ref-swap.
             expect(clearCalls).toHaveLength(1);
+            vi.useRealTimers();
+        });
+    });
+
+    // ── Status line: empty buffer shows NO status (not "✓ no issues") ──────
+    describe("status line empty-buffer behavior", () => {
+        test("empty buffer → blank status; clean non-empty → 'no issues'; cleared → blank", async () => {
+            vi.useFakeTimers();
+            const statusCalls: string[] = [];
+            let text = "";
+            let onChangeCb: () => void = () => undefined;
+            const ref = {
+                get text() {
+                    return text;
+                },
+                current: { input: "", parts: [] },
+                cursorOffset: 0,
+                offsetToScreen: () => ({ x: 0, y: 0 }),
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                    onCursorChange: () => () => undefined,
+                },
+                keymap: { registerLayer: () => () => undefined },
+                ui: { toast: () => undefined },
+                theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+                lifecycle: { onDispose: () => () => undefined },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { realtimeDelayMs: 10 }, {
+                correct: (req: { text: string }) =>
+                    Promise.resolve({ original: req.text, score: 100, suggestions: [] }),
+                panelRenderer: () => ({
+                    setView: () => undefined,
+                    subscribe: () => () => undefined,
+                    currentView: () => null,
+                    dispose: () => undefined,
+                    setStatusText: (t: string) => statusCalls.push(t),
+                    subscribeStatus: () => () => undefined,
+                    currentStatus: () => "",
+                }),
+            } as unknown as OrchestratorDeps);
+
+            // Initial check fires on the empty buffer → status must be blank "".
+            await vi.advanceTimersByTimeAsync(20);
+            expect(statusCalls.at(-1)).toBe("");
+
+            // Type a clean sentence → check finds 0 issues → "✓ no issues".
+            text = "This is fine.";
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(20);
+            expect(statusCalls.at(-1)).toContain("no issues");
+
+            // Clear back to empty → status must blank again (not stale "no issues").
+            text = "";
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(20);
+            expect(statusCalls.at(-1)).toBe("");
+
             vi.useRealTimers();
         });
     });

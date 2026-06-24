@@ -181,6 +181,7 @@ func main() {
 	svc.SetToneCache(cfg.ToneCacheSize)
 	svc.SetToneConfig(cfg.ToneEnabled, cfg.ToneMinChars)
 	svc.SetCompleteEnabled(cfg.CompleteEnabled)
+	svc.SetCompleteCache(cfg.CompleteCacheSize)
 	if cfg.ToneProvider != "" {
 		svc.SetToneDefaultBackend(&correction.RephraseBackend{
 			Provider: cfg.ToneProvider,

@@ -47,8 +47,13 @@ import {
     buildRephraseLoadingCardSpec,
     buildRephraseResultCardSpec,
 } from "./card-spec";
-import { clampAnchor } from "./overlay-anchor";
-import { initGhostSignal, pushGhostPayload, type GhostPayload } from "./ghost-overlay";
+import { clampAnchor, ghostAnchor } from "./overlay-anchor";
+import {
+    currentGhostPayload,
+    pushGhostPayload,
+    subscribeGhost,
+    type GhostPayload,
+} from "./ghost-overlay";
 import { logDebug } from "./debug";
 import { makeDisplayWidth, bunSegmentWidth } from "./display-width";
 
@@ -60,8 +65,8 @@ const ID = "grammarforge";
 const CARD_W = 44;
 const CARD_H = 5; // 3 content rows + top/bottom border
 
-const tui: TuiPlugin = async (api: TuiApi) => {
-    logDebug("tui() entered", { id: ID });
+const tui: TuiPlugin = async (api: TuiApi, options) => {
+    logDebug("tui() entered", { id: ID, hasOptions: options !== undefined });
     const controller: PanelController = createDetailsPanelController();
     const panelRenderer = (): PanelController => controller;
     const ghostRenderer = {
@@ -72,7 +77,15 @@ const tui: TuiPlugin = async (api: TuiApi) => {
             pushGhostPayload(null);
         },
     };
-    const stop = startOrchestrator(api, undefined, { panelRenderer, ghostRenderer });
+    // Pass the host-supplied plugin options through to the orchestrator —
+    // these carry the tui.json settings (completionEnabled, bridgeUrl,
+    // hotkeys, …). The host invokes the plugin as tui(api, options, meta);
+    // dropping `options` here (the prior `startOrchestrator(api, undefined, …)`)
+    // silently forced resolveSettings() to ALL defaults, so no tui.json
+    // setting ever reached the plugin. Tuple form in tui.json — e.g.
+    // ["file://…/clients/opencode", { "completionEnabled": true }] — is the
+    // supported mechanism (host config/plugin.ts passes plugin[1] as options).
+    const stop = startOrchestrator(api, options, { panelRenderer, ghostRenderer });
     api.lifecycle.onDispose(() => {
         logDebug("plugin teardown: orchestrator stop + controller dispose");
         stop();
@@ -120,8 +133,14 @@ export default plugin;
 // this function — it rides the host's scheduler. The controller's
 // setView fanout pushes the payload into localView via subscribe.
 function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
-    const [localView, setLocalView] = createSignal<PanelView | null>(null);
-    const [statusText, setStatusText] = createSignal("");
+    // Initialize from the controller's CURRENT values, not null/"". The host
+    // re-invokes the slot fn on prompt re-renders, re-mounting PanelComponent;
+    // a null default would blank the live card/status on the next keystroke.
+    // Reading currentView/currentStatus at mount restores the live state.
+    const [localView, setLocalView] = createSignal<PanelView | null>(
+        props.controller.currentView(),
+    );
+    const [statusText, setStatusText] = createSignal(props.controller.currentStatus());
     const unsubscribe = props.controller.subscribe((next) => {
         setLocalView(next);
     });
@@ -281,18 +300,18 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
 const GHOST_Z_INDEX = 3500; // below the suggestion card (4000)
 
 function GhostComponent(props: { api: TuiApi }) {
-    const [ghost, setGhost] = createSignal<GhostPayload | null>(null);
+    // Initialize from the current ghost payload, not null — the host re-invokes
+    // the slot fn on prompt re-renders, re-mounting this component; a null
+    // default would blank a live ghost. Same fix as PanelComponent.
+    const [ghost, setGhost] = createSignal<GhostPayload | null>(currentGhostPayload());
     const dimensions = useTerminalDimensions();
 
-    // Wire the solid signal into the ghost-overlay module so the
-    // orchestrator's imperative renderGhost/clearGhost calls push here.
-    // Idempotent — second slot mount is a no-op (only one slot active
-    // at a time, but both home_prompt_right and session_prompt_right
-    // call this).
-    initGhostSignal(
-        () => ghost(),
-        (v) => setGhost(() => v),
-    );
+    // Subscribe this instance's setter so the orchestrator's imperative
+    // renderGhost/clearGhost calls reach it. Unlike the old single-setter
+    // design, EVERY live GhostComponent is updated — a remount can't strand
+    // the orchestrator's push at a disposed signal. Cleaned up on unmount.
+    const unsubscribeGhost = subscribeGhost((v) => setGhost(() => v));
+    onCleanup(unsubscribeGhost);
 
     // SolidJS: the component body runs ONCE. A signal read here (ghost())
     // is NOT reactive — it would return null at mount and never re-render.
@@ -307,14 +326,19 @@ function GhostComponent(props: { api: TuiApi }) {
                 const screenW = dims.width;
                 const screenH = dims.height;
                 const ghostW = Math.min(80, Math.max(10, screenW - (anchor?.x ?? 0) - 1));
-                const clamped = anchor
-                    ? clampAnchor(anchor, ghostW, 1 /* single row */, screenW, screenH)
-                    : null;
+                // Inline ghost text uses ghostAnchor (NOT clampAnchor): it sits
+                // on the caret's EXACT row. clampAnchor is for the floating card
+                // and renders one row ABOVE the anchor (top = y - cardH), which
+                // put the ghost on the blank line above the prompt in session
+                // view (prompt pinned to the terminal bottom).
+                const clamped = anchor ? ghostAnchor(anchor, screenW, screenH) : null;
                 if (!clamped) return null;
 
                 logDebug("ghost overlay rendered", {
                     text: current.text.substring(0, 30),
                     atOffset: current.atOffset,
+                    anchorX: anchor?.x ?? null,
+                    anchorY: anchor?.y ?? null,
                     clampedLeft: clamped.left,
                     clampedTop: clamped.top,
                 });

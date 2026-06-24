@@ -100,6 +100,15 @@ const styleSystemPrompt = "You are a writing style assistant. Suggest STYLE and 
 const completeSystemPrompt = "Continue the following text naturally. " +
 	"Return ONLY the continuation, no explanation."
 
+// completeSystemPromptOpenCode scopes completion for the OpenCode TUI, whose
+// prompt is an INSTRUCTION to an AI coding agent (e.g. "Fix the failing test
+// in", "Refactor the auth handler to"), NOT prose. A generic "continue
+// naturally" prompt produces story-like text ("...the lazy dog.") which is
+// useless here; this asks the model to finish the developer's request.
+const completeSystemPromptOpenCode = "You are completing a developer's instruction to an AI coding assistant. " +
+	"Continue the instruction concisely and technically, as a software request. " +
+	"Return ONLY the continuation, no explanation."
+
 // toneSystemPrompt is the chat_instruct instruction for tone analysis. Keep the
 // tag list in sync with correction.ToneTags.
 const toneSystemPrompt = "You are a tone analysis assistant. Analyze the tone of the user's text. " +
@@ -517,9 +526,15 @@ func (b *Builder) BuildTone(req correction.ToneRequest) correction.Prompt {
 // fallback. The LLM client handles both templates, and the complete system
 // prompt has no model-family-specific format (unlike the GRMR native envelope
 // which is only valid for correction).
-func (b *Builder) BuildComplete(text string) correction.Prompt {
+func (b *Builder) BuildComplete(text string, source correction.Source) correction.Prompt {
+	// Scope the completion style by client: OpenCode prompts are coding-agent
+	// instructions; every other client (browser, vencord, …) is standard prose.
+	system := completeSystemPrompt
+	if source == correction.SourceOpenCode {
+		system = completeSystemPromptOpenCode
+	}
 	return correction.Prompt{
-		System:   completeSystemPrompt,
+		System:   system,
 		User:     text,
 		Template: correction.TemplateChatInstruct,
 	}

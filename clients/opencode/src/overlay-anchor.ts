@@ -50,3 +50,33 @@ export function clampAnchor(
 
     return { left, top };
 }
+
+/**
+ * Compute the position for INLINE ghost completion text.
+ *
+ * Unlike {@link clampAnchor} (built for the floating CARD, which prefers
+ * rendering ABOVE the anchor so the card body has room), inline ghost text is a
+ * visual continuation of the typed line — it MUST sit on the caret's EXACT row.
+ * Reusing clampAnchor put the ghost one row above the caret (`top = y - cardH`,
+ * cardH=1), which is glaringly visible when the prompt is pinned to the terminal
+ * bottom (session view): the continuation appeared on the blank line above the
+ * text, indented to the caret column.
+ *
+ * Rules:
+ *   - top = anchor.y EXACTLY (clamped to the screen), never flipped.
+ *   - left = anchor.x (the caret column), clamped so at least one column stays
+ *     on screen. The caller sizes the ghost box width to the remaining columns.
+ *
+ * @param anchor  Absolute screen position of the caret cell.
+ * @param screenW Terminal width in columns.
+ * @param screenH Terminal height in rows.
+ */
+export function ghostAnchor(
+    anchor: AnchorPoint,
+    screenW: number,
+    screenH: number,
+): ClampedPosition {
+    const left = Math.min(Math.max(0, anchor.x), Math.max(0, screenW - 1));
+    const top = Math.min(Math.max(0, anchor.y), Math.max(0, screenH - 1));
+    return { left, top };
+}

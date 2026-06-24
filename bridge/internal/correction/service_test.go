@@ -60,7 +60,7 @@ func (fakePB) BuildTone(_ ToneRequest) Prompt {
 // BuildComplete for fakePB: completion is inherently a chat task, so even on
 // the GRMR-native fake we emit a chat_instruct prompt (mirroring the real
 // Builder). Tests that care about the complete system prompt use pickyPB.
-func (fakePB) BuildComplete(text string) Prompt {
+func (fakePB) BuildComplete(text string, _ Source) Prompt {
 	return Prompt{System: "continue", User: text, Template: TemplateChatInstruct}
 }
 
@@ -363,16 +363,45 @@ func TestRephraseUsesOverrideAndReturnsAlternatives(t *testing.T) {
 func TestServiceCompleteHappyPath(t *testing.T) {
 	st := &fakeStore{}
 	svc := NewService(fakePB{}, nil, fakeLLM{out: " fox jumps over the lazy dog."}, st, "m", fastPolicy())
-	got, err := svc.Complete(context.Background(), "The quick brown")
+	got, err := svc.Complete(context.Background(), "The quick brown", SourceOpenCode)
 	require.NoError(t, err)
 	require.Equal(t, "fox jumps over the lazy dog.", got)
 	require.Equal(t, int64(0), st.count, "complete must NOT log to the store")
 }
 
+func TestServiceCompleteCacheElidesSecondLLMCall(t *testing.T) {
+	st := &fakeStore{}
+	var calls int
+	llm := llmFunc(func(_ context.Context, _ Prompt) (string, error) {
+		calls++
+		return " the auth module", nil
+	})
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	svc.SetCompleteCache(8)
+
+	// First call hits the LLM.
+	got1, err := svc.Complete(context.Background(), "Fix the failing test in", SourceOpenCode)
+	require.NoError(t, err)
+	require.Equal(t, "the auth module", got1)
+	require.Equal(t, 1, calls)
+
+	// Identical source+text → served from cache, NO second LLM call.
+	got2, err := svc.Complete(context.Background(), "Fix the failing test in", SourceOpenCode)
+	require.NoError(t, err)
+	require.Equal(t, "the auth module", got2)
+	require.Equal(t, 1, calls, "cache must elide the second LLM call")
+
+	// Different source for the same text → distinct key → fresh LLM call
+	// (completion is scoped by client, so the cache must not bleed).
+	_, err = svc.Complete(context.Background(), "Fix the failing test in", SourceBrowser)
+	require.NoError(t, err)
+	require.Equal(t, 2, calls, "different source must miss the cache")
+}
+
 func TestServiceCompleteLLMError(t *testing.T) {
 	st := &fakeStore{}
 	svc := NewService(fakePB{}, nil, fakeLLM{err: errAlways}, st, "m", fastPolicy())
-	_, err := svc.Complete(context.Background(), "x")
+	_, err := svc.Complete(context.Background(), "x", SourceOpenCode)
 	require.Error(t, err)
 	require.Equal(t, int64(0), st.count, "complete must NOT log on backend error")
 }
@@ -380,7 +409,7 @@ func TestServiceCompleteLLMError(t *testing.T) {
 func TestServiceCompleteNilLLM(t *testing.T) {
 	st := &fakeStore{}
 	svc := NewService(fakePB{}, nil, nil, st, "m", fastPolicy())
-	_, err := svc.Complete(context.Background(), "x")
+	_, err := svc.Complete(context.Background(), "x", SourceOpenCode)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "llm")
 }
@@ -434,7 +463,7 @@ func (pickyPB) BuildTone(req ToneRequest) Prompt {
 	return Prompt{User: req.Text, System: "tone", Template: TemplateChatInstruct}
 }
 
-func (pickyPB) BuildComplete(text string) Prompt {
+func (pickyPB) BuildComplete(text string, _ Source) Prompt {
 	return Prompt{System: "continue", User: text, Template: TemplateChatInstruct}
 }
 
@@ -488,7 +517,7 @@ func (p *spikePB) BuildTone(req ToneRequest) Prompt {
 	return Prompt{User: req.Text, System: "tone", Template: TemplateChatInstruct}
 }
 
-func (p *spikePB) BuildComplete(text string) Prompt {
+func (p *spikePB) BuildComplete(text string, _ Source) Prompt {
 	return Prompt{System: "continue", User: text, Template: TemplateChatInstruct}
 }
 

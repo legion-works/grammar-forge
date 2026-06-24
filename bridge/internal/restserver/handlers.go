@@ -30,6 +30,7 @@ type signalRequest struct {
 // for temperature). Text is required.
 type completeRequest struct {
 	Text        string  `json:"text"`
+	Source      string  `json:"source,omitempty"`
 	MaxTokens   int     `json:"max_tokens,omitempty"`
 	Temperature float64 `json:"temperature,omitempty"`
 }
@@ -405,7 +406,7 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text is required"})
 		return
 	}
-	result, err := s.svc.Complete(r.Context(), req.Text)
+	result, err := s.svc.Complete(r.Context(), req.Text, correction.Source(req.Source))
 	if err != nil {
 		s.log.Error("complete failed", "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "complete backend unavailable"})

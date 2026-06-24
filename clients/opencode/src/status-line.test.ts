@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { buildStatusLine, type StatusLineInput } from "./status-line";
 
 describe("buildStatusLine", () => {
-    test("FLAGGED: shows count + review/apply/rephrase keys + category ticks", () => {
+    test("FLAGGED: terse — count + apply-all key + ticks (full hints live on the card)", () => {
         const input: StatusLineInput = {
             state: "flagged",
             issueCount: 8,
@@ -13,12 +13,20 @@ describe("buildStatusLine", () => {
         };
         const result = buildStatusLine(input);
         expect(result).toContain("8 issues");
-        expect(result).toContain("ctrl+g review");
-        expect(result).toContain("ctrl+. apply all");
-        expect(result).toContain("ctrl+/ rephrase");
+        expect(result).toContain("ctrl+. fix all");
+        // Terse: the verbose review/rephrase hints are NOT in the footer status
+        // (they'd wrap and mangle the model line); they live on the card.
+        expect(result).not.toContain("review");
+        expect(result).not.toContain("rephrase");
     });
 
-    test("PINNED: shows index/total with bound cycle keys", () => {
+    test("FLAGGED: singular noun for a single issue", () => {
+        const result = buildStatusLine({ state: "flagged", issueCount: 1, applyAllKey: "ctrl+." });
+        expect(result).toContain("1 issue ");
+        expect(result).not.toContain("1 issues");
+    });
+
+    test("PINNED: terse — index/total + cycle keys (card shows apply/ignore/close)", () => {
         const input: StatusLineInput = {
             state: "pinned",
             issueCount: 8,
@@ -33,6 +41,9 @@ describe("buildStatusLine", () => {
         const result = buildStatusLine(input);
         expect(result).toContain("‹ 3/8 ›");
         expect(result).toContain("ctrl+n ctrl+p cycle");
+        // Terse: the apply/ignore/close hints are on the card, not the footer.
+        expect(result).not.toContain("return apply");
+        expect(result).not.toContain("esc close");
     });
 
     test("PINNED: uses non-default bound keys", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clampAnchor } from "./overlay-anchor";
+import { clampAnchor, ghostAnchor } from "./overlay-anchor";
 
 // Terminal: 80 cols × 24 rows. Card: 44 wide × 5 tall.
 const SCREEN_W = 80;
@@ -54,5 +54,37 @@ describe("clampAnchor", () => {
     it("narrow terminal: left clamped to 0 when screenW < cardW", () => {
         const pos = clampAnchor({ x: 10, y: 10 }, CARD_W, CARD_H, 20, SCREEN_H);
         expect(pos.left).toBe(0); // max(0, 20 - 44) = 0
+    });
+});
+
+describe("ghostAnchor", () => {
+    it("sits on the caret's EXACT row — never flips above (unlike clampAnchor)", () => {
+        // The bug: reusing clampAnchor put the ghost at y-1 (one row above the
+        // caret), glaring when the prompt is pinned to the terminal bottom.
+        const pos = ghostAnchor({ x: 18, y: 34 }, 120, 40);
+        expect(pos.top).toBe(34); // EXACT caret row, not 33
+        expect(pos.left).toBe(18); // EXACT caret column
+    });
+
+    it("prompt on the very bottom row stays on that row (no upward flip)", () => {
+        const pos = ghostAnchor({ x: 5, y: 39 }, 120, 40);
+        expect(pos.top).toBe(39);
+        expect(pos.left).toBe(5);
+    });
+
+    it("clamps top into the screen when anchor.y is out of range", () => {
+        const pos = ghostAnchor({ x: 5, y: 99 }, 120, 40);
+        expect(pos.top).toBe(39); // screenH - 1
+    });
+
+    it("clamps left so at least one column stays on screen", () => {
+        const pos = ghostAnchor({ x: 200, y: 10 }, 120, 40);
+        expect(pos.left).toBe(119); // screenW - 1
+    });
+
+    it("clamps negatives to 0", () => {
+        const pos = ghostAnchor({ x: -3, y: -2 }, 120, 40);
+        expect(pos.left).toBe(0);
+        expect(pos.top).toBe(0);
     });
 });

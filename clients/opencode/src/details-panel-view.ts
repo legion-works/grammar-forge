@@ -75,6 +75,19 @@ export interface PanelController {
      *  setView was called with (or null for unpin). Multiple
      *  subscribers are supported (e.g. for tests + the component). */
     subscribe: (cb: (next: PanelView | null) => void) => () => void;
+    /** The last value passed to setView (or null). A freshly-mounted
+     *  PanelComponent reads this to INITIALIZE its local signal, so a
+     *  slot re-invoke that re-mounts the component restores the current
+     *  card instead of resetting to null. The host re-invokes the slot
+     *  fn (re-mounting PanelComponent) on prompt re-renders, so without
+     *  this a pinned card vanishes on the next keystroke/status push.
+     *  (The redesign-era version accidentally survived this via a live
+     *  for…of fanout feeding the new subscriber mid-iteration; that
+     *  coupling is the same one that, once the per-keystroke status push
+     *  was added, became an unbounded slot-remount freeze. The snapshot
+     *  fix in setView/setStatusText broke the loop; this getter is the
+     *  explicit, bounded replacement for the lost replay.) */
+    currentView: () => PanelView | null;
     /** Tear down all subscribers. Called on plugin dispose. */
     dispose: () => void;
     // ── Status-line (A6) ─────────────────────────────────────────────
@@ -82,6 +95,8 @@ export interface PanelController {
     setStatusText: (text: string) => void;
     /** Subscribe to status-line text updates. */
     subscribeStatus: (cb: (text: string) => void) => () => void;
+    /** The last status text (or ""). Read at mount — see currentView. */
+    currentStatus: () => string;
     // ── Mouse callbacks (A7) — set by the orchestrator ────────────────
     onApply?: () => void;
     onIgnore?: () => void;
@@ -95,9 +110,22 @@ export interface PanelController {
 export function createDetailsPanelController(): PanelController {
     const subscribers = new Set<(next: PanelView | null) => void>();
     const statusSubscribers = new Set<(text: string) => void>();
+    // Current values — held so a freshly-mounted PanelComponent can
+    // INITIALIZE from them (the host re-invokes the slot fn on prompt
+    // re-renders, remounting PanelComponent with a null-default local
+    // signal; reading these on mount restores the live card/status).
+    let lastView: PanelView | null = null;
+    let lastStatus = "";
     return {
         setView(next) {
-            for (const cb of subscribers) {
+            lastView = next;
+            // Snapshot before fanout: a subscriber callback can synchronously
+            // re-invoke the host slot fn, which mounts a fresh PanelComponent
+            // that calls subscribe() — adding to this Set MID-ITERATION. A
+            // live `for…of` over a Set visits elements added during iteration,
+            // so without the snapshot a single setView can spin unbounded
+            // (slot-fn ↔ panel-remount storm → synchronous freeze).
+            for (const cb of [...subscribers]) {
                 cb(next);
             }
         },
@@ -107,12 +135,20 @@ export function createDetailsPanelController(): PanelController {
                 subscribers.delete(cb);
             };
         },
+        currentView: () => lastView,
         dispose() {
             subscribers.clear();
             statusSubscribers.clear();
+            lastView = null;
+            lastStatus = "";
         },
         setStatusText(text) {
-            for (const cb of statusSubscribers) {
+            lastStatus = text;
+            // Snapshot before fanout — see setView's note. The status path is
+            // where this actually bit: pushStatusLine → setStatusText fans out
+            // to a subscriber that re-mounts PanelComponent → subscribeStatus
+            // re-adds to this Set mid-iteration → unbounded slot re-render.
+            for (const cb of [...statusSubscribers]) {
                 cb(text);
             }
         },
@@ -122,5 +158,6 @@ export function createDetailsPanelController(): PanelController {
                 statusSubscribers.delete(cb);
             };
         },
+        currentStatus: () => lastStatus,
     };
 }

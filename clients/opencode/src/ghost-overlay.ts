@@ -28,6 +28,39 @@ export function lineLooksUnfinished(text: string): boolean {
     return !TERMINAL_PUNCTUATION.has(lastChar);
 }
 
+/**
+ * Join a continuation onto the existing prompt text with correct spacing.
+ *
+ * The bridge's /complete returns a bare continuation with NO leading space, so
+ * `"the"` + `"lazy dog."` would render/insert as `"thelazy dog."`. This inserts
+ * a single joining space ONLY when both sides are "word-ish" (the text ends in a
+ * non-space char AND the continuation starts with a non-space, non-punctuation
+ * char). It does NOT add a space when:
+ *   - the text already ends with whitespace (user typed a trailing space),
+ *   - the continuation already starts with whitespace,
+ *   - the continuation starts with punctuation (e.g. ".", ",", "'s", ")") that
+ *     should butt directly against the preceding word.
+ * Returns the continuation with the leading space prepended when needed, else
+ * the continuation unchanged. Pure — no I/O.
+ */
+const CONTINUATION_NO_SPACE_PREFIX = new Set([
+    ".", ",", "!", "?", ":", ";", ")", "]", "}", "'", "\u2019", "\"", "-", "\n",
+]);
+
+export function joinContinuation(text: string, continuation: string): string {
+    if (continuation.length === 0) return continuation;
+    if (text.length === 0) return continuation;
+    const lastChar = text[text.length - 1]!;
+    const firstChar = continuation[0]!;
+    // Text ends in whitespace, or continuation already leads with space → no join.
+    if (/\s/.test(lastChar)) return continuation;
+    if (/\s/.test(firstChar)) return continuation;
+    // Continuation starts with punctuation that hugs the previous word → no space.
+    if (CONTINUATION_NO_SPACE_PREFIX.has(firstChar)) return continuation;
+    // Both sides word-ish → insert one joining space.
+    return " " + continuation;
+}
+
 /** Shape the orchestrator receives to push ghost text into the render layer. */
 export interface GhostRenderer {
     renderGhost(text: string, atOffset: number): void;
@@ -39,31 +72,43 @@ export interface GhostPayload {
     atOffset: number;
 }
 
-// SolidJS signal holder — populated by tui-entry.tsx:GhostComponent.
-// The signal is the bridge between the orchestrator's imperative calls
-// and the JSX component's reactive render. Same pattern as PanelController.
-// Using `any` types to avoid importing solid-js in this pure-logic module;
-// the actual signal types are resolved in tui-entry.tsx.
-let ghostSignalGet: (() => GhostPayload | null) | null = null;
-let ghostSignalSet: ((v: GhostPayload | null) => void) | null = null;
+// Bridge between the orchestrator's imperative renderGhost/clearGhost calls
+// and the JSX GhostComponent's reactive render. Mirrors PanelController:
+//   - lastPayload is held so a freshly-mounted GhostComponent INITIALIZES
+//     from the current value (the host re-invokes the slot fn on prompt
+//     re-renders, remounting GhostComponent with a null-default signal).
+//   - a subscriber Set (not a single setter) so EVERY live GhostComponent
+//     instance receives updates. The prior single-setter + idempotent-guard
+//     design pinned the setter to the FIRST-mounted component; once the host
+//     remounted it, pushGhostPayload updated a disposed signal and the ghost
+//     never rendered (completion result arrived but no overlay painted).
+let lastPayload: GhostPayload | null = null;
+const ghostSubscribers = new Set<(v: GhostPayload | null) => void>();
 
-/**
- * Called at GhostComponent mount to wire the solid signal.
- * Idempotent — second mount is a no-op (only one slot active at a time,
- * but both home_prompt_right and session_prompt_right call this; the
- * first mount wins and the overwrite is harmless since only one slot is
- * ever mounted simultaneously).
- */
-export function initGhostSignal(
-    get: () => GhostPayload | null,
-    set: (v: GhostPayload | null) => void,
-): void {
-    if (ghostSignalGet) return; // already wired — idempotent guard
-    ghostSignalGet = get;
-    ghostSignalSet = set;
+/** The current ghost payload — read by a freshly-mounted GhostComponent to
+ *  initialize its local signal (so a slot re-invoke restores the live ghost). */
+export function currentGhostPayload(): GhostPayload | null {
+    return lastPayload;
 }
 
-/** Imperative push from the orchestrator — called by renderGhost. */
+/**
+ * Subscribe a GhostComponent's local signal setter. Returns an unsubscribe
+ * fn (call in onCleanup). Multiple live components are supported — each gets
+ * every update, so a remount can never strand the orchestrator's setter.
+ */
+export function subscribeGhost(set: (v: GhostPayload | null) => void): () => void {
+    ghostSubscribers.add(set);
+    return () => {
+        ghostSubscribers.delete(set);
+    };
+}
+
+/** Imperative push from the orchestrator — called by renderGhost/clearGhost. */
 export function pushGhostPayload(payload: GhostPayload | null): void {
-    ghostSignalSet?.(payload);
+    lastPayload = payload;
+    // Snapshot before fanout — a setter could synchronously trigger a remount
+    // that re-subscribes mid-iteration (see PanelController's setView note).
+    for (const set of [...ghostSubscribers]) {
+        set(payload);
+    }
 }

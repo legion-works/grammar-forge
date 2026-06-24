@@ -50,6 +50,11 @@ bridge/native/*.h
 bridge/native/harper-c/target/
 bridge/models/gector/*
 !bridge/models/gector/README.md
+# Any local model-rollback backups (e.g. gector.deberta-backup/ kept on disk as a
+# revert anchor after a model swap) — large weights, never commit (public repo).
+bridge/models/*-backup/
+bridge/models/*.backup/
+bridge/models/gector.deberta-backup/
 
 # --- Python (gector/, learning loop) ---
 __pycache__/

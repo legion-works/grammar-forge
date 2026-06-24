@@ -11,6 +11,12 @@
 // want the debug path to throw into a render fn).
 
 import { createFileBackend } from "@/lib/debug-backends";
+// node: builtins resolve in Bun regardless of --conditions (the host
+// launches with --conditions=browser, under which globalThis.require is
+// undefined → the default createFileBackend append silently no-ops and
+// NO debug output is ever written). Import appendFileSync statically and
+// inject it so GF_TUI_DEBUG actually produces a log under the host runtime.
+import { appendFileSync } from "node:fs";
 
 let enabled = false;
 let path = "/tmp/grammarforge-tui-debug.log";
@@ -30,7 +36,15 @@ try {
     enabled = false;
 }
 
-const backend = createFileBackend({ path, isEnabled: () => enabled });
+const backend = createFileBackend({
+    path,
+    isEnabled: () => enabled,
+    // Inject a working append — the default path uses globalThis.require,
+    // which is undefined under the host's --conditions=browser launch.
+    append: (p, line) => {
+        appendFileSync(p, line, "utf8");
+    },
+});
 
 export function logDebug(message: string, args?: unknown): void {
     if (!enabled) return;

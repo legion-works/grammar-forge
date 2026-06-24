@@ -41,6 +41,10 @@ type Config struct {
 	// CompleteEnabled gates the /complete endpoint (default false — no accidental
 	// paid calls until the clients ship; enable explicitly in the deploy compose).
 	CompleteEnabled bool
+	// CompleteCacheSize is the LRU capacity for the per-source+text completion
+	// cache (0 disables; default 512). Completion has no fast path, so the cache
+	// is the only way to elide repeated LLM calls for an identical prompt.
+	CompleteCacheSize int
 	// ToneMinChars: field-granularity tone requests below this many bytes return
 	// empty without calling the LLM (defense-in-depth; on-demand sentence
 	// requests are exempt). 0 = no floor.
@@ -263,14 +267,15 @@ func Load(getenv Getenv) Config {
 		RephraseModel:    get("GF_REPHRASE_MODEL", ""),
 		RephraseAPIKey:   get("GF_REPHRASE_API_KEY", ""),
 
-		ToneProvider:  get("GF_TONE_PROVIDER", ""),
-		ToneBaseURL:   get("GF_TONE_BASE_URL", ""),
-		ToneModel:     get("GF_TONE_MODEL", ""),
-		ToneAPIKey:    get("GF_TONE_API_KEY", ""),
-		ToneEnabled:   getBool("GF_TONE_ENABLED", false),
-		ToneMinChars:  getInt("GF_TONE_MIN_CHARS", 80),
-		CompleteEnabled: getBool("GF_COMPLETE_ENABLED", false),
-		ToneCacheSize: getInt("GF_TONE_CACHE_SIZE", 512),
+		ToneProvider:      get("GF_TONE_PROVIDER", ""),
+		ToneBaseURL:       get("GF_TONE_BASE_URL", ""),
+		ToneModel:         get("GF_TONE_MODEL", ""),
+		ToneAPIKey:        get("GF_TONE_API_KEY", ""),
+		ToneEnabled:       getBool("GF_TONE_ENABLED", false),
+		ToneMinChars:      getInt("GF_TONE_MIN_CHARS", 80),
+		CompleteEnabled:   getBool("GF_COMPLETE_ENABLED", false),
+		CompleteCacheSize: getInt("GF_COMPLETE_CACHE_SIZE", 512),
+		ToneCacheSize:     getInt("GF_TONE_CACHE_SIZE", 512),
 
 		GECToRModelDir:            get("GF_GECTOR_MODEL_DIR", "/models/gector"),
 		HarperEnabled:             getBool("GF_HARPER_ENABLED", true),

@@ -57,14 +57,32 @@ func TestBuildRephraseChat(t *testing.T) {
 
 func TestBuildCompleteChat(t *testing.T) {
 	b := New("chat_instruct")
-	p := b.BuildComplete("The quick brown")
+	// Non-OpenCode source → standard prose continuation prompt.
+	p := b.BuildComplete("The quick brown", correction.SourceBrowser)
 	require.Equal(t, correction.TemplateChatInstruct, p.Template)
 	require.NotEmpty(t, p.System, "complete chat prompt must have a system prompt")
 	require.Contains(t, strings.ToLower(p.System), "continue",
 		"complete system prompt must instruct the model to continue")
 	require.Contains(t, strings.ToLower(p.System), "no explanation",
 		"complete system prompt must forbid explanation/preamble")
+	require.NotContains(t, strings.ToLower(p.System), "coding",
+		"non-OpenCode completion must NOT use the coding-agent prompt")
 	require.Equal(t, "The quick brown", p.User)
+}
+
+func TestBuildCompleteOpenCodeScoped(t *testing.T) {
+	// OpenCode prompts are instructions to an AI coding agent — completion must
+	// be scoped to finish a software request, NOT generic prose.
+	b := New("chat_instruct")
+	p := b.BuildComplete("Fix the failing test in", correction.SourceOpenCode)
+	require.Equal(t, correction.TemplateChatInstruct, p.Template)
+	require.Contains(t, strings.ToLower(p.System), "coding",
+		"OpenCode completion prompt must scope to the coding-agent context")
+	require.Equal(t, "Fix the failing test in", p.User)
+	// Distinct from the generic prose prompt.
+	generic := b.BuildComplete("Fix the failing test in", correction.SourceBrowser)
+	require.NotEqual(t, generic.System, p.System,
+		"OpenCode completion prompt must differ from the standard prose prompt")
 }
 
 func TestBuildCompleteGRMRNative(t *testing.T) {
@@ -72,7 +90,7 @@ func TestBuildCompleteGRMRNative(t *testing.T) {
 	// inherently a chat task, so we fall back to the chat_instruct template with
 	// the completeSystemPrompt — best-effort (model quality is what it is).
 	b := New("grmr_native")
-	p := b.BuildComplete("finish this")
+	p := b.BuildComplete("finish this", correction.SourceVencord)
 	require.Equal(t, correction.TemplateChatInstruct, p.Template,
 		"GRMR-native completion must use chat_instruct (best-effort fallback)")
 	require.NotEmpty(t, p.System, "complete fallback prompt must have a system prompt")
