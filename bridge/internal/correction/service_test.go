@@ -363,10 +363,35 @@ func TestRephraseUsesOverrideAndReturnsAlternatives(t *testing.T) {
 func TestServiceCompleteHappyPath(t *testing.T) {
 	st := &fakeStore{}
 	svc := NewService(fakePB{}, nil, fakeLLM{out: " fox jumps over the lazy dog."}, st, "m", fastPolicy())
-	got, err := svc.Complete(context.Background(), "The quick brown", SourceOpenCode)
+	got, err := svc.Complete(context.Background(), "The quick brown", SourceOpenCode, 0)
 	require.NoError(t, err)
 	require.Equal(t, "fox jumps over the lazy dog.", got)
 	require.Equal(t, int64(0), st.count, "complete must NOT log to the store")
+}
+
+func TestServiceCompleteTemperature(t *testing.T) {
+	// Completion must apply a non-zero sampling temperature so continuations
+	// vary across inputs (correction/rephrase/tone stay greedy at 0). A positive
+	// per-request value overrides the service default; otherwise the default is
+	// used.
+	st := &fakeStore{}
+	var gotTemp float64
+	llm := llmFunc(func(_ context.Context, p Prompt) (string, error) {
+		gotTemp = p.Temperature
+		return "x", nil
+	})
+	svc := NewService(fakePB{}, nil, llm, st, "m", fastPolicy())
+	svc.SetCompleteTemperature(0.4)
+
+	// No per-request temperature → service default applies.
+	_, err := svc.Complete(context.Background(), "Refactor the", SourceOpenCode, 0)
+	require.NoError(t, err)
+	require.InDelta(t, 0.4, gotTemp, 1e-9, "completion must use the configured default temperature")
+
+	// Per-request temperature overrides the default.
+	_, err = svc.Complete(context.Background(), "Refactor that", SourceOpenCode, 0.9)
+	require.NoError(t, err)
+	require.InDelta(t, 0.9, gotTemp, 1e-9, "per-request temperature must override the default")
 }
 
 func TestServiceCompleteCacheElidesSecondLLMCall(t *testing.T) {
@@ -380,20 +405,20 @@ func TestServiceCompleteCacheElidesSecondLLMCall(t *testing.T) {
 	svc.SetCompleteCache(8)
 
 	// First call hits the LLM.
-	got1, err := svc.Complete(context.Background(), "Fix the failing test in", SourceOpenCode)
+	got1, err := svc.Complete(context.Background(), "Fix the failing test in", SourceOpenCode, 0)
 	require.NoError(t, err)
 	require.Equal(t, "the auth module", got1)
 	require.Equal(t, 1, calls)
 
 	// Identical source+text → served from cache, NO second LLM call.
-	got2, err := svc.Complete(context.Background(), "Fix the failing test in", SourceOpenCode)
+	got2, err := svc.Complete(context.Background(), "Fix the failing test in", SourceOpenCode, 0)
 	require.NoError(t, err)
 	require.Equal(t, "the auth module", got2)
 	require.Equal(t, 1, calls, "cache must elide the second LLM call")
 
 	// Different source for the same text → distinct key → fresh LLM call
 	// (completion is scoped by client, so the cache must not bleed).
-	_, err = svc.Complete(context.Background(), "Fix the failing test in", SourceBrowser)
+	_, err = svc.Complete(context.Background(), "Fix the failing test in", SourceBrowser, 0)
 	require.NoError(t, err)
 	require.Equal(t, 2, calls, "different source must miss the cache")
 }
@@ -401,7 +426,7 @@ func TestServiceCompleteCacheElidesSecondLLMCall(t *testing.T) {
 func TestServiceCompleteLLMError(t *testing.T) {
 	st := &fakeStore{}
 	svc := NewService(fakePB{}, nil, fakeLLM{err: errAlways}, st, "m", fastPolicy())
-	_, err := svc.Complete(context.Background(), "x", SourceOpenCode)
+	_, err := svc.Complete(context.Background(), "x", SourceOpenCode, 0)
 	require.Error(t, err)
 	require.Equal(t, int64(0), st.count, "complete must NOT log on backend error")
 }
@@ -409,7 +434,7 @@ func TestServiceCompleteLLMError(t *testing.T) {
 func TestServiceCompleteNilLLM(t *testing.T) {
 	st := &fakeStore{}
 	svc := NewService(fakePB{}, nil, nil, st, "m", fastPolicy())
-	_, err := svc.Complete(context.Background(), "x", SourceOpenCode)
+	_, err := svc.Complete(context.Background(), "x", SourceOpenCode, 0)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "llm")
 }

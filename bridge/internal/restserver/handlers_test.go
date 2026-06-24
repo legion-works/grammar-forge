@@ -97,7 +97,7 @@ func (f *fakeService) Synonyms(_ context.Context, word string) ([]string, error)
 }
 func (f *fakeService) SynonymsEnabled() bool { return f.synonymsEnabled }
 
-func (f *fakeService) Complete(_ context.Context, _ string, _ correction.Source) (string, error) {
+func (f *fakeService) Complete(_ context.Context, _ string, _ correction.Source, _ float64) (string, error) {
 	return f.completeOut, f.completeErr
 }
 func (f *fakeService) CompleteEnabled() bool { return f.completeEnabled }

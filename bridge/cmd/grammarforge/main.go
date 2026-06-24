@@ -89,6 +89,10 @@ func main() {
 	if dict != nil {
 		pb.SetVocabularySource(dict)
 	}
+	// Seed the configured English dialect into the LLM prompts so the slow path
+	// matches Harper's fast-path dialect (e.g. British keeps organise/colour).
+	// American (default) appends nothing — the golden-eval baseline is unchanged.
+	pb.SetDialect(cfg.HarperDialect)
 
 	svc := correction.NewService(
 		pb,
@@ -182,6 +186,7 @@ func main() {
 	svc.SetToneConfig(cfg.ToneEnabled, cfg.ToneMinChars)
 	svc.SetCompleteEnabled(cfg.CompleteEnabled)
 	svc.SetCompleteCache(cfg.CompleteCacheSize)
+	svc.SetCompleteTemperature(cfg.CompleteTemperature)
 	if cfg.ToneProvider != "" {
 		svc.SetToneDefaultBackend(&correction.RephraseBackend{
 			Provider: cfg.ToneProvider,

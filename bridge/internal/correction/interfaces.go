@@ -73,10 +73,16 @@ type PromptBuilder interface {
 
 // Prompt is a backend-agnostic prompt; the LLMClient renders it to the wire.
 type Prompt struct {
-	System   string // empty for GRMR-native
-	User     string
-	Stop     []string
-	Template PromptTemplate
+	System string // empty for GRMR-native
+	User   string
+	Stop   []string
+	// Temperature is the sampling temperature for this prompt. The zero value
+	// (0) means greedy/deterministic — every correction, rephrase, and tone
+	// prompt leaves it 0 so their wire payload stays byte-identical (golden-eval
+	// stable). Only completion sets a non-zero temperature, so its continuations
+	// vary across different inputs instead of collapsing to one canonical output.
+	Temperature float64
+	Template    PromptTemplate
 }
 
 // PromptTemplate selects the wire format the LLMClient must use.

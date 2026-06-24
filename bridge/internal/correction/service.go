@@ -95,6 +95,9 @@ type Service struct {
 	// completeCache memoizes continuations per source+text (no fast path on
 	// the completion endpoint, so the cache is the only LLM-call elision).
 	completeCache *completeCache
+	// completeTemperature is the default sampling temperature for completion
+	// (a per-request value overrides it). 0 keeps completion greedy.
+	completeTemperature float64
 	// Synonyms (Moby Thesaurus II, public domain). The thesaurus is loaded
 	// once at startup into a frozen lookup map; nil = uninitialised, and
 	// the lookup short-circuits to nil without panicking. synonymsEnabled
@@ -249,6 +252,9 @@ func (s *Service) SetCompleteEnabled(enabled bool) { s.completeEnabled = enabled
 // SetCompleteCache enables the per-source+text completion cache with the given
 // capacity (0 disables). Mirrors the tone cache wiring.
 func (s *Service) SetCompleteCache(size int) { s.completeCache = newCompleteCache(size) }
+
+// SetCompleteTemperature sets the default completion sampling temperature.
+func (s *Service) SetCompleteTemperature(t float64) { s.completeTemperature = t }
 
 // CompleteEnabled reports whether the /complete endpoint is enabled.
 func (s *Service) CompleteEnabled() bool { return s.completeEnabled }

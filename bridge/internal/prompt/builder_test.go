@@ -63,11 +63,39 @@ func TestBuildCompleteChat(t *testing.T) {
 	require.NotEmpty(t, p.System, "complete chat prompt must have a system prompt")
 	require.Contains(t, strings.ToLower(p.System), "continue",
 		"complete system prompt must instruct the model to continue")
-	require.Contains(t, strings.ToLower(p.System), "no explanation",
-		"complete system prompt must forbid explanation/preamble")
-	require.NotContains(t, strings.ToLower(p.System), "coding",
+	require.Contains(t, strings.ToLower(p.System), "only",
+		"complete system prompt must restrict output to ONLY the continuation")
+	require.Contains(t, strings.ToLower(p.System), "not capitalise",
+		"completion must not capitalise/start a new sentence mid-line")
+	require.NotContains(t, strings.ToLower(p.System), "developer",
 		"non-OpenCode completion must NOT use the coding-agent prompt")
+	// Dialect is OFF by default (American) → no British instruction.
+	require.NotContains(t, strings.ToLower(p.System), "british",
+		"default (American) completion must NOT add a British instruction")
 	require.Equal(t, "The quick brown", p.User)
+}
+
+func TestBuildCompleteDialectSeeded(t *testing.T) {
+	// SetDialect("british") seeds British spelling into the completion prompt;
+	// the American default leaves it out (golden-eval baseline byte-identical).
+	b := New("chat_instruct")
+	b.SetDialect("british")
+	p := b.BuildComplete("The quick brown", correction.SourceOpenCode)
+	require.Contains(t, strings.ToLower(p.System), "british",
+		"british dialect must seed a British-spelling instruction")
+
+	// And on the correction (Build) path — this is what stops /correct
+	// Americanising British spellings.
+	bc := b.Build(correction.Request{Text: "I will organise the colour palette."})
+	require.Contains(t, strings.ToLower(bc.System), "british",
+		"british dialect must seed the correction prompt too")
+
+	// American default adds nothing to the correction prompt (byte-identical
+	// to the golden-eval baseline).
+	american := New("chat_instruct")
+	ac := american.Build(correction.Request{Text: "I will organise the colour palette."})
+	require.NotContains(t, strings.ToLower(ac.System), "british")
+	require.NotContains(t, strings.ToLower(ac.System), "dialect")
 }
 
 func TestBuildCompleteOpenCodeScoped(t *testing.T) {
@@ -76,8 +104,8 @@ func TestBuildCompleteOpenCodeScoped(t *testing.T) {
 	b := New("chat_instruct")
 	p := b.BuildComplete("Fix the failing test in", correction.SourceOpenCode)
 	require.Equal(t, correction.TemplateChatInstruct, p.Template)
-	require.Contains(t, strings.ToLower(p.System), "coding",
-		"OpenCode completion prompt must scope to the coding-agent context")
+	require.Contains(t, strings.ToLower(p.System), "coding assistant",
+		"OpenCode completion prompt must scope to the coding-assistant context")
 	require.Equal(t, "Fix the failing test in", p.User)
 	// Distinct from the generic prose prompt.
 	generic := b.BuildComplete("Fix the failing test in", correction.SourceBrowser)

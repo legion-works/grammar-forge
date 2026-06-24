@@ -97,17 +97,28 @@ const styleSystemPrompt = "You are a writing style assistant. Suggest STYLE and 
 // continuation. It is DISTINCT from both systemPrompt (minimal-edit grammar)
 // and rephraseSystemPrompt (fluency rewrite): completion asks the model to
 // naturally extend the user's text, not to correct or restyle it.
-const completeSystemPrompt = "Continue the following text naturally. " +
-	"Return ONLY the continuation, no explanation."
+// completeSystemPrompt is the prose/standard-client (browser, vencord)
+// completion prompt. It must genuinely CONTINUE the user's partial text from
+// where it ends — not restate it, not start a fresh sentence — so the
+// continuation reads as one line with what they typed.
+const completeSystemPrompt = "You are an autocomplete. Continue the user's text from exactly where it ends, " +
+	"as a seamless continuation of the same sentence and thought. " +
+	"Return ONLY the text that follows — do not repeat any of their words, do not add quotes or explanation. " +
+	"Do NOT capitalise the first word or start a new sentence unless their text already ended one. " +
+	"Keep it to a short phrase or a single clause."
 
 // completeSystemPromptOpenCode scopes completion for the OpenCode TUI, whose
-// prompt is an INSTRUCTION to an AI coding agent (e.g. "Fix the failing test
-// in", "Refactor the auth handler to"), NOT prose. A generic "continue
-// naturally" prompt produces story-like text ("...the lazy dog.") which is
-// useless here; this asks the model to finish the developer's request.
-const completeSystemPromptOpenCode = "You are completing a developer's instruction to an AI coding assistant. " +
-	"Continue the instruction concisely and technically, as a software request. " +
-	"Return ONLY the continuation, no explanation."
+// prompt is a message to an AI coding assistant. It must still CONTINUE the
+// developer's actual partial text (an over-prescriptive "write a software
+// request" prompt made short/ambiguous input collapse to one canonical
+// capitalised instruction like "Implement unit tests for the UserService
+// class" regardless of what was typed). This keeps a technical register while
+// continuing what they actually wrote.
+const completeSystemPromptOpenCode = "You are an autocomplete for a developer typing a message to an AI coding assistant. " +
+	"Continue their message from exactly where it ends, in the same voice and a technical register. " +
+	"Return ONLY the text that follows — do not repeat any of their words, do not add quotes or explanation. " +
+	"Do NOT capitalise the first word or start a new sentence unless their text already ended one. " +
+	"Keep it to a short phrase or a single clause."
 
 // toneSystemPrompt is the chat_instruct instruction for tone analysis. Keep the
 // tag list in sync with correction.ToneTags.
@@ -118,11 +129,19 @@ const toneSystemPrompt = "You are a tone analysis assistant. Analyze the tone of
 	"frustrated, aggressive, anxious, sarcastic, passive-aggressive, optimistic, urgent, sincere. " +
 	`Return every tag that applies with its confidence; if none apply, return {"tags":[]}.`
 
-// Builder implements correction.PromptBuilder for one configured format.
+// Builder assembles model-family-specific prompts for each correction.Service
+// entry point (correct, rephrase, style, tone, complete). It implements
+// correction.PromptBuilder and branches on the configured LLM format.
 type Builder struct {
 	chat         bool // true => chat_instruct, false => grmr_native
 	personalizer Personalizer
 	vocabulary   VocabularySource
+	// dialect is the configured English dialect (GF_HARPER_DIALECT). It seeds a
+	// spelling instruction into the LLM prompts so the slow path honours the
+	// same dialect as Harper's fast path — e.g. british keeps "organise"/"colour"
+	// instead of Americanising them. The zero value / "american" adds NOTHING to
+	// any prompt, so the American golden-eval baseline stays byte-identical.
+	dialect string
 }
 
 // SetVocabularySource injects the user dictionary whose words the chat
@@ -130,6 +149,31 @@ type Builder struct {
 // keeps every prompt byte-identical. GRMR-native takes no system prompt, so
 // the source is a no-op on that path.
 func (b *Builder) SetVocabularySource(v VocabularySource) { b.vocabulary = v }
+
+// SetDialect sets the configured English dialect (GF_HARPER_DIALECT) that seeds
+// the spelling instruction into the LLM prompts. Empty or "american" leaves
+// every prompt byte-identical (golden-eval baseline unchanged).
+func (b *Builder) SetDialect(dialect string) { b.dialect = strings.ToLower(strings.TrimSpace(dialect)) }
+
+// dialectSpellingInstruction returns the spelling-dialect sentence to append to
+// an LLM system prompt, or "" for American (the default — no instruction keeps
+// the American golden-eval baseline byte-identical). Non-American dialects get
+// an explicit "use <dialect> English spelling" instruction so the slow path
+// matches Harper's configured dialect and stops Americanising e.g. British
+// spellings (organise, colour, behaviour).
+func (b *Builder) dialectSpellingInstruction() string {
+	switch b.dialect {
+	case "british":
+		return " Use British English spelling (e.g. organise, colour, behaviour); never convert the author's British spellings to American."
+	case "canadian":
+		return " Use Canadian English spelling; never convert the author's Canadian spellings to American."
+	case "australian":
+		return " Use Australian English spelling; never convert the author's Australian spellings to American."
+	default:
+		// american / empty / unknown: no instruction — byte-identical baseline.
+		return ""
+	}
+}
 
 // vocabularyBlock renders the protected-words sentence appended to the chat
 // system prompts, or "" when there is no vocabulary OR no dictionary word
@@ -338,7 +382,10 @@ func NewWithPersonalizer(format string, p Personalizer) *Builder {
 // system prompt so the LLM sees the few-shot examples.
 func (b *Builder) Build(req correction.Request) correction.Prompt {
 	if b.chat {
-		sys := systemPrompt + b.vocabularyBlock(req.Text)
+		// Dialect instruction goes BEFORE the vocabulary/personalisation blocks
+		// so those text-dependent additions stay in their measured position. For
+		// American (default) dialectSpellingInstruction() is "" → byte-identical.
+		sys := systemPrompt + b.dialectSpellingInstruction() + b.vocabularyBlock(req.Text)
 		if b.personalizer != nil {
 			if block := b.personalizer.Snapshot(); !block.Empty() {
 				sys += block.String()
@@ -448,7 +495,7 @@ func renderSpellingHints(text string, hints []correction.Suggestion) string {
 // function is pure prompt shaping.
 func (b *Builder) BuildRephrase(req correction.RephraseRequest) correction.Prompt {
 	if b.chat {
-		sys := rephraseSystemPrompt
+		sys := rephraseSystemPrompt + b.dialectSpellingInstruction()
 		// Tone/Style are untrusted client text from the /rephrase request
 		// JSON. Render each through strconv.Quote (Go-escaped quoted
 		// string literal) so an embedded quote, newline, or control char
@@ -533,6 +580,9 @@ func (b *Builder) BuildComplete(text string, source correction.Source) correctio
 	if source == correction.SourceOpenCode {
 		system = completeSystemPromptOpenCode
 	}
+	// Seed the configured dialect so continuations match Harper's dialect
+	// (e.g. British spelling). American/empty appends nothing.
+	system += b.dialectSpellingInstruction()
 	return correction.Prompt{
 		System:   system,
 		User:     text,
