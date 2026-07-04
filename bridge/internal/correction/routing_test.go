@@ -261,3 +261,93 @@ func TestShouldEscalate_SkipSpellingStillHonorsConfidenceFloor(t *testing.T) {
 		t.Error("a low-confidence spelling-only edit must still escalate")
 	}
 }
+
+// Phase-B: TrustedCategories generalizes the spelling-only skip into a
+// configurable category set. Skip escalation when EVERY fast suggestion's
+// Category is in the trusted set; empty set falls back to the legacy
+// SkipLLMForSpellingOnly check verbatim; SkipLLMForSpellingOnly=true remains
+// equivalent to TrustedCategories=[CategorySpelling].
+//
+// Each policy literal below sets MaxSentenceLen=200 and MinConfidence=0 so
+// only the EscalateOnFastEdit / trusted-set branches decide the outcome
+// (matches the legacy SkipLLMForSpellingOnly test fixture's pattern).
+
+func TestTrustedCategoriesSkipsEscalation(t *testing.T) {
+	// Spelling + typography trusted; fast result is one of each. With the
+	// generalisation, no all-spelling-only requirement anymore — every
+	// suggestion just needs to be a trusted category.
+	p := EscalationPolicy{
+		MaxSentenceLen:     200,
+		MinConfidence:      0.7,
+		EscalateOnFastEdit: true,
+		TrustedCategories:  []string{CategorySpelling, CategoryTypography},
+	}
+	fast := []Suggestion{
+		{Category: CategorySpelling, Confidence: 0.95},
+		{Category: CategoryTypography, Confidence: 0.9},
+	}
+	require.False(t, p.ShouldEscalate("Teh word — nice.", fast)) //nolint:misspell // intentional fixture
+}
+
+func TestUntrustedCategoryStillEscalates(t *testing.T) {
+	// Mixed fast result: a trusted spelling edit next to an untrusted
+	// grammar edit. Mixed contents must still escalate so the LLM can
+	// arbitrate the grammar edit.
+	p := EscalationPolicy{
+		MaxSentenceLen:     200,
+		MinConfidence:      0.7,
+		EscalateOnFastEdit: true,
+		TrustedCategories:  []string{CategorySpelling},
+	}
+	fast := []Suggestion{
+		{Category: CategorySpelling, Confidence: 0.95},
+		{Category: CategoryGrammar, Confidence: 0.9},
+	}
+	require.True(t, p.ShouldEscalate("She go to teh school.", fast)) //nolint:misspell // intentional fixture
+}
+
+func TestEmptyTrustedFallsBackToLegacyFlag(t *testing.T) {
+	// TrustedCategories empty + legacy SkipLLMForSpellingOnly=true: the
+	// skip still fires for an all-spelling fast result (back-compat).
+	p := EscalationPolicy{
+		MaxSentenceLen:         200,
+		MinConfidence:          0.7,
+		EscalateOnFastEdit:     true,
+		SkipLLMForSpellingOnly: true,
+	}
+	fast := []Suggestion{{Category: CategorySpelling, Confidence: 0.95}}
+	require.False(t, p.ShouldEscalate("Teh word.", fast)) //nolint:misspell // intentional fixture
+}
+
+func TestTrustedCategoriesNeverTrustsGrammar(t *testing.T) {
+	// Belt-and-braces: even if the parser let "" through (it rejects it),
+	// the routing layer must still escalate a CategoryGrammar edit. Grammar
+	// errors (agreement, syntax, ...) are exactly what the LLM is needed to
+	// override — the trust set must never include grammar.
+	p := EscalationPolicy{
+		MaxSentenceLen:     200,
+		MinConfidence:      0.7,
+		EscalateOnFastEdit: true,
+		TrustedCategories:  []string{""}, // parser rejects; defensive test
+	}
+	fast := []Suggestion{{Category: CategoryGrammar, Confidence: 0.9}}
+	require.True(t, p.ShouldEscalate("She go.", fast),
+		"CategoryGrammar must never be trusted regardless of set contents")
+}
+
+func TestTrustedCategoriesStackedWithLegacyFlag(t *testing.T) {
+	// Both TrustedCategories AND SkipLLMForSpellingOnly set: their effects
+	// stack — the trust set is the union. A typography-only fast result is
+	// skipped here even though the legacy flag alone would only have
+	// trusted spelling.
+	p := EscalationPolicy{
+		EscalateOnFastEdit:     true,
+		MaxSentenceLen:         200,
+		MinConfidence:          0.5,
+		SkipLLMForSpellingOnly: true,
+		TrustedCategories:      []string{CategoryTypography},
+	}
+	fast := []Suggestion{{Category: CategoryTypography, Confidence: 0.95}}
+	require.False(t, p.ShouldEscalate("the word — nice.", fast),
+		"trusted-set union (spelling+typography) must skip typography-only fast edits")
+}

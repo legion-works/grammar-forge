@@ -44,6 +44,33 @@ type EscalationPolicy struct {
 	// GF_SKIP_LLM_FOR_SPELLING_ONLY) unless the fast path learns morphology;
 	// any re-enable must re-pass the full cold eval.
 	SkipLLMForSpellingOnly bool
+	// TrustedCategories generalises SkipLLMForSpellingOnly: when every fast-
+	// path suggestion's Category is in this set, the EscalateOnFastEdit
+	// trigger is suppressed and the fast path is served directly (subject to
+	// the confidence floor below) instead of consulting the LLM. Categories
+	// the fast path is natively good at (e.g. dictionary-driven spelling) save
+	// an LLM round-trip (~10-40ms vs ~300-800ms).
+	//
+	// Semantics:
+	//   - TrustedCategories=[] (empty) → fall back to the legacy
+	//     SkipLLMForSpellingOnly check verbatim (back-compat).
+	//   - SkipLLMForSpellingOnly=true ≡ TrustedCategories=[CategorySpelling].
+	//   - Both set → trust set is the union; the operator can layer the new
+	//     set over the legacy flag (or remove the legacy flag once the new
+	//     set subsumes it).
+	//   - Grammar (CategoryGrammar, the empty string) is NEVER trusted — a
+	//     grammar fast-path edit is exactly what the LLM exists to override,
+	//     so the config parser rejects "" or the literal "grammar" at parse
+	//     time AND the routing check enforces the invariant defensively.
+	//
+	// Enablement is an eval-gated operator action: candidate sets MUST be
+	// motivated by Phase-A's per-category FP attribution data
+	// (which categories the fast path flags with zero eval-visible LLM
+	// lift) and require BOTH run_eval.py --require-exact (125/125) AND
+	// clean_eval.py fp_rate ≤ baseline on gf-bridge-eval — the default deploy
+	// keeps TrustedCategories=[] (legacy behaviour). See plans and the
+	// calibration protocol in eval/README.md.
+	TrustedCategories []string
 }
 
 // ShouldEscalate returns true if the input is long, the fast path found nothing
@@ -66,10 +93,17 @@ func (p EscalationPolicy) ShouldEscalate(text string, fast []Suggestion) bool {
 	if p.EscalateOnFastEdit {
 		// Fast path emitted edits; let the LLM arbitrate from the original
 		// (see Service.Correct). Covers confident-but-wrong Harper lints
-		// that the confidence floor would otherwise serve as-is. Exception
-		// (opt-in): an ALL-spelling fast result is served directly — it
-		// falls through to the confidence floor below instead.
-		if !p.SkipLLMForSpellingOnly || !allSpellingSuggestions(fast) {
+		// that the confidence floor would otherwise serve as-is.
+		//
+		// Exception (Phase-B generalisation): when the operator has opted
+		// into a TrustedCategories set (or the legacy SkipLLMForSpellingOnly
+		// flag, treated as {CategorySpelling}) AND every fast suggestion's
+		// category is trusted, the fast result is served directly — it
+		// falls through to the confidence floor below instead. Empty trust
+		// set with SkipLLMForSpellingOnly=false ⇒ no exemption (always
+		// escalate), preserving legacy behaviour.
+		trusted := p.effectiveTrustedCategories()
+		if len(trusted) == 0 || !everyCategoryTrusted(fast, trusted) {
 			return true
 		}
 	}
@@ -190,15 +224,55 @@ func categoryPriority(c string) int {
 	}
 }
 
-// allSpellingSuggestions reports whether every fast-path suggestion is a
-// spelling edit (the SkipLLMForSpellingOnly exemption). False for an empty
-// slice — the empty-fast-path branch decides that case.
-func allSpellingSuggestions(fast []Suggestion) bool {
-	if len(fast) == 0 {
+// effectiveTrustedCategories returns the trust set used by ShouldEscalate's
+// EscalateOnFastEdit branch: the union of TrustedCategories with the legacy
+// SkipLLMForSpellingOnly flag (treated as {[CategorySpelling]}). Returns nil
+// when neither is set, so ShouldEscalate's "no exemption" fast path stays a
+// single length-zero check.
+//
+// TrustedCategories values equal to CategoryGrammar ("") are dropped here as
+// a defensive duplicate of the config parser's strict rejection — the
+// parser-side guard is the source of truth, but the trust set never carries
+// grammar even if a future config path forgets to validate.
+func (p EscalationPolicy) effectiveTrustedCategories() []string {
+	if len(p.TrustedCategories) == 0 && !p.SkipLLMForSpellingOnly {
+		return nil
+	}
+	out := make([]string, 0, len(p.TrustedCategories)+1)
+	for _, c := range p.TrustedCategories {
+		if c != "" {
+			out = append(out, c)
+		}
+	}
+	if p.SkipLLMForSpellingOnly {
+		out = append(out, CategorySpelling)
+	}
+	return out
+}
+
+// isCategoryTrusted reports whether name is in the trust set. Grammar
+// (CategoryGrammar, the empty string) is NEVER trusted — the LLM exists to
+// override grammar fast-path edits, so even if the set somehow contained ""
+// the routing layer would still escalate. Belt and braces alongside the
+// config parser's strict rejection.
+func isCategoryTrusted(name string, trusted []string) bool {
+	if name == CategoryGrammar {
 		return false
 	}
+	for _, t := range trusted {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+// everyCategoryTrusted reports whether EVERY fast-path suggestion's category
+// is in the trust set. An empty fast slice returns true (the empty-fast-path
+// branch decides that case separately before this helper is called).
+func everyCategoryTrusted(fast []Suggestion, trusted []string) bool {
 	for _, s := range fast {
-		if s.Category != CategorySpelling {
+		if !isCategoryTrusted(s.Category, trusted) {
 			return false
 		}
 	}
