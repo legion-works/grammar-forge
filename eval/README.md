@@ -178,6 +178,7 @@ a no-op; do not "align" the two definitions). Regenerate the corpus with
 Baseline lives in `clean_baseline.json` — gate PRs at (baseline + 2pp) or better.
 Registers: `golden` (golden outputs), `casual`, `technical`, `british`.
 Per-model attribution tells you WHERE the FP came from (`harper`/`gector`/`llm`).
+The baseline was measured with GF_HARPER_DIALECT=british (live config). Golden gates run with american — see the dialect note in the plan; never compare FP numbers across dialect envs.
 
 ## 5. Semantic verifier calibration (Phase C, Task C4)
 

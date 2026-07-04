@@ -14,5 +14,7 @@
     "casual": 12,
     "british": 1,
     "technical": 0
-  }
+  },
+  "dialect": "british",
+  "note": "measured under the live config (GF_HARPER_DIALECT=british); compare clean-FP gates under the same dialect env — golden gates use american (see README)"
 }
