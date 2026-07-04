@@ -1921,3 +1921,56 @@ func writeMobyTempFile(t *testing.T) string {
 	require.NoError(t, os.WriteFile(path, []byte("happy,blessed,blissful,blithe,cheerful,content\n"), 0o600))
 	return path
 }
+
+// ---- Phase D reject suppression (GF_REJECT_SUPPRESSION) ----
+
+// Fast corrector emits a single "setup"->"set up" suggestion. The
+// suppression gate (when configured) must drop it deterministically at
+// finalize time. WITHOUT the suppressor: the same suggestion survives
+// (baseline sanity — the fakeStore path proves we haven't accidentally
+// broken the pipeline). WITH the suppressor (pre-warmed so the
+// stale-while-revalidate cache is loaded BEFORE the Correct call): the
+// suggestion is dropped, leaving the result empty. Pre-warming is the
+// test-friendly way to avoid racing the background refresh; a polling
+// eventually over the Correct result would work too but couples test
+// latency to the refresh goroutine's spawn timing.
+func TestRejectSuppressorDropsMatchingFastPathSuggestion(t *testing.T) {
+	// Input: "I will setup the server." — "setup" lives at byte 7..12.
+	rejected := []EditPair{{Original: "setup", Suggestion: "set up", Count: 4}}
+	fcSug := []Suggestion{{
+		Span:        Span{7, 12},
+		Replacement: "set up",
+		Model:       ModelGECToR,
+		Confidence:  0.95,
+	}}
+
+	// Baseline (no suppressor): the suggestion survives untouched.
+	stBase := &fakeStore{}
+	fcBase := fakeCorrector{name: string(ModelGECToR), sugs: fcSug}
+	svcBase := NewService(fakePB{}, []Corrector{fcBase}, fakeLLM{err: errAlways}, stBase, "m", fastPolicy())
+	gotBase, err := svcBase.Correct(context.Background(), Request{Text: "I will setup the server."})
+	require.NoError(t, err)
+	require.Len(t, gotBase.Suggestions, 1,
+		"without the suppressor the fast-path suggestion must survive")
+	require.Equal(t, "set up", gotBase.Suggestions[0].Replacement)
+
+	// Suppressor ON: same fake corrector, pre-warm so the rejected pair
+	// is loaded into the cache BEFORE Correct is called.
+	stSup := &fakeSuppressionStore{
+		fakeStore: &fakeStore{},
+		data:      PersonalizationData{Rejected: rejected},
+	}
+	rs := NewRejectSuppressor(stSup, time.Minute)
+	require.Eventually(t, func() bool {
+		return rs.Suppressed(context.Background(), "setup", "set up")
+	}, time.Second, 5*time.Millisecond,
+		"pre-warm: the rejected pair must be loaded into the cache before Correct")
+
+	fcSup := fakeCorrector{name: string(ModelGECToR), sugs: fcSug}
+	svcSup := NewService(fakePB{}, []Corrector{fcSup}, fakeLLM{err: errAlways}, stSup, "m", fastPolicy())
+	svcSup.SetRejectSuppressor(rs)
+	gotSup, err := svcSup.Correct(context.Background(), Request{Text: "I will setup the server."})
+	require.NoError(t, err)
+	require.Empty(t, gotSup.Suggestions,
+		"the rejected pair must drop the matching fast-path suggestion")
+}

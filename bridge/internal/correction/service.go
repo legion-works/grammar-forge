@@ -124,6 +124,16 @@ type Service struct {
 	// discarded. 0 / negative = gate disabled; the helper short-circuits
 	// without consulting the verifier.
 	semThreshold float64
+	// rejectSuppressor drops suggestions matching the user's rejected
+	// personalization pairs (see RejectSuppressor). It hardens the
+	// prompt-level "Do NOT change X" lines against LLM non-compliance by
+	// deterministically removing the rejected pair from the suggestion
+	// set. nil = no filtering (zero value; byte-identical legacy
+	// behaviour). Default OFF; wired in main only when GF_REJECT_SUPPRESSION
+	// is on after the Phase-D gates pass. The Suppressor's
+	// stale-while-revalidate cache means an expired or not-yet-built
+	// snapshot never blocks the request.
+	rejectSuppressor *RejectSuppressor
 	// irregularPluralFix enables the Harper irregular-plural possessive
 	// misfire repair (see irregular_plural.go). When true,
 	// repairIrregularPluralPossessive is applied to the Harper fast-path
@@ -237,6 +247,15 @@ func (s *Service) SetSemanticVerifier(v SemanticVerifier, threshold float64) {
 	s.semVerifier = v
 	s.semThreshold = threshold
 }
+
+// SetRejectSuppressor installs the personalization-driven drop filter
+// applied at finalize time. nil disables the filter (byte-identical
+// legacy behaviour). Default unset; wired in main only when
+// GF_REJECT_SUPPRESSION is on. The Suppressor's stale-while-revalidate
+// cache means the drop is best-effort: an expired or not-yet-built
+// snapshot serves the current (possibly empty) set without blocking,
+// so suppression is opportunistic rather than strict.
+func (s *Service) SetRejectSuppressor(r *RejectSuppressor) { s.rejectSuppressor = r }
 
 // semanticVerifierApproves reports whether the repaired LLM output keeps
 // enough of the original's meaning to be diffed into suggestions. Fails
@@ -647,6 +666,20 @@ func (s *Service) finalize(ctx context.Context, req Request, all []Suggestion) (
 	// kept — only single dictionary words are suppressed.
 	if s.allowlist != nil && len(all) > 0 {
 		all = s.dropAllowlisted(req.Text, all)
+	}
+	// Drop suggestions matching the user's rejected personalization
+	// pairs. Hardens the prompt-level "Do NOT change" lines against LLM
+	// non-compliance: if the user has rejected "setup"->"set up" three
+	// or more times, the suggestion is dropped deterministically at
+	// finalize (the prompt-level line is best-effort and the LLM may
+	// still produce it). Suppression is context-blind at the word-pair
+	// level (a rejected pair suppresses that edit in EVERY sentence) —
+	// intended semantics mirroring the prompt-level "Do NOT change"
+	// line it hardens; sentence-scoped suppression was considered and
+	// deferred until word-level over-suppression shows up as a real
+	// failure mode in the live deploy.
+	if s.rejectSuppressor != nil && len(all) > 0 {
+		all = s.dropRejected(ctx, req.Text, all)
 	}
 	// applyAll (used for the logged Event.Suggestion) and clients both
 	// assume suggestions are ordered by ascending Span.Start so that
@@ -1179,6 +1212,33 @@ func (s *Service) dropAllowlisted(text string, sugs []Suggestion) []Suggestion {
 			if allTokensAllowlisted(text[wordStart:wordEnd], s.allowlist) {
 				continue
 			}
+		}
+		out = append(out, sg)
+	}
+	return out
+}
+
+// dropRejected removes suggestions whose word-level (Original, Suggestion)
+// pair is on the user's rejected list (see RejectSuppressor). Mirrors
+// store.SQLite.PersonalizationExamples's word-boundary reconstruction
+// (ExpandToWordBoundaries + splice) so the key the drop step computes
+// matches the key the store records. Span.Validate is checked FIRST: a
+// corrupt span would make ExpandToWordBoundaries walk past the text
+// boundary and panic, so the package-wide guard skips the suppression
+// check (the suggestion is left alone — same defensive posture as
+// dropAllowlisted).
+func (s *Service) dropRejected(ctx context.Context, text string, sugs []Suggestion) []Suggestion {
+	out := make([]Suggestion, 0, len(sugs))
+	for _, sg := range sugs {
+		if sg.Span.Validate(len(text)) != nil {
+			out = append(out, sg)
+			continue
+		}
+		wordStart, wordEnd := ExpandToWordBoundaries(text, sg.Span.Start, sg.Span.End)
+		pairOriginal := text[wordStart:wordEnd]
+		pairSuggestion := text[wordStart:sg.Span.Start] + sg.Replacement + text[sg.Span.End:wordEnd]
+		if s.rejectSuppressor.Suppressed(ctx, pairOriginal, pairSuggestion) {
+			continue
 		}
 		out = append(out, sg)
 	}

@@ -395,3 +395,28 @@ func TestLoad_SemanticVerifierOverrides(t *testing.T) {
 	require.InDelta(t, 0.65, cfg.SemanticVerifierThreshold, 1e-9)
 	require.Equal(t, "/opt/models/minilm", cfg.SemanticVerifierModelPath)
 }
+
+// Phase-D reject suppression: byte-identical legacy behaviour by default
+// (the suppressor is OFF). Operators enable it explicitly via
+// GF_REJECT_SUPPRESSION after the Phase-D gates pass; the TTL bounds the
+// stale-while-revalidate refresh cadence and is expressed in SECONDS
+// (env-friendly integer) rather than the time.Duration string format used
+// elsewhere — the "_SECONDS" suffix signals the unit.
+func TestLoad_RejectSuppressionDefaults(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.False(t, cfg.RejectSuppressionEnabled,
+		"GF_REJECT_SUPPRESSION must default false")
+	require.Equal(t, 300*time.Second, cfg.RejectSuppressionTTL,
+		"GF_REJECT_SUPPRESSION_TTL_SECONDS must default 300 seconds")
+}
+
+func TestLoad_RejectSuppressionOverrides(t *testing.T) {
+	env := map[string]string{
+		"GF_REJECT_SUPPRESSION":             "true",
+		"GF_REJECT_SUPPRESSION_TTL_SECONDS": "60",
+	}
+	cfg := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	require.True(t, cfg.RejectSuppressionEnabled)
+	require.Equal(t, 60*time.Second, cfg.RejectSuppressionTTL,
+		"GF_REJECT_SUPPRESSION_TTL_SECONDS=60 must parse to 60s, not 60ns")
+}

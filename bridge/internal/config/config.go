@@ -211,6 +211,20 @@ type Config struct {
 	SemanticVerifierEnabled   bool    // GF_SEMANTIC_VERIFIER            (default false)
 	SemanticVerifierThreshold float64 // GF_SEMANTIC_VERIFIER_THRESHOLD  (default 0.80)
 	SemanticVerifierModelPath string  // GF_SEMANTIC_VERIFIER_MODEL_PATH (default /models/minilm)
+
+	// RejectSuppression (Phase D): a TTL-cached, stale-while-revalidate
+	// filter (correction.RejectSuppressor) that deterministically drops
+	// suggestions matching the user's rejected personalization pairs. It
+	// hardens the prompt-level "Do NOT change X" lines against LLM
+	// non-compliance: if the user has rejected "setup"->"set up" three
+	// or more times, the suggestion is dropped at finalize regardless of
+	// what the LLM produces. Default OFF — enabling is an eval-gated
+	// operator action after the Phase-D gates pass (full cold golden +
+	// clean-text FP at or below baseline). The TTL bounds how often the
+	// suppressor reads fresh rejection pairs from the store (the request
+	// path never blocks); default 300s.
+	RejectSuppressionEnabled bool          // GF_REJECT_SUPPRESSION             (default false)
+	RejectSuppressionTTL     time.Duration // GF_REJECT_SUPPRESSION_TTL_SECONDS (default 300 seconds)
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -328,6 +342,9 @@ func Load(getenv Getenv) Config {
 		SemanticVerifierEnabled:   getBool("GF_SEMANTIC_VERIFIER", false),
 		SemanticVerifierThreshold: getFloat("GF_SEMANTIC_VERIFIER_THRESHOLD", 0.80),
 		SemanticVerifierModelPath: get("GF_SEMANTIC_VERIFIER_MODEL_PATH", "/models/minilm"),
+
+		RejectSuppressionEnabled: getBool("GF_REJECT_SUPPRESSION", false),
+		RejectSuppressionTTL:     time.Duration(getInt("GF_REJECT_SUPPRESSION_TTL_SECONDS", 300)) * time.Second,
 	}
 }
 

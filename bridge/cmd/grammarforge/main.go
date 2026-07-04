@@ -176,6 +176,21 @@ func main() {
 		}
 	}
 
+	// Phase-D reject suppression (GF_REJECT_SUPPRESSION, default off):
+	// when on, the suppressor's stale-while-revalidate cache serves the
+	// request path without blocking, and a background goroutine refreshes
+	// the rejected pair set on TTL expiry. Best-effort: a failed refresh
+	// keeps the last-good set (or empty on cold start) and logs Warn;
+	// suppression is therefore opportunistic rather than strict — a
+	// suggestion is dropped only when the cache actually contains the
+	// matching pair at finalize time. The store is the same one already
+	// opened above; TTL is GF_REJECT_SUPPRESSION_TTL_SECONDS (default
+	// 300s). Enabling is an eval-gated operator action after the
+	// Phase-D gates pass.
+	if cfg.RejectSuppressionEnabled {
+		svc.SetRejectSuppressor(correction.NewRejectSuppressor(st, cfg.RejectSuppressionTTL))
+	}
+
 	// Inject the rephrase provider factory (this is where internal/llm is
 	// allowed — the correction core stays transport-free). The api_key is
 	// never logged (mirrors llm.Config.APIKey).
