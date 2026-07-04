@@ -464,8 +464,9 @@ func TestLoad_EscalationTrustedCategoriesOverride(t *testing.T) {
 // the trustable category set (correction.IsTrustableCategory). A typo or an
 // attempt to trust grammar MUST error — the caller (main.go) ignores the
 // whole variable and falls back to the legacy empty set, never honoring
-// an incomplete/typo'd subset (council Must: a typo must not silently produce
-// an empty trust set that changes routing).
+// an incomplete/typo'd subset: the operator typed "spelling,typo" expecting
+// spelling, the parser silently accepts spelling, and the deploy's
+// behaviour diverges from intent in a hard-to-diagnose way.
 func TestParseTrustedCategories(t *testing.T) {
 	t.Run("empty string returns empty list no error", func(t *testing.T) {
 		got, err := ParseTrustedCategories("")

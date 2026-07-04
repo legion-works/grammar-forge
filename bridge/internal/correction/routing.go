@@ -250,11 +250,14 @@ func (p EscalationPolicy) effectiveTrustedCategories() []string {
 	return out
 }
 
-// isCategoryTrusted reports whether name is in the trust set. Grammar
-// (CategoryGrammar, the empty string) is NEVER trusted — the LLM exists to
-// override grammar fast-path edits, so even if the set somehow contained ""
-// the routing layer would still escalate. Belt and braces alongside the
-// config parser's strict rejection.
+// isCategoryTrusted reports whether name is in the trust set. The
+// CategoryGrammar guard at the top of the function is unreachable via the
+// current caller — effectiveTrustedCategories filters out "" before this
+// sees the set — and is retained to defend future direct callers:
+// trusting the empty string would zero-cost-match every uncategorized
+// suggestion (the default CategoryGrammar falls through every
+// non-empty-match path), silently reactivating the all-grammar skip the
+// field exists to forbid.
 func isCategoryTrusted(name string, trusted []string) bool {
 	if name == CategoryGrammar {
 		return false
