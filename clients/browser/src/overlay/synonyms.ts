@@ -49,10 +49,7 @@ export function isWordChar(ch: string): boolean {
  *    - the offset is out of range (< 0 or > text.length)
  *    - there is no word at the offset (only punctuation / whitespace)
  *  The returned `start` / `end` are slice indices into `text`. */
-export function resolveWordAtPoint(
-    text: string,
-    offset: number,
-): ResolvedWord | null {
+export function resolveWordAtPoint(text: string, offset: number): ResolvedWord | null {
     if (typeof text !== 'string' || typeof offset !== 'number') return null
     if (!Number.isFinite(offset) || offset < 0 || offset > text.length) return null
     // Clamp to the last code unit's BOUNDARY — the browser may report
@@ -81,20 +78,14 @@ export function resolveWordAtPoint(
  *  position (text inside a `<textarea>` / `<input>` / contenteditable
  *  is handled by the browser). Returns -1 when the browser does not
  *  expose either API. */
-export function offsetFromDblClick(
-    event: MouseEvent,
-    fieldEl: HTMLElement,
-): number {
+export function offsetFromDblClick(event: MouseEvent, fieldEl: HTMLElement): number {
     // For <textarea> and <input>, caretPositionFromPoint / caretRangeFromPoint
     // return the textarea element itself (not a text node inside it), so
     // range.setStart(fieldEl, 0) → range.setEnd(textarea, 0) → length 0 →
     // offset 0 → always resolves the FIRST word. The reliable source for
     // textarea/input is selectionStart: the browser selects the double-clicked
     // word on dblclick, so selectionStart is the word's start offset.
-    if (
-        fieldEl instanceof HTMLTextAreaElement ||
-        fieldEl instanceof HTMLInputElement
-    ) {
+    if (fieldEl instanceof HTMLTextAreaElement || fieldEl instanceof HTMLInputElement) {
         const sel = fieldEl.selectionStart
         return sel !== null ? sel : -1
     }
@@ -104,8 +95,9 @@ export function offsetFromDblClick(
     const w = fieldEl.ownerDocument?.defaultView ?? window
     // Prefer the modern API (Chromium 120+, Firefox 132+).
     type CaretPosLike = { offsetNode: Node; offset: number } | null
-    const caretPosition = (w as unknown as { caretPositionFromPoint?: (x: number, y: number) => CaretPosLike })
-        .caretPositionFromPoint
+    const caretPosition = (
+        w as unknown as { caretPositionFromPoint?: (x: number, y: number) => CaretPosLike }
+    ).caretPositionFromPoint
     if (typeof caretPosition === 'function') {
         try {
             const pos = caretPosition.call(doc, x, y)
@@ -122,8 +114,9 @@ export function offsetFromDblClick(
         }
     }
     type CaretRangeLike = { startContainer: Node; startOffset: number } | null
-    const caretRange = (doc as unknown as { caretRangeFromPoint?: (x: number, y: number) => CaretRangeLike })
-        .caretRangeFromPoint
+    const caretRange = (
+        doc as unknown as { caretRangeFromPoint?: (x: number, y: number) => CaretRangeLike }
+    ).caretRangeFromPoint
     if (typeof caretRange === 'function') {
         try {
             const r = caretRange.call(doc, x, y)
@@ -176,6 +169,14 @@ export interface SynonymsOptions {
     onPick: (synonym: string) => void
     /** Esc / outside-click / × close — the caller calls `destroy()`. */
     onClose: () => void
+    /** Optional viewport rect of the host chrome the popover must clear
+     *  (e.g. Discord's composer box). When the popover flips ABOVE the
+     *  anchor, it clears the TOP of this rect instead of just the word;
+     *  when placed BELOW, it clears the rect's BOTTOM. The word rect
+     *  alone is not enough in Discord: the word sits inside the composer,
+     *  so clearing the word still overlaps the composer chrome
+     *  (overlap reported live 2026-07). */
+    clearRect?: DOMRect
 }
 
 export interface SynonymsHandle {
@@ -186,6 +187,13 @@ export interface SynonymsHandle {
 const VIEWPORT_GUTTER = 8
 const POPOVER_WIDTH = 190
 const POPOVER_HEIGHT_FALLBACK = 140
+// Gap between the popover and the anchored word. The flip-ABOVE gap is larger
+// than the below gap so the popover clears the word AND any host chrome under
+// it — in Discord the composer sits at the screen bottom, so the popover always
+// flips above and a tight 6px gap left it flush against Discord's own composer /
+// autocomplete panel (overlap reported 2026-07). Extra clearance lifts it off.
+const POPOVER_GAP_BELOW = 6
+const POPOVER_GAP_ABOVE = 14
 
 /**
  * Mount the Synonyms popover in the supplied shadow root, anchored to
@@ -194,6 +202,7 @@ const POPOVER_HEIGHT_FALLBACK = 140
  * word's baseline) and is viewport-clamped.
  */
 import { installOutsideDismiss, type OutsideDismissHandle } from '@/overlay/dismiss'
+import { debugLog } from '@/lib/debug-log'
 
 export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): SynonymsHandle {
     destroyExisting(root)
@@ -242,7 +251,15 @@ export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): Synony
     el(pop, 'span', 'gf-syn__tail')
 
     root.appendChild(pop)
-    positionPopover(pop, options.anchorRect, view)
+    positionPopover(pop, options.anchorRect, view, options.clearRect)
+
+    // Re-position after first paint: multi-line synonym rows wrap inside
+    // the fixed 190px width, so the real height can exceed the pre-paint
+    // measurement. The rAF re-measure keeps the popover's BOTTOM clear of
+    // the anchor/composer once the true height is known.
+    const repositionFrame = view.requestAnimationFrame(() => {
+        if (pop.isConnected) positionPopover(pop, options.anchorRect, view, options.clearRect)
+    })
 
     // Esc dismiss
     const onKeydown = (event: KeyboardEvent): void => {
@@ -264,6 +281,7 @@ export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): Synony
 
     return {
         destroy: () => {
+            view.cancelAnimationFrame(repositionFrame)
             outsideDismiss.remove()
             doc.removeEventListener('keydown', onKeydown)
             if (pop.isConnected) pop.remove()
@@ -276,7 +294,7 @@ function destroyExisting(root: ShadowRoot): void {
     root.querySelectorAll('.gf-syn').forEach((el) => el.remove())
 }
 
-function positionPopover(pop: HTMLElement, anchor: DOMRect, view: Window): void {
+function positionPopover(pop: HTMLElement, anchor: DOMRect, view: Window, clear?: DOMRect): void {
     const vw = view.innerWidth
     const vh = view.innerHeight
     const width = pop.offsetWidth || POPOVER_WIDTH
@@ -286,9 +304,23 @@ function positionPopover(pop: HTMLElement, anchor: DOMRect, view: Window): void 
     let left = anchor.left + anchor.width / 2 - width / 2
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     if (left + width > vw - VIEWPORT_GUTTER) left = vw - width - VIEWPORT_GUTTER
-    let top = anchor.bottom + 6
-    if (top + height > vh - VIEWPORT_GUTTER) top = anchor.top - height - 6
+    // Below-placement clears the BOTTOM of the clear rect (host chrome)
+    // when supplied; flip-above clears its TOP. The word rect alone is
+    // not enough: in Discord the word sits inside the composer, so a
+    // popover that clears the word still overlaps the composer chrome.
+    const belowEdge = clear ? Math.max(anchor.bottom, clear.bottom) : anchor.bottom
+    const aboveEdge = clear ? Math.min(anchor.top, clear.top) : anchor.top
+    let top = belowEdge + POPOVER_GAP_BELOW
+    if (top + height > vh - VIEWPORT_GUTTER) top = aboveEdge - height - POPOVER_GAP_ABOVE
     if (top < VIEWPORT_GUTTER) top = VIEWPORT_GUTTER
+    debugLog('synonyms', 'position', {
+        offsetHeight: pop.offsetHeight,
+        usedHeight: height,
+        anchorTop: anchor.top,
+        clearTop: clear?.top ?? null,
+        top,
+        left,
+    })
     pop.style.left = `${String(left)}px`
     pop.style.top = `${String(top)}px`
 }

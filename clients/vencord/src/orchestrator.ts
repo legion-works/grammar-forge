@@ -61,6 +61,11 @@ import type { GrammarForgeConfig } from './settings'
 // GrammarForge flags it.
 const PASTE_GRACE_MS = 1500
 
+// Height band above the Discord composer reserved for Discord's floating
+// selection formatting toolbar (B/I/U/…), which appears whenever the
+// dblclick selects a word. The synonyms popover must clear it too.
+const SELECTION_TOOLBAR_CLEARANCE_PX = 56
+
 export type InputDecision = 'check' | 'skip' | 'grace'
 
 /** Compact, log-safe description of the current selection RELATIVE to a
@@ -398,7 +403,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 const panelForDetached = panelFor !== null && !fields.has(panelFor)
                 if (panelFor === el || panelForDetached) {
                     if (panelForDetached) {
-                        debugLog(`panel churn rebind oldUid=${panelFor ? getElUid(panelFor) : 'none'} newUid=${getElUid(el)} items=${st.items.length}`)
+                        debugLog(
+                            `panel churn rebind oldUid=${panelFor ? getElUid(panelFor) : 'none'} newUid=${getElUid(el)} items=${st.items.length}`,
+                        )
                         panelFor = el
                     }
                     reviewPanel.restoreReviewBody(
@@ -409,7 +416,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                         true, // onRephrase is wired in buildReviewPanelOptions
                     )
                 } else {
-                    debugLog(`panel refresh skipped renderUid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} items=${st.items.length}`)
+                    debugLog(
+                        `panel refresh skipped renderUid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} items=${st.items.length}`,
+                    )
                 }
             }
             return
@@ -453,7 +462,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // stays mounted + readable while the orb's count/band/ring stay
         // live. The W1 `!panelOpen` skip is stale; remove it.
         // Orb not mounted in Vencord — chatbar badge is the count source.
-        debugLog(`render items=${st.items.length} rectsMeasured=${String(allRects != null)} panelOpen=${String(panelOpen)}`)
+        debugLog(
+            `render items=${st.items.length} rectsMeasured=${String(allRects != null)} panelOpen=${String(panelOpen)}`,
+        )
         notify()
         // Panel refresh: if the review panel is open for this field, rebuild
         // its body in-place with the fresh items/score so applied suggestions
@@ -466,7 +477,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             const panelForDetached = panelFor !== null && !fields.has(panelFor)
             if (panelFor === el || panelForDetached) {
                 if (panelForDetached) {
-                    debugLog(`panel churn rebind oldUid=${panelFor ? getElUid(panelFor) : 'none'} newUid=${getElUid(el)} items=${st.items.length}`)
+                    debugLog(
+                        `panel churn rebind oldUid=${panelFor ? getElUid(panelFor) : 'none'} newUid=${getElUid(el)} items=${st.items.length}`,
+                    )
                     panelFor = el
                 }
                 reviewPanel.restoreReviewBody(
@@ -477,7 +490,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     true, // onRephrase is wired in buildReviewPanelOptions
                 )
             } else {
-                debugLog(`panel refresh skipped renderUid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} items=${st.items.length}`)
+                debugLog(
+                    `panel refresh skipped renderUid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} items=${st.items.length}`,
+                )
             }
         }
     }
@@ -693,7 +708,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
      *  first rect (the dominant baseline rect) for anchor positioning.
      *  Returns null when measurement throws or returns empty (the word
      *  is in a detached subtree, or a zero-width surrogate pair). */
-    const measureWordRect = (fieldEl: HTMLElement, text: string, start: number, end: number): DOMRect | null => {
+    const measureWordRect = (
+        fieldEl: HTMLElement,
+        text: string,
+        start: number,
+        end: number,
+    ): DOMRect | null => {
         try {
             const rects = getSpanRectsBatch(fieldEl, [{ start, end }])
             const first = rects[0]?.[0]
@@ -1066,7 +1086,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         // the field has been detached (fields.get returns undefined).
         const liveSt = fields.get(el) ?? st
         const opts = buildReviewPanelOptions(el, liveSt, anchor)
-        debugLog(`panel open uid=${getElUid(el)} items=${liveSt.items.length} phase=${liveSt.phase ?? 'done'}`)
+        debugLog(
+            `panel open uid=${getElUid(el)} items=${liveSt.items.length} phase=${liveSt.phase ?? 'done'}`,
+        )
         reviewPanel = showPanel(overlay.root, opts)
         panelOpen = true
         panelFor = el
@@ -1180,8 +1202,11 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     ? reviewPanel.getBodyContainer()?.parentElement
                     : null
                 if (panelAside && 'setActiveTab' in panelAside) {
-                    (panelAside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
-                        .setActiveTab('stats')
+                    ;(
+                        panelAside as HTMLElement & {
+                            setActiveTab: (t: 'review' | 'stats') => void
+                        }
+                    ).setActiveTab('stats')
                 }
                 const body = reviewPanel?.getBodyContainer()
                 if (!body) return
@@ -1197,8 +1222,11 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     ? reviewPanel.getBodyContainer()?.parentElement
                     : null
                 if (panelAside && 'setActiveTab' in panelAside) {
-                    (panelAside as HTMLElement & { setActiveTab: (t: 'review' | 'stats') => void })
-                        .setActiveTab('review')
+                    ;(
+                        panelAside as HTMLElement & {
+                            setActiveTab: (t: 'review' | 'stats') => void
+                        }
+                    ).setActiveTab('review')
                 }
                 const stNow = fields.get(el)
                 if (!stNow) return
@@ -1237,7 +1265,10 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
     const buildStatsViewDeps = (): StatsViewDeps => ({
         loadStats: () => refreshClient().stats(),
         loadDict: () =>
-            refreshClient().dictionaryList().then((r) => r.words).catch(() => []),
+            refreshClient()
+                .dictionaryList()
+                .then((r) => r.words)
+                .catch(() => []),
         removeDictWord: (word: string) => refreshClient().dictionaryRemove(word),
     })
 
@@ -1272,7 +1303,10 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
      *  the combined inverse-edit batch on the field's undo slot. Mirrors
      *  `applyAllFor` but accepts a pre-filtered set (e.g. high-confidence
      *  only, or one category). */
-    const applyBatchFor = async (el: HTMLElement, items: readonly RenderableItem[]): Promise<void> => {
+    const applyBatchFor = async (
+        el: HTMLElement,
+        items: readonly RenderableItem[],
+    ): Promise<void> => {
         const st = fields.get(el)
         if (!st) return
         if (items.length === 0) return
@@ -1331,7 +1365,10 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         if (!st) return
         const goals = getConfig().goals
         const visible = visibleItems(st.items, st.phase, goals)
-        await applyBatchFor(el, visible.filter((it) => it.category === cat))
+        await applyBatchFor(
+            el,
+            visible.filter((it) => it.category === cat),
+        )
     }
 
     // togglePause: flip paused, clear every field's items + popovers, update
@@ -1543,7 +1580,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         trackedFields.add(el)
         lastActiveField = el
         // Instrument: log element uid at attach so churn is visible in logs.
-        debugLog(`composer attach uid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} panelOpen=${String(panelOpen)}`)
+        debugLog(
+            `composer attach uid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} panelOpen=${String(panelOpen)}`,
+        )
         notify()
 
         // Release this field's paste-grace timer on global teardown. The
@@ -1615,10 +1654,27 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             // pick-list render.
             const wordRect = measureWordRect(el, text, resolved.start, resolved.end)
             if (!wordRect) return
+            // The word sits INSIDE the composer, so clearing the word
+            // alone still lets the popover overlap the composer chrome
+            // (overlap reported live 2026-07). Discord ALSO anchors a
+            // floating selection formatting toolbar (B/I/U/…) above the
+            // selection the dblclick just made — it renders ~48px above
+            // the composer top, and its class names are hashed (measuring
+            // it is churn-fragile), so clear a fixed band above the
+            // composer that covers it (second overlap reported live
+            // 2026-07-04).
+            const composerRect = el.getBoundingClientRect()
+            const clearRect = new DOMRect(
+                composerRect.x,
+                composerRect.y - SELECTION_TOOLBAR_CLEARANCE_PX,
+                composerRect.width,
+                composerRect.height + SELECTION_TOOLBAR_CLEARANCE_PX,
+            )
             hideTooltipNow()
             closeSynonyms()
             synonymsHandle = showSynonyms(overlay.root, {
                 anchorRect: wordRect,
+                clearRect: clearRect,
                 word: resolved.word,
                 synonyms: [],
                 loading: true,
@@ -1639,6 +1695,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     synonymsHandle.destroy()
                     synonymsHandle = showSynonyms(overlay.root, {
                         anchorRect: wordRect,
+                        clearRect: clearRect,
                         word: resolved.word,
                         synonyms: res.synonyms,
                         loading: false,
@@ -1657,6 +1714,7 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     synonymsHandle.destroy()
                     synonymsHandle = showSynonyms(overlay.root, {
                         anchorRect: wordRect,
+                        clearRect: clearRect,
                         word: resolved.word,
                         synonyms: [],
                         loading: false,
@@ -1825,9 +1883,12 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
             //    Without this guard, clicking the chatbar button blurs the
             //    composer → items cleared → panel opens empty.
             const rt = e.relatedTarget
-            const withinGf = isWithinOverlay(rt) ||
+            const withinGf =
+                isWithinOverlay(rt) ||
                 (rt instanceof Element && rt.closest('[data-grammarforge-ui]') != null)
-            debugLog(`blur within-gf=${String(withinGf)} items=${String(fields.get(el)?.items.length ?? 0)} clearItems=${String(!withinGf)}`)
+            debugLog(
+                `blur within-gf=${String(withinGf)} items=${String(fields.get(el)?.items.length ?? 0)} clearItems=${String(!withinGf)}`,
+            )
             if (withinGf) return
             const s = fields.get(el)
             if (!s) return
@@ -1908,7 +1969,9 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         trackedFields.delete(el)
         fields.delete(el)
         // Instrument: log element uid at detach so churn is visible in logs.
-        debugLog(`composer detach uid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} panelOpen=${String(panelOpen)} wasPanelFor=${String(panelFor === el)}`)
+        debugLog(
+            `composer detach uid=${getElUid(el)} panelForUid=${panelFor ? getElUid(panelFor) : 'none'} panelOpen=${String(panelOpen)} wasPanelFor=${String(panelFor === el)}`,
+        )
         // When the panel's field is detached (churn), keep panelFor pointing
         // to the detached element so the churn-rebind in renderField can
         // detect it via !fields.has(panelFor). Do NOT null panelFor here —

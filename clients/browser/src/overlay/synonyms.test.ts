@@ -21,7 +21,7 @@ describe('isWordChar', () => {
         expect(isWordChar('Ж')).toBe(true)
         expect(isWordChar('ñ')).toBe(true)
     })
-    it("accepts underscores + hyphens + ASCII + curly apostrophes (so contractions and co-op stay one word)", () => {
+    it('accepts underscores + hyphens + ASCII + curly apostrophes (so contractions and co-op stay one word)', () => {
         expect(isWordChar('_')).toBe(true)
         expect(isWordChar('-')).toBe(true)
         expect(isWordChar("'")).toBe(true)
@@ -307,5 +307,63 @@ describe('showSynonyms (DOM mount)', () => {
         const head = root.querySelector('.gf-syn__head') as HTMLElement
         expect(head.textContent).toContain('teh')
         expect(head.textContent).toContain('Synonyms')
+    })
+
+    it('flip-above: a word near the viewport bottom lifts the popover clear of the word', () => {
+        // Discord's composer sits at the screen bottom, so the synonyms popover
+        // always flips ABOVE the word. With the fallback height (140 in jsdom)
+        // and default innerHeight (768), a word whose bottom is near 768 leaves
+        // no room below → the popover flips above with the larger ABOVE gap, so
+        // its BOTTOM clears the word top (no overlap with the composer chrome).
+        const root = mkRoot()
+        const wordTop = 740
+        const wordHeight = 18
+        showSynonyms(root, mkOptions({ anchorRect: new DOMRect(80, wordTop, 50, wordHeight) }))
+        const pop = root.querySelector('.gf-syn') as HTMLElement
+        const top = parseInt(pop.style.top, 10)
+        // Popover is ABOVE the word (its top is above the word's top).
+        expect(top).toBeLessThan(wordTop)
+        // And its bottom edge clears the word top by the ABOVE gap (14), i.e.
+        // top + fallbackHeight(140) <= wordTop - 14. Assert it does not overlap
+        // the word: popover bottom <= word top.
+        const POPOVER_HEIGHT_FALLBACK = 140
+        expect(top + POPOVER_HEIGHT_FALLBACK).toBeLessThanOrEqual(wordTop)
+    })
+
+    it('clearRect: flip-above clears the composer top, not just the word', () => {
+        // The composer top (720) sits 20px above the word top (740) — the
+        // word alone would let the popover overlap the composer chrome.
+        // clearRect must push the popover clear of the composer top instead.
+        const root = mkRoot()
+        showSynonyms(
+            root,
+            mkOptions({
+                anchorRect: new DOMRect(80, 740, 50, 18),
+                clearRect: new DOMRect(0, 720, 800, 60),
+            }),
+        )
+        const pop = root.querySelector('.gf-syn') as HTMLElement
+        const top = parseInt(pop.style.top, 10)
+        const POPOVER_HEIGHT_FALLBACK = 140
+        expect(top + POPOVER_HEIGHT_FALLBACK).toBeLessThanOrEqual(720)
+        expect(top).toBeLessThan(720)
+    })
+
+    it('clearRect: below-placement clears the composer bottom', () => {
+        // Plenty of room below (word top 50, jsdom innerHeight 768), so the
+        // popover stays BELOW — but it must clear the composer's bottom
+        // edge (100), not just the word's bottom.
+        const root = mkRoot()
+        showSynonyms(
+            root,
+            mkOptions({
+                anchorRect: new DOMRect(80, 50, 50, 18),
+                clearRect: new DOMRect(0, 40, 800, 60),
+            }),
+        )
+        const pop = root.querySelector('.gf-syn') as HTMLElement
+        const top = parseInt(pop.style.top, 10)
+        const POPOVER_GAP_BELOW = 6
+        expect(top).toBeGreaterThanOrEqual(100 + POPOVER_GAP_BELOW)
     })
 })
