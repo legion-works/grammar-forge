@@ -164,3 +164,17 @@ cd eval && uv venv && uv pip install errant "click<8.2" nltk pytest ruff && \
 The `click<8.2` pin is required (typer dropped the click shim spaCy's `download` CLI uses).
 `nltk` (+ `punkt`/`punkt_tab`) is needed for CoNLL PTB tokenization; `pytest`/`ruff` run the
 harness unit tests + lint. `jfleg_eval.py` needs no extra deps (pure stdlib).
+
+## 4. Clean-text FP eval
+
+Every sentence in `clean_corpus.jsonl` is known-clean; any suggestion is a false
+positive (deliberately STRICTER than run_eval.py's applied-text-differs check —
+a suggestion on clean text is a user-visible underline even when applying it is
+a no-op; do not "align" the two definitions). Regenerate the corpus with
+`build_clean_corpus.py` after golden changes.
+
+    python3 clean_eval.py http://127.0.0.1:8001 clean_corpus.jsonl --max-fp-rate 12
+
+Baseline lives in `clean_baseline.json` — gate PRs at (baseline + 2pp) or better.
+Registers: `golden` (golden outputs), `casual`, `technical`, `british`.
+Per-model attribution tells you WHERE the FP came from (`harper`/`gector`/`llm`).

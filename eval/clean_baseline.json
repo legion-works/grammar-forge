@@ -1,0 +1,18 @@
+{
+  "date": "2026-07-04",
+  "bridge": "f1f7c77",
+  "fp_rate": 0.1161,
+  "false_positives": 18,
+  "total": 155,
+  "by_model": {
+    "llm": 18,
+    "harper": 0,
+    "gector": 0
+  },
+  "by_register": {
+    "golden": 5,
+    "casual": 12,
+    "british": 1,
+    "technical": 0
+  }
+}
