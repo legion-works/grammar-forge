@@ -425,7 +425,7 @@ func TestLoad_RejectSuppressionOverrides(t *testing.T) {
 // (correction.NewDialectSpellingRepair over the embedded VarCon lexicon)
 // is OFF by default. Enable is an eval-gated operator action after the
 // Phase-E gates pass (full cold golden + clean-text FP at or below
-// baseline). The Harvard-only-by-default semantics live in the wiring
+// baseline). The British-only-by-default semantics live in the wiring
 // (main.go): the flag is ignored on non-British deploys, so American
 // deploys never pay the construction cost — see main.go for the
 // conditional that gates both the LLM rebuild and the 316KB embed parse.

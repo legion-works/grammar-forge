@@ -1,6 +1,7 @@
 package correction
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -119,6 +120,33 @@ func NewDialectSpellingRepair(lexicon map[string]string) OverEditRule {
 			return corrected
 		}
 
+		// Sort splices ascending by start before the apply loop. The
+		// splice list is built by ranging over `active` (which itself
+		// is built from the `origWords` map), so without this sort the
+		// list arrives in Go's randomised map-iteration order. Each
+		// findWholeWordReplacements call returns splices for ONE
+		// needle, already ascending — but concatenating the per-needle
+		// batches in random order BREAKS the last-to-first apply
+		// invariant: an earlier-by-byte splice sitting LATER in the
+		// list would get applied first, slicing into byte offsets
+		// that the earlier edit has already shifted, producing
+		// non-deterministic text corruption ("myneighbourr'sfavouritee
+		// armour"). The fix is structural, not on a per-needle basis —
+		// even a fully sorted `active` list would still produce
+		// interleaved splices when multiple needles match at non-aligned
+		// offsets. Sorting here also makes the output deterministic
+		// across runs. (quartet-e-rev finding #1, 2026-07-04.)
+		sort.Slice(splices, func(i, j int) bool {
+			if splices[i].start != splices[j].start {
+				return splices[i].start < splices[j].start
+			}
+			// Tie-break on end (longer match first) so a fully-overlapping
+			// pair of splices has stable drop precedence. Stable — no
+			// production impact today (end always differs when start ties),
+			// but keeps the sort a total order.
+			return splices[i].end > splices[j].end
+		})
+
 		// Apply last-to-first so earlier byte offsets stay valid
 		// (same house pattern as the other OverEditRule implementations
 		// in overedit.go).
@@ -192,10 +220,18 @@ func splitWords(s string) []string {
 
 // findWholeWordReplacements locates every whole-word occurrence of
 // needle in haystack and returns splices that replace it with
-// case-preserving repl (lower, but with the FIRST rune's case copied
-// from the matched token's first rune). Whole-word means the byte
-// immediately before is not a letter and the byte immediately after is
-// not a letter (or the string edge).
+// case-preserving repl. Case is preserved across the three-tier matrix
+// (reviewer finding #5):
+//
+//   - matched span is entirely uppercase (len > 1, every byte A-Z):
+//     emit the replacement fully uppercased ("COLOR" → "COLOUR");
+//   - matched span starts with an uppercase letter but isn't all-upper:
+//     title-case the replacement ("Color" → "Colour");
+//   - matched span is all-lowercase: emit the replacement as-is
+//     ("color" → "colour").
+//
+// Whole-word means the byte immediately before is not a letter and the
+// byte immediately after is not a letter (or the string edge).
 func findWholeWordReplacements(haystack, needle, repl string) []dialectSplice {
 	if needle == "" {
 		return nil
@@ -217,22 +253,45 @@ func findWholeWordReplacements(haystack, needle, repl string) []dialectSplice {
 			i = matchStart + 1
 			continue
 		}
-		// Preserve the case of the first rune of the matched span.
-		firstRune, _ := decodeFirstRune(haystack[matchStart:matchEnd])
-		var casedRepl string
-		if firstRune >= 'A' && firstRune <= 'Z' {
-			casedRepl = upperFirstRune(repl)
-		} else {
-			casedRepl = repl
-		}
 		splices = append(splices, dialectSplice{
 			start: matchStart,
 			end:   matchEnd,
-			repl:  casedRepl,
+			repl:  renderCasedReplacement(haystack[matchStart:matchEnd], repl),
 		})
 		i = matchEnd
 	}
 	return splices
+}
+
+// renderCasedReplacement inspects the case profile of the ASCII-matched
+// span and emits the replacement in the matching case. The span is
+// guaranteed single-byte ASCII by indexFoldASCII (a multi-byte rune >0x7F
+// would never match our lowercase needle's bytes), so byte-by-byte
+// inspection is sound and beats a UTF-8 decoder on the hot path.
+func renderCasedReplacement(matched, repl string) string {
+	allUpper := len(matched) > 1
+	for k := 0; k < len(matched); k++ {
+		b := matched[k]
+		switch {
+		case b >= 'a' && b <= 'z':
+			allUpper = false
+		case b >= 'A' && b <= 'Z':
+			// still possibly all-upper
+		default:
+			// digits / punctuation disqualify allUpper but don't change
+			// the title-case branch (which only checks the first byte).
+			allUpper = false
+		}
+	}
+	firstIsUpper := len(matched) > 0 && matched[0] >= 'A' && matched[0] <= 'Z'
+	switch {
+	case allUpper:
+		return upperASCIIString(repl)
+	case firstIsUpper:
+		return upperFirstRune(repl)
+	default:
+		return repl
+	}
 }
 
 // isLeftBoundary reports whether position p in s is at the start of a
@@ -305,8 +364,9 @@ func lowerASCII(c byte) byte {
 	return c
 }
 
-// upperFirstRune returns s with its first rune upper-cased (ASCII-only).
-// Dialect replacements are ASCII so we don't need full Unicode handling.
+// upperFirstRune returns s with its first byte upper-cased. ASCII-only —
+// the lexicon is built from ASCII VarCon entries and dialect replacements
+// (colour, theatre, …) are likewise ASCII.
 func upperFirstRune(s string) string {
 	if s == "" {
 		return s
@@ -318,34 +378,25 @@ func upperFirstRune(s string) string {
 	return s
 }
 
-// decodeFirstRune returns the first rune of s plus its byte width.
-// Only ASCII is expected, but the helper is implemented in
-// general form so it cannot fail on a non-ASCII diacritic slipped in
-// from the corrected text (the caller uses the rune purely for casing).
-func decodeFirstRune(s string) (rune, int) {
+// upperASCIIString returns s with every ASCII a-z byte mapped to A-Z.
+// Non-letter bytes pass through unchanged; this matches the rule's
+// scope (the embedded lexicon is ASCII).
+func upperASCIIString(s string) string {
+	hasLower := false
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c < 0x80:
-			return rune(c), 1
-		case c < 0xC0:
-			// stray continuation byte — skip and keep scanning
-		case c < 0xE0:
-			if i+1 < len(s) {
-				return rune(c&0x1F)<<6 | rune(s[i+1]&0x3F), 2
-			}
-			return rune(c), 1
-		case c < 0xF0:
-			if i+2 < len(s) {
-				return rune(c&0x0F)<<12 | rune(s[i+1]&0x3F)<<6 | rune(s[i+2]&0x3F), 3
-			}
-			return rune(c), 1
-		default:
-			if i+3 < len(s) {
-				return rune(c&0x07)<<18 | rune(s[i+1]&0x3F)<<12 | rune(s[i+2]&0x3F)<<6 | rune(s[i+3]&0x3F), 4
-			}
-			return rune(c), 1
+		if s[i] >= 'a' && s[i] <= 'z' {
+			hasLower = true
+			break
 		}
 	}
-	return 0, 0
+	if !hasLower {
+		return s
+	}
+	b := []byte(s)
+	for i := 0; i < len(b); i++ {
+		if b[i] >= 'a' && b[i] <= 'z' {
+			b[i] -= 'a' - 'A'
+		}
+	}
+	return string(b)
 }

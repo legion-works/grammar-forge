@@ -102,6 +102,33 @@ EXCLUDE_MARKERS = {"x", "-"}            # markers on a tag that disqualify its p
 TAG_RE = re.compile(r"^[A-Z][vx.?\-]?$") # a valid dialect tag token
 ANNOTATION_RE = re.compile(r"\|")       # POS / context annotation marker
 
+# Cleanup-pass blocklist: pairs pulled from the raw extract that we
+# intentionally do NOT ship, with a one-line justification for each. Add
+# new entries here (with a source citation) rather than mutating the
+# upstream file. Reviewer cross-family audit (2026-07-04 quartet-e-rev
+# findings #2 + #3) flagged:
+#
+#   - "micrograms" -> "nanogrammes": upstream varcon.txt line 32543
+#     copy-paste typo (the correct pair for microgram/microgramme sits
+#     at lines 32541-32542). Embedding it would silently corrupt user
+#     text from micrograms -> nanogrammes (a 1000x unit-magnitude
+#     semantic flip) whenever the original also contained the whole
+#     word "nanogrammes". Drop entirely.
+#
+#   - "sync", "dis", "ha", "et": short / rare / stale tokens where the
+#     modern British register matches American usage (synchronisation-
+#     spelling drifted to "sync" universally; "dis"/"ha"/"et" mostly
+#     appear as sub-string morphemes rather than standalone words). The
+#     reviewer audit found no real homograph collision in this set, but
+#     the spelling-preference flip is high-noise for the user; prune.
+BLOCKLIST_US = frozenset({
+    "micrograms",  # upstream typo — see comment above
+    "sync",        # modern British writing uses "sync"; no useful revert
+    "dis",         # rare as a standalone word; mostly a sub-string morpheme
+    "ha",          # rare; modern register is "hah"
+    "et",          # rare; modern register is "et" / "aet" both uncommon
+})
+
 
 def _tag_blob_has_primary(tag_blob: str, primary: str) -> bool:
     """Does this tag blob contain a primary 'primary' tag WITHOUT exclusion?
@@ -177,6 +204,8 @@ def extract_pair(line: str) -> tuple[str, str] | None:
     us = _clean(_first_word(us_side) or "")
     gb = _clean(_first_word(gb_side) or "")
     if us is None or gb is None or us == gb:
+        return None
+    if us in BLOCKLIST_US:
         return None
     return us, gb
 

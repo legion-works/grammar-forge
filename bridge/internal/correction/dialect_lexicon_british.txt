@@ -2865,7 +2865,6 @@ diplomatize	diplomatise
 diplomatized	diplomatised
 diplomatizes	diplomatises
 diplomatizing	diplomatising
-dis	diss
 disangularize	disangularise
 disangularizes	disangularises
 disauthorize	disauthorise
@@ -3617,7 +3616,6 @@ estuate	aestuate
 estuous	aestuous
 esture	aesture
 estus	aestus
-et	aet
 eternalization	eternalisation
 eternalizations	eternalisations
 eternalize	eternalise
@@ -4592,7 +4590,6 @@ gyrostabilization	gyrostabilisation
 gyrostabilizations	gyrostabilisations
 gyrostabilizer	gyrostabiliser
 gyrostabilizers	gyrostabilisers
-ha	hah
 habitualize	habitualise
 habitualizes	habitualises
 hamletization	hamletisation
@@ -6477,7 +6474,6 @@ microcolorimetric	microcolourimetric
 microcolorimetrically	microcolourimetrically
 microcolorimetry	microcolourimetry
 microgram	microgramme
-micrograms	nanogrammes
 microliter	microlitre
 microliters	microlitres
 micromillimeter	micromillimetre
@@ -10845,7 +10841,6 @@ symptomizes	symptomises
 synalepha	synaloepha
 synalephas	synaloephas
 synalephe	synaloephe
-sync	synch
 synced	synched
 synchronizable	synchronisable
 synchronizables	synchronisables

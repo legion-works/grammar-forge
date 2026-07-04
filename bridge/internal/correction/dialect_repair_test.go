@@ -91,3 +91,40 @@ func TestDialectRepairIgnoresEmptyOrDisabledLexicon(t *testing.T) {
 		require.Equal(t, "I like the color scheme.", got)
 	})
 }
+
+// TestDialectRepairMultiplePairsInOneSentence is the regression anchor for
+// the multi-pair splice-ordering bug found in cross-family review
+// (quartet-e-rev finding #1). When 2+ distinct (american, dialect) pairs
+// trigger in the same sentence, the rule must produce the SAME byte-for-byte
+// revert on every run — independent of Go's randomised map-iteration order —
+// and a clean (un-concatenated) full revert of every word. Run with -count=50
+// to flush out map-iteration-order drift; without the splice-sort fix this
+// reproducibly corrupts output ("myneighbourr'sfavouritee armour", etc.)
+// roughly 11/12 of runs.
+func TestDialectRepairMultiplePairsInOneSentence(t *testing.T) {
+	rule := NewDialectSpellingRepair(map[string]string{
+		"color":    "colour",
+		"neighbor": "neighbour",
+		"favorite": "favourite",
+		"armor":    "armour",
+	})
+	got := rule(
+		"I love the colour of my neighbour's favourite armour.",
+		"I love the color of my neighbor's favorite armor.",
+	)
+	require.Equal(t,
+		"I love the colour of my neighbour's favourite armour.",
+		got,
+		"multi-pair revert must restore every dialect word exactly, regardless of map-iteration order")
+}
+
+// TestDialectRepairAllCapsPreserved caps the case-preservation matrix at
+// the ALL-CAPS end: when the matched whole word is entirely uppercase
+// (length > 1), the replacement is rendered fully uppercase too. Reviewer
+// finding #5 (quartet-e-rev): "I LOVE COLOUR" / "I LOVE COLOR" must yield
+// "I LOVE COLOUR", not "Colour".
+func TestDialectRepairAllCapsPreserved(t *testing.T) {
+	rule := NewDialectSpellingRepair(map[string]string{"color": "colour"})
+	got := rule("I LOVE COLOUR SO MUCH.", "I LOVE COLOR SO MUCH.")
+	require.Equal(t, "I LOVE COLOUR SO MUCH.", got)
+}
