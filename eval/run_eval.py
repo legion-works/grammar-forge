@@ -2,14 +2,16 @@
 """GrammarForge GEC eval: feed a cases file to the bridge /correct endpoint,
 apply the returned byte-offset suggestions, and score against gold.
 
-Usage: python3 eval/run_eval.py [bridge_url] [cases_file]
+Usage: python3 eval/run_eval.py [bridge_url] [cases_file] [--require-exact]
   bridge_url  default http://127.0.0.1:8000
   cases_file  default eval/golden.jsonl (JSONL of {id,cat,input,golden})
+  --require-exact  exit 1 unless every case passed (default: exit 0)
 
 results are written next to the cases file as <cases_stem>.results.json
 (golden.jsonl -> golden.results.json; keeps multiple eval sets side by side).
 """
 
+import argparse
 import json
 import sys
 import urllib.request
@@ -17,9 +19,15 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 from pathlib import Path
 
-BRIDGE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000").rstrip("/")
+# Parse known flags before positional args so module-level code works.
+_parser = argparse.ArgumentParser(add_help=False)
+_parser.add_argument("--require-exact", action="store_true", default=False)
+_known, _rest = _parser.parse_known_args()
+REQUIRE_EXACT = _known.require_exact
+
+BRIDGE = (_rest[0] if len(_rest) > 0 else "http://127.0.0.1:8000").rstrip("/")
 HERE = Path(__file__).parent
-CASES_FILE = Path(sys.argv[2]) if len(sys.argv) > 2 else (HERE / "golden.jsonl")
+CASES_FILE = Path(_rest[1]) if len(_rest) > 1 else (HERE / "golden.jsonl")
 CASES = [
     json.loads(line) for line in CASES_FILE.read_text().splitlines() if line.strip()
 ]
@@ -27,7 +35,7 @@ CASES = [
 # cases file writes <stem>.results.json so multiple sets coexist.
 RESULTS_FILE = (
     (HERE / "results.json")
-    if len(sys.argv) <= 2
+    if len(_rest) <= 1
     else CASES_FILE.with_suffix(".results.json")
 )
 
@@ -163,7 +171,14 @@ def main():
 
     # average similarity (partial-credit signal)
     sims = [r["similarity"] for r in results if "similarity" in r]
-    print(f"\nMean char similarity to gold: {sum(sims) / len(sims):.3f}")
+    if sims:
+        print(f"\nMean char similarity to gold: {sum(sims) / len(sims):.3f}")
+    else:
+        print("\nMean char similarity to gold: N/A (no results with similarity)")
+
+    if REQUIRE_EXACT and overall["fail"] > 0:
+        print(f"\n--require-exact: {overall['fail']} failures → exit 1")
+        return 1
     return 0
 
 
