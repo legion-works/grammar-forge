@@ -1763,7 +1763,7 @@ func TestServiceSynonymsNilThesaurus(t *testing.T) {
 	require.Nil(t, got, "nil thesaurus + flag on => nil, no panic (boot path before SetThesaurus)")
 }
 
-// ---- semantic verifier gate (C1) ----
+// ---- semantic verifier gate ----
 // A SemanticVerifier scores how much meaning two texts share (0..1). When
 // the service is configured with one and the score drops below threshold,
 // the LLM rewrite is discarded before diffing. The verifier fails OPEN:
@@ -1874,6 +1874,41 @@ func TestSemanticVerifierRejectionKeepsPickyStylePass(t *testing.T) {
 	}
 	require.Equal(t, 1, styleCount, "style pass must still run after rejection")
 	require.Equal(t, 0, grammarLLMCount, "rejected grammar rewrite must not appear")
+}
+
+// Escalation site + picky=true (the load-bearing invariant the council pinned
+// down): a low-confidence fast edit forces escalation; the LLM grammar
+// output is rejected by the verifier; the fast-path suggestion survives;
+// and the picky style pass STILL runs. Catches an early-return regression
+// in the escalation-arm gate that would silently drop the style pass.
+func TestSemanticVerifierEscalationRejectionKeepsPickyStylePass(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	llm := &scriptedLLM{
+		grammarOut: "Completely unrelated sentence.", // verifier rejects
+		styleOut:   "I has a kitty",                  // valid, non-overlapping style edit
+	}
+	svc := NewService(pickyPB{}, []Corrector{fc}, llm, st, "m", fastPolicy())
+	svc.SetSemanticVerifier(fakeVerifier{sim: 0.10}, 0.80)
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Picky: true})
+	require.NoError(t, err)
+	var fastCount, styleCount, grammarLLMCount int
+	for _, s := range got.Suggestions {
+		switch {
+		case s.Model == ModelGECToR:
+			fastCount++
+		case s.Category == CategoryStyle:
+			styleCount++
+		case s.Model == ModelLLM:
+			grammarLLMCount++
+		}
+	}
+	require.Equal(t, 1, fastCount, "fast-path suggestion must survive the rejected rewrite")
+	require.Equal(t, 1, styleCount, "style pass must still run after escalation-arm rejection")
+	require.Equal(t, 0, grammarLLMCount, "rejected LLM grammar rewrite must not appear")
 }
 
 // writeMobyTempFile writes a one-line Moby-format dataset containing the
