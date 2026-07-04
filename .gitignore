@@ -37,6 +37,7 @@ adapters/
 *.test
 *.out
 bridge/bridge
+bridge/semverify-probe
 /bin/
 vendor/
 
@@ -51,6 +52,7 @@ bridge/native/harper-c/target/
 bridge/models/gector/*
 !bridge/models/gector/README.md
 bridge/models/minilm/*
+!bridge/models/minilm/README.md
 # Any local model-rollback backups (e.g. gector.deberta-backup/ kept on disk as a
 # revert anchor after a model swap) — large weights, never commit (public repo).
 bridge/models/*-backup/
@@ -68,6 +70,8 @@ env/
 .ruff_cache/
 .mypy_cache/
 *.jsonl
+# sentence-transformers downloads (Phase C, Task C4 calibration study).
+eval/.huggingface_cache/
 
 # --- Node / TypeScript (vencord plugin, browser extension fork) ---
 node_modules/
@@ -87,6 +91,8 @@ docker-compose.override.yml
 # cold-restart protocol in eval/README.md.
 !eval/golden.jsonl
 !eval/clean_corpus.jsonl
+# Phase C semantic-verifier fixture pairs (extracted from overedit_test.go).
+!eval/overedit_fixtures.jsonl
 
 # --- Editor / OS ---
 .DS_Store

@@ -1,0 +1,1130 @@
+{
+  "tolerance": 0.02,
+  "n_pairs": 159,
+  "max_abs_delta": 1e-06,
+  "mean_abs_delta": 0.0,
+  "pairs_over_tolerance": 0,
+  "verdict": "PROXY HOLDS",
+  "ground_truth": {
+    "min_golden": 0.566428,
+    "max_overedit": 1.0,
+    "separation": -0.433572,
+    "chosen_threshold": null,
+    "verdict": "NO SAFE THRESHOLD — do not enable (sep -0.4336 <= 0.05)"
+  },
+  "pairs": [
+    {
+      "id": "g1",
+      "kind": "golden",
+      "python_cosine": 0.988901,
+      "go_cosine": 0.988901,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g10",
+      "kind": "golden",
+      "python_cosine": 0.995137,
+      "go_cosine": 0.995137,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g100",
+      "kind": "golden",
+      "python_cosine": 0.9601,
+      "go_cosine": 0.9601,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g101",
+      "kind": "golden",
+      "python_cosine": 0.978377,
+      "go_cosine": 0.978377,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g102",
+      "kind": "golden",
+      "python_cosine": 0.893985,
+      "go_cosine": 0.893985,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g103",
+      "kind": "golden",
+      "python_cosine": 0.981594,
+      "go_cosine": 0.981594,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g104",
+      "kind": "golden",
+      "python_cosine": 0.953706,
+      "go_cosine": 0.953706,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g105",
+      "kind": "golden",
+      "python_cosine": 0.946151,
+      "go_cosine": 0.946151,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g106",
+      "kind": "golden",
+      "python_cosine": 0.824015,
+      "go_cosine": 0.824015,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g107",
+      "kind": "golden",
+      "python_cosine": 0.586236,
+      "go_cosine": 0.586237,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g108",
+      "kind": "golden",
+      "python_cosine": 0.957784,
+      "go_cosine": 0.957784,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g109",
+      "kind": "golden",
+      "python_cosine": 0.992931,
+      "go_cosine": 0.992931,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g11",
+      "kind": "golden",
+      "python_cosine": 0.9929,
+      "go_cosine": 0.9929,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g110",
+      "kind": "golden",
+      "python_cosine": 0.91384,
+      "go_cosine": 0.91384,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g111",
+      "kind": "golden",
+      "python_cosine": 0.889352,
+      "go_cosine": 0.889352,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g112",
+      "kind": "golden",
+      "python_cosine": 0.89904,
+      "go_cosine": 0.89904,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g113",
+      "kind": "golden",
+      "python_cosine": 0.832598,
+      "go_cosine": 0.832599,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g114",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g115",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g116",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g117",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g118",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g119",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g12",
+      "kind": "golden",
+      "python_cosine": 0.999589,
+      "go_cosine": 0.999589,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g120",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g121",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g122",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g123",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g124",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g125",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g13",
+      "kind": "golden",
+      "python_cosine": 0.999639,
+      "go_cosine": 0.999639,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g14",
+      "kind": "golden",
+      "python_cosine": 0.999747,
+      "go_cosine": 0.999746,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g15",
+      "kind": "golden",
+      "python_cosine": 0.999747,
+      "go_cosine": 0.999747,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g16",
+      "kind": "golden",
+      "python_cosine": 0.969636,
+      "go_cosine": 0.969636,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g17",
+      "kind": "golden",
+      "python_cosine": 0.968492,
+      "go_cosine": 0.968492,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g18",
+      "kind": "golden",
+      "python_cosine": 0.914044,
+      "go_cosine": 0.914044,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g19",
+      "kind": "golden",
+      "python_cosine": 0.960258,
+      "go_cosine": 0.960258,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g2",
+      "kind": "golden",
+      "python_cosine": 0.987943,
+      "go_cosine": 0.987943,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g20",
+      "kind": "golden",
+      "python_cosine": 0.952969,
+      "go_cosine": 0.952969,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g21",
+      "kind": "golden",
+      "python_cosine": 0.8927,
+      "go_cosine": 0.8927,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g22",
+      "kind": "golden",
+      "python_cosine": 0.987449,
+      "go_cosine": 0.987448,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g23",
+      "kind": "golden",
+      "python_cosine": 0.80435,
+      "go_cosine": 0.80435,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g24",
+      "kind": "golden",
+      "python_cosine": 0.985564,
+      "go_cosine": 0.985564,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g25",
+      "kind": "golden",
+      "python_cosine": 0.878897,
+      "go_cosine": 0.878897,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g26",
+      "kind": "golden",
+      "python_cosine": 0.947947,
+      "go_cosine": 0.947947,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g27",
+      "kind": "golden",
+      "python_cosine": 0.863933,
+      "go_cosine": 0.863933,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g28",
+      "kind": "golden",
+      "python_cosine": 0.924307,
+      "go_cosine": 0.924307,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g29",
+      "kind": "golden",
+      "python_cosine": 0.79632,
+      "go_cosine": 0.79632,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g3",
+      "kind": "golden",
+      "python_cosine": 0.977116,
+      "go_cosine": 0.977116,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g30",
+      "kind": "golden",
+      "python_cosine": 0.68042,
+      "go_cosine": 0.680421,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g31",
+      "kind": "golden",
+      "python_cosine": 0.969148,
+      "go_cosine": 0.969148,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g32",
+      "kind": "golden",
+      "python_cosine": 0.934003,
+      "go_cosine": 0.934003,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g33",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g34",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g35",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g36",
+      "kind": "golden",
+      "python_cosine": 0.951821,
+      "go_cosine": 0.951821,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g37",
+      "kind": "golden",
+      "python_cosine": 0.930933,
+      "go_cosine": 0.930932,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g38",
+      "kind": "golden",
+      "python_cosine": 0.961717,
+      "go_cosine": 0.961716,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g39",
+      "kind": "golden",
+      "python_cosine": 0.963417,
+      "go_cosine": 0.963417,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g4",
+      "kind": "golden",
+      "python_cosine": 0.988043,
+      "go_cosine": 0.988043,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g40",
+      "kind": "golden",
+      "python_cosine": 0.985189,
+      "go_cosine": 0.985189,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g41",
+      "kind": "golden",
+      "python_cosine": 0.992916,
+      "go_cosine": 0.992916,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g42",
+      "kind": "golden",
+      "python_cosine": 0.963412,
+      "go_cosine": 0.963412,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g43",
+      "kind": "golden",
+      "python_cosine": 0.990976,
+      "go_cosine": 0.990976,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g44",
+      "kind": "golden",
+      "python_cosine": 0.917178,
+      "go_cosine": 0.917179,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g45",
+      "kind": "golden",
+      "python_cosine": 0.971106,
+      "go_cosine": 0.971106,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g46",
+      "kind": "golden",
+      "python_cosine": 0.920273,
+      "go_cosine": 0.920272,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g47",
+      "kind": "golden",
+      "python_cosine": 0.956896,
+      "go_cosine": 0.956896,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g48",
+      "kind": "golden",
+      "python_cosine": 0.969271,
+      "go_cosine": 0.96927,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g49",
+      "kind": "golden",
+      "python_cosine": 0.967055,
+      "go_cosine": 0.967055,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g5",
+      "kind": "golden",
+      "python_cosine": 0.99742,
+      "go_cosine": 0.99742,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g50",
+      "kind": "golden",
+      "python_cosine": 0.949262,
+      "go_cosine": 0.949262,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g51",
+      "kind": "golden",
+      "python_cosine": 0.902272,
+      "go_cosine": 0.902272,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g52",
+      "kind": "golden",
+      "python_cosine": 0.956733,
+      "go_cosine": 0.956733,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g53",
+      "kind": "golden",
+      "python_cosine": 0.975498,
+      "go_cosine": 0.975498,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g54",
+      "kind": "golden",
+      "python_cosine": 0.972869,
+      "go_cosine": 0.972869,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g55",
+      "kind": "golden",
+      "python_cosine": 0.566428,
+      "go_cosine": 0.566428,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g56",
+      "kind": "golden",
+      "python_cosine": 0.80301,
+      "go_cosine": 0.803011,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "g57",
+      "kind": "golden",
+      "python_cosine": 0.631429,
+      "go_cosine": 0.631429,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g58",
+      "kind": "golden",
+      "python_cosine": 0.934242,
+      "go_cosine": 0.934242,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g59",
+      "kind": "golden",
+      "python_cosine": 0.99666,
+      "go_cosine": 0.99666,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g6",
+      "kind": "golden",
+      "python_cosine": 0.961516,
+      "go_cosine": 0.961516,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g60",
+      "kind": "golden",
+      "python_cosine": 0.968255,
+      "go_cosine": 0.968255,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g61",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g62",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g63",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g64",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g65",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g66",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g67",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g68",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g69",
+      "kind": "golden",
+      "python_cosine": 0.996221,
+      "go_cosine": 0.996221,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g7",
+      "kind": "golden",
+      "python_cosine": 0.983857,
+      "go_cosine": 0.983857,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g70",
+      "kind": "golden",
+      "python_cosine": 0.989193,
+      "go_cosine": 0.989193,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g71",
+      "kind": "golden",
+      "python_cosine": 0.994653,
+      "go_cosine": 0.994653,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g72",
+      "kind": "golden",
+      "python_cosine": 0.996247,
+      "go_cosine": 0.996247,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g73",
+      "kind": "golden",
+      "python_cosine": 0.978652,
+      "go_cosine": 0.978652,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g74",
+      "kind": "golden",
+      "python_cosine": 0.95116,
+      "go_cosine": 0.95116,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g75",
+      "kind": "golden",
+      "python_cosine": 0.985204,
+      "go_cosine": 0.985204,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g76",
+      "kind": "golden",
+      "python_cosine": 0.969111,
+      "go_cosine": 0.969111,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g77",
+      "kind": "golden",
+      "python_cosine": 0.988112,
+      "go_cosine": 0.988112,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g78",
+      "kind": "golden",
+      "python_cosine": 0.999928,
+      "go_cosine": 0.999928,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g79",
+      "kind": "golden",
+      "python_cosine": 0.999812,
+      "go_cosine": 0.999812,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g8",
+      "kind": "golden",
+      "python_cosine": 0.987376,
+      "go_cosine": 0.987376,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g80",
+      "kind": "golden",
+      "python_cosine": 0.979458,
+      "go_cosine": 0.979458,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g81",
+      "kind": "golden",
+      "python_cosine": 0.993469,
+      "go_cosine": 0.993469,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g82",
+      "kind": "golden",
+      "python_cosine": 0.980628,
+      "go_cosine": 0.980628,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g83",
+      "kind": "golden",
+      "python_cosine": 0.967494,
+      "go_cosine": 0.967494,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g84",
+      "kind": "golden",
+      "python_cosine": 0.993037,
+      "go_cosine": 0.993037,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g85",
+      "kind": "golden",
+      "python_cosine": 0.979398,
+      "go_cosine": 0.979398,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g86",
+      "kind": "golden",
+      "python_cosine": 0.99171,
+      "go_cosine": 0.99171,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g87",
+      "kind": "golden",
+      "python_cosine": 0.868027,
+      "go_cosine": 0.868027,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g88",
+      "kind": "golden",
+      "python_cosine": 0.838623,
+      "go_cosine": 0.838623,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g89",
+      "kind": "golden",
+      "python_cosine": 0.836399,
+      "go_cosine": 0.836399,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g9",
+      "kind": "golden",
+      "python_cosine": 0.98492,
+      "go_cosine": 0.98492,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g90",
+      "kind": "golden",
+      "python_cosine": 0.895634,
+      "go_cosine": 0.895634,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g91",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g92",
+      "kind": "golden",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g93",
+      "kind": "golden",
+      "python_cosine": 0.988575,
+      "go_cosine": 0.988575,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g94",
+      "kind": "golden",
+      "python_cosine": 0.986652,
+      "go_cosine": 0.986652,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g95",
+      "kind": "golden",
+      "python_cosine": 0.979708,
+      "go_cosine": 0.979708,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g96",
+      "kind": "golden",
+      "python_cosine": 0.994305,
+      "go_cosine": 0.994305,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g97",
+      "kind": "golden",
+      "python_cosine": 0.992914,
+      "go_cosine": 0.992914,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g98",
+      "kind": "golden",
+      "python_cosine": 0.996139,
+      "go_cosine": 0.996139,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "g99",
+      "kind": "golden",
+      "python_cosine": 0.952065,
+      "go_cosine": 0.952065,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f0",
+      "kind": "overedit",
+      "python_cosine": 0.998587,
+      "go_cosine": 0.998587,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f1",
+      "kind": "overedit",
+      "python_cosine": 0.980613,
+      "go_cosine": 0.980613,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f10",
+      "kind": "overedit",
+      "python_cosine": 0.98454,
+      "go_cosine": 0.98454,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f11",
+      "kind": "overedit",
+      "python_cosine": 0.943792,
+      "go_cosine": 0.943792,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f12",
+      "kind": "overedit",
+      "python_cosine": 0.940201,
+      "go_cosine": 0.940201,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f13",
+      "kind": "overedit",
+      "python_cosine": 0.948369,
+      "go_cosine": 0.948369,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f14",
+      "kind": "overedit",
+      "python_cosine": 0.891804,
+      "go_cosine": 0.891804,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f15",
+      "kind": "overedit",
+      "python_cosine": 0.976936,
+      "go_cosine": 0.976936,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f16",
+      "kind": "overedit",
+      "python_cosine": 0.930103,
+      "go_cosine": 0.930103,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f17",
+      "kind": "overedit",
+      "python_cosine": 0.953432,
+      "go_cosine": 0.953432,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f18",
+      "kind": "overedit",
+      "python_cosine": 0.937335,
+      "go_cosine": 0.937335,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f19",
+      "kind": "overedit",
+      "python_cosine": 0.915455,
+      "go_cosine": 0.915454,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "f2",
+      "kind": "overedit",
+      "python_cosine": 0.879641,
+      "go_cosine": 0.879641,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f20",
+      "kind": "overedit",
+      "python_cosine": 0.867692,
+      "go_cosine": 0.867692,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f21",
+      "kind": "overedit",
+      "python_cosine": 0.915322,
+      "go_cosine": 0.915322,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f22",
+      "kind": "overedit",
+      "python_cosine": 0.71353,
+      "go_cosine": 0.71353,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f23",
+      "kind": "overedit",
+      "python_cosine": 0.904755,
+      "go_cosine": 0.904755,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f24",
+      "kind": "overedit",
+      "python_cosine": 0.705738,
+      "go_cosine": 0.705738,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f25",
+      "kind": "overedit",
+      "python_cosine": 0.752187,
+      "go_cosine": 0.752187,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f26",
+      "kind": "overedit",
+      "python_cosine": 0.908151,
+      "go_cosine": 0.908151,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f27",
+      "kind": "overedit",
+      "python_cosine": 0.626412,
+      "go_cosine": 0.626412,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f28",
+      "kind": "overedit",
+      "python_cosine": 0.731107,
+      "go_cosine": 0.731107,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f29",
+      "kind": "overedit",
+      "python_cosine": 0.810214,
+      "go_cosine": 0.810214,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f3",
+      "kind": "overedit",
+      "python_cosine": 0.981675,
+      "go_cosine": 0.981675,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f30",
+      "kind": "overedit",
+      "python_cosine": 0.731859,
+      "go_cosine": 0.731859,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f31",
+      "kind": "overedit",
+      "python_cosine": 0.932973,
+      "go_cosine": 0.932973,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f32",
+      "kind": "overedit",
+      "python_cosine": 0.936666,
+      "go_cosine": 0.936665,
+      "abs_delta": 1e-06
+    },
+    {
+      "id": "f33",
+      "kind": "overedit",
+      "python_cosine": 0.772448,
+      "go_cosine": 0.772448,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f4",
+      "kind": "overedit",
+      "python_cosine": 0.99241,
+      "go_cosine": 0.99241,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f5",
+      "kind": "overedit",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f6",
+      "kind": "overedit",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f7",
+      "kind": "overedit",
+      "python_cosine": 1.0,
+      "go_cosine": 1.0,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f8",
+      "kind": "overedit",
+      "python_cosine": 0.959738,
+      "go_cosine": 0.959738,
+      "abs_delta": 0.0
+    },
+    {
+      "id": "f9",
+      "kind": "overedit",
+      "python_cosine": 0.988806,
+      "go_cosine": 0.988806,
+      "abs_delta": 0.0
+    }
+  ]
+}

@@ -1,0 +1,810 @@
+{
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "golden": [
+    {
+      "id": 1,
+      "cosine": 0.988901,
+      "kind": "golden"
+    },
+    {
+      "id": 2,
+      "cosine": 0.987943,
+      "kind": "golden"
+    },
+    {
+      "id": 3,
+      "cosine": 0.977116,
+      "kind": "golden"
+    },
+    {
+      "id": 4,
+      "cosine": 0.988043,
+      "kind": "golden"
+    },
+    {
+      "id": 5,
+      "cosine": 0.99742,
+      "kind": "golden"
+    },
+    {
+      "id": 6,
+      "cosine": 0.961516,
+      "kind": "golden"
+    },
+    {
+      "id": 7,
+      "cosine": 0.983857,
+      "kind": "golden"
+    },
+    {
+      "id": 8,
+      "cosine": 0.987376,
+      "kind": "golden"
+    },
+    {
+      "id": 9,
+      "cosine": 0.98492,
+      "kind": "golden"
+    },
+    {
+      "id": 10,
+      "cosine": 0.995137,
+      "kind": "golden"
+    },
+    {
+      "id": 11,
+      "cosine": 0.9929,
+      "kind": "golden"
+    },
+    {
+      "id": 12,
+      "cosine": 0.999589,
+      "kind": "golden"
+    },
+    {
+      "id": 13,
+      "cosine": 0.999639,
+      "kind": "golden"
+    },
+    {
+      "id": 14,
+      "cosine": 0.999747,
+      "kind": "golden"
+    },
+    {
+      "id": 15,
+      "cosine": 0.999747,
+      "kind": "golden"
+    },
+    {
+      "id": 16,
+      "cosine": 0.969636,
+      "kind": "golden"
+    },
+    {
+      "id": 17,
+      "cosine": 0.968492,
+      "kind": "golden"
+    },
+    {
+      "id": 18,
+      "cosine": 0.914044,
+      "kind": "golden"
+    },
+    {
+      "id": 19,
+      "cosine": 0.960258,
+      "kind": "golden"
+    },
+    {
+      "id": 20,
+      "cosine": 0.952969,
+      "kind": "golden"
+    },
+    {
+      "id": 21,
+      "cosine": 0.8927,
+      "kind": "golden"
+    },
+    {
+      "id": 22,
+      "cosine": 0.987449,
+      "kind": "golden"
+    },
+    {
+      "id": 23,
+      "cosine": 0.80435,
+      "kind": "golden"
+    },
+    {
+      "id": 24,
+      "cosine": 0.985564,
+      "kind": "golden"
+    },
+    {
+      "id": 25,
+      "cosine": 0.878897,
+      "kind": "golden"
+    },
+    {
+      "id": 26,
+      "cosine": 0.947947,
+      "kind": "golden"
+    },
+    {
+      "id": 27,
+      "cosine": 0.863933,
+      "kind": "golden"
+    },
+    {
+      "id": 28,
+      "cosine": 0.924307,
+      "kind": "golden"
+    },
+    {
+      "id": 29,
+      "cosine": 0.79632,
+      "kind": "golden"
+    },
+    {
+      "id": 30,
+      "cosine": 0.68042,
+      "kind": "golden"
+    },
+    {
+      "id": 31,
+      "cosine": 0.969148,
+      "kind": "golden"
+    },
+    {
+      "id": 32,
+      "cosine": 0.934003,
+      "kind": "golden"
+    },
+    {
+      "id": 33,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 34,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 35,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 36,
+      "cosine": 0.951821,
+      "kind": "golden"
+    },
+    {
+      "id": 37,
+      "cosine": 0.930933,
+      "kind": "golden"
+    },
+    {
+      "id": 38,
+      "cosine": 0.961717,
+      "kind": "golden"
+    },
+    {
+      "id": 39,
+      "cosine": 0.963417,
+      "kind": "golden"
+    },
+    {
+      "id": 40,
+      "cosine": 0.985189,
+      "kind": "golden"
+    },
+    {
+      "id": 41,
+      "cosine": 0.992916,
+      "kind": "golden"
+    },
+    {
+      "id": 42,
+      "cosine": 0.963412,
+      "kind": "golden"
+    },
+    {
+      "id": 43,
+      "cosine": 0.990976,
+      "kind": "golden"
+    },
+    {
+      "id": 44,
+      "cosine": 0.917178,
+      "kind": "golden"
+    },
+    {
+      "id": 45,
+      "cosine": 0.971106,
+      "kind": "golden"
+    },
+    {
+      "id": 46,
+      "cosine": 0.920273,
+      "kind": "golden"
+    },
+    {
+      "id": 47,
+      "cosine": 0.956896,
+      "kind": "golden"
+    },
+    {
+      "id": 48,
+      "cosine": 0.969271,
+      "kind": "golden"
+    },
+    {
+      "id": 49,
+      "cosine": 0.967055,
+      "kind": "golden"
+    },
+    {
+      "id": 50,
+      "cosine": 0.949262,
+      "kind": "golden"
+    },
+    {
+      "id": 51,
+      "cosine": 0.902272,
+      "kind": "golden"
+    },
+    {
+      "id": 52,
+      "cosine": 0.956733,
+      "kind": "golden"
+    },
+    {
+      "id": 53,
+      "cosine": 0.975498,
+      "kind": "golden"
+    },
+    {
+      "id": 54,
+      "cosine": 0.972869,
+      "kind": "golden"
+    },
+    {
+      "id": 55,
+      "cosine": 0.566428,
+      "kind": "golden"
+    },
+    {
+      "id": 56,
+      "cosine": 0.80301,
+      "kind": "golden"
+    },
+    {
+      "id": 57,
+      "cosine": 0.631429,
+      "kind": "golden"
+    },
+    {
+      "id": 58,
+      "cosine": 0.934242,
+      "kind": "golden"
+    },
+    {
+      "id": 59,
+      "cosine": 0.99666,
+      "kind": "golden"
+    },
+    {
+      "id": 60,
+      "cosine": 0.968255,
+      "kind": "golden"
+    },
+    {
+      "id": 61,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 62,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 63,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 64,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 65,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 66,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 67,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 68,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 69,
+      "cosine": 0.996221,
+      "kind": "golden"
+    },
+    {
+      "id": 70,
+      "cosine": 0.989193,
+      "kind": "golden"
+    },
+    {
+      "id": 71,
+      "cosine": 0.994653,
+      "kind": "golden"
+    },
+    {
+      "id": 72,
+      "cosine": 0.996247,
+      "kind": "golden"
+    },
+    {
+      "id": 73,
+      "cosine": 0.978652,
+      "kind": "golden"
+    },
+    {
+      "id": 74,
+      "cosine": 0.95116,
+      "kind": "golden"
+    },
+    {
+      "id": 75,
+      "cosine": 0.985204,
+      "kind": "golden"
+    },
+    {
+      "id": 76,
+      "cosine": 0.969111,
+      "kind": "golden"
+    },
+    {
+      "id": 77,
+      "cosine": 0.988112,
+      "kind": "golden"
+    },
+    {
+      "id": 78,
+      "cosine": 0.999928,
+      "kind": "golden"
+    },
+    {
+      "id": 79,
+      "cosine": 0.999812,
+      "kind": "golden"
+    },
+    {
+      "id": 80,
+      "cosine": 0.979458,
+      "kind": "golden"
+    },
+    {
+      "id": 81,
+      "cosine": 0.993469,
+      "kind": "golden"
+    },
+    {
+      "id": 82,
+      "cosine": 0.980628,
+      "kind": "golden"
+    },
+    {
+      "id": 83,
+      "cosine": 0.967494,
+      "kind": "golden"
+    },
+    {
+      "id": 84,
+      "cosine": 0.993037,
+      "kind": "golden"
+    },
+    {
+      "id": 85,
+      "cosine": 0.979398,
+      "kind": "golden"
+    },
+    {
+      "id": 86,
+      "cosine": 0.99171,
+      "kind": "golden"
+    },
+    {
+      "id": 87,
+      "cosine": 0.868027,
+      "kind": "golden"
+    },
+    {
+      "id": 88,
+      "cosine": 0.838623,
+      "kind": "golden"
+    },
+    {
+      "id": 89,
+      "cosine": 0.836399,
+      "kind": "golden"
+    },
+    {
+      "id": 90,
+      "cosine": 0.895634,
+      "kind": "golden"
+    },
+    {
+      "id": 91,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 92,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 93,
+      "cosine": 0.988575,
+      "kind": "golden"
+    },
+    {
+      "id": 94,
+      "cosine": 0.986652,
+      "kind": "golden"
+    },
+    {
+      "id": 95,
+      "cosine": 0.979708,
+      "kind": "golden"
+    },
+    {
+      "id": 96,
+      "cosine": 0.994305,
+      "kind": "golden"
+    },
+    {
+      "id": 97,
+      "cosine": 0.992914,
+      "kind": "golden"
+    },
+    {
+      "id": 98,
+      "cosine": 0.996139,
+      "kind": "golden"
+    },
+    {
+      "id": 99,
+      "cosine": 0.952065,
+      "kind": "golden"
+    },
+    {
+      "id": 100,
+      "cosine": 0.9601,
+      "kind": "golden"
+    },
+    {
+      "id": 101,
+      "cosine": 0.978377,
+      "kind": "golden"
+    },
+    {
+      "id": 102,
+      "cosine": 0.893985,
+      "kind": "golden"
+    },
+    {
+      "id": 103,
+      "cosine": 0.981594,
+      "kind": "golden"
+    },
+    {
+      "id": 104,
+      "cosine": 0.953706,
+      "kind": "golden"
+    },
+    {
+      "id": 105,
+      "cosine": 0.946151,
+      "kind": "golden"
+    },
+    {
+      "id": 106,
+      "cosine": 0.824015,
+      "kind": "golden"
+    },
+    {
+      "id": 107,
+      "cosine": 0.586236,
+      "kind": "golden"
+    },
+    {
+      "id": 108,
+      "cosine": 0.957784,
+      "kind": "golden"
+    },
+    {
+      "id": 109,
+      "cosine": 0.992931,
+      "kind": "golden"
+    },
+    {
+      "id": 110,
+      "cosine": 0.91384,
+      "kind": "golden"
+    },
+    {
+      "id": 111,
+      "cosine": 0.889352,
+      "kind": "golden"
+    },
+    {
+      "id": 112,
+      "cosine": 0.89904,
+      "kind": "golden"
+    },
+    {
+      "id": 113,
+      "cosine": 0.832598,
+      "kind": "golden"
+    },
+    {
+      "id": 114,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 115,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 116,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 117,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 118,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 119,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 120,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 121,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 122,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 123,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 124,
+      "cosine": 1.0,
+      "kind": "golden"
+    },
+    {
+      "id": 125,
+      "cosine": 1.0,
+      "kind": "golden"
+    }
+  ],
+  "overedit": [
+    {
+      "id": "f0",
+      "cosine": 0.998587,
+      "kind": "overedit"
+    },
+    {
+      "id": "f1",
+      "cosine": 0.980613,
+      "kind": "overedit"
+    },
+    {
+      "id": "f2",
+      "cosine": 0.879641,
+      "kind": "overedit"
+    },
+    {
+      "id": "f3",
+      "cosine": 0.981675,
+      "kind": "overedit"
+    },
+    {
+      "id": "f4",
+      "cosine": 0.99241,
+      "kind": "overedit"
+    },
+    {
+      "id": "f5",
+      "cosine": 1.0,
+      "kind": "overedit"
+    },
+    {
+      "id": "f6",
+      "cosine": 1.0,
+      "kind": "overedit"
+    },
+    {
+      "id": "f7",
+      "cosine": 1.0,
+      "kind": "overedit"
+    },
+    {
+      "id": "f8",
+      "cosine": 0.959738,
+      "kind": "overedit"
+    },
+    {
+      "id": "f9",
+      "cosine": 0.988806,
+      "kind": "overedit"
+    },
+    {
+      "id": "f10",
+      "cosine": 0.98454,
+      "kind": "overedit"
+    },
+    {
+      "id": "f11",
+      "cosine": 0.943792,
+      "kind": "overedit"
+    },
+    {
+      "id": "f12",
+      "cosine": 0.940201,
+      "kind": "overedit"
+    },
+    {
+      "id": "f13",
+      "cosine": 0.948369,
+      "kind": "overedit"
+    },
+    {
+      "id": "f14",
+      "cosine": 0.891804,
+      "kind": "overedit"
+    },
+    {
+      "id": "f15",
+      "cosine": 0.976936,
+      "kind": "overedit"
+    },
+    {
+      "id": "f16",
+      "cosine": 0.930103,
+      "kind": "overedit"
+    },
+    {
+      "id": "f17",
+      "cosine": 0.953432,
+      "kind": "overedit"
+    },
+    {
+      "id": "f18",
+      "cosine": 0.937335,
+      "kind": "overedit"
+    },
+    {
+      "id": "f19",
+      "cosine": 0.915455,
+      "kind": "overedit"
+    },
+    {
+      "id": "f20",
+      "cosine": 0.867692,
+      "kind": "overedit"
+    },
+    {
+      "id": "f21",
+      "cosine": 0.915322,
+      "kind": "overedit"
+    },
+    {
+      "id": "f22",
+      "cosine": 0.71353,
+      "kind": "overedit"
+    },
+    {
+      "id": "f23",
+      "cosine": 0.904755,
+      "kind": "overedit"
+    },
+    {
+      "id": "f24",
+      "cosine": 0.705738,
+      "kind": "overedit"
+    },
+    {
+      "id": "f25",
+      "cosine": 0.752187,
+      "kind": "overedit"
+    },
+    {
+      "id": "f26",
+      "cosine": 0.908151,
+      "kind": "overedit"
+    },
+    {
+      "id": "f27",
+      "cosine": 0.626412,
+      "kind": "overedit"
+    },
+    {
+      "id": "f28",
+      "cosine": 0.731107,
+      "kind": "overedit"
+    },
+    {
+      "id": "f29",
+      "cosine": 0.810214,
+      "kind": "overedit"
+    },
+    {
+      "id": "f30",
+      "cosine": 0.731859,
+      "kind": "overedit"
+    },
+    {
+      "id": "f31",
+      "cosine": 0.932973,
+      "kind": "overedit"
+    },
+    {
+      "id": "f32",
+      "cosine": 0.936666,
+      "kind": "overedit"
+    },
+    {
+      "id": "f33",
+      "cosine": 0.772448,
+      "kind": "overedit"
+    }
+  ],
+  "summary": {
+    "min_golden": 0.5664276480674744,
+    "p5_golden": 0.8082832813262939,
+    "max_overedit": 1.0000001192092896,
+    "p95_overedit": 1.0,
+    "separation": -0.4335724711418152,
+    "chosen_threshold": null
+  }
+}

@@ -178,3 +178,65 @@ a no-op; do not "align" the two definitions). Regenerate the corpus with
 Baseline lives in `clean_baseline.json` — gate PRs at (baseline + 2pp) or better.
 Registers: `golden` (golden outputs), `casual`, `technical`, `british`.
 Per-model attribution tells you WHERE the FP came from (`harper`/`gector`/`llm`).
+
+## 5. Semantic verifier calibration (Phase C, Task C4)
+
+The post-LLM semantic verifier (`internal/semverify`, MiniLM
+`sentence-transformers/all-MiniLM-L6-v2`) was a candidate Phase C gate — a
+universal cosine threshold on the LLM rewrite vs. the original that would
+discard catastrophic rewrites before diffing. A threshold study was run
+before any operator enable.
+
+**Verdict (commit `9a379ca` calibration): NO SAFE THRESHOLD.**
+
+- 125 golden `(input, golden)` pairs + 34 LLM over-edit fixtures (extracted
+  from `bridge/internal/correction/overedit_test.go`) were embedded with
+  MiniLM and cosine-scored.
+- Distribution summary (numbers from the Go reference; Python reference
+  agrees to ≤1e-6 per pair, see `verifier_equivalence_diff.json`):
+
+  |             | min  | p5  | p95  | max  |
+  | ----------- | ---- | --- | ---- | ---- |
+  | golden      | 0.5664 | 0.8083 | 1.0000 | 1.0000 |
+  | over-edit   | 0.6264 | 0.6264 | 1.0000 | 1.0000 |
+
+  **Separation (min_golden − max_overedit) = −0.4336** — inverted. Many
+  over-edits (contraction expansions, casing single-letter flips, comma
+  restores) are **semantically identical** to the original at the embedding
+  level, so a universal threshold can never reject them without also
+  discarding legitimate corrections that happen to score low (e.g. golden
+  case 55's heavily-rewritten input scores 0.5664, below many over-edits).
+
+- The verifier interface, wiring, and probe remain in the tree (gated to
+  `cgo && ORT`, off by default); the operator action to enable any
+  threshold remains blocked until either (a) a per-rule threshold (only
+  fires on the rewrite-classes that *do* drop cosine — singular-they,
+  modal-have) replaces the universal gate, or (b) a paired-feature classifier
+  is added (out of scope).
+
+### Reproducing the study
+
+```bash
+# Python reference (sentence-transformers). Caches under eval/.huggingface_cache/,
+# so the project tree stays tidy and the system ~/.cache permission is bypassed.
+cd eval
+HF_HOME="$PWD/.huggingface_cache" HF_HUB_CACHE="$PWD/.huggingface_cache/hub" \
+    .venv/bin/python3 verifier_calibration.py golden.jsonl overedit_fixtures.jsonl
+
+# Go probe (hugot) — runs the same pair set via the real bridge build.
+docker build -t grammarforge-bridge:dev bridge/
+docker run --rm \
+  -v "$PWD/eval:/eval" -v "$PWD/bridge/models/minilm:/models/minilm" \
+  --entrypoint /bin/sh grammarforge-bridge:dev \
+  -c '/usr/local/bin/semverify-probe /models/minilm /eval/overedit_fixtures.jsonl \
+      /eval/golden.jsonl > /eval/semverify_probe_scores.tsv'
+
+# Cross-check the two and re-emit the ground-truth verdict (Go numbers).
+.venv/bin/python3 verifier_equivalence_check.py
+```
+
+Output artifacts (committed):
+- `verifier_calibration_scores.json` — Python per-pair cosines + summary
+- `semverify_probe_scores.tsv` — Go per-pair cosines (`id<TAB>cosine`)
+- `verifier_equivalence_diff.json` — merged per-pair |python−go| + verdict + Go-only threshold re-study
+- `overedit_fixtures.jsonl` — the 34 fixture pairs extracted from `overedit_test.go`

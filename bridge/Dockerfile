@@ -57,7 +57,8 @@ ENV CGO_ENABLED=1 \
 # packages instead of a cold CGo+ONNX build of the whole module.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -tags ORT -ldflags="-s -w" -o /out/grammarforge ./cmd/grammarforge
+    go build -tags ORT -ldflags="-s -w" -o /out/grammarforge ./cmd/grammarforge \
+    && go build -tags ORT -ldflags="-s -w" -o /out/semverify-probe ./cmd/semverify-probe
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -71,6 +72,7 @@ RUN ldconfig
 # corrections.db on first start. For production, mount a volume here.
 RUN mkdir -p /data
 COPY --from=bridge /out/grammarforge /usr/local/bin/grammarforge
+COPY --from=bridge /out/semverify-probe /usr/local/bin/semverify-probe
 COPY models/ /models/
 ENV GF_GECTOR_MODEL_DIR=/models/gector \
     GF_DB_PATH=/data/corrections.db
