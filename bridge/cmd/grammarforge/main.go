@@ -124,7 +124,25 @@ func main() {
 	// LLM grammar output before diffing. Default on; GF_OVEREDIT_FILTER=false
 	// restores legacy behaviour.
 	if cfg.OverEditFilterEnabled {
-		svc.SetOverEditRules(correction.DefaultOverEditRules())
+		rules := correction.DefaultOverEditRules()
+		// Phase-E dialect spelling guard: append a deterministic
+		// US->GB revert (correction.NewDialectSpellingRepair over the
+		// embedded VarCon lexicon) so the user's British spelling
+		// survives an LLM Americanization. The conditional wraps the
+		// construction call itself so American deploys never parse the
+		// 316KB embed. v1 only ships the British direction (the
+		// embedded lexicon contains only ->British pairs); enabling on
+		// a non-british HarperDialect is intentionally a no-op so the
+		// operator can flip the flag in advance without affecting
+		// current deploys. Default OFF — enabling is an eval-gated
+		// operator action after the Phase-E gates pass (full cold
+		// golden 125/125 + clean-text FP at or below Phase-A baseline
+		// for the british register). See plans/2026-07-04-bridge-quality-quartet.md.
+		if cfg.DialectSpellingGuard && cfg.HarperDialect == "british" {
+			rules = append(rules,
+				correction.NewDialectSpellingRepair(correction.BritishLexicon()))
+		}
+		svc.SetOverEditRules(rules)
 	}
 	// Deterministic a/an article fix: applied after the over-edit chain and
 	// before diffing. Fixes silent-h words Harper's letter-based AnA rule

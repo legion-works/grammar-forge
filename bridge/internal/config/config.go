@@ -225,6 +225,22 @@ type Config struct {
 	// path never blocks); default 300s.
 	RejectSuppressionEnabled bool          // GF_REJECT_SUPPRESSION             (default false)
 	RejectSuppressionTTL     time.Duration // GF_REJECT_SUPPRESSION_TTL_SECONDS (default 300 seconds)
+
+	// DialectSpellingGuard (Phase E): appends a deterministic
+	// correction.NewDialectSpellingRepair rule to the LLM over-edit
+	// repair chain, restoring the user's British spelling when the LLM
+	// Americanized a word the user wrote in dialect form (color ->
+	// colour, theater -> theatre, etc.). The rule reads from an embedded
+	// VarCon-derived lexicon in correction.BritishLexicon(); the wiring
+	// in main.go gates the rule's CONSTRUCTION on
+	// (DialectSpellingGuard && HarperDialect == "british"), so American
+	// deploys never pay the 316KB embed parse cost. Default OFF — v1
+	// only ships the British direction (the lexicon currently contains
+	// only ->British pairs); enabling on non-British deploys is a
+	// no-op. Enabling is an eval-gated operator action after the
+	// Phase-E gates pass (full cold golden 125/125 + clean-text FP
+	// rate at or below Phase-A baseline for the british register).
+	DialectSpellingGuard bool // GF_DIALECT_SPELLING_GUARD (default false)
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -345,6 +361,8 @@ func Load(getenv Getenv) Config {
 
 		RejectSuppressionEnabled: getBool("GF_REJECT_SUPPRESSION", false),
 		RejectSuppressionTTL:     time.Duration(getInt("GF_REJECT_SUPPRESSION_TTL_SECONDS", 300)) * time.Second,
+
+		DialectSpellingGuard: getBool("GF_DIALECT_SPELLING_GUARD", false),
 	}
 }
 

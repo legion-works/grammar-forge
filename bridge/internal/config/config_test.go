@@ -420,3 +420,53 @@ func TestLoad_RejectSuppressionOverrides(t *testing.T) {
 	require.Equal(t, 60*time.Second, cfg.RejectSuppressionTTL,
 		"GF_REJECT_SUPPRESSION_TTL_SECONDS=60 must parse to 60s, not 60ns")
 }
+
+// Phase-E dialect spelling guard: the deterministic US->GB revert
+// (correction.NewDialectSpellingRepair over the embedded VarCon lexicon)
+// is OFF by default. Enable is an eval-gated operator action after the
+// Phase-E gates pass (full cold golden + clean-text FP at or below
+// baseline). The Harvard-only-by-default semantics live in the wiring
+// (main.go): the flag is ignored on non-British deploys, so American
+// deploys never pay the construction cost — see main.go for the
+// conditional that gates both the LLM rebuild and the 316KB embed parse.
+// Config discipline is exception-free: every new GF_* gate defaults to
+// the legacy behaviour so existing deploys are byte-identical until the
+// operator opts in.
+func TestLoad_DialectSpellingGuardDefaultsFalse(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.False(t, cfg.DialectSpellingGuard,
+		"GF_DIALECT_SPELLING_GUARD must default false")
+}
+
+func TestLoad_DialectSpellingGuardOverrides(t *testing.T) {
+	t.Run("true", func(t *testing.T) {
+		cfg := Load(func(k string) (string, bool) {
+			if k == "GF_DIALECT_SPELLING_GUARD" {
+				return "true", true
+			}
+			return "", false
+		})
+		require.True(t, cfg.DialectSpellingGuard,
+			"GF_DIALECT_SPELLING_GUARD=true must enable the guard")
+	})
+	t.Run("false", func(t *testing.T) {
+		cfg := Load(func(k string) (string, bool) {
+			if k == "GF_DIALECT_SPELLING_GUARD" {
+				return "false", true
+			}
+			return "", false
+		})
+		require.False(t, cfg.DialectSpellingGuard,
+			"GF_DIALECT_SPELLING_GUARD=false must explicitly disable, not fall through to the default")
+	})
+	t.Run("1", func(t *testing.T) {
+		cfg := Load(func(k string) (string, bool) {
+			if k == "GF_DIALECT_SPELLING_GUARD" {
+				return "1", true
+			}
+			return "", false
+		})
+		require.True(t, cfg.DialectSpellingGuard,
+			"GF_DIALECT_SPELLING_GUARD=1 must parse as true (getBool convention)")
+	})
+}
