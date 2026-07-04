@@ -16,3 +16,9 @@ func buildFastPath(_ config.Config) ([]correction.Corrector, func()) {
 	slog.Info("fast path disabled (built without cgo+ORT) — LLM-only")
 	return nil, func() {}
 }
+
+// buildSemanticVerifier returns nil. The MiniLM verifier needs CGo+ORT (it
+// runs the same hugot session as GECToR); the stub build never wires it.
+func buildSemanticVerifier(_ config.Config) correction.SemanticVerifier {
+	return nil
+}

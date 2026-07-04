@@ -9,6 +9,7 @@ import (
 	"github.com/grammarforge/bridge/internal/correction"
 	"github.com/grammarforge/bridge/internal/gector"
 	"github.com/grammarforge/bridge/internal/harperffi"
+	"github.com/grammarforge/bridge/internal/semverify"
 )
 
 // buildFastPath constructs the in-process fast-path correctors. The Harper
@@ -53,4 +54,20 @@ func buildFastPath(cfg config.Config) ([]correction.Corrector, func()) {
 		}
 	}
 	return fast, cleanup
+}
+
+// buildSemanticVerifier constructs the MiniLM verifier (correction.SemanticVerifier).
+// Mirrors the corrector build pattern: a load failure is logged at Warn and nil
+// is returned — a broken verifier must never crash startup, since the service
+// layer fails OPEN on a nil verifier (same posture as the corrector fall-through).
+// The returned *semverify.Verifier is safe to cast back to interface{ Close() }
+// on shutdown alongside the corrector sessions.
+func buildSemanticVerifier(cfg config.Config) correction.SemanticVerifier {
+	v, err := semverify.New(cfg.SemanticVerifierModelPath)
+	if err != nil {
+		slog.Warn("semantic verifier unavailable; running without it", "err", err, "model_path", cfg.SemanticVerifierModelPath)
+		return nil
+	}
+	slog.Info("semantic verifier loaded", "model_path", cfg.SemanticVerifierModelPath, "threshold", cfg.SemanticVerifierThreshold)
+	return v
 }

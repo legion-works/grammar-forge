@@ -369,3 +369,29 @@ func TestLoadToneConfig(t *testing.T) {
 	require.Equal(t, 40, c2.ToneMinChars)
 	require.Equal(t, 1024, c2.ToneCacheSize)
 }
+
+func TestLoad_SemanticVerifierDefaults(t *testing.T) {
+	// Config discipline: every new GF_* gate defaults to the legacy behaviour
+	// (verifier OFF) so existing deploys are byte-identical until the operator
+	// opts in. Enabling is an eval-gated operator action (full cold golden +
+	// clean-text FP, both at or below baseline).
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.False(t, cfg.SemanticVerifierEnabled,
+		"GF_SEMANTIC_VERIFIER must default false")
+	require.Equal(t, 0.80, cfg.SemanticVerifierThreshold,
+		"GF_SEMANTIC_VERIFIER_THRESHOLD must default 0.80")
+	require.Equal(t, "/models/minilm", cfg.SemanticVerifierModelPath,
+		"GF_SEMANTIC_VERIFIER_MODEL_PATH must default /models/minilm")
+}
+
+func TestLoad_SemanticVerifierOverrides(t *testing.T) {
+	env := map[string]string{
+		"GF_SEMANTIC_VERIFIER":            "true",
+		"GF_SEMANTIC_VERIFIER_THRESHOLD":  "0.65",
+		"GF_SEMANTIC_VERIFIER_MODEL_PATH": "/opt/models/minilm",
+	}
+	cfg := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	require.True(t, cfg.SemanticVerifierEnabled)
+	require.InDelta(t, 0.65, cfg.SemanticVerifierThreshold, 1e-9)
+	require.Equal(t, "/opt/models/minilm", cfg.SemanticVerifierModelPath)
+}

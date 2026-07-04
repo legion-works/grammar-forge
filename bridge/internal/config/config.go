@@ -201,6 +201,16 @@ type Config struct {
 	// The file is read once at startup; a missing file is a no-op, not an
 	// error — the bridge still boots and /synonyms returns empty.
 	ThesaurusPath string
+
+	// SemanticVerifier (Phase C): an all-MiniLM-L6-v2 embedding gate that
+	// discards LLM rewrites whose cosine similarity to the original falls
+	// below the threshold. Off by default — enabling is an eval-gated
+	// operator action (full cold golden + clean-text FP at or below
+	// baseline). A nil verifier or non-positive threshold is a no-op in the
+	// service layer (fails OPEN).
+	SemanticVerifierEnabled   bool    // GF_SEMANTIC_VERIFIER            (default false)
+	SemanticVerifierThreshold float64 // GF_SEMANTIC_VERIFIER_THRESHOLD  (default 0.80)
+	SemanticVerifierModelPath string  // GF_SEMANTIC_VERIFIER_MODEL_PATH (default /models/minilm)
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -314,6 +324,10 @@ func Load(getenv Getenv) Config {
 
 		SynonymsEnabled: getBool("GF_SYNONYMS_ENABLED", true),
 		ThesaurusPath:   get("GF_THESAURUS_PATH", "/data/mthesaur.txt"),
+
+		SemanticVerifierEnabled:   getBool("GF_SEMANTIC_VERIFIER", false),
+		SemanticVerifierThreshold: getFloat("GF_SEMANTIC_VERIFIER_THRESHOLD", 0.80),
+		SemanticVerifierModelPath: get("GF_SEMANTIC_VERIFIER_MODEL_PATH", "/models/minilm"),
 	}
 }
 

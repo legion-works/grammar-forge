@@ -40,6 +40,9 @@ func main() {
 		"gector_model_dir", cfg.GECToRModelDir,
 		"personalization_enabled", cfg.PersonalizationEnabled,
 		"personalization_ttl", cfg.PersonalizationTTL,
+		"semantic_verifier_enabled", cfg.SemanticVerifierEnabled,
+		"semantic_verifier_threshold", cfg.SemanticVerifierThreshold,
+		"semantic_verifier_model_path", cfg.SemanticVerifierModelPath,
 	)
 
 	st, err := store.Open(cfg.DBPath)
@@ -154,6 +157,19 @@ func main() {
 	// with false is a no-op), so wiring the env flag here is the single
 	// switch.
 	svc.SetFastHintsEnabled(cfg.FastHintsEnabled)
+
+	// Phase-C semantic verifier (GF_SEMANTIC_VERIFIER, default off): when
+	// on, LLM rewrites whose MiniLM cosine similarity to the original
+	// falls below the threshold are discarded before being diffed into
+	// suggestions. Best-effort: a load failure logs Warn and returns nil,
+	// and the service layer fails OPEN on a nil verifier. Enabling is an
+	// eval-gated operator action (full cold golden + clean-text FP at or
+	// below baseline) — see plans/2026-07-04-bridge-quality-quartet.md.
+	if cfg.SemanticVerifierEnabled {
+		if sv := buildSemanticVerifier(cfg); sv != nil {
+			svc.SetSemanticVerifier(sv, cfg.SemanticVerifierThreshold)
+		}
+	}
 
 	// Inject the rephrase provider factory (this is where internal/llm is
 	// allowed — the correction core stays transport-free). The api_key is
