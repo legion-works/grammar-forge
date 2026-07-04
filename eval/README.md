@@ -241,3 +241,58 @@ Output artifacts (committed):
 - `semverify_probe_scores.tsv` — Go per-pair cosines (`id<TAB>cosine`)
 - `verifier_equivalence_diff.json` — merged per-pair |python−go| + verdict + Go-only threshold re-study
 - `overedit_fixtures.jsonl` — the 34 fixture pairs extracted from `overedit_test.go`
+
+## 6. Trusted-category escalation routing (Phase B, Task B2)
+
+`GF_ESCALATION_TRUSTED_CATEGORIES` (default `""` = legacy
+`GF_SKIP_LLM_FOR_SPELLING_ONLY` semantics) extends the spelling-only skip
+into a configurable category set — only fast-path results where EVERY
+suggestion's category is in the trust set skip the LLM. Grammar
+(`CategoryGrammar`, the empty string) is never trustable; the bridge
+parser (`config.ParseTrustedCategories`) rejects empty tokens, the literal
+`grammar`, and unknown category names by ignoring the WHOLE variable (a typo
+must not silently produce a partial-subset foot-gun).
+
+**Default deploys keep `""`.** Enablement is an eval-gated operator action —
+no candidate set goes live on a real deploy without passing BOTH gates below
+on `gf-bridge-eval`:
+
+1. **Data-driven motivation.** Pick a candidate set from
+   `clean_baseline.json[by_category]` — categories with no eval-visible LLM
+   lift (the LLM's contribution there is zero) are the candidates for
+   trusted-set inclusion. Spelling-only skip has a **mixed empirical
+   history**: the legacy `SkipLLMForSpellingOnly` exists, but a full cold
+   golden eval (2026-06-10) measured blanket escalation as justified
+   (123/125 → 116/125 with the skip on — Harper's dictionary engine emits
+   confident-wrong morphology suggestions like `buyed`→`bayed`). Even
+   `spelling` therefore needs **fresh Phase-A per-category attribution
+   data** before any re-enablement — pick candidates from data, not
+   intuition.
+
+2. **Both gates must pass, in this order:**
+   ```bash
+   docker build -t grammarforge-bridge:dev bridge/
+   docker run -d --name gf-bridge-eval --network homelab_default \
+       -p 127.0.0.1:8001:8000 \
+       -e GF_ESCALATION_TRUSTED_CATEGORIES='spelling,typography' \
+       -e GF_HARPER_DIALECT=american \
+       -v "$PWD/bridge/models/gector:/models/gector" \
+       grammarforge-bridge:dev
+
+   # exit 0 ⇒ 125/125 exact
+   eval/.venv/bin/python3 run_eval.py --require-exact http://127.0.0.1:8001
+
+   # ≤ baseline ⇒ no clean-text regression on the trusted-set-induced skips
+   eval/.venv/bin/python3 clean_eval.py http://127.0.0.1:8001 \
+       clean_corpus.jsonl --max-fp-rate $(jq -r '.fp_rate * 100 + 2' clean_baseline.json)
+
+   docker stop gf-bridge-eval
+   ```
+
+   A single low score is **not** a regression: double-run back-to-back plus a
+   `/correct` homophone sanity check (expect `model:"llm"`) before concluding
+   the trust set broke something. Any candidate set that fails EITHER gate
+   stays off; the default `""` stays the deploy default. **Never** set this
+   flag on the live container without first running both gates on
+   `gf-bridge-eval`; the operator-action gate exists so a routing change
+   never ships without evidence.

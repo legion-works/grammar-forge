@@ -3,10 +3,13 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/grammarforge/bridge/internal/correction"
 )
 
 // Config holds all bridge runtime settings.
@@ -241,6 +244,19 @@ type Config struct {
 	// Phase-E gates pass (full cold golden 125/125 + clean-text FP
 	// rate at or below Phase-A baseline for the british register).
 	DialectSpellingGuard bool // GF_DIALECT_SPELLING_GUARD (default false)
+
+	// Phase-B trusted-category escalation routing: comma-separated list of
+	// fast-path categories the bridge may serve directly without consulting
+	// the LLM (correction.EscalationPolicy.TrustedCategories). Default ""
+	// preserves the legacy SkipLLMForSpellingOnly semantics — enablement
+	// is an eval-gated operator action (Phase-A per-category FP attribution
+	// motivates the candidate set; BOTH run_eval.py --require-exact 125/125
+	// AND clean_eval.py fp_rate ≤ baseline must pass before a candidate set
+	// goes live on a deploy). Raw CSV; main.go calls ParseTrustedCategories
+	// to validate. The routing field is []string; the env-var-on-the-wire
+	// form is CSV because comma lists are the convention for GF_*_RULES
+	// (HarperDisabledRules, HarperEnabledRules) and similar.
+	EscalationTrustedCategories string // GF_ESCALATION_TRUSTED_CATEGORIES (default "")
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -363,7 +379,46 @@ func Load(getenv Getenv) Config {
 		RejectSuppressionTTL:     time.Duration(getInt("GF_REJECT_SUPPRESSION_TTL_SECONDS", 300)) * time.Second,
 
 		DialectSpellingGuard: getBool("GF_DIALECT_SPELLING_GUARD", false),
+
+		EscalationTrustedCategories: get("GF_ESCALATION_TRUSTED_CATEGORIES", ""),
 	}
+}
+
+// ParseTrustedCategories parses the GF_ESCALATION_TRUSTED_CATEGORIES CSV
+// into a validated []string. Tokens are trimmed and lowercased; any invalid
+// token (empty, literal "grammar", or unknown) makes the WHOLE variable
+// rejected — callers MUST treat the error as "ignore the variable, fall back
+// to the legacy empty trust set". A partial success on a typo'd CSV would be
+// a routing foot-gun: the operator typed "spelling,typo" expecting spelling,
+// the parser silently accepts spelling, and the deploy's behaviour diverges
+// from intent in a hard-to-diagnose way. Source of truth for the trustable
+// set is correction.IsTrustableCategory.
+//
+// Exported because main.go is the consumer; unexported callers would push
+// the parse-time validation out of testability. The function has no
+// additional state and is safe to call from any goroutine at startup.
+func ParseTrustedCategories(csv string) ([]string, error) {
+	if csv == "" {
+		return nil, nil
+	}
+	var out []string
+	for _, raw := range strings.Split(csv, ",") {
+		tok := strings.ToLower(strings.TrimSpace(raw))
+		if tok == "" {
+			return nil, fmt.Errorf("GF_ESCALATION_TRUSTED_CATEGORIES: empty token (consecutive commas or trailing comma)")
+		}
+		if tok == "grammar" {
+			// Reject the LITERAL "grammar" even though CategoryGrammar is the
+			// empty string: a typed "grammar" is unambiguously an attempt to
+			// trust grammar and must surface as a diagnostic, not a no-op.
+			return nil, fmt.Errorf("GF_ESCALATION_TRUSTED_CATEGORIES: 'grammar' is never trustable (LITERAL got %q)", tok)
+		}
+		if !correction.IsTrustableCategory(tok) {
+			return nil, fmt.Errorf("GF_ESCALATION_TRUSTED_CATEGORIES: unknown category %q (valid: spelling, punctuation, typography, style)", tok)
+		}
+		out = append(out, tok)
+	}
+	return out, nil
 }
 
 // FromOS is the production loader.

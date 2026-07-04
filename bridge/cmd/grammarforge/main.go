@@ -97,6 +97,22 @@ func main() {
 	// American (default) appends nothing — the golden-eval baseline is unchanged.
 	pb.SetDialect(cfg.HarperDialect)
 
+	// Phase-B TrustedCategories (GF_ESCALATION_TRUSTED_CATEGORIES, default
+	// "" = legacy SkipLLMForSpellingOnly semantics). Validate the CSV at
+	// startup — any invalid token (unknown, literal "grammar", empty from
+	// consecutive commas) makes the WHOLE variable rejected, NOT a silent
+	// subset. The legacy [CategorySpelling] setting is exposed as
+	// GF_SKIP_LLM_FOR_SPELLING_ONLY (orthogonal to the new set; the two
+	// stack when both are present). Enablement is an eval-gated operator
+	// action — see the calibration protocol in eval/README.md before
+	// setting any value on a deploy.
+	trustedCategories, err := config.ParseTrustedCategories(cfg.EscalationTrustedCategories)
+	if err != nil {
+		slog.Error("GF_ESCALATION_TRUSTED_CATEGORIES rejected; falling back to legacy empty trust set",
+			"err", err, "raw", cfg.EscalationTrustedCategories)
+		trustedCategories = nil
+	}
+
 	svc := correction.NewService(
 		pb,
 		fast,
@@ -109,6 +125,7 @@ func main() {
 			MinWordsForEscalation:  cfg.EscalateMinWords,
 			EscalateOnFastEdit:     cfg.EscalateOnFastEdit,
 			SkipLLMForSpellingOnly: cfg.SkipLLMForSpellingOnly,
+			TrustedCategories:      trustedCategories,
 		},
 	)
 	if cfg.SentenceCacheSize > 0 {

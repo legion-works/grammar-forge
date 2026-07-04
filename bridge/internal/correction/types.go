@@ -63,6 +63,22 @@ const (
 	CategoryUnknown     = "unknown"
 )
 
+// IsTrustableCategory reports whether name is a fast-path category eligible
+// for the trusted-set escalation skip (correction.EscalationPolicy.TrustedCategories).
+// Grammar (CategoryGrammar, the empty string) is intentionally NOT trustable:
+// a grammar fast-path edit is exactly what the LLM exists to override, so
+// even if a future config path forgets to validate the parser output the
+// routing invariant holds. This is the single source of truth consumed by
+// both the config parser (config.parseTrustedCategories) and by the routing
+// layer's defensive guard (everyCategoryTrusted → isCategoryTrusted).
+func IsTrustableCategory(name string) bool {
+	switch name {
+	case CategorySpelling, CategoryPunctuation, CategoryTypography, CategoryStyle:
+		return true
+	}
+	return false
+}
+
 // Suggestion is a single proposed edit. The bridge SUGGESTS; clients apply.
 type Suggestion struct {
 	// ID is the correction-log row id, set after the suggestion is persisted,

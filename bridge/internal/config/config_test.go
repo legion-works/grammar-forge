@@ -438,6 +438,86 @@ func TestLoad_DialectSpellingGuardDefaultsFalse(t *testing.T) {
 		"GF_DIALECT_SPELLING_GUARD must default false")
 }
 
+// Phase-B TrustedCategories: env-driven calibration gate. The field is
+// loaded as raw CSV (default "") and parsed into a validated []string on the
+// way into the EscalationPolicy literal in main.go — see ParseTrustedCategories
+// tests below. Default empty preserves the legacy behaviour
+// (SkipLLMForSpellingOnly off, TrustedCategories empty).
+func TestLoad_EscalationTrustedCategoriesDefaultsEmpty(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, "", cfg.EscalationTrustedCategories,
+		"GF_ESCALATION_TRUSTED_CATEGORIES must default \"\" so legacy deploys stay byte-identical")
+}
+
+func TestLoad_EscalationTrustedCategoriesOverride(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_ESCALATION_TRUSTED_CATEGORIES" {
+			return "spelling,typography", true
+		}
+		return "", false
+	})
+	require.Equal(t, "spelling,typography", cfg.EscalationTrustedCategories,
+		"parser must surface the raw CSV; main.go runs ParseTrustedCategories on it")
+}
+
+// ParseTrustedCategories validates GF_ESCALATION_TRUSTED_CATEGORIES against
+// the trustable category set (correction.IsTrustableCategory). A typo or an
+// attempt to trust grammar MUST error — the caller (main.go) ignores the
+// whole variable and falls back to the legacy empty set, never honoring
+// an incomplete/typo'd subset (council Must: a typo must not silently produce
+// an empty trust set that changes routing).
+func TestParseTrustedCategories(t *testing.T) {
+	t.Run("empty string returns empty list no error", func(t *testing.T) {
+		got, err := ParseTrustedCategories("")
+		require.NoError(t, err)
+		require.Empty(t, got)
+	})
+	t.Run("valid list trims and lowercases", func(t *testing.T) {
+		got, err := ParseTrustedCategories("  Spelling , TYPOGRAPHY,punctuation")
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"spelling", "typography", "punctuation"}, got)
+	})
+	t.Run("single token", func(t *testing.T) {
+		got, err := ParseTrustedCategories("spelling")
+		require.NoError(t, err)
+		require.Equal(t, []string{"spelling"}, got)
+	})
+	t.Run("unknown token rejected", func(t *testing.T) {
+		_, err := ParseTrustedCategories("spelling,bogus")
+		require.Error(t, err)
+	})
+	t.Run("literal grammar rejected", func(t *testing.T) {
+		_, err := ParseTrustedCategories("spelling,grammar")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "grammar",
+			"error must name the rejected token so the operator can diagnose")
+	})
+	t.Run("empty token (consecutive commas) rejected", func(t *testing.T) {
+		_, err := ParseTrustedCategories("spelling,,typography")
+		require.Error(t, err)
+	})
+	t.Run("trailing comma rejected", func(t *testing.T) {
+		_, err := ParseTrustedCategories("spelling,")
+		require.Error(t, err)
+	})
+	t.Run("only whitespace inside token rejected", func(t *testing.T) {
+		_, err := ParseTrustedCategories("spelling, ,typography")
+		require.Error(t, err)
+	})
+	t.Run("whole variable rejected on any bad token", func(t *testing.T) {
+		// A typo'd subset must NOT silently parse into the remaining tokens.
+		// That's the whole reason the parser exists — partial success on a
+		// typo is a foot-gun.
+		_, err := ParseTrustedCategories("spelling,bogus,typography")
+		require.Error(t, err)
+	})
+	t.Run("all four trustable categories accepted together", func(t *testing.T) {
+		got, err := ParseTrustedCategories("spelling,punctuation,typography,style")
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"spelling", "punctuation", "typography", "style"}, got)
+	})
+}
+
 func TestLoad_DialectSpellingGuardOverrides(t *testing.T) {
 	t.Run("true", func(t *testing.T) {
 		cfg := Load(func(k string) (string, bool) {
