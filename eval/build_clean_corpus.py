@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Build eval/clean_corpus.jsonl: known-clean sentences the bridge must NOT flag.
 
 Sources:

@@ -39,3 +39,14 @@ def test_score_empty_corpus_is_zero_rate() -> None:
     s = score_clean_results([])
     assert s["total"] == 0
     assert s["fp_rate"] == 0.0
+
+
+def test_error_row_does_not_count_as_fp() -> None:
+    results = [
+        _r("g001", "golden", False),
+        {"id": "g002", "register": "golden", "flagged": False, "error": "timeout"},
+    ]
+    s = score_clean_results(results)
+    assert s["total"] == 1  # error row excluded
+    assert s["false_positives"] == 0
+    assert s["fp_rate"] == 0.0

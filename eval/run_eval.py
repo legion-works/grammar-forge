@@ -20,7 +20,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 # Parse known flags before positional args so module-level code works.
-_parser = argparse.ArgumentParser(add_help=False)
+_parser = argparse.ArgumentParser(add_help=True)
 _parser.add_argument("--require-exact", action="store_true", default=False)
 _known, _rest = _parser.parse_known_args()
 REQUIRE_EXACT = _known.require_exact

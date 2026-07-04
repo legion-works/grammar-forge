@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Clean-text false-positive eval: every sentence in the corpus is known-clean;
 ANY suggestion returned by /correct is a false positive (deliberately stricter
 than run_eval.py's applied-text-differs check — a suggestion on clean text is a
@@ -19,6 +20,8 @@ def score_clean_results(results: list[dict]) -> dict:
     by_category: dict[str, int] = {}
     fp = 0
     for r in results:
+        if "error" in r:
+            continue  # measurement failure, not a clean-text result
         reg = by_register.setdefault(r["register"], {"total": 0, "fp": 0})
         reg["total"] += 1
         if r["flagged"]:
@@ -28,7 +31,7 @@ def score_clean_results(results: list[dict]) -> dict:
                 by_model[m] = by_model.get(m, 0) + 1
             for c in r["categories"]:
                 by_category[c] = by_category.get(c, 0) + 1
-    total = len(results)
+    total = sum(1 for r in results if "error" not in r)
     return {
         "total": total,
         "false_positives": fp,
@@ -47,27 +50,44 @@ def run(bridge_url: str, corpus_file: str) -> list[dict]:
             if not line:
                 continue
             case = json.loads(line)
-            req = urllib.request.Request(
-                f"{bridge_url}/correct",
-                data=json.dumps(
-                    {"text": case["text"], "source": "languagetool"}
-                ).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - operator-supplied local bridge URL
-                body = json.load(resp)
-            suggestions = body.get("suggestions") or []
-            results.append(
-                {
-                    "id": case["id"],
-                    "register": case["register"],
-                    "flagged": bool(suggestions),
-                    "models": [s.get("model", "?") for s in suggestions],
-                    "categories": [s.get("category") or "grammar" for s in suggestions],
-                    "text": case["text"],
-                    "suggestions": suggestions,
-                }
-            )
+            try:
+                req = urllib.request.Request(
+                    f"{bridge_url}/correct",
+                    data=json.dumps(
+                        {"text": case["text"], "source": "languagetool"}
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - operator-supplied local bridge URL
+                    body = json.load(resp)
+                suggestions = body.get("suggestions") or []
+                results.append(
+                    {
+                        "id": case["id"],
+                        "register": case["register"],
+                        "flagged": bool(suggestions),
+                        "models": [s.get("model", "?") for s in suggestions],
+                        "categories": [
+                            s.get("category") or "grammar" for s in suggestions
+                        ],
+                        "text": case["text"],
+                        "suggestions": suggestions,
+                    }
+                )
+            except Exception as e:
+                print(f"  WARN: {case['id']} request failed: {e!r}", file=sys.stderr)
+                results.append(
+                    {
+                        "id": case["id"],
+                        "register": case["register"],
+                        "flagged": False,
+                        "models": [],
+                        "categories": [],
+                        "text": case["text"],
+                        "suggestions": [],
+                        "error": repr(e),
+                    }
+                )
     return results
 
 
@@ -84,6 +104,7 @@ def main() -> int:
     args = p.parse_args()
 
     results = run(args.bridge_url, args.corpus_file)
+    n_errors = sum(1 for r in results if "error" in r)
     s = score_clean_results(results)
     pct = s["fp_rate"] * 100
     print(
@@ -100,8 +121,14 @@ def main() -> int:
                 for x in r["suggestions"]
             ]
             print(f"  FP {r['id']} [{r['register']}]: {r['text']!r} -> {edits}")
+    if n_errors:
+        print(
+            f"  {n_errors} request errors — a gate that could not measure must not pass"
+        )
     if pct > args.max_fp_rate:
         print(f"FAIL: fp_rate {pct:.1f}% > max {args.max_fp_rate:.1f}%")
+        return 1
+    if n_errors:
         return 1
     return 0
 
