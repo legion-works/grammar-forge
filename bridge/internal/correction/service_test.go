@@ -1763,6 +1763,119 @@ func TestServiceSynonymsNilThesaurus(t *testing.T) {
 	require.Nil(t, got, "nil thesaurus + flag on => nil, no panic (boot path before SetThesaurus)")
 }
 
+// ---- semantic verifier gate (C1) ----
+// A SemanticVerifier scores how much meaning two texts share (0..1). When
+// the service is configured with one and the score drops below threshold,
+// the LLM rewrite is discarded before diffing. The verifier fails OPEN:
+// missing verifier, identical text, or verifier error all pass the LLM
+// output through. On rejection the escalation default arm keeps the
+// fast-path suggestion set; the LLM-only arm yields empty suggestions but
+// still reaches the picky style pass — the rejection never short-circuits
+// either branch.
+
+type fakeVerifier struct {
+	sim float64
+	err error
+}
+
+func (f fakeVerifier) Similarity(_ context.Context, _, _ string) (float64, error) {
+	return f.sim, f.err
+}
+
+func hasLLMSuggestion(sugs []Suggestion) bool {
+	for _, s := range sugs {
+		if s.Model == ModelLLM {
+			return true
+		}
+	}
+	return false
+}
+
+// Escalation site: a low-confidence fast edit forces escalation; the LLM
+// returns a totally unrelated sentence; the verifier (sim=0.10, threshold
+// 0.80) rejects. The fast-path suggestion survives; the rejected LLM diff
+// must not appear in the result.
+func TestSemanticVerifierDiscardsLowSimilarityRewrite(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	llm := &scriptedLLM{grammarOut: "Completely unrelated sentence."}
+	svc := NewService(pickyPB{}, []Corrector{fc}, llm, st, "m", fastPolicy())
+	svc.SetSemanticVerifier(fakeVerifier{sim: 0.10}, 0.80)
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.False(t, hasLLMSuggestion(got.Suggestions),
+		"rejected LLM rewrite must not appear in suggestions")
+	for _, s := range got.Suggestions {
+		require.NotEqual(t, ModelLLM, s.Model, "no ModelLLM suggestions after rejection")
+	}
+}
+
+// High similarity passes through the verifier unchanged; the LLM diff
+// reaches the suggestion set as in the legacy baseline.
+func TestSemanticVerifierPassesHighSimilarityRewrite(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	llm := &scriptedLLM{grammarOut: "I have a cat"}
+	svc := NewService(pickyPB{}, []Corrector{fc}, llm, st, "m", fastPolicy())
+	svc.SetSemanticVerifier(fakeVerifier{sim: 0.97}, 0.80)
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.True(t, hasLLMSuggestion(got.Suggestions),
+		"high-similarity rewrite must reach the diff")
+}
+
+// Verifier error must fail OPEN: the LLM output is passed through, not
+// silently rejected. A flaky verifier is preferable to swallowing good
+// rewrites (the whole gate exists to reject low-similarity rewrites, not
+// to add another way to drop good ones).
+func TestSemanticVerifierErrorFailsOpen(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.3}},
+	}
+	llm := &scriptedLLM{grammarOut: "I have a cat"}
+	svc := NewService(pickyPB{}, []Corrector{fc}, llm, st, "m", fastPolicy())
+	svc.SetSemanticVerifier(fakeVerifier{err: errors.New("verifier down")}, 0.80)
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.True(t, hasLLMSuggestion(got.Suggestions),
+		"verifier error must fail open; LLM rewrite is kept")
+}
+
+// LLM-only site + picky=true: when the verifier rejects the LLM grammar
+// rewrite, the grammar path yields empty suggestions but the picky style
+// pass must still run. scriptedLLM dispatches by System: Build returns
+// System:"grammar" (pickyPB), BuildStyle returns System:"style". The style
+// branch returns styleOut; the grammar branch returns grammarOut.
+func TestSemanticVerifierRejectionKeepsPickyStylePass(t *testing.T) {
+	st := &fakeStore{}
+	llm := &scriptedLLM{
+		grammarOut: "Completely unrelated sentence.",
+		styleOut:   "I has a kitty",
+	}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+	svc.SetSemanticVerifier(fakeVerifier{sim: 0.10}, 0.80)
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat", Picky: true})
+	require.NoError(t, err)
+	var styleCount, grammarLLMCount int
+	for _, s := range got.Suggestions {
+		if s.Category == CategoryStyle {
+			styleCount++
+		} else if s.Model == ModelLLM {
+			grammarLLMCount++
+		}
+	}
+	require.Equal(t, 1, styleCount, "style pass must still run after rejection")
+	require.Equal(t, 0, grammarLLMCount, "rejected grammar rewrite must not appear")
+}
+
 // writeMobyTempFile writes a one-line Moby-format dataset containing the
 // "happy" headword with 5 synonyms, to a temp file the test owns. Returns
 // the path; t.TempDir() cleans up at test exit.

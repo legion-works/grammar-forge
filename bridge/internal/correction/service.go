@@ -112,6 +112,18 @@ type Service struct {
 	// overEditRules pattern: text-level repair before diffToSuggestions so
 	// the fix fires even when the LLM misses it.
 	articleFix bool
+	// semVerifier is the optional meaning-similarity gate applied to the
+	// LLM grammar output before diffing (see SemanticVerifier). nil = gate
+	// disabled; the helper returns true on a nil receiver. When configured
+	// with semThreshold > 0, a similarity score below threshold rejects the
+	// LLM rewrite: on escalation, the fast-path suggestion set survives;
+	// on the LLM-only path, the grammar result is empty (the picky style
+	// pass still runs).
+	semVerifier SemanticVerifier
+	// semThreshold is the similarity cutoff below which the LLM rewrite is
+	// discarded. 0 / negative = gate disabled; the helper short-circuits
+	// without consulting the verifier.
+	semThreshold float64
 	// irregularPluralFix enables the Harper irregular-plural possessive
 	// misfire repair (see irregular_plural.go). When true,
 	// repairIrregularPluralPossessive is applied to the Harper fast-path
@@ -213,6 +225,39 @@ func (s *Service) SetIrregularPluralFix(enabled bool) { s.irregularPluralFix = e
 // Default false (zero value); set true in main when GF_CAPITALIZATION_FIX is
 // enabled (default true).
 func (s *Service) SetCapitalizationFix(enabled bool) { s.capitalizationFix = enabled }
+
+// SetSemanticVerifier installs the meaning-similarity gate. v nil or
+// threshold <= 0 disables the gate (the helper short-circuits without
+// calling Similarity). On rejection the gate preserves the fast-path
+// suggestion set on the escalation branch and yields an empty grammar
+// result on the LLM-only branch; the picky style pass still runs in both
+// cases. The verifier is invoked once per LLM response, after repairOverEdits
+// and (if enabled) the article fix.
+func (s *Service) SetSemanticVerifier(v SemanticVerifier, threshold float64) {
+	s.semVerifier = v
+	s.semThreshold = threshold
+}
+
+// semanticVerifierApproves reports whether the repaired LLM output keeps
+// enough of the original's meaning to be diffed into suggestions. Fails
+// OPEN: no verifier configured, identical text, or a verifier error all
+// approve — the gate only ever blocks on a confident low-similarity score.
+func (s *Service) semanticVerifierApproves(ctx context.Context, original, repaired string) bool {
+	if s.semVerifier == nil || s.semThreshold <= 0 || repaired == original {
+		return true
+	}
+	sim, err := s.semVerifier.Similarity(ctx, original, repaired)
+	if err != nil {
+		s.log.Warn("semantic verifier failed; passing LLM output through", "err", err)
+		return true
+	}
+	if sim < s.semThreshold {
+		s.log.Warn("semantic verifier discarded LLM rewrite",
+			"similarity", sim, "threshold", s.semThreshold)
+		return false
+	}
+	return true
+}
 
 // SetMergeFastEditsMode selects the escalation result composition (see the
 // MergeFastEdits* constants). Optional; zero value = legacy replace semantics.
@@ -448,11 +493,19 @@ func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, e
 			if s.articleFix {
 				repaired = applyArticleFixes(repaired)
 			}
-			all = propagateFastCategories(diffToSuggestions(req.Text, repaired), fast)
-			// Merge-not-replace spike (GF_MERGE_FAST_EDITS): append fast
-			// edits the LLM did not contradict. Off by default — replace
-			// semantics above are the measured baseline.
-			all = s.mergeNonConflictingFastEdits(req.Text, all, fast)
+			// Semantic-verifier gate: a verified low-similarity rewrite is a
+			// catastrophic failure mode (rare but observed — the LLM returns
+			// an unrelated sentence on edge inputs). On rejection the fast-
+			// path suggestion set is preserved (all stays at `fast`) and
+			// execution falls through to the picky style pass below — the
+			// rejection never short-circuits the request.
+			if s.semanticVerifierApproves(ctx, req.Text, repaired) {
+				all = propagateFastCategories(diffToSuggestions(req.Text, repaired), fast)
+				// Merge-not-replace spike (GF_MERGE_FAST_EDITS): append fast
+				// edits the LLM did not contradict. Off by default — replace
+				// semantics above are the measured baseline.
+				all = s.mergeNonConflictingFastEdits(req.Text, all, fast)
+			}
 		}
 	}
 
@@ -557,6 +610,13 @@ func (s *Service) llmOnlySuggestions(ctx context.Context, req Request) ([]Sugges
 			len(corrected), len(req.Text))
 	}
 	corrected = s.repairOverEdits(req.Text, corrected)
+	// Semantic-verifier gate: on the LLM-only branch there is no fast-path
+	// set to fall back on, so rejection yields an empty grammar result
+	// (mirroring the existing "no edit needed" baseline). The caller still
+	// runs the picky style pass — the rejection does NOT short-circuit.
+	if !s.semanticVerifierApproves(ctx, req.Text, corrected) {
+		return nil, nil
+	}
 	return diffToSuggestions(req.Text, corrected), nil
 }
 

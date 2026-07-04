@@ -34,6 +34,16 @@ type LLMClient interface {
 	Complete(ctx context.Context, p Prompt) (string, error)
 }
 
+// SemanticVerifier scores how much meaning two texts share (0..1). Used to
+// discard catastrophic LLM rewrites before diffing — a verified low-score
+// rewrite is treated as a confidence-zero correction rather than a candidate
+// fix. The service fails OPEN when no verifier is configured, when the
+// repaired text equals the original, or when the verifier errors; the gate
+// only ever blocks on a confident low-similarity score.
+type SemanticVerifier interface {
+	Similarity(ctx context.Context, original, corrected string) (float64, error)
+}
+
 // RephraseClientFactory builds a one-shot LLMClient for a rephrase backend.
 // Injected by main (the transport layer) so the correction core stays free of
 // any concrete transport (llm) import. Returns an error for an unknown provider.
