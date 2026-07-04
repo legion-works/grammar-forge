@@ -162,11 +162,16 @@ func main() {
 	// on, LLM rewrites whose MiniLM cosine similarity to the original
 	// falls below the threshold are discarded before being diffed into
 	// suggestions. Best-effort: a load failure logs Warn and returns nil,
-	// and the service layer fails OPEN on a nil verifier. Enabling is an
-	// eval-gated operator action (full cold golden + clean-text FP at or
-	// below baseline) — see plans/2026-07-04-bridge-quality-quartet.md.
+	// and the service layer fails OPEN on a nil verifier. The returned
+	// cleanup releases the verifier's hugot session on shutdown — always
+	// non-nil so the defer is unconditional (mirrors buildFastPath).
+	// Enabling is an eval-gated operator action (full cold golden +
+	// clean-text FP at or below baseline) — see
+	// plans/2026-07-04-bridge-quality-quartet.md.
 	if cfg.SemanticVerifierEnabled {
-		if sv := buildSemanticVerifier(cfg); sv != nil {
+		sv, closeVerifier := buildSemanticVerifier(cfg)
+		defer closeVerifier()
+		if sv != nil {
 			svc.SetSemanticVerifier(sv, cfg.SemanticVerifierThreshold)
 		}
 	}

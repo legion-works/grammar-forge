@@ -27,7 +27,7 @@ MINILM_REPO="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resol
 
 mkdir -p "$LLM_DIR" "$NATIVE_DIR" "$GECTOR_DIR" "$MINILM_DIR"
 
-echo "==> [1/5] Slow-path GGUF ($GGUF_FILE, ~4.2 GB)"
+echo "==> [1/7] Slow-path GGUF ($GGUF_FILE, ~4.2 GB)"
 if [ -f "$LLM_DIR/$GGUF_FILE" ]; then
   echo "    present, skipping (delete to re-fetch)"
 else
@@ -38,7 +38,7 @@ else
   mv "$LLM_DIR/$GGUF_FILE.partial" "$LLM_DIR/$GGUF_FILE"
 fi
 
-echo "==> [2/5] hugot native libs ($HUGOT_VER)"
+echo "==> [2/7] hugot native libs ($HUGOT_VER)"
 for tarball in libonnxruntime-linux-x64.tar.gz libtokenizers-linux-x64.tar.gz; do
   echo "    $tarball"
   curl -fL --retry 5 \
@@ -46,7 +46,7 @@ for tarball in libonnxruntime-linux-x64.tar.gz libtokenizers-linux-x64.tar.gz; d
     | tar -xz -C "$NATIVE_DIR"
 done
 
-echo "==> [3/5] GECToR model.onnx (~345 MB, INT8, resumable)"
+echo "==> [3/7] GECToR model.onnx (~345 MB, INT8, resumable)"
 if [ -f "$GECTOR_DIR/model.onnx" ]; then
   echo "    present, skipping (delete to re-fetch)"
 else
@@ -56,18 +56,18 @@ else
   mv "$GECTOR_DIR/model.onnx.partial" "$GECTOR_DIR/model.onnx"
 fi
 
-echo "==> [3/5] GECToR support files (tokenizer/config JSONs)"
+echo "==> [4/7] GECToR support files (tokenizer/config JSONs)"
 for f in config.json tokenizer.json tokenizer_config.json vocab.json merges.txt special_tokens_map.json; do
   echo "    $f"
   curl -fL --retry 5 -o "$GECTOR_DIR/$f" "$GECTOR_REPO/$f"
 done
 
-echo "==> [4/5] verb-form vocabulary"
+echo "==> [5/7] verb-form vocabulary"
 # verb-form-vocab.txt is fetched from grammarly/gector — identical $TRANSFORM_VERB_* tags.
 curl -fL --retry 5 -o "$GECTOR_DIR/verb-form-vocab.txt" \
   "https://raw.githubusercontent.com/grammarly/gector/master/data/verb-form-vocab.txt"
 
-echo "==> [5/5] MiniLM model.onnx (~90 MB, FP32, resumable)"
+echo "==> [6/7] MiniLM model.onnx (~90 MB, FP32, resumable)"
 if [ -f "$MINILM_DIR/model.onnx" ]; then
   echo "    present, skipping (delete to re-fetch)"
 else
@@ -79,7 +79,7 @@ else
   mv "$MINILM_DIR/model.onnx.partial" "$MINILM_DIR/model.onnx"
 fi
 
-echo "==> [5/5] MiniLM tokenizer + config"
+echo "==> [7/7] MiniLM tokenizer + config"
 for f in tokenizer.json config.json vocab.txt special_tokens_map.json; do
   echo "    $f"
   curl -fL --retry 5 -o "$MINILM_DIR/$f" "$MINILM_REPO/$f"
