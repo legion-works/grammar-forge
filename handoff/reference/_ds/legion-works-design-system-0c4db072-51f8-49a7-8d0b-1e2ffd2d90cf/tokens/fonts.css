@@ -1,0 +1,14 @@
+/* ============================================================
+   Legion Works — Fonts
+   ------------------------------------------------------------
+   All three families load from Google Fonts (authoritative host
+   for Geist, Geist Mono, Space Grotesk, JetBrains Mono). Binaries
+   are NOT vendored into /assets — they are fetched from Google's
+   CDN. For fully offline use, upload the woff2 files and swap
+   these @import lines for local @font-face rules.
+
+   Display : Space Grotesk  — technical geometric, headings/marks
+   UI/Body : Geist          — clean neo-grotesk, precise + neutral
+   Mono    : JetBrains Mono  — TUI, code, terminal, data
+   ============================================================ */
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");

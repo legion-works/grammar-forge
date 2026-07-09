@@ -1,0 +1,60 @@
+/* ============================================================
+   Legion Works — Base resets & primitives
+   Minimal, opinionated. Consumers get sane defaults + selection,
+   focus-ring, scrollbar, and .lw-eyebrow / .lw-mono helpers.
+   ============================================================ */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--lh-normal);
+  color: var(--text-body);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  color: var(--text-strong);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+  font-weight: var(--fw-semibold);
+}
+
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+code, kbd, pre, samp { font-family: var(--font-mono); }
+
+::selection { background: color-mix(in oklab, var(--cyan-400) 32%, transparent); color: var(--text-strong); }
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Thin synthetic scrollbar */
+* { scrollbar-width: thin; scrollbar-color: var(--neutral-400) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--neutral-400);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* Eyebrow / kicker label */
+.lw-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--accent);
+  font-weight: var(--fw-medium);
+}
+.lw-mono { font-family: var(--font-mono); }

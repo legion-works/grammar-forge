@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/fonts.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/ansi.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/radius-shadow.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/glass.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/annotations.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/base.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/styles.css">
+  <script src="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/_ds_bundle.js"></script>
+  <style>
+    @keyframes gfd-pop { from { transform: scale(0.985) translateY(2px); } to { transform: scale(1) translateY(0); } }
+    @keyframes gfd-panel { from { transform: scale(0.97) translateY(8px); } to { transform: scale(1) translateY(0); } }
+    @keyframes gfd-spin { to { transform: rotate(360deg); } }
+    @keyframes gfd-pip { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.18); opacity: 0.75; } }
+    @keyframes gfd-flash { 0% { background: rgba(59,165,93,0.34); } 100% { background: transparent; } }
+    @keyframes gfd-toastin { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #1e1f22; }
+
+    .gfd-glass {
+      background: linear-gradient(180deg, rgba(41,46,66,0.90) 0%, rgba(22,22,30,0.88) 100%);
+      border: 1px solid var(--glass-stroke);
+      backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%);
+      box-shadow: var(--shadow-lg), var(--glass-rim); color: var(--text-body); position: relative; isolation: isolate; font-family: var(--font-ui);
+    }
+    .gfd-glass::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      box-shadow: inset 0 1px 0 var(--glass-stroke-top), inset 0 -1px 1px rgba(0,0,0,0.35); }
+    .gfd-primary { color: var(--accent-ink) !important; }
+    .gfd-pop { opacity: 1; animation: gfd-pop 170ms cubic-bezier(0.22,1,0.36,1); }
+    .gfd-panel { opacity: 1; animation: gfd-panel 230ms cubic-bezier(0.22,1,0.36,1); }
+
+    /* composer overlay-mirror */
+    #gfd-stack { position: relative; }
+    #gfd-under, #gfd-input {
+      font: 400 15px/1.5 'gg sans', -apple-system, var(--font-ui), sans-serif;
+      letter-spacing: 0; padding: 11px 12px; white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;
+      margin: 0; border: 0; min-height: 44px;
+    }
+    #gfd-under { position: absolute; inset: 0; color: transparent; pointer-events: none; z-index: 1; user-select: none; }
+    #gfd-input { position: relative; z-index: 2; color: #dbdee1; outline: none; caret-color: #fff; background: transparent; }
+    #gfd-input:empty::before { content: 'Message #general'; color: #6d7079; }
+    /* Copilot-style ghost completion: dim inline text after the caret. */
+    #gfd-ghost { position: absolute; z-index: 1; pointer-events: none; color: #5f636c;
+      font: 400 15px/1.5 'gg sans', -apple-system, var(--font-ui), sans-serif; white-space: pre; }
+    .gfd-ghosthint { display: inline-flex; align-items: center; gap: 4px; color: #6d7079; }
+    /* Underline always shows the issue; the background tint only appears on
+       hover or when the word's card is open (mirrors the browser client). */
+    .gfd-u { text-decoration: underline wavy; text-decoration-thickness: 1.7px; text-underline-offset: 3px; border-radius: 2px; transition: background 120ms ease-out; }
+    .gfd-u-spelling { text-decoration-color: var(--cat-spelling); }
+    .gfd-u-grammar { text-decoration-color: var(--cat-grammar); }
+    .gfd-u-punctuation { text-decoration-color: var(--cat-punctuation); }
+    .gfd-u-style { text-decoration-color: var(--cat-style); }
+    .gfd-u-on.gfd-u-spelling { background: rgba(239,68,68,0.22); }
+    .gfd-u-on.gfd-u-grammar { background: rgba(234,179,8,0.24); }
+    .gfd-u-on.gfd-u-punctuation { background: rgba(6,182,212,0.22); }
+    .gfd-u-on.gfd-u-style { background: rgba(139,92,246,0.22); }
+
+    .gfd-btn { transition: background 100ms ease-out, color 100ms ease-out, box-shadow 120ms ease-out, transform 80ms ease-out; cursor: pointer; }
+    .gfd-btn:hover { background: rgba(255,255,255,0.10) !important; color: #dbdee1 !important; }
+    .gfd-btn:active { transform: scale(0.94); }
+    .gfd-gf.on { background: rgba(134,225,252,0.30) !important; color: var(--accent) !important; box-shadow: 0 0 12px rgba(134,225,252,0.4); }
+    .gfd-primary { transition: background 120ms ease-out, transform 110ms ease-out, box-shadow 140ms ease-out; cursor: pointer; }
+    .gfd-primary:hover { background: var(--accent-strong) !important; transform: translateY(-1px); box-shadow: 0 6px 18px rgba(134,225,252,0.45); }
+    .gfd-soft { transition: background 110ms ease-out, transform 100ms ease-out; cursor: pointer; }
+    .gfd-soft:hover { background: rgba(255,255,255,0.10) !important; transform: translateY(-1px); }
+    .gfd-row { transition: background 100ms ease-out, transform 110ms ease-out; cursor: pointer; }
+    .gfd-row:hover { background: rgba(255,255,255,0.08) !important; transform: translateX(3px); }
+    .gfd-alt { transition: background 110ms ease-out, border-color 110ms ease-out, transform 100ms ease-out; cursor: pointer; }
+    .gfd-alt:hover { border-color: rgba(134,225,252,0.55) !important; transform: translateY(-1px); }
+    .gfd-ch { transition: background 80ms ease-out; cursor: pointer; }
+    .gfd-ch:hover { background: rgba(255,255,255,0.04) !important; }
+    .gfd-ch.sel { background: rgba(255,255,255,0.10) !important; }
+    .gfd-pip { animation: gfd-pip 1100ms ease-in-out infinite; }
+    .gfd-resolved { animation: gfd-flash 700ms ease-out; }
+    .gfd-toast { animation: gfd-toastin 240ms cubic-bezier(0.22,1,0.36,1); }
+    .gfd-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid rgba(134,225,252,0.3); border-top-color: var(--accent); animation: gfd-spin 0.7s linear infinite; display: inline-block; flex-shrink: 0; }
+    @keyframes gfd-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .gfd-skel { background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(134,225,252,0.18) 50%, rgba(255,255,255,0.05) 75%); background-size: 200% 100%; animation: gfd-shimmer 1.5s linear infinite; border-radius: 11px; }
+    .gfd-vtab { transition: background 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out; }
+    .gfd-vtab:hover { color: #e7e9ee; }
+    .thin::-webkit-scrollbar { width: 4px; }
+    .thin::-webkit-scrollbar-track { background: transparent; }
+    .thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.16); border-radius: 2px; }
+    .kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 4px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.16); font: 600 10px/1 ui-monospace, monospace; color: #c7ccd1; }
+  </style>
+</helmet>
+
+<div class="lw-aurora" style="min-height: 100vh; padding: 30px 24px 54px; font-family: 'gg sans', -apple-system, BlinkMacSystemFont, var(--font-ui), sans-serif;" onClick="{{ closeAll }}">
+
+  <div style="max-width: 1000px; margin: 0 auto 16px; display: flex; align-items: center; gap: 11px;">
+    <img src="assets/grammarforge-mark.svg" width="32" height="32" alt="GrammarForge mark" style="display: block; flex-shrink: 0; filter: drop-shadow(0 2px 9px color-mix(in oklab, var(--cyan-400) 42%, transparent));">
+    <div>
+      <div style="font-family: var(--font-display); font-weight: 600; font-size: 16px; line-height: 1.1; letter-spacing: -0.01em; color: var(--text-strong);">GrammarForge <span style="color: var(--text-muted); font-weight: 500; font-family: var(--font-ui);">· Vencord plugin</span></div>
+      <div style="font-family: var(--font-ui); font-weight: 500; font-size: 11.5px; line-height: 1.2; color: var(--text-muted); margin-top: 2px;">Live in the Discord composer · type to watch it check</div>
+    </div>
+    <div style="flex: 1;"></div>
+    <x-import component-from-global-scope="LegionWorksDesignSystem_0c4db0.Badge" tone="success" dot="{{ true }}" hint-size="auto,26px">bridge · localhost:8000</x-import>
+  </div>
+
+  <!-- Discord window -->
+  <div style="max-width: 1000px; margin: 0 auto; height: 640px; border-radius: 12px; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.4); display: flex;">
+
+    <!-- server rail -->
+    <div style="width: 72px; background: #1e1f22; display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 8px; flex-shrink: 0;">
+      <div style="width: 48px; height: 48px; border-radius: 16px; background: #5865f2; display: flex; align-items: center; justify-content: center; color: #fff; font: 700 18px/1 var(--font-ui);">GF</div>
+      <div style="width: 32px; height: 2px; border-radius: 1px; background: rgba(255,255,255,0.06);"></div>
+      <div style="width: 48px; height: 48px; border-radius: 24px; background: #313338; display: flex; align-items: center; justify-content: center; color: #b5bac1; font: 600 15px/1 var(--font-ui);">VC</div>
+      <div style="width: 48px; height: 48px; border-radius: 24px; background: #313338; display: flex; align-items: center; justify-content: center; color: #b5bac1; font: 600 15px/1 var(--font-ui);">d</div>
+    </div>
+
+    <!-- channels -->
+    <div style="width: 232px; background: #2b2d31; display: flex; flex-direction: column; flex-shrink: 0;">
+      <div style="height: 48px; padding: 0 16px; display: flex; align-items: center; font: 600 15px/1 var(--font-ui); color: #f2f3f5; border-bottom: 1px solid rgba(0,0,0,0.3); box-shadow: 0 1px 0 rgba(0,0,0,0.2);">GrammarForge Dev</div>
+      <div style="flex: 1; padding: 10px 8px; overflow-y: auto;" class="thin">
+        <div style="font: 600 11px/1 var(--font-ui); color: #949ba4; text-transform: uppercase; letter-spacing: 0.02em; padding: 12px 8px 5px;">Text Channels</div>
+        <div style="height: 32px; padding: 0 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #f2f3f5; font: 500 15px/1 var(--font-ui);" class="gfd-ch sel"><span style="font-size: 19px; color: #80848e;">#</span> general</div>
+        <div style="height: 32px; padding: 0 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #80848e; font: 500 15px/1 var(--font-ui);" class="gfd-ch"><span style="font-size: 19px;">#</span> bridge-dev</div>
+        <div style="height: 32px; padding: 0 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #80848e; font: 500 15px/1 var(--font-ui);" class="gfd-ch"><span style="font-size: 19px;">#</span> clients</div>
+        <div style="height: 32px; padding: 0 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #80848e; font: 500 15px/1 var(--font-ui);" class="gfd-ch"><span style="font-size: 19px;">#</span> evals</div>
+      </div>
+      <div style="height: 52px; background: #232428; display: flex; align-items: center; gap: 8px; padding: 0 8px; flex-shrink: 0;">
+        <div style="width: 32px; height: 32px; border-radius: 50%; background: #5865f2; display: flex; align-items: center; justify-content: center; color: #fff; font: 700 13px/1 var(--font-ui);">T</div>
+        <div style="flex: 1; min-width: 0;"><div style="font: 600 13px/1 var(--font-ui); color: #f2f3f5;">tehan</div><div style="font: 400 11px/1.3 var(--font-ui); color: #949ba4;">online</div></div>
+      </div>
+    </div>
+
+    <!-- chat -->
+    <div style="flex: 1; background: #313338; display: flex; flex-direction: column; position: relative; min-width: 0;" onClick="{{ stopProp }}">
+      <div style="height: 48px; padding: 0 16px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(0,0,0,0.2); box-shadow: 0 1px 0 rgba(0,0,0,0.2); flex-shrink: 0;">
+        <span style="font-size: 22px; color: #80848e;">#</span>
+        <span style="font: 700 16px/1 var(--font-ui); color: #f2f3f5;">general</span>
+        <div style="width: 1px; height: 18px; background: rgba(255,255,255,0.12); margin: 0 4px;"></div>
+        <span style="font: 400 13px/1 var(--font-ui); color: #949ba4;">GrammarForge checking your draft</span>
+      </div>
+
+      <!-- messages -->
+      <div style="flex: 1; overflow-y: auto; padding: 16px 16px 8px;" class="thin" onClick="{{ closePanel }}">
+        <div style="display: flex; gap: 14px; padding: 4px 0 14px;">
+          <div style="width: 40px; height: 40px; border-radius: 50%; background: #3ba55d; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; font: 700 15px/1 var(--font-ui);">A</div>
+          <div><div style="display: flex; align-items: baseline; gap: 8px;"><span style="font: 600 15px/1 var(--font-ui); color: #f2f3f5;">alice</span><span style="font: 400 11px/1 var(--font-ui); color: #80848e;">10:32 AM</span></div><div style="font: 400 15px/1.5 var(--font-ui); color: #dbdee1; margin-top: 3px;">fast path p75 is down to 38ms after the GECToR change 🚀</div></div>
+        </div>
+        <div style="display: flex; gap: 14px; padding: 4px 0;">
+          <div style="width: 40px; height: 40px; border-radius: 50%; background: #faa61a; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #000; font: 700 15px/1 var(--font-ui);">C</div>
+          <div><div style="display: flex; align-items: baseline; gap: 8px;"><span style="font: 600 15px/1 var(--font-ui); color: #faa61a;">carol</span><span style="font: 400 11px/1 var(--font-ui); color: #80848e;">10:41 AM</span></div><div style="font: 400 15px/1.5 var(--font-ui); color: #dbdee1; margin-top: 3px;">the inline overlay is so clean now. try typing in the box 👇</div></div>
+        </div>
+      </div>
+
+      <!-- composer -->
+      <div id="gfd-cwrap" style="padding: 0 16px 24px; flex-shrink: 0; position: relative;">
+        {{ panelEl }}
+        {{ cardEl }}
+        {{ hoverTipEl }}
+        {{ synEl }}
+        {{ goalsEl }}
+        {{ rephraseEl }}
+        {{ toastEl }}
+
+        <div style="background: #383a40; border-radius: 8px; display: flex; align-items: flex-end; min-height: 44px;" onClick="{{ stopProp }}">
+          <div style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #b5bac1; font-size: 24px; flex-shrink: 0;" class="gfd-btn">+</div>
+
+          <div id="gfd-stack" style="flex: 1; min-width: 0;">
+            <div id="gfd-under"></div>
+            <div id="gfd-input" contenteditable="true" spellcheck="false"></div>
+            <div id="gfd-ghost"></div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 2px; padding: 7px 8px; flex-shrink: 0;">
+            <div style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: #b5bac1; font-size: 19px;" class="gfd-btn">🎁</div>
+            <div style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: #b5bac1; font: 700 11px/1 var(--font-ui);" class="gfd-btn">GIF</div>
+            <div style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: #b5bac1; font-size: 19px;" class="gfd-btn">😀</div>
+            <!-- GrammarForge chatbar button -->
+            <div style="position: relative; display: inline-flex;" onClick="{{ togglePanel }}">
+              <div style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: {{ gfColor }};" class="gfd-btn gfd-gf {{ gfOn }}">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+              </div>
+              {{ gfBadgeEl }}
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 7px; font: 400 11.5px/1 var(--font-ui); color: #6d7079;">
+          {{ statusLineEl }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p style="max-width: 1000px; margin: 14px auto 0; text-align: center; font: 400 12.5px/1.5 var(--font-ui); color: #6d7079;">
+    The composer is live — edit the text and GrammarForge re-checks as you type · click the <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="vertical-align: -1px; opacity: 0.85;"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"></path></svg> button for the full review · accept to rewrite inline
+  </p>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    panelOpen: false, card: null, cardPos: null,
+    rephraseOpen: false, rephraseTone: 'neutral',
+    checking: false, phase: 'done',
+    suggestions: [], dismissed: {}, accepts: 0,
+    toast: null, hoverId: null, hoverPos: null,
+    panelView: 'review', goals: { audience: 'general', formality: 'neutral', domain: 'chat' }, goalsOpen: false,
+    dictWords: ['Vencord', 'GECToR'], muted: 0,
+    rephraseScope: 'sentence', rephraseLoading: false,
+    synActive: null, synPos: null, synWord: null, synChosen: {},
+  };
+
+  INITIAL = 'i think we should of merged teh fix last week — its definitly a big improvment and will effect the whole team';
+
+  CAT = {
+    spelling: { label: 'Spelling', dot: 'var(--cat-spelling)', pen: 5 },
+    grammar: { label: 'Grammar', dot: 'var(--cat-grammar)', pen: 4 },
+    punctuation: { label: 'Punctuation', dot: 'var(--cat-punctuation)', pen: 3 },
+    style: { label: 'Style', dot: 'var(--cat-style)', pen: 2 },
+    typography: { label: 'Typography', dot: 'var(--cat-typography)', pen: 1 },
+    unknown: { label: 'Issue', dot: 'var(--text-muted)', pen: 1 },
+  };
+
+  // Bridge /tone model output (ToneTag[] — label + 0..1 score), highest first.
+  TONE = [
+    { tag: 'Confident', score: 0.79, color: 'var(--band-excellent)' },
+    { tag: 'Direct',    score: 0.55, color: 'var(--accent)' },
+  ];
+
+  // Live detection rules. Each: regex (word-ish), category, replacement, message, confidence, model.
+  RULES = [
+    { re: /\bi\b/g, repl: 'I', cat: 'grammar', model: 'Harper', conf: 0.99, msg: 'Capitalize the pronoun \u201cI.\u201d' },
+    { re: /\bshould of\b/gi, repl: 'should have', cat: 'grammar', model: 'GECToR', conf: 0.97, msg: '\u201cShould of\u201d is a mishearing of \u201cshould have.\u201d' },
+    { re: /\bteh\b/gi, repl: 'the', cat: 'spelling', model: 'Harper', conf: 0.99, msg: 'Possible spelling mistake.' },
+    { re: /\bits\b/gi, repl: 'it\u2019s', cat: 'grammar', model: 'GECToR', conf: 0.9, msg: '\u201cIt\u2019s\u201d = \u201cit is\u201d here; add the apostrophe.' },
+    { re: /\bdefinitly\b/gi, repl: 'definitely', alts: ['definitively'], cat: 'spelling', model: 'Harper', conf: 0.99, msg: 'Possible spelling mistake.' },
+    { re: /\bimprovment\b/gi, repl: 'improvement', cat: 'spelling', model: 'Harper', conf: 0.99, msg: 'Possible spelling mistake.' },
+    { re: /\beffect\b/gi, repl: 'affect', cat: 'grammar', model: 'AI', conf: 0.78, msg: 'Use the verb \u201caffect\u201d; \u201ceffect\u201d is usually a noun.' },
+    { re: /\bbig\b/gi, repl: 'major', alts: ['significant', 'substantial'], cat: 'style', model: 'AI', conf: 0.71, msg: '\u201cBig\u201d is vague \u2014 a stronger word reads more confidently.' },
+    { re: /\balot\b/gi, repl: 'a lot', cat: 'spelling', model: 'Harper', conf: 0.98, msg: 'Possible spelling mistake.' },
+    { re: /\brecieve\b/gi, repl: 'receive', cat: 'spelling', model: 'Harper', conf: 0.99, msg: 'Possible spelling mistake. (i before e\u2026)' },
+  ];
+
+  // Synonyms surfaced on double-click of any non-flagged word (Wordtune-style).
+  SYN = { fix: ['patch', 'change', 'correction'], merged: ['landed', 'integrated', 'combined'], whole: ['entire', 'full', 'complete'], team: ['group', 'crew', 'squad'], shipped: ['released', 'deployed', 'launched'] };
+
+  REPHRASE = {
+    neutral: ['I think we should have merged the fix last week \u2014 it\u2019s a big improvement that affects the whole team.', 'We probably should have shipped the fix last week; it\u2019s a solid improvement for the entire team.'],
+    formal: ['I believe we should have merged the fix last week; it represents a significant improvement that affects the entire team.', 'In hindsight, the fix should have been merged last week, as it constitutes a meaningful improvement for the whole team.'],
+    casual: ['we def should\u2019ve merged the fix last week \u2014 big improvement, affects everyone!', 'honestly should\u2019ve shipped that fix last week, it\u2019s a huge win for the whole team.'],
+  };
+
+  glass() {
+    return {
+      background: 'linear-gradient(180deg, rgba(41,46,66,0.90) 0%, rgba(22,22,30,0.88) 100%)',
+      border: '1px solid var(--glass-stroke)',
+      backdropFilter: 'blur(22px) saturate(160%)', WebkitBackdropFilter: 'blur(22px) saturate(160%)',
+      boxShadow: 'var(--shadow-lg), var(--glass-rim)', color: 'var(--text-body)', isolation: 'isolate', fontFamily: 'var(--font-ui)',
+    };
+  }
+
+  // ── lifecycle ──
+  componentDidMount() {
+    const input = document.getElementById('gfd-input');
+    if (input) {
+      input.textContent = this.INITIAL;
+      input.addEventListener('input', () => this.onInput());
+      input.addEventListener('keydown', (e) => {
+        // Tab accepts the ghost completion (Copilot-style). Falls through to
+        // normal Tab when there's no ghost.
+        if (e.key === 'Tab' && this._ghost) { e.preventDefault(); this.acceptGhost(); return; }
+        if (e.key === 'Escape' && this._ghost) { this.setGhost(''); return; }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); }
+      });
+      // Real-plugin parity: the underline layer is pointer-events:none, so
+      // clicks/moves land on the field; we hit-test the pointer against the
+      // suggestion spans (mirrors orchestrator.ts onFieldClick / onFieldMouseMove).
+      input.addEventListener('click', (e) => this.onComposerClick(e));
+      input.addEventListener('mousemove', (e) => this.onComposerMove(e));
+      input.addEventListener('mouseleave', () => this.onComposerLeave());
+      input.addEventListener('dblclick', (e) => this.onComposerDblClick(e));
+    }
+    this._onKey = (e) => this.onKey(e);
+    window.addEventListener('keydown', this._onKey, { capture: true });
+    this.scan(this.INITIAL, true);
+    // Seed a ghost completion for the initial prompt.
+    this.computeGhost();
+  }
+  componentWillUnmount() { if (this._onKey) window.removeEventListener('keydown', this._onKey, { capture: true }); }
+
+  REPHRASE_SENT = {
+    neutral: ['It\u2019s a solid improvement for the whole team.', 'This should help the entire team.'],
+    formal: ['This constitutes a meaningful improvement for the team.', 'It will benefit the entire team.'],
+    casual: ['big win for everyone!', 'helps the whole team out.'],
+  };
+
+  // Hit-test the pointer against the rendered underline spans.
+  hitTestPoint(x, y) {
+    const under = document.getElementById('gfd-under'); if (!under) return null;
+    const spans = under.querySelectorAll('.gfd-u[data-id]');
+    for (const sp of spans) {
+      const rects = sp.getClientRects();
+      for (const r of rects) {
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+          const id = sp.getAttribute('data-id');
+          const s = this.visible().find(v => v.id === id);
+          if (s) return { s, sp };
+        }
+      }
+    }
+    return null;
+  }
+  onComposerClick(e) {
+    const hit = this.hitTestPoint(e.clientX, e.clientY);
+    if (hit) { this._hoverId = null; this.setState({ hoverId: null, hoverPos: null }); this.openCard(hit.s); }
+    else if (this.state.card != null) { this._focusId = null; this.setState({ card: null, cardPos: null }); this.renderUnderlay(); }
+  }
+  onComposerMove(e) {
+    if (this.state.card != null || this.state.panelOpen) { if (this.state.hoverId) this.setState({ hoverId: null, hoverPos: null }); return; }
+    const hit = this.hitTestPoint(e.clientX, e.clientY);
+    const id = hit ? hit.s.id : null;
+    if (id === this._hoverId) return;
+    // Measure the hovered span BEFORE renderUnderlay() resets the overlay's
+    // innerHTML — otherwise hit.sp is detached and getBoundingClientRect()
+    // returns zeros, throwing the pill off-screen.
+    let pos = null;
+    if (hit) {
+      const wrap = document.getElementById('gfd-cwrap');
+      if (wrap) { const wr = wrap.getBoundingClientRect(); const sr = hit.sp.getBoundingClientRect(); pos = { left: sr.left - wr.left + sr.width / 2, bottom: wr.bottom - sr.top + 9 }; }
+    }
+    this._hoverId = id; this._focusId = id; this.renderUnderlay();
+    this.setState({ hoverId: id, hoverPos: pos });
+  }
+  onComposerLeave() { this._hoverId = null; if (this.state.card == null) { this._focusId = null; this.renderUnderlay(); } this.setState({ hoverId: null, hoverPos: null }); }
+  componentDidUpdate() {
+    const c = this.state.card;
+    if (c != null && c !== this._cardMeasured) { this._cardMeasured = c; this.measureCard(); }
+    else if (c == null) this._cardMeasured = null;
+  }
+
+  inputText() { const el = document.getElementById('gfd-input'); return el ? el.textContent : ''; }
+
+  onInput() {
+    this.renderUnderlay();          // instant visual reflow of underlines
+    this.computeGhost();            // refresh the ghost completion
+    clearTimeout(this._deb);
+    this.setState({ checking: true, phase: 'fast' });
+    this._deb = setTimeout(() => this.scan(this.inputText(), false), 480);
+  }
+
+  // ── Copilot-style ghost completion ──────────────────────────────────────
+  // Predictive continuations keyed by a trailing trigger. In production this
+  // is a debounced bridge /complete call (LLM, same Gemma model as rephrase)
+  // returning the most-likely continuation of the caret context.
+  GHOSTS = [
+    { re: /\bbackoff to the auth\s*$/i, text: ' client, capping retries at 5 with full jitter' },
+    { re: /\bexponential\s*$/i,         text: ' backoff to the auth client' },
+    { re: /\bretry with\s*$/i,          text: ' exponential backoff and a jittered delay' },
+    { re: /\badd (a|an)\s*$/i,          text: ' integration test for the happy path' },
+    { re: /\bfix the\s*$/i,             text: ' race condition in the token refresh' },
+    { re: /\bthanks\s*$/i,              text: ' for taking a look!' },
+  ];
+  computeGhost() {
+    const text = this.inputText();
+    // Only complete at the end of input with the caret at the end (Copilot rule).
+    if (!this.caretAtEnd()) { this.setGhost(''); return; }
+    let g = '';
+    for (const c of this.GHOSTS) { if (c.re.test(text)) { g = c.text; break; } }
+    this.setGhost(g);
+  }
+  setGhost(g) {
+    const had = !!this._ghost; this._ghost = g; this.renderGhost();
+    if (had !== !!g) this.setState({ hasGhost: !!g });
+  }
+  caretAtEnd() {
+    const input = document.getElementById('gfd-input');
+    const sel = window.getSelection();
+    if (!input || !sel || sel.rangeCount === 0) return true;
+    const r = sel.getRangeAt(0);
+    if (!input.contains(r.endContainer)) return true;
+    const probe = r.cloneRange(); probe.selectNodeContents(input); probe.setStart(r.endContainer, r.endOffset);
+    return probe.toString().length === 0;
+  }
+  renderGhost() {
+    const ghost = document.getElementById('gfd-ghost');
+    const input = document.getElementById('gfd-input');
+    const stack = document.getElementById('gfd-stack');
+    if (!ghost || !input || !stack) return;
+    if (!this._ghost) { ghost.textContent = ''; return; }
+    ghost.textContent = this._ghost;
+    // Anchor the ghost at the end-of-text caret position (last line if wrapped).
+    const sr = stack.getBoundingClientRect();
+    let rect;
+    const tn = this.lastTextNode(input);
+    if (tn) { const r = document.createRange(); r.setStart(tn, tn.textContent.length); r.collapse(true); rect = r.getBoundingClientRect(); }
+    if (!rect || (rect.width === 0 && rect.height === 0 && rect.left === 0)) {
+      const ir = input.getBoundingClientRect(); ghost.style.left = (ir.left - sr.left + 12) + 'px'; ghost.style.top = (ir.top - sr.top + 11) + 'px'; return;
+    }
+    ghost.style.left = (rect.right - sr.left) + 'px';
+    ghost.style.top = (rect.top - sr.top) + 'px';
+  }
+  lastTextNode(el) {
+    let last = null;
+    const walk = (n) => { for (const c of n.childNodes) { if (c.nodeType === 3 && c.textContent.length) last = c; else if (c.nodeType === 1) walk(c); } };
+    walk(el); return last;
+  }
+  acceptGhost() {
+    if (!this._ghost) return;
+    const input = document.getElementById('gfd-input');
+    const accepted = this._ghost;
+    input.textContent = this.inputText() + accepted;
+    this._ghost = ''; this.renderGhost();
+    // place caret at end
+    const sel = window.getSelection(); const r = document.createRange(); r.selectNodeContents(input); r.collapse(false); sel.removeAllRanges(); sel.addRange(r);
+    this.renderUnderlay();
+    clearTimeout(this._deb);
+    this.setState({ checking: true, phase: 'fast' });
+    this._deb = setTimeout(() => { this.scan(this.inputText(), false); this.computeGhost(); }, 300);
+    this.showToast({ text: 'Completion accepted', sub: 'Tab \u00b7' + accepted.trim().slice(0, 34) });
+  }
+
+  scan(text, initial) {
+    const found = [];
+    const dict = this.state.dictWords.map(w => w.toLowerCase());
+    for (const r of this.RULES) {
+      r.re.lastIndex = 0; let m;
+      while ((m = r.re.exec(text)) !== null) {
+        const id = r.cat + ':' + m.index;
+        if (this.state.dismissed[id]) { if (m[0].length === 0) r.re.lastIndex++; continue; }
+        if (dict.includes(m[0].toLowerCase())) { if (m[0].length === 0) r.re.lastIndex++; continue; }
+        found.push({ id, start: m.index, end: m.index + m[0].length, orig: m[0], repl: this.applyCase(m[0], r.repl), alts: (r.alts || []).map(a => this.applyCase(m[0], a)), cat: r.cat, model: r.model, conf: r.conf, msg: r.msg });
+        if (m[0].length === 0) r.re.lastIndex++;
+      }
+    }
+    found.sort((a, b) => a.start - b.start);
+    // streaming: AI rules land a beat later
+    clearTimeout(this._aiT);
+    this.setState({ suggestions: found, checking: false, phase: 'fast' });
+    this.renderUnderlay(found);
+    this._aiT = setTimeout(() => { this.setState({ phase: 'done' }); this.renderUnderlay(); }, initial ? 1300 : 650);
+  }
+
+  applyCase(orig, repl) { return (orig[0] === orig[0].toUpperCase() && orig[0] !== orig[0].toLowerCase()) ? repl[0].toUpperCase() + repl.slice(1) : repl; }
+  isLive(s) { return s.model !== 'AI' || this.state.phase === 'done'; }
+  isGoalVisible(s) { return !(s.cat === 'style' && this.state.goals.formality === 'informal'); }
+  visible() { return this.state.suggestions.filter(s => !this.state.dismissed[s.id] && this.isLive(s) && this.isGoalVisible(s)); }
+  hiddenByGoals() { return this.state.suggestions.filter(s => !this.state.dismissed[s.id] && this.isLive(s) && !this.isGoalVisible(s)).length; }
+  openIds() { return this.visible().map(s => s.id); }
+
+  esc(t) { return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  renderUnderlay(list) {
+    const under = document.getElementById('gfd-under'); const input = document.getElementById('gfd-input');
+    if (!under || !input) return;
+    const text = input.textContent;
+    const sugg = (list || this.state.suggestions).filter(s => !this.state.dismissed[s.id] && this.isLive(s) && this.isGoalVisible(s)).sort((a, b) => a.start - b.start);
+    const focus = this._focusId;
+    let html = ''; let i = 0;
+    for (const s of sugg) {
+      if (s.start < i) continue;
+      html += this.esc(text.slice(i, s.start));
+      const on = s.id === focus ? ' gfd-u-on' : '';
+      html += `<span class="gfd-u gfd-u-${s.cat}${on}" data-id="${s.id}">` + this.esc(text.slice(s.start, s.end)) + '</span>';
+      i = s.end;
+    }
+    html += this.esc(text.slice(i));
+    under.innerHTML = html;
+  }
+
+  // ── scoring ──
+  score() { let pen = 0; for (const s of this.visible()) pen += this.CAT[s.cat].pen; return Math.max(0, 100 - pen); }
+  band(v) { return v >= 90 ? { c: 'var(--band-excellent)', t: 'Excellent' } : v >= 78 ? { c: 'var(--band-good)', t: 'Good' } : v >= 60 ? { c: 'var(--band-fair)', t: 'Fair' } : { c: 'var(--band-needswork)', t: 'Needs work' }; }
+  confLabel(v) { return v >= 0.9 ? 'High' : v >= 0.75 ? 'Medium' : 'Low'; }
+  confColor(v) { return v >= 0.9 ? 'var(--band-excellent)' : v >= 0.75 ? 'var(--band-fair)' : '#94a3b8'; }
+
+  // ── actions ──
+  replaceRange(start, end, repl) {
+    const input = document.getElementById('gfd-input');
+    if (!input) return;
+    const t = input.textContent;
+    input.textContent = t.slice(0, start) + repl + t.slice(end);
+    this.scan(input.textContent, false);
+  }
+  accept(s, repl) {
+    const val = repl != null ? repl : s.repl;
+    this.replaceRange(s.start, s.end, val);
+    this._focusId = null;
+    this.setState(p => ({ card: null, cardPos: null, accepts: p.accepts + 1 }));
+    this.showToast({ text: 'Accepted', sub: s.orig + ' \u2192 ' + val });
+  }
+  navCard(dir) {
+    const vis = this.visible(); const ids = vis.map(s => s.id); if (!ids.length) return;
+    let i = ids.indexOf(this.state.card);
+    if (i === -1) { this.openCard(vis[0]); return; }
+    i = (i + dir + ids.length) % ids.length; this.openCard(vis[i]);
+  }
+  addToDict(s) {
+    this._focusId = null;
+    this.setState(p => ({ dictWords: [...p.dictWords, s.orig], card: null, cardPos: null }));
+    setTimeout(() => this.scan(this.inputText(), false), 0);
+    this.showToast({ text: 'Added to dictionary', sub: '\u201c' + s.orig + '\u201d won\u2019t be flagged', undo: () => { this.setState(p => ({ dictWords: p.dictWords.filter(w => w !== s.orig), toast: null })); setTimeout(() => this.scan(this.inputText(), false), 0); } });
+  }
+  removeDict(w) { this.setState(p => ({ dictWords: p.dictWords.filter(x => x !== w) })); setTimeout(() => this.scan(this.inputText(), false), 0); }
+  acceptHighConf() {
+    const batch = this.visible().filter(s => s.conf >= 0.9).slice().sort((a, b) => b.start - a.start);
+    if (!batch.length) return;
+    const input = document.getElementById('gfd-input'); if (!input) return;
+    let t = input.textContent;
+    for (const s of batch) t = t.slice(0, s.start) + s.repl + t.slice(s.end);
+    input.textContent = t; this._focusId = null;
+    this.setState(p => ({ panelOpen: false, card: null, cardPos: null, accepts: p.accepts + batch.length }));
+    this.scan(t, false);
+    this.showToast({ text: `Accepted ${batch.length} high-confidence`, sub: 'Judgment calls kept for your review' });
+  }
+  setGoal(key, val) {
+    const goals = { ...this.state.goals, [key]: val }; const patch = { goals };
+    if (key === 'formality') patch.rephraseTone = val === 'formal' ? 'formal' : (val === 'informal' ? 'casual' : 'neutral');
+    this._focusId = null; this.setState(patch, () => this.renderUnderlay()); this.renderUnderlay();
+  }
+  toggleGoals() { this.setState(p => ({ goalsOpen: !p.goalsOpen })); }
+  setPanelView(v) { this.setState({ panelView: v, goalsOpen: false }); }
+  setTone(t) { this.setState({ rephraseTone: t, rephraseLoading: true }); clearTimeout(this._rT); this._rT = setTimeout(() => this.setState({ rephraseLoading: false }), 600); }
+  setRephraseScope(sc) { this.setState({ rephraseScope: sc, rephraseLoading: true }); clearTimeout(this._rT); this._rT = setTimeout(() => this.setState({ rephraseLoading: false }), 650); }
+  onKey(e) {
+    if (this.state.synActive) { if (e.key === 'Escape') this.setState({ synActive: null, synPos: null }); return; }
+    if (this.state.rephraseOpen && e.key === 'Escape') { this.setState({ rephraseOpen: false }); return; }
+    if (this.state.card == null) return;
+    const s = this.visible().find(x => x.id === this.state.card); if (!s) return;
+    if (e.key === 'Escape') { this._focusId = null; this.setState({ card: null, cardPos: null }); this.renderUnderlay(); }
+    else if (e.key === 'Enter') { e.preventDefault(); this.accept(s); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); this.navCard(1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); this.navCard(-1); }
+  }
+  onComposerDblClick(e) {
+    if (this.hitTestPoint(e.clientX, e.clientY)) return;
+    const sel = window.getSelection(); if (!sel || sel.rangeCount === 0) return;
+    const raw = sel.toString(); const word = raw.trim().toLowerCase();
+    if (!word || !this.SYN[word]) return;
+    let r; try { r = sel.getRangeAt(0); } catch (_) { return; }
+    const wrap = document.getElementById('gfd-cwrap'); if (!wrap) return;
+    const wr = wrap.getBoundingClientRect(); const rr = r.getBoundingClientRect();
+    this.setState({ synActive: word, synWord: raw, synRange: { start: r.startOffset, end: r.endOffset }, synPos: { left: rr.left - wr.left + rr.width / 2, bottom: wr.bottom - rr.top + 9 }, card: null, cardPos: null, panelOpen: false });
+  }
+  chooseSyn(newWord) {
+    const rng = this.state.synRange;
+    if (rng) { this.setState(p => ({ synChosen: { ...p.synChosen, [this.state.synWord]: newWord } })); this.replaceRange(rng.start, rng.end, newWord); }
+    this.setState({ synActive: null, synPos: null });
+  }
+  dismiss(s) {
+    this.setState(p => ({ dismissed: { ...p.dismissed, [s.id]: true }, card: null, cardPos: null }), );
+    setTimeout(() => this.scan(this.inputText(), false), 0);
+    this.showToast({ text: 'Dismissed', sub: this.CAT[s.cat].label + ' rule \u00b7 signal sent', undo: () => { this.setState(p => { const d = { ...p.dismissed }; delete d[s.id]; return { dismissed: d, toast: null }; }); setTimeout(() => this.scan(this.inputText(), false), 0); } });
+  }
+  acceptAll() {
+    // apply from rightmost to keep offsets valid
+    const list = this.visible().slice().sort((a, b) => b.start - a.start);
+    const input = document.getElementById('gfd-input'); if (!input) return;
+    let t = input.textContent;
+    for (const s of list) t = t.slice(0, s.start) + s.repl + t.slice(s.end);
+    input.textContent = t;
+    this.setState(p => ({ panelOpen: false, card: null, accepts: p.accepts + list.length }));
+    this.scan(t, false);
+    this.showToast({ text: `Accepted all ${list.length}`, sub: 'Draft cleaned up' });
+  }
+  showToast(t) { clearTimeout(this._toastT); this.setState({ toast: t }); this._toastT = setTimeout(() => this.setState(p => (p.toast === t ? { toast: null } : null)), 3200); }
+
+  openCard(s) { this._focusId = s.id; this.setState({ card: s.id, cardPos: null, panelOpen: false, rephraseOpen: false, synActive: null }, () => this.renderUnderlay()); this.renderUnderlay(); }
+
+  measureCard() {
+    const wrap = document.getElementById('gfd-cwrap');
+    const s = this.visible().find(x => x.id === this.state.card);
+    if (!wrap || !s) return;
+    const sp = wrap.querySelector(`#gfd-under .gfd-u[data-id="${s.id}"]`);
+    if (!sp) { this.setState({ cardPos: { left: 12 } }); return; }
+    const wr = wrap.getBoundingClientRect(); const sr = sp.getBoundingClientRect();
+    const w = 320;
+    let left = (sr.left - wr.left) + sr.width / 2 - w / 2;
+    left = Math.max(8, Math.min(left, wr.width - w - 8));
+    this.setState({ cardPos: { left, anchorX: (sr.left - wr.left) + sr.width / 2 } });
+  }
+
+  startRephrase() { this._focusId = null; this.setState({ rephraseOpen: true, panelOpen: false, card: null, cardPos: null, rephraseLoading: true }); this.renderUnderlay(); clearTimeout(this._rT); this._rT = setTimeout(() => this.setState({ rephraseLoading: false }), 700); }
+
+  diffEl(orig, repl) {
+    return React.createElement('span', { style: { fontSize: '14px' } },
+      React.createElement('span', { style: { color: 'var(--danger)', textDecoration: 'line-through' } }, orig),
+      React.createElement('span', { style: { color: 'rgba(231,233,238,0.45)', margin: '0 7px' } }, '\u2192'),
+      React.createElement('span', { style: { color: 'var(--success)', fontWeight: 700 } }, repl));
+  }
+  sourceChip(model) {
+    const ai = model === 'AI';
+    return React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '4px', height: '20px', padding: '0 8px', borderRadius: '9999px', font: '600 10.5px/1 var(--font-ui)',
+      background: ai ? 'linear-gradient(135deg, rgba(139,92,246,0.22), rgba(134,225,252,0.22))' : 'rgba(255,255,255,0.07)', border: `1px solid ${ai ? 'rgba(139,92,246,0.4)' : 'rgba(255,255,255,0.12)'}`, color: ai ? 'var(--purple-400)' : '#b5bac1' } },
+      ai ? '\u2728 AI' : model, ai ? null : React.createElement('span', { style: { opacity: 0.6, fontWeight: 500 } }, '\u00b7 instant'));
+  }
+
+  // ── correction card ──
+  makeCard() {
+    const s = this.visible().find(x => x.id === this.state.card); const pos = this.state.cardPos;
+    if (!s || !pos) return null;
+    const meta = this.CAT[s.cat];
+    const vis = this.visible(); const idx = vis.findIndex(x => x.id === s.id); const total = vis.length;
+    const tailX = pos.anchorX != null ? Math.max(16, Math.min(pos.anchorX - pos.left, 304)) : 24;
+    return React.createElement('div', { className: 'gfd-pop gfd-glass', style: { ...this.glass(), position: 'absolute', left: pos.left + 'px', bottom: '70px', width: '320px', borderRadius: '14px', padding: '14px', zIndex: 40 }, onClick: e => e.stopPropagation() },
+      React.createElement('span', { style: { position: 'absolute', top: '100%', left: tailX + 'px', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '7px solid transparent', borderRight: '7px solid transparent', borderTop: '7px solid rgba(22,22,30,0.9)', filter: 'drop-shadow(0 2px 1px rgba(0,0,0,0.3))' } }),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '9px' } },
+        React.createElement('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: meta.dot } }),
+        React.createElement('span', { style: { font: '600 11px/1 var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#b5bac1' } }, meta.label),
+        React.createElement('div', { style: { flex: 1 } }), this.sourceChip(s.model)),
+      React.createElement('div', { style: { marginBottom: '9px' } }, this.diffEl(s.orig, s.repl)),
+      React.createElement('div', { style: { font: '400 12.5px/1.45 var(--font-ui)', color: '#b5bac1', marginBottom: '11px' } }, s.msg),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' } },
+        React.createElement('span', { style: { font: '500 11px/1 var(--font-ui)', color: '#949ba4' } }, 'Confidence'),
+        React.createElement('div', { style: { flex: 1, height: '5px', borderRadius: '3px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden', maxWidth: '120px' } },
+          React.createElement('div', { style: { width: (s.conf * 100) + '%', height: '100%', borderRadius: '3px', background: this.confColor(s.conf) } })),
+        React.createElement('span', { style: { font: '600 11px/1 var(--font-ui)', color: this.confColor(s.conf) } }, this.confLabel(s.conf))),
+      React.createElement('div', { style: { display: 'flex', gap: '7px', marginBottom: (s.alts && s.alts.length) || s.cat === 'spelling' ? '10px' : '0' } },
+        React.createElement('button', { onClick: () => this.accept(s), className: 'gfd-primary', style: { flex: 1, height: '34px', borderRadius: '9px', border: 'none', background: 'var(--accent)', color: '#fff', font: '600 13px/1 var(--font-ui)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '7px' } },
+          'Accept', React.createElement('span', { className: 'kbd' }, '\u23ce')),
+        React.createElement('button', { onClick: () => this.dismiss(s), className: 'gfd-soft', style: { height: '34px', padding: '0 14px', borderRadius: '9px', border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: '#b5bac1', font: '600 13px/1 var(--font-ui)', cursor: 'pointer' } }, 'Dismiss')),
+      (s.alts && s.alts.length) ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: s.cat === 'spelling' ? '10px' : '0' } },
+        React.createElement('span', { style: { font: '500 11px/1 var(--font-ui)', color: '#80848e', alignSelf: 'center', marginRight: '2px' } }, 'Or:'),
+        ...s.alts.map((a, k) => React.createElement('button', { key: k, onClick: () => this.accept(s, a), className: 'gfd-alt', style: { padding: '5px 10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)', color: '#dbdee1', font: '500 12px/1 var(--font-ui)', cursor: 'pointer' } }, a))) : null,
+      s.cat === 'spelling' ? React.createElement('button', { onClick: () => this.addToDict(s), className: 'gfd-soft', style: { width: '100%', height: '30px', borderRadius: '8px', border: 'none', background: 'transparent', color: '#b5bac1', font: '500 12px/1 var(--font-ui)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' } }, '\uFF0B Add \u201c' + s.orig + '\u201d to dictionary') : null,
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '11px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' } },
+        React.createElement('button', { onClick: () => this.navCard(-1), className: 'gfd-btn', style: { width: '26px', height: '26px', borderRadius: '7px', border: 'none', background: 'rgba(255,255,255,0.05)', color: '#b5bac1', font: '600 13px/1 var(--font-ui)', cursor: 'pointer' } }, '\u2039'),
+        React.createElement('span', { style: { font: '500 11.5px/1 var(--font-ui)', color: '#949ba4', fontVariantNumeric: 'tabular-nums' } }, `${idx + 1} of ${total}`),
+        React.createElement('button', { onClick: () => this.navCard(1), className: 'gfd-btn', style: { width: '26px', height: '26px', borderRadius: '7px', border: 'none', background: 'rgba(255,255,255,0.05)', color: '#b5bac1', font: '600 13px/1 var(--font-ui)', cursor: 'pointer' } }, '\u203a'),
+        React.createElement('div', { style: { flex: 1 } }),
+        React.createElement('span', { style: { font: '400 10.5px/1 var(--font-ui)', color: '#6d7079', display: 'inline-flex', alignItems: 'center', gap: '4px' } }, React.createElement('span', { className: 'kbd' }, '\u2192'), 'next')));
+  }
+
+  makeInsights() {
+    const text = this.inputText();
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    const sents = Math.max(1, (text.match(/[.!?]+/g) || []).length);
+    const wps = words / sents;
+    const grade = wps < 13 ? 6 : wps < 17 ? 8 : 11;
+    const readLabel = wps < 17 ? 'Clear' : 'Dense';
+    const readSecs = Math.max(1, Math.round(words / 200 * 60));
+    const tag = (txt, color) => React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '4px', font: '600 11.5px/1 var(--font-ui)', color: '#cdd3dd' } }, React.createElement('span', { style: { width: '6px', height: '6px', borderRadius: '50%', background: color } }), txt);
+    const cell = (label, body) => React.createElement('div', { style: { padding: '8px 11px', borderRadius: '11px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' } },
+      React.createElement('div', { style: { font: '600 9.5px/1 var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#6d7079', marginBottom: '6px' } }, label), body);
+    const stat = (v) => React.createElement('div', { style: { font: '600 12.5px/1 var(--font-ui)', color: '#cdd3dd', fontVariantNumeric: 'tabular-nums' } }, v);
+    return React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px', padding: '2px 15px 12px' } },
+      cell('Tone', React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' } }, tag(this.TONE[0].tag, this.TONE[0].color), React.createElement('span', { style: { font: '600 11px/1 var(--font-ui)', color: '#6d7079', fontVariantNumeric: 'tabular-nums' } }, Math.round(this.TONE[0].score * 100) + '%'), tag(this.TONE[1].tag, this.TONE[1].color))),
+      cell('Readability', stat(`${readLabel} \u00b7 Gr ${grade}`)),
+      cell('Words', stat(String(words))),
+      cell('Read time', stat(`${readSecs}s`)));
+  }
+
+  makeGoals() {
+    if (!this.state.goalsOpen || !this.state.panelOpen || this.state.panelView !== 'review') return null;
+    const g = this.state.goals;
+    const seg = (key, val, label) => { const on = g[key] === val;
+      return React.createElement('button', { key: val, onClick: () => this.setGoal(key, val), className: 'gfd-soft', style: { flex: 1, padding: '7px 4px', borderRadius: '9px', border: `1px solid ${on ? 'var(--accent)' : 'rgba(255,255,255,0.12)'}`, background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--accent-ink)' : '#b5bac1', font: '600 11.5px/1 var(--font-ui)', cursor: 'pointer' } }, label); };
+    const row = (title, key, opts) => React.createElement('div', { style: { marginBottom: '12px' } },
+      React.createElement('div', { style: { font: '600 10px/1 var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6d7079', marginBottom: '6px' } }, title),
+      React.createElement('div', { style: { display: 'flex', gap: '5px' } }, ...opts.map(o => seg(key, o[0], o[1]))));
+    return React.createElement('div', { className: 'gfd-pop gfd-glass', style: { ...this.glass(), position: 'absolute', right: '16px', bottom: '120px', width: '300px', borderRadius: '16px', padding: '15px', zIndex: 55 }, onClick: e => e.stopPropagation() },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '13px' } },
+        React.createElement('svg', { viewBox: '0 0 24 24', width: 15, height: 15, fill: 'none', stroke: 'var(--accent)', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, React.createElement('circle', { cx: 12, cy: 12, r: 9 }), React.createElement('circle', { cx: 12, cy: 12, r: 4.5 })),
+        React.createElement('span', { style: { font: '700 13px/1 var(--font-ui)', color: '#f2f3f5' } }, 'Goals'),
+        React.createElement('span', { style: { font: '500 11px/1 var(--font-ui)', color: '#6d7079' } }, 'tunes what surfaces'),
+        React.createElement('div', { style: { flex: 1 } }),
+        React.createElement('button', { onClick: () => this.setState({ goalsOpen: false }), className: 'gfd-btn', style: { width: '24px', height: '24px', borderRadius: '7px', border: 'none', background: 'transparent', color: '#949ba4', font: '500 16px/1 var(--font-ui)', cursor: 'pointer' } }, '\u00d7')),
+      row('Audience', 'audience', [['general', 'General'], ['informed', 'Informed'], ['expert', 'Expert']]),
+      row('Formality', 'formality', [['informal', 'Informal'], ['neutral', 'Neutral'], ['formal', 'Formal']]),
+      row('Domain', 'domain', [['chat', 'Chat'], ['work', 'Work'], ['support', 'Support']]),
+      React.createElement('div', { style: { font: '400 11.5px/1.5 var(--font-ui)', color: '#6d7079', padding: '9px 11px', borderRadius: '9px', background: 'rgba(255,255,255,0.04)' } }, 'Goals re-weight which suggestions surface and set the default rephrase tone. Informal mutes style nudges; formal raises the bar.'));
+  }
+
+  makeStats() {
+    const accepted = this.state.accepts;
+    const dismissed = Object.keys(this.state.dismissed).length;
+    const total = accepted + dismissed;
+    const rate = total > 0 ? Math.round(accepted / total * 100) : 100;
+    const stat = (label, val, sub) => React.createElement('div', { style: { padding: '11px 12px', borderRadius: '12px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' } },
+      React.createElement('div', { style: { font: '700 20px/1 var(--font-ui)', color: '#f2f3f5', fontVariantNumeric: 'tabular-nums' } }, val),
+      React.createElement('div', { style: { font: '500 10px/1.2 var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.04em', color: '#6d7079', marginTop: '5px' } }, label),
+      sub ? React.createElement('div', { style: { font: '400 11px/1.2 var(--font-ui)', color: '#949ba4', marginTop: '3px' } }, sub) : null);
+    const top = [['spelling', 41], ['grammar', 58], ['punctuation', 19], ['style', 12]]; const maxC = 58;
+    const bars = React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+      ...top.map(([cat, nn]) => React.createElement('div', { key: cat, style: { display: 'flex', alignItems: 'center', gap: '9px' } },
+        React.createElement('span', { style: { width: '74px', font: '500 11.5px/1 var(--font-ui)', color: '#b5bac1', flexShrink: 0 } }, this.CAT[cat].label),
+        React.createElement('div', { style: { flex: 1, height: '8px', borderRadius: '4px', background: 'rgba(255,255,255,0.06)', overflow: 'hidden' } }, React.createElement('div', { style: { width: (nn / maxC * 100) + '%', height: '100%', borderRadius: '4px', background: this.CAT[cat].dot } })),
+        React.createElement('span', { style: { width: '22px', textAlign: 'right', font: '600 11.5px/1 var(--font-ui)', color: '#80848e', fontVariantNumeric: 'tabular-nums' } }, nn))));
+    const sec = (txt) => React.createElement('div', { style: { font: '600 10.5px/1 var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6d7079', margin: '17px 0 9px' } }, txt);
+    const dict = React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '5px' } },
+      ...this.state.dictWords.map(w => React.createElement('span', { key: w, style: { display: 'inline-flex', alignItems: 'center', gap: '4px', height: '25px', padding: '0 5px 0 10px', borderRadius: '9999px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', font: '500 12px/1 var(--font-ui)', color: '#cdd3dd' } },
+        w, React.createElement('button', { onClick: () => this.removeDict(w), className: 'gfd-btn', title: 'Remove', style: { width: '17px', height: '17px', borderRadius: '50%', border: 'none', background: 'transparent', color: '#949ba4', cursor: 'pointer', font: '500 13px/1 var(--font-ui)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' } }, '\u00d7'))),
+      this.state.dictWords.length === 0 ? React.createElement('span', { style: { font: '400 12px/1.3 var(--font-ui)', color: '#6d7079' } }, 'No custom words yet \u2014 add from any spelling card.') : null);
+    return React.createElement('div', { className: 'thin', style: { flex: 1, overflowY: 'auto', padding: '8px 15px 16px' } },
+      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' } },
+        stat('Words this week', '3,140', '+12% vs last week'), stat('Corrections', '96', 'logged this week'),
+        stat('Acceptance', rate + '%', accepted + ' accepted now'), stat('Day streak', '5', 'days writing')),
+      sec('Top issues this week'), bars,
+      sec('Personal dictionary'), dict,
+      React.createElement('div', { style: { font: '400 11px/1.45 var(--font-ui)', color: '#6d7079', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.08)' } }, 'Computed locally from your bridge \u2014 nothing leaves your machine.'));
+  }
+
+  makeSynPop() {
+    if (this.state.synActive == null || !this.state.synPos) return null;
+    const opts = this.SYN[this.state.synActive] || []; const pos = this.state.synPos;
+    return React.createElement('div', { className: 'gfd-pop gfd-glass', style: { ...this.glass(), position: 'absolute', left: pos.left + 'px', bottom: pos.bottom + 'px', transform: 'translateX(-50%)', width: '190px', borderRadius: '13px', padding: '8px', zIndex: 42 }, onClick: e => e.stopPropagation() },
+      React.createElement('div', { style: { font: '600 10px/1 var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6d7079', padding: '3px 7px 6px' } }, '\u21c4 Synonyms'),
+      ...opts.map((o, k) => React.createElement('button', { key: k, onClick: () => this.chooseSyn(o), className: 'gfd-row', style: { width: '100%', textAlign: 'left', padding: '7px 9px', borderRadius: '8px', border: 'none', background: 'transparent', color: '#dbdee1', font: '500 13px/1 var(--font-ui)', cursor: 'pointer' } }, o)),
+      React.createElement('span', { style: { position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '6px solid rgba(22,22,30,0.9)' } }));
+  }
+
+  // ── panel ──
+  makePanel() {
+    if (!this.state.panelOpen) return null;
+    const vis = this.visible(); const score = this.score(); const band = this.band(score);
+    const cats = ['spelling', 'grammar', 'punctuation', 'style'];
+    const byCat = {}; for (const c of cats) byCat[c] = vis.filter(s => s.cat === c);
+    const segs = cats.filter(c => byCat[c].length > 0);
+    const ro = 150.8 * (1 - score / 100);
+    const refining = this.state.phase === 'fast';
+    const hidden = this.hiddenByGoals(); const hc = vis.filter(s => s.conf >= 0.9).length;
+    const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+
+    const head = React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '9px', padding: '14px 15px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)' } },
+      React.createElement('img', { src: 'assets/grammarforge-mark.svg', width: 24, height: 24, alt: '', style: { display: 'block', flexShrink: 0 } }),
+      React.createElement('span', { style: { fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '14px', lineHeight: 1, letterSpacing: '-0.01em', color: 'var(--text-strong)' } }, 'GrammarForge'),
+      React.createElement('div', { style: { flex: 1 } }),
+      this.state.panelView === 'review' ? React.createElement('button', { onClick: () => this.toggleGoals(), className: 'gfd-soft', style: { display: 'inline-flex', alignItems: 'center', gap: '5px', height: '27px', padding: '0 10px', borderRadius: '9999px', border: `1px solid ${this.state.goalsOpen ? 'var(--accent)' : 'rgba(255,255,255,0.12)'}`, background: this.state.goalsOpen ? 'rgba(134,225,252,0.18)' : 'rgba(255,255,255,0.05)', color: this.state.goalsOpen ? 'var(--accent)' : '#b5bac1', font: '600 11px/1 var(--font-ui)', cursor: 'pointer' } },
+        React.createElement('svg', { viewBox: '0 0 24 24', width: 13, height: 13, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, React.createElement('circle', { cx: 12, cy: 12, r: 8.5 }), React.createElement('circle', { cx: 12, cy: 12, r: 4 })), cap(this.state.goals.formality)) : null,
+      React.createElement('button', { onClick: () => this.setState({ panelOpen: false }), className: 'gfd-btn', style: { width: '28px', height: '28px', borderRadius: '8px', border: 'none', background: 'transparent', color: '#949ba4', font: '500 18px/1 var(--font-ui)', cursor: 'pointer' } }, '\u00d7'));
+
+    const viewTabs = React.createElement('div', { style: { display: 'flex', gap: '3px', margin: '12px 15px 2px', padding: '3px', borderRadius: '10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.07)' } },
+      ...[['review', 'Review'], ['stats', 'Stats']].map(o => { const on = this.state.panelView === o[0];
+        return React.createElement('button', { key: o[0], onClick: () => this.setPanelView(o[0]), className: 'gfd-vtab', style: { flex: 1, height: '28px', borderRadius: '8px', border: 'none', cursor: 'pointer', font: '600 12px/1 var(--font-ui)', background: on ? 'rgba(255,255,255,0.12)' : 'transparent', color: on ? '#f2f3f5' : '#949ba4', boxShadow: on ? '0 1px 3px rgba(0,0,0,0.3)' : 'none' } }, o[1]); }));
+
+    const scoreBlock = React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 15px' } },
+      React.createElement('div', { style: { position: 'relative', width: '60px', height: '60px', flexShrink: 0 } },
+        React.createElement('svg', { viewBox: '0 0 60 60', width: 60, height: 60 },
+          React.createElement('circle', { cx: 30, cy: 30, r: 24, fill: 'none', stroke: 'rgba(255,255,255,0.12)', strokeWidth: 5 }),
+          React.createElement('circle', { cx: 30, cy: 30, r: 24, fill: 'none', stroke: band.c, strokeWidth: 5, strokeLinecap: 'round', strokeDasharray: 150.8, strokeDashoffset: ro, transform: 'rotate(-90 30 30)', style: { transition: 'stroke-dashoffset 600ms cubic-bezier(0.22,1,0.36,1), stroke 400ms' } })),
+        React.createElement('div', { style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', font: '700 19px/1 var(--font-ui)', color: '#f2f3f5', fontVariantNumeric: 'tabular-nums' } }, score)),
+      React.createElement('div', null,
+        React.createElement('div', { style: { font: '600 14px/1.2 var(--font-ui)', color: band.c } }, band.t),
+        React.createElement('div', { style: { font: '400 12.5px/1.4 var(--font-ui)', color: '#949ba4', marginTop: '3px' } }, vis.length === 0 ? 'Clean \u2014 ready to send.' : `${vis.length} suggestion${vis.length !== 1 ? 's' : ''} as you type`)));
+
+    const banner = refining ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '9px', margin: '0 15px 12px', padding: '9px 11px', borderRadius: '11px', background: 'linear-gradient(135deg, rgba(192,153,255,0.16), rgba(134,225,252,0.16))', border: '1px solid rgba(139,151,245,0.25)' } },
+      React.createElement('span', { className: 'gfd-spinner' }), React.createElement('span', { style: { font: '600 12px/1.3 var(--font-ui)', color: 'var(--purple-400)' } }, this.state.checking ? 'Checking your draft\u2026' : 'Fast pass in \u00b7 AI refining\u2026')) : null;
+
+    const actions = vis.length > 0 ? React.createElement('div', { style: { padding: '0 15px 12px', display: 'flex', flexDirection: 'column', gap: '7px' } },
+      React.createElement('button', { onClick: () => this.acceptAll(), className: 'gfd-primary', style: { width: '100%', height: '36px', borderRadius: '10px', border: 'none', background: 'var(--accent)', color: '#fff', font: '600 13px/1 var(--font-ui)', cursor: 'pointer' } }, `Accept all ${vis.length}`),
+      (hc > 0 && hc < vis.length) ? React.createElement('button', { onClick: () => this.acceptHighConf(), className: 'gfd-soft', style: { width: '100%', height: '32px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#e7e9ee', font: '600 12px/1 var(--font-ui)', cursor: 'pointer' } }, `\u2713 Accept ${hc} high-confidence only`) : null,
+      React.createElement('button', { onClick: () => this.startRephrase(), className: 'gfd-soft', style: { width: '100%', height: '34px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#e7e9ee', font: '600 12.5px/1 var(--font-ui)', cursor: 'pointer' } }, '\u2728 Rephrase message'))
+      : React.createElement('div', { style: { padding: '0 15px 14px' } },
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', borderRadius: '11px', background: 'rgba(59,165,93,0.14)', border: '1px solid rgba(59,165,93,0.3)', color: 'var(--success)', font: '600 13px/1.3 var(--font-ui)' } }, '\u2713', 'All clear \u2014 looks great.'),
+        React.createElement('button', { onClick: () => this.startRephrase(), className: 'gfd-soft', style: { width: '100%', height: '34px', marginTop: '8px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#e7e9ee', font: '600 12.5px/1 var(--font-ui)', cursor: 'pointer' } }, '\u2728 Rephrase message'));
+
+    const groups = segs.map(cat => React.createElement('div', { key: cat, style: { marginBottom: '12px' } },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '6px' } },
+        React.createElement('span', { style: { width: '7px', height: '7px', borderRadius: '50%', background: this.CAT[cat].dot } }),
+        React.createElement('span', { style: { font: '600 11px/1 var(--font-ui)', textTransform: 'uppercase', letterSpacing: '0.04em', color: '#b5bac1' } }, this.CAT[cat].label),
+        React.createElement('span', { style: { font: '500 11px/1 var(--font-ui)', color: '#80848e' } }, byCat[cat].length)),
+      ...byCat[cat].map(s => React.createElement('button', { key: s.id, onClick: () => { this.setState({ panelOpen: false }); this.openCard(s); }, className: 'gfd-row', style: { width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 9px', borderRadius: '9px', border: 'none', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', marginBottom: '4px' } },
+        React.createElement('div', { style: { flex: 1, minWidth: 0 } }, this.diffEl(s.orig, s.repl)), this.sourceChip(s.model)))));
+
+    const footer = React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '11px 15px', borderTop: '1px solid rgba(255,255,255,0.08)', font: '500 11.5px/1.3 var(--font-ui)', color: 'var(--purple-400)' } },
+      '\u2728 Learns your style', React.createElement('div', { style: { flex: 1 } }),
+      React.createElement('span', { style: { color: '#6d7079', font: '400 11px/1 var(--font-ui)' } }, this.state.accepts + ' accepted'));
+
+    const hiddenNote = hidden > 0 ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '7px', margin: '2px 15px 4px', padding: '8px 10px', borderRadius: '9px', background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.14)', font: '500 11.5px/1.3 var(--font-ui)', color: '#b5bac1' } },
+      React.createElement('span', { style: { width: '7px', height: '7px', borderRadius: '50%', background: this.CAT.style.dot, flexShrink: 0 } }),
+      `${hidden} style suggestion${hidden !== 1 ? 's' : ''} muted by your goals`,
+      React.createElement('div', { style: { flex: 1 } }),
+      React.createElement('button', { onClick: () => this.toggleGoals(), className: 'gfd-btn', style: { font: '600 11px/1 var(--font-ui)', color: 'var(--accent)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 5px', borderRadius: '6px' } }, 'Goals')) : null;
+
+    const panelStyle = { ...this.glass(), position: 'absolute', right: '16px', bottom: '70px', width: '320px', maxHeight: '460px', borderRadius: '16px', overflow: 'hidden', display: 'flex', flexDirection: 'column', zIndex: 45 };
+    if (this.state.panelView === 'stats') return React.createElement('div', { className: 'gfd-panel gfd-glass', style: panelStyle, onClick: e => e.stopPropagation() }, head, viewTabs, this.makeStats());
+    return React.createElement('div', { className: 'gfd-panel gfd-glass', style: panelStyle, onClick: e => e.stopPropagation() },
+      head, viewTabs, banner, scoreBlock, this.makeInsights(), actions,
+      vis.length > 0 ? React.createElement('div', { className: 'thin', style: { flex: 1, overflowY: 'auto', padding: '2px 15px 12px' } }, ...groups, hiddenNote) : hiddenNote,
+      footer);
+  }
+
+  // ── rephrase ──
+  makeRephrase() {
+    if (!this.state.rephraseOpen) return null;
+    const tones = [['neutral', 'Neutral'], ['formal', 'Formal'], ['casual', 'Casual']];
+    const para = this.state.rephraseScope === 'message';
+    const alts = para ? this.REPHRASE[this.state.rephraseTone] : this.REPHRASE_SENT[this.state.rephraseTone];
+    const apply = (a) => { const input = document.getElementById('gfd-input'); if (input) { input.textContent = a; } this._focusId = null; this.setState({ rephraseOpen: false }); this.scan(a, false); this.showToast({ text: para ? 'Message rephrased' : 'Sentence rephrased', sub: 'Draft updated', undo: () => { if (input) { input.textContent = this.INITIAL; } this.scan(this.INITIAL, false); this.setState({ toast: null }); } }); };
+    return React.createElement('div', { className: 'gfd-pop gfd-glass', style: { ...this.glass(), position: 'absolute', right: '16px', bottom: '70px', width: '360px', borderRadius: '16px', padding: '15px', zIndex: 50 }, onClick: e => e.stopPropagation() },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' } },
+        React.createElement('span', { style: { font: '700 13px/1 var(--font-ui)', color: '#f2f3f5' } }, '\u2728 Rephrase'),
+        React.createElement('span', { style: { font: '500 11px/1 var(--font-ui)', color: '#80848e' } }, 'AI \u00b7 Gemma 4'),
+        React.createElement('div', { style: { flex: 1 } }),
+        React.createElement('button', { onClick: () => this.setState({ rephraseOpen: false }), className: 'gfd-btn', style: { width: '24px', height: '24px', borderRadius: '7px', border: 'none', background: 'transparent', color: '#949ba4', font: '500 16px/1 var(--font-ui)', cursor: 'pointer' } }, '\u00d7')),
+      React.createElement('div', { style: { display: 'flex', gap: '3px', padding: '3px', borderRadius: '9999px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', marginBottom: '12px' } },
+        ...[['sentence', 'This sentence'], ['message', 'Whole message']].map(o => { const on = this.state.rephraseScope === o[0];
+          return React.createElement('button', { key: o[0], onClick: () => this.setRephraseScope(o[0]), className: 'gfd-vtab', style: { flex: 1, height: '26px', borderRadius: '9999px', border: 'none', cursor: 'pointer', font: '600 11.5px/1 var(--font-ui)', background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--accent-ink)' : '#b5bac1' } }, o[1]); })),
+      React.createElement('div', { style: { display: 'flex', gap: '5px', marginBottom: '12px' } },
+        ...tones.map(([t, label]) => { const on = this.state.rephraseTone === t;
+          return React.createElement('button', { key: t, onClick: () => this.setTone(t), className: 'gfd-soft', style: { padding: '6px 12px', borderRadius: '9999px', border: `1px solid ${on ? 'var(--accent)' : 'rgba(255,255,255,0.12)'}`, background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--accent-ink)' : '#b5bac1', font: '600 12px/1 var(--font-ui)', cursor: 'pointer' } }, label); })),
+      this.state.rephraseLoading
+        ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } },
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '1px' } }, React.createElement('span', { className: 'gfd-spinner' }), React.createElement('span', { style: { font: '500 11.5px/1 var(--font-ui)', color: '#80848e' } }, 'Generating with Gemma\u2026')),
+            React.createElement('div', { className: 'gfd-skel', style: { height: '44px' } }), React.createElement('div', { className: 'gfd-skel', style: { height: '44px' } }))
+        : React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } },
+            ...alts.map((a, k) => React.createElement('button', { key: this.state.rephraseScope + this.state.rephraseTone + k, onClick: () => apply(a), className: 'gfd-alt', style: { textAlign: 'left', padding: '11px 13px', borderRadius: '11px', border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)', color: '#dbdee1', font: '400 13.5px/1.45 var(--font-ui)', cursor: 'pointer' } }, a))),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', paddingTop: '11px', borderTop: '1px solid rgba(255,255,255,0.08)' } },
+        React.createElement('button', { onClick: () => this.setTone(this.state.rephraseTone), className: 'gfd-soft', style: { display: 'inline-flex', alignItems: 'center', gap: '6px', height: '28px', padding: '0 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: '#b5bac1', font: '500 12px/1 var(--font-ui)', cursor: 'pointer' } }, '\u21bb Regenerate'),
+        React.createElement('div', { style: { flex: 1 } }),
+        React.createElement('span', { style: { font: '400 11px/1 var(--font-ui)', color: '#6d7079' } }, 'Click one to apply')));
+  }
+
+  makeToast() {
+    if (!this.state.toast) return null; const t = this.state.toast;
+    return React.createElement('div', { className: 'gfd-toast gfd-glass', style: { ...this.glass(), position: 'absolute', left: '50%', bottom: '78px', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: '11px', padding: '9px 11px 9px 13px', borderRadius: '12px', zIndex: 60, whiteSpace: 'nowrap' }, onClick: e => e.stopPropagation() },
+      React.createElement('span', { style: { width: '22px', height: '22px', borderRadius: '50%', background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(134,225,252,0.25))', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', flexShrink: 0 } }, '\u2728'),
+      React.createElement('div', null,
+        React.createElement('div', { style: { font: '600 12.5px/1.2 var(--font-ui)', color: '#f2f3f5' } }, t.text),
+        t.sub ? React.createElement('div', { style: { font: '400 11px/1.2 var(--font-ui)', color: '#949ba4', marginTop: '2px' } }, t.sub) : null),
+      t.undo ? React.createElement('button', { onClick: () => t.undo(), className: 'gfd-soft', style: { marginLeft: '4px', height: '28px', padding: '0 13px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.06)', color: '#e7e9ee', font: '600 12px/1 var(--font-ui)', cursor: 'pointer' } }, 'Undo') : null);
+  }
+
+  makeHoverTip() {
+    if (this.state.hoverId == null || !this.state.hoverPos || this.state.card != null) return null;
+    const s = this.visible().find(x => x.id === this.state.hoverId);
+    if (!s) return null;
+    const meta = this.CAT[s.cat]; const pos = this.state.hoverPos;
+    return React.createElement('div', { style: { position: 'absolute', left: pos.left + 'px', bottom: pos.bottom + 'px', transform: 'translateX(-50%)', zIndex: 38, pointerEvents: 'none' } },
+      React.createElement('div', { style: { position: 'relative', display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap', padding: '5px 11px', borderRadius: '9999px', font: '500 12.5px/1 var(--font-ui)',
+        background: 'rgba(30,32,48,0.94)', border: '1px solid rgba(255,255,255,0.12)', backdropFilter: 'blur(16px) saturate(180%)', WebkitBackdropFilter: 'blur(16px) saturate(180%)', boxShadow: '0 6px 22px rgba(0,0,0,0.5)' } },
+        React.createElement('span', { style: { width: '6px', height: '6px', borderRadius: '50%', background: meta.dot, flexShrink: 0 } }),
+        React.createElement('span', { style: { color: 'var(--danger)', textDecoration: 'line-through' } }, s.orig),
+        React.createElement('span', { style: { color: 'rgba(231,233,238,0.45)' } }, '\u2192'),
+        React.createElement('span', { style: { color: 'var(--success)', fontWeight: 700 } }, s.repl),
+        React.createElement('span', { style: { position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(30,32,48,0.94)' } })));
+  }
+
+  renderVals() {
+    const vis = this.visible(); const n = vis.length;
+    const refining = this.state.phase === 'fast';
+    const gfBadgeEl = n > 0
+      ? React.createElement('span', { style: { position: 'absolute', top: '-3px', right: '-3px', minWidth: '17px', height: '17px', borderRadius: '9px', background: 'var(--accent)', color: 'var(--accent-ink)', font: '700 11px/17px var(--font-ui)', textAlign: 'center', padding: '0 4px', pointerEvents: 'none', boxShadow: '0 0 0 2px #383a40' } }, n)
+      : (refining ? React.createElement('span', { className: 'gfd-pip', style: { position: 'absolute', top: '-3px', right: '-3px', width: '15px', height: '15px', borderRadius: '8px', background: 'linear-gradient(135deg,var(--purple-400),var(--accent))', color: '#fff', font: '700 9px/15px var(--font-ui)', textAlign: 'center', boxShadow: '0 0 0 2px #383a40' } }, '\u2728')
+        : React.createElement('span', { style: { position: 'absolute', top: '-2px', right: '-2px', width: '13px', height: '13px', borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 0 2px #383a40', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+            React.createElement('svg', { viewBox: '0 0 24 24', width: 9, height: 9, fill: 'none', stroke: '#fff', strokeWidth: 3.5, strokeLinecap: 'round', strokeLinejoin: 'round' }, React.createElement('path', { d: 'M5 13l4 4L19 7' }))));
+
+    const baseStatusEl = refining
+      ? React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: 'var(--purple-400)' } }, React.createElement('span', { className: 'gfd-spinner' }), this.state.checking ? 'Checking\u2026' : 'AI refining\u2026')
+      : (n > 0 ? React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px' } },
+          React.createElement('span', { style: { display: 'inline-flex', gap: '3px' } }, ...['spelling', 'grammar', 'punctuation', 'style'].filter(c => vis.some(s => s.cat === c)).map(c => React.createElement('span', { key: c, style: { width: '14px', height: '3px', borderRadius: '2px', background: this.CAT[c].dot } }))),
+          React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '4px' } },
+            `${n} suggestion${n !== 1 ? 's' : ''} \u00b7 click`,
+            React.createElement('svg', { viewBox: '0 0 24 24', width: 12, height: 12, fill: 'currentColor', style: { opacity: 0.85, flexShrink: 0 } }, React.createElement('path', { d: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z' })),
+            'to review'))
+        : React.createElement('span', { style: { color: 'var(--success)' } }, '\u2713 No issues \u2014 ready to send'));
+
+    const ghostHintEl = this.state.hasGhost
+      ? React.createElement('span', { className: 'gfd-ghosthint', style: { display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#8b8f98', font: '600 11px/1 var(--font-ui)' } },
+          React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '20px', height: '16px', padding: '0 4px', borderRadius: '4px', background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.16)', font: '600 10px/1 ui-monospace, monospace', color: '#c7ccd1' } }, 'Tab'),
+          React.createElement('span', { style: { color: '#6d7079' } }, 'accept completion'))
+      : null;
+    const statusLineEl = React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '12px' } }, baseStatusEl, ghostHintEl);
+
+    return {
+      panelEl: this.makePanel(),
+      cardEl: this.makeCard(),
+      hoverTipEl: this.makeHoverTip(),
+      synEl: this.makeSynPop(),
+      goalsEl: this.makeGoals(),
+      rephraseEl: this.makeRephrase(),
+      toastEl: this.makeToast(),
+      gfBadgeEl, statusLineEl,
+      gfOn: this.state.panelOpen ? 'on' : '',
+      gfColor: this.state.panelOpen ? 'var(--accent)' : '#b5bac1',
+      togglePanel: e => { e.stopPropagation(); this._focusId = null; this.setState(p => ({ panelOpen: !p.panelOpen, card: null, cardPos: null, rephraseOpen: false, goalsOpen: false, synActive: null })); this.renderUnderlay(); },
+      closePanel: () => this.setState({ panelOpen: false, card: null, rephraseOpen: false, goalsOpen: false }),
+      closeAll: () => { this._hoverId = null; this._focusId = null; this.setState({ panelOpen: false, card: null, cardPos: null, rephraseOpen: false, hoverId: null, hoverPos: null, goalsOpen: false, synActive: null, synPos: null }); this.renderUnderlay(); },
+      stopProp: e => e.stopPropagation(),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

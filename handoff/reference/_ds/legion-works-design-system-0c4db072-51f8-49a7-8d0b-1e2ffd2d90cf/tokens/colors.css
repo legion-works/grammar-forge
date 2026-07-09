@@ -1,0 +1,155 @@
+/* ============================================================
+   Legion Works — Color System  (Tokyo Night / Night Owl)
+   ------------------------------------------------------------
+   Grounded in the owner's real OpenCode themes: Tokyo Night and
+   Night Owl. Web system + terminal share ONE palette:
+     • Legion Cyan   — Tokyo Night cyan #86E1FC, the synthetic mind
+     • Signal Blue   — #82AAFF, primary interactive / links
+     • Geth Purple   — #C099FF, tertiary synthetic accent
+     • IceTea Amber  — #FF966C / #FFC777 (Aurora warm), sparing
+   Deep-navy ground (#16161E) gives Liquid Glass real depth. The
+   neutral ramp is Tokyo Night's darkStep1–12. Ramp NAMES are
+   stable (cyan-*, amber-*, …); only values changed.
+   Sibling theme: [data-theme="nightowl"] retints to Night Owl.
+   ============================================================ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- Legion Cyan (Tokyo Night cyan) — signature accent ---- */
+  --cyan-100:#e6faff;
+  --cyan-200:#cdf3ff;
+  --cyan-300:#a9ebff;
+  --cyan-400:#86E1FC;   /* base primary */
+  --cyan-500:#5cc7e8;
+  --cyan-600:#2f7d9c;   /* light-mode accent */
+  --cyan-700:#245f78;
+
+  /* ---- Signal Blue ---- */
+  --blue-300:#a9c3ff;
+  --blue-400:#82AAFF;
+  --blue-500:#6b90e8;
+  --blue-600:#3760bf;   /* Tokyo Night Day */
+
+  /* ---- IceTea Amber (Aurora warm) — sparing ---- */
+  --amber-200:#ffe0b8;
+  --amber-300:#FFC777;  /* yellow */
+  --amber-400:#ffb07f;
+  --amber-500:#FF966C;  /* orange — the warm accent */
+  --amber-600:#e0744c;
+
+  /* ---- Ember Orange ---- */
+  --orange-400:#ff9e78;
+  --orange-500:#FF966C;
+
+  /* ---- Semantic + Geth Purple (Aurora) ---- */
+  --green-400:#C3E88D;
+  --green-500:#a8d472;
+  --red-400:#FF757F;
+  --red-500:#f7616b;
+  --yellow-400:#FFC777;
+  --purple-400:#C099FF;
+  --purple-500:#a87ff0;
+
+  /* ---- Cool neutral ramp: Tokyo Night darkStep1–12 (+ deeper) ---- */
+  --neutral-0:  #16161e;   /* deep night */
+  --neutral-50: #1a1b26;   /* step1 */
+  --neutral-100:#1e2030;   /* step2 */
+  --neutral-150:#222436;   /* step3 */
+  --neutral-200:#292e42;   /* step4 */
+  --neutral-300:#3b4261;   /* step5 */
+  --neutral-400:#545c7e;   /* step6 */
+  --neutral-500:#737aa2;   /* step7 */
+  --neutral-600:#828bb8;   /* step11 (muted) */
+  --neutral-700:#9099b2;   /* step8 */
+  --neutral-800:#c8d3f5;   /* step12 */
+  --neutral-900:#e6ecff;
+
+  /* ============ Semantic aliases — DARK (default) ============ */
+  --bg-base:    var(--neutral-0);
+  --bg-sunken:  #101018;
+  --bg-raised:  #222436;
+  --bg-overlay: rgba(16, 16, 24, 0.72);
+
+  --text-strong: var(--neutral-800);   /* #c8d3f5 */
+  --text-body:   #a9b1d6;
+  --text-muted:  var(--neutral-600);
+  --text-faint:  var(--neutral-500);
+  --text-on-accent: #0c1622;
+
+  --accent:         var(--cyan-400);
+  --accent-strong:  var(--cyan-300);
+  --accent-muted:   color-mix(in oklab, var(--cyan-400) 18%, transparent);
+  --accent-ink:     var(--text-on-accent);
+  --accent-warm:    var(--amber-500);
+  --accent-warm-muted: color-mix(in oklab, var(--amber-500) 18%, transparent);
+  --link:           var(--blue-400);
+
+  --border:        rgba(169, 177, 214, 0.14);
+  --border-strong: rgba(169, 177, 214, 0.28);
+  --border-accent: color-mix(in oklab, var(--cyan-400) 48%, transparent);
+  --ring:          color-mix(in oklab, var(--cyan-400) 58%, transparent);
+
+  --success: var(--green-400);
+  --warning: var(--amber-300);
+  --danger:  var(--red-400);
+  --info:    var(--cyan-400);
+  --success-muted: color-mix(in oklab, var(--green-400) 18%, transparent);
+  --warning-muted: color-mix(in oklab, var(--amber-300) 18%, transparent);
+  --danger-muted:  color-mix(in oklab, var(--red-400) 18%, transparent);
+  --info-muted:    color-mix(in oklab, var(--cyan-400) 18%, transparent);
+}
+
+/* ================= Sibling dark theme — NIGHT OWL ================= */
+[data-theme="nightowl"] {
+  color-scheme: dark;
+  --cyan-400:#7fdbca;  --cyan-300:#a3eadd;  --cyan-500:#5bbdac;
+  --blue-400:#82AAFF;  --blue-500:#6b90e8;
+  --amber-300:#ecc48d; --amber-500:#F78C6C; --amber-600:#e0744c;
+  --green-400:#c5e478; --red-400:#EF5350; --yellow-400:#ecc48d; --purple-400:#c792ea;
+
+  --neutral-0:#011627;  --neutral-50:#041b2e; --neutral-100:#0b253a;
+  --neutral-150:#0e2c44; --neutral-200:#123350; --neutral-300:#1d4665;
+  --neutral-400:#2d5a7a; --neutral-500:#5f7e97; --neutral-600:#7a97ac;
+  --neutral-700:#9fb6c9; --neutral-800:#d6deeb; --neutral-900:#eef4fb;
+
+  --bg-base:#011627; --bg-sunken:#00101c; --bg-raised:#0b253a; --bg-overlay:rgba(1,15,25,0.74);
+  --text-strong:#d6deeb; --text-body:#c3cee0; --text-muted:#8ba3b8; --text-faint:#5f7e97;
+  --accent:var(--cyan-400); --accent-strong:#a3eadd; --accent-ink:#022a26;
+  --accent-warm:var(--amber-500);
+  --border:rgba(214,222,235,0.13); --border-strong:rgba(214,222,235,0.26);
+}
+
+/* ================= Semantic aliases — LIGHT (Tokyo Day) ================= */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-base:    #e6e7ed;
+  --bg-sunken:  #d5d6db;
+  --bg-raised:  #ffffff;
+  --bg-overlay: rgba(213, 214, 219, 0.66);
+
+  --text-strong: #1a1b26;
+  --text-body:   #2c3044;
+  --text-muted:  #565f89;
+  --text-faint:  #737a8c;
+  --text-on-accent: #ffffff;
+
+  --accent:         var(--cyan-600);
+  --accent-strong:  var(--cyan-700);
+  --accent-muted:   color-mix(in oklab, var(--cyan-600) 15%, transparent);
+  --accent-ink:     #ffffff;
+  --accent-warm:    var(--amber-600);
+  --accent-warm-muted: color-mix(in oklab, var(--amber-500) 18%, transparent);
+  --link:           var(--blue-600);
+
+  --border:        rgba(26, 27, 38, 0.14);
+  --border-strong: rgba(26, 27, 38, 0.26);
+  --border-accent: color-mix(in oklab, var(--cyan-600) 48%, transparent);
+  --ring:          color-mix(in oklab, var(--cyan-600) 52%, transparent);
+
+  --success: var(--green-500);
+  --warning: var(--amber-600);
+  --danger:  var(--red-500);
+  --info:    var(--cyan-600);
+}

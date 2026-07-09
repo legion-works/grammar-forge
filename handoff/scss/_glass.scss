@@ -1,0 +1,75 @@
+// ============================================================================
+// GrammarForge — Liquid Glass surface mixins  (Legion Works edition)
+// ----------------------------------------------------------------------------
+// The signature Legion material: a translucent fill + 22px/160% blur backdrop +
+// a hairline stroke + a refractive **specular rim** (the "wet glass" edge). The
+// rim is the exact Legion Works `--glass-rim` recipe, which the design system
+// lifted verbatim from GrammarForge's own glass — so these match the DS 1:1.
+//
+// ► If the Legion Works CSS is loaded in the GF root you can drop these mixins
+//   and use the DS directly:  var(--glass-fill), var(--glass-stroke),
+//   var(--glass-rim), var(--shadow-lg), backdrop-filter: blur(var(--glass-blur))
+//   saturate(var(--glass-saturate)).  See INSTRUCTIONS.md §A.
+//
+// Use glass for: score orb, correction card, review panel, rephrase/goals/synonym
+// popovers, hover pill, toasts. Do NOT glass dense data tables or long reading
+// surfaces — those get opaque $gf-raised-*.
+// ============================================================================
+@use "tokens" as *;
+
+// The canonical Legion specular rim (= DS --glass-rim).
+$gf-glass-rim:
+  inset 0 1px 1.5px rgba(255,255,255,0.50),
+  inset 0 0 0   1px  rgba(255,255,255,0.10),
+  inset 0 -1px 1px   rgba(0,0,0,0.16);
+
+@mixin gf-glass-dark {
+  position: relative;
+  isolation: isolate;
+  // Deep-navy translucent fill (Tokyo Night raised over base).
+  background: linear-gradient(180deg, rgba(41,46,66,0.90) 0%, rgba(22,22,30,0.88) 100%);
+  border: 1px solid rgba(255,255,255,0.10);       // --glass-stroke
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.50), $gf-glass-rim;  // --shadow-lg + rim
+  color: $gf-ink-dark;
+
+  &::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -1px 1px rgba(0,0,0,0.34);
+  }
+}
+
+@mixin gf-glass-light {
+  position: relative;
+  isolation: isolate;
+  // White raised surface, lightly translucent over the Tokyo Day ground.
+  background: color-mix(in oklab, #ffffff 90%, transparent);
+  border: 1px solid rgba(26,27,38,0.10);          // --glass-stroke (light)
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  box-shadow: 0 18px 50px rgba(26,27,38,0.14), $gf-glass-rim;
+  color: $gf-ui-light;
+
+  &::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.90), inset 0 -1px 1px rgba(26,27,38,0.06);
+  }
+}
+
+// A compact hover-tooltip pill is a lighter-weight glass (no full specular rim).
+@mixin gf-glass-tip($dark: true) {
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  @if $dark {
+    background: rgba(30,32,48,0.94);              // Tokyo Night raised
+    border: 1px solid rgba(255,255,255,0.12);
+    color: $gf-ink-dark;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.52);
+  } @else {
+    background: rgba(255,255,255,0.96);
+    border: 1px solid rgba(26,27,38,0.10);
+    color: $gf-ui-light;
+    box-shadow: 0 6px 22px rgba(26,27,38,0.18);
+  }
+}

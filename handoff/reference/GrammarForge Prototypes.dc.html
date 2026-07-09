@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/fonts.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/ansi.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/radius-shadow.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/glass.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/annotations.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/base.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/styles.css">
+  <script src="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/_ds_bundle.js"></script>
+  <style>
+    @keyframes gf-enter {
+      from { transform: scale(0.96) translateY(4px); opacity: 0; }
+      to   { transform: scale(1) translateY(0); opacity: 1; }
+    }
+    @keyframes gf-spin { to { transform: rotate(360deg); } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #dde1e8; }
+
+    /* ════ Apple Liquid Glass ════ */
+    .glass-dark {
+      background: linear-gradient(180deg, rgba(41,46,66,0.92) 0%, rgba(22,22,30,0.90) 100%);
+      border: 1px solid var(--glass-stroke);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      backdrop-filter: blur(22px) saturate(160%);
+      box-shadow: var(--shadow-lg), var(--glass-rim);
+      color: var(--text-body);
+      font-family: var(--font-ui);
+      position: relative;
+      isolation: isolate;
+    }
+    .glass-dark::after {
+      content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      box-shadow: inset 0 1px 0 var(--glass-stroke-top), inset 0 -1px 1px rgba(0,0,0,0.32);
+    }
+    .glass-light {
+      background: color-mix(in oklab, var(--bg-raised) 90%, transparent);
+      border: 1px solid var(--glass-stroke);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      backdrop-filter: blur(22px) saturate(160%);
+      box-shadow: var(--shadow-lg), var(--glass-rim);
+      color: var(--text-body);
+      font-family: var(--font-ui);
+      position: relative;
+      isolation: isolate;
+    }
+    .glass-light::after {
+      content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      box-shadow: inset 0 1px 0 var(--glass-stroke-top), inset 0 -1px 1px rgba(11,14,20,0.06);
+    }
+    .gf-anim { animation: gf-enter 170ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+    /* ════ Highlighted words + hover tooltip pill ════ */
+    .hl-wrap { position: relative; border-radius: 3px; padding: 1px 2px; cursor: pointer; white-space: nowrap;
+      transition: background 120ms ease-out, box-shadow 120ms ease-out; }
+    .hl-gram  { background: color-mix(in oklab, var(--cat-grammar) 20%, transparent);     border-bottom: 2px solid var(--cat-grammar); }
+    .hl-spell { background: color-mix(in oklab, var(--cat-spelling) 20%, transparent);    border-bottom: 2px solid var(--cat-spelling); }
+    .hl-punc  { background: color-mix(in oklab, var(--cat-punctuation) 18%, transparent); border-bottom: 2px solid var(--cat-punctuation); }
+    .hl-style { background: color-mix(in oklab, var(--cat-style) 18%, transparent);       border-bottom: 2px solid var(--cat-style); }
+    .hl-gram:hover  { background: color-mix(in oklab, var(--cat-grammar) 38%, transparent);     box-shadow: 0 0 0 1px color-mix(in oklab, var(--cat-grammar) 45%, transparent); }
+    .hl-spell:hover { background: color-mix(in oklab, var(--cat-spelling) 36%, transparent);    box-shadow: 0 0 0 1px color-mix(in oklab, var(--cat-spelling) 42%, transparent); }
+    .hl-punc:hover  { background: color-mix(in oklab, var(--cat-punctuation) 34%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--cat-punctuation) 40%, transparent); }
+    .hl-style:hover { background: color-mix(in oklab, var(--cat-style) 34%, transparent);       box-shadow: 0 0 0 1px color-mix(in oklab, var(--cat-style) 40%, transparent); }
+    .hl-applied   { color: var(--success); font-weight: 500; }
+    .hl-applied-l { color: var(--success); font-weight: 500; }
+
+    /* The small hover pill */
+    .hl-tip {
+      position: absolute; bottom: calc(100% + 9px); left: 50%;
+      transform: translateX(-50%) translateY(5px);
+      display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+      padding: 5px 11px; border-radius: 9999px; font: 500 12px/1 var(--font-ui);
+      pointer-events: none; opacity: 0; visibility: hidden; z-index: 400;
+      transition: opacity 140ms ease-out, transform 140ms cubic-bezier(0.22,1,0.36,1);
+    }
+    .hl-wrap:hover .hl-tip { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+    .hl-tip::after {
+      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+      border: 5px solid transparent; border-top-color: var(--tip-arrow);
+    }
+    .hl-tip-d {
+      --tip-arrow: rgba(28,28,34,0.96);
+      background: rgba(28,28,34,0.92); border: 1px solid rgba(255,255,255,0.14); color: var(--text-strong);
+      backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.42);
+    }
+    .hl-tip-l {
+      --tip-arrow: rgba(252,252,254,0.97);
+      background: rgba(252,252,254,0.95); border: 1px solid rgba(0,0,0,0.10); color: var(--text-strong);
+      backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.16);
+    }
+    .hl-tip-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+    .hl-tip-arr { opacity: 0.5; margin: 0 1px; }
+
+    /* ════ Discord chrome ════ */
+    .vc-ch { transition: background 80ms ease-out; }
+    .vc-ch:hover { background: rgba(255,255,255,0.07) !important; }
+    .vc-ch.sel { background: rgba(255,255,255,0.10) !important; color: #dbdee1 !important; }
+    .vc-msg { transition: background 80ms ease-out; border-radius: 4px; }
+    .vc-msg:hover { background: rgba(0,0,0,0.08); }
+    .srv-icon { transition: border-radius 200ms ease-out, transform 150ms ease-out; cursor: pointer; }
+    .srv-icon:hover { transform: translateY(-1px); }
+
+    /* GF chatbar icon button */
+    .gf-icon-btn { transition: background 100ms ease-out, color 100ms ease-out, box-shadow 120ms ease-out; border-radius: 4px; cursor: pointer; }
+    .gf-icon-btn:hover { background: rgba(255,255,255,0.12) !important; }
+    .gf-icon-btn:active { transform: scale(0.92); }
+    .gf-icon-btn.on { background: color-mix(in oklab, var(--accent) 28%, transparent) !important; color: var(--accent) !important; box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 40%, transparent); }
+    .gf-icon-btn.on:hover { background: color-mix(in oklab, var(--accent) 40%, transparent) !important; box-shadow: 0 0 18px color-mix(in oklab, var(--accent) 50%, transparent); }
+
+    /* ════ Panels / rows / buttons ════ */
+    .corr-row { transition: background 80ms ease-out, transform 100ms ease-out; cursor: pointer; }
+    .corr-row:hover { background: rgba(255,255,255,0.12) !important; transform: translateX(3px); }
+    .corr-row-l { transition: background 80ms ease-out, transform 100ms ease-out; cursor: pointer; }
+    .corr-row-l:hover { background: rgba(0,0,0,0.07) !important; transform: translateX(3px); }
+    .pa-btn { transition: background 100ms ease-out, transform 80ms ease-out; cursor: pointer; }
+    .pa-btn:hover:not(:disabled) { background: rgba(255,255,255,0.20) !important; transform: scale(1.04); }
+    .pa-btn:active:not(:disabled) { transform: scale(0.95); }
+    .pa-btn:disabled { opacity: 0.35; cursor: default; }
+    .pa-btn-l { transition: background 100ms ease-out, transform 80ms ease-out; cursor: pointer; }
+    .pa-btn-l:hover:not(:disabled) { background: rgba(0,0,0,0.09) !important; transform: scale(1.04); }
+    .pa-btn-l:active:not(:disabled) { transform: scale(0.95); }
+    .pa-btn-l:disabled { opacity: 0.35; cursor: default; }
+    .apply-btn { transition: background 100ms ease-out, transform 100ms ease-out, box-shadow 120ms ease-out; color: var(--accent-ink) !important; }
+    .apply-btn:hover { background: var(--accent-strong) !important; transform: translateY(-1px); box-shadow: var(--glow-cyan) !important; }
+    .apply-btn:active { transform: translateY(0); }
+
+    /* ════ Popup ════ */
+    .pop-tab { transition: background 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out; }
+    .pop-tab:not(.on):hover { background: rgba(0,0,0,0.05); color: var(--text-strong); }
+    .pop-primary { transition: opacity 120ms ease-out, transform 120ms ease-out, box-shadow 120ms ease-out; }
+    .pop-primary:hover { opacity: 0.90; transform: translateY(-1px); box-shadow: 0 5px 16px rgba(134,225,252,0.32); }
+    .pop-primary:active { transform: translateY(0); }
+    .pop-sec { transition: background 120ms ease-out, transform 100ms ease-out; }
+    .pop-sec:hover { background: rgba(0,0,0,0.09) !important; transform: translateY(-1px); }
+    .pop-sec:active { transform: translateY(0); }
+    .pop-mini { transition: background 120ms ease-out, transform 100ms ease-out; }
+    .pop-mini:hover { background: rgba(0,0,0,0.09) !important; transform: translateY(-1px); }
+
+    /* Browser status pill */
+    .br-pill { transition: opacity 160ms ease-out, transform 160ms ease-out; }
+    .br-pill:hover { opacity: 1 !important; transform: scale(1.05); }
+    .br-pill:active { transform: scale(0.97); }
+
+    /* Scrollbars */
+    .thin-scroll::-webkit-scrollbar { width: 4px; }
+    .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+    .thin-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 2px; }
+    .thin-scroll-l::-webkit-scrollbar { width: 4px; }
+    .thin-scroll-l::-webkit-scrollbar-track { background: transparent; }
+    .thin-scroll-l::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 2px; }
+
+    /* Settings inputs */
+    .s-input { height: 26px; padding: 0 8px; border-radius: 7px; border: 1px solid rgba(0,0,0,0.13); background: rgba(0,0,0,0.04); font: 400 12px/1 var(--font-ui); color: var(--text-body); outline: none; transition: border-color 120ms, box-shadow 120ms; }
+    .s-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(134,225,252,0.14); }
+    .s-select { height: 26px; padding: 0 6px; border-radius: 7px; border: 1px solid rgba(0,0,0,0.13); background: rgba(0,0,0,0.04); font: 400 12px/1 var(--font-ui); color: var(--text-body); outline: none; transition: border-color 120ms; }
+    .s-select:focus { border-color: var(--accent); }
+    .chip { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 8px; border-radius: 9999px; border: 1px solid rgba(0,0,0,0.12); background: rgba(0,0,0,0.04); font: 400 11px/1 var(--font-ui); color: var(--text-body); }
+    .chip-x { background: none; border: none; cursor: pointer; color: rgba(15,23,42,0.35); padding: 0 0 0 2px; font: inherit; transition: color 100ms; }
+    .chip-x:hover { color: rgba(15,23,42,0.7); }
+  </style>
+</helmet>
+
+<!-- Root canvas -->
+<div class="lw-aurora" style="min-height: 100vh; padding: 36px 28px 60px; font-family: var(--font-ui);"
+     onClick="{{ closeAll }}">
+
+  <!-- Page header -->
+  <div style="text-align: center; margin-bottom: 40px;">
+    <div style="display: inline-flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+      <img src="assets/grammarforge-mark.svg" width="28" height="28" alt="GrammarForge mark" style="display: block; filter: drop-shadow(0 2px 8px color-mix(in oklab, var(--cyan-400) 42%, transparent));">
+      <span style="font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 1; letter-spacing: -0.01em; color: var(--text-strong);">GrammarForge</span>
+      <span style="font-family: var(--font-ui); font-weight: 400; font-size: 14px; line-height: 1; color: var(--text-muted);">· Plugin Prototypes</span>
+    </div>
+    <p style="font-family: var(--font-ui); font-weight: 400; font-size: 13px; line-height: 1.5; color: var(--text-faint); margin: 0;">Hover a highlighted word for a preview · click it to fix inline · click the pill to open the panel</p>
+  </div>
+
+  <!-- Two-column layout -->
+  <div style="display: flex; gap: 32px; align-items: flex-start; justify-content: center; flex-wrap: wrap;">
+
+    <!-- ═══════════ VENCORD ═══════════ -->
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px;">
+        <div style="width: 8px; height: 8px; border-radius: 50%; background: #5865f2;"></div>
+        <span style="font: 600 11px/1 var(--font-ui); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;">Vencord Plugin — Discord</span>
+      </div>
+
+      <div style="width: 860px; height: 620px; border-radius: 12px; overflow: hidden; box-shadow: 0 28px 90px rgba(0,0,0,0.38), 0 0 0 1px rgba(255,255,255,0.04); display: flex;">
+
+        <!-- Server sidebar -->
+        <div style="width: 48px; background: #1e1f22; display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 8px; flex-shrink: 0; overflow: hidden;">
+          <div style="width: 36px; height: 36px; border-radius: 50%; background: #5865f2; display: flex; align-items: center; justify-content: center; color: #fff; font: 700 14px/1 var(--font-ui); flex-shrink: 0;" class="srv-icon">G</div>
+          <div style="width: 28px; height: 1px; background: rgba(255,255,255,0.08); flex-shrink: 0;"></div>
+          <div style="width: 36px; height: 36px; border-radius: 12px; background: #23a559; display: flex; align-items: center; justify-content: center; color: #fff; font: 700 16px/1 var(--font-ui); flex-shrink: 0;" class="srv-icon">+</div>
+          <div style="width: 36px; height: 36px; border-radius: 18px; background: #2b2d31; display: flex; align-items: center; justify-content: center; color: #949ba4; font: 600 12px/1 var(--font-ui); flex-shrink: 0;" class="srv-icon">d</div>
+          <div style="width: 36px; height: 36px; border-radius: 18px; background: #2b2d31; display: flex; align-items: center; justify-content: center; color: #949ba4; font: 600 12px/1 var(--font-ui); flex-shrink: 0;" class="srv-icon">m</div>
+        </div>
+
+        <!-- Channel list -->
+        <div style="width: 220px; background: #2b2d31; display: flex; flex-direction: column; flex-shrink: 0;">
+          <div style="padding: 0 16px; height: 48px; border-bottom: 1px solid rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: space-between; cursor: pointer; flex-shrink: 0;">
+            <span style="font: 600 14px/1 var(--font-ui); color: #dbdee1;">GrammarForge Dev</span>
+            <span style="color: #949ba4; font-size: 18px;">⌄</span>
+          </div>
+          <div style="flex: 1; overflow-y: auto; padding: 8px 6px;" class="thin-scroll">
+            <div style="font: 600 11px/1 var(--font-ui); color: #949ba4; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 8px 6px;">Text Channels</div>
+            <div style="padding: 5px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #dbdee1; font: 500 14px/1 var(--font-ui);" class="vc-ch sel"><span style="font-size: 16px; color: #949ba4;">#</span> general</div>
+            <div style="padding: 5px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #949ba4; font: 500 14px/1 var(--font-ui);" class="vc-ch"><span style="font-size: 16px;">#</span> announcements</div>
+            <div style="padding: 5px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #949ba4; font: 500 14px/1 var(--font-ui);" class="vc-ch"><span style="font-size: 16px;">#</span> bridge-dev</div>
+            <div style="padding: 5px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #949ba4; font: 500 14px/1 var(--font-ui);" class="vc-ch"><span style="font-size: 16px;">#</span> clients</div>
+            <div style="padding: 5px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #949ba4; font: 500 14px/1 var(--font-ui);" class="vc-ch"><span style="font-size: 16px;">#</span> evals</div>
+            <div style="font: 600 11px/1 var(--font-ui); color: #949ba4; text-transform: uppercase; letter-spacing: 0.04em; padding: 14px 8px 6px;">Voice Channels</div>
+            <div style="padding: 5px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; color: #949ba4; font: 500 14px/1 var(--font-ui);" class="vc-ch"><span style="font-size: 14px;">🔊</span> standup</div>
+          </div>
+          <div style="padding: 8px; background: #232428; display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: #5865f2; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; font: 700 13px/1 var(--font-ui); position: relative;">
+              T<span style="position: absolute; bottom: -1px; right: -1px; width: 11px; height: 11px; border-radius: 50%; background: #23a559; border: 2px solid #232428;"></span>
+            </div>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font: 600 13px/1 var(--font-ui); color: #dbdee1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">tehan</div>
+              <div style="font: 400 11px/1 var(--font-ui); color: #949ba4; margin-top: 2px;">#0001</div>
+            </div>
+            <div style="display: flex; gap: 2px;">
+              <div style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; color: #949ba4; font-size: 14px;" class="gf-icon-btn">🎤</div>
+              <div style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; color: #949ba4; font-size: 14px;" class="gf-icon-btn">⚙️</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main chat -->
+        <div style="flex: 1; background: #313338; display: flex; flex-direction: column; position: relative; min-width: 0;" onClick="{{ stopProp }}">
+          <div style="padding: 0 16px; height: 48px; border-bottom: 1px solid rgba(0,0,0,0.24); display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+            <span style="font-size: 20px; color: #949ba4;">#</span>
+            <span style="font: 600 16px/1 var(--font-ui); color: #dbdee1;">general</span>
+            <div style="width: 1px; height: 18px; background: rgba(255,255,255,0.14); margin: 0 4px;"></div>
+            <span style="font: 400 13px/1 var(--font-ui); color: #949ba4;">GrammarForge active · bridge localhost:8000</span>
+          </div>
+
+          <!-- Messages -->
+          <div style="flex: 1; overflow-y: auto; padding: 16px 16px 0;" class="thin-scroll" onClick="{{ closeVAll }}">
+            <div style="display: flex; gap: 12px; padding: 6px 4px;" class="vc-msg">
+              <div style="width: 40px; height: 40px; border-radius: 50%; background: #5865f2; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; font: 700 16px/1 var(--font-ui); margin-top: 1px;">A</div>
+              <div><div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px;"><span style="font: 600 14px/1 var(--font-ui); color: #dbdee1;">alice</span><span style="font: 400 11px/1 var(--font-ui); color: #80848e;">Today at 10:32 AM</span></div><div style="font: 400 15px/1.5 var(--font-ui); color: #dbdee1;">Just merged the GECToR improvements — fast path p75 is down to 38ms 🚀</div></div>
+            </div>
+            <div style="display: flex; gap: 12px; padding: 6px 4px;" class="vc-msg">
+              <div style="width: 40px; height: 40px; border-radius: 50%; background: #ed4245; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; font: 700 16px/1 var(--font-ui); margin-top: 1px;">B</div>
+              <div><div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px;"><span style="font: 600 14px/1 var(--font-ui); color: #dbdee1;">bob</span><span style="font: 400 11px/1 var(--font-ui); color: #80848e;">Today at 10:34 AM</span></div><div style="font: 400 15px/1.5 var(--font-ui); color: #dbdee1;">Nice! Did you fix the rephrase latency too? 3 seconds felt pretty slow for a local LLM</div></div>
+            </div>
+            <div style="display: flex; gap: 12px; padding: 6px 4px;" class="vc-msg">
+              <div style="width: 40px; height: 40px; border-radius: 50%; background: #fdd663; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #000; font: 700 16px/1 var(--font-ui); margin-top: 1px;">C</div>
+              <div><div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px;"><span style="font: 600 14px/1 var(--font-ui); color: #fdd663;">carol</span><span style="font: 400 11px/1 var(--font-ui); color: #80848e;">Today at 10:41 AM</span></div><div style="font: 400 15px/1.5 var(--font-ui); color: #dbdee1;">The glass overlay on the popover looks incredible. Liquid Glass was the right call 🔥</div></div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; margin: 14px 0;">
+              <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.08);"></div>
+              <span style="font: 600 11px/1 var(--font-ui); color: #80848e;">Today</span>
+              <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.08);"></div>
+            </div>
+          </div>
+
+          <!-- Composer -->
+          <div style="padding: 0 16px 16px; flex-shrink: 0; position: relative;">
+            {{ vPanelEl }}
+            {{ vPopoverEl }}
+            <div style="background: #383a40; border-radius: 8px; display: flex; align-items: center; min-height: 44px; position: relative;" onClick="{{ stopProp }}">
+              <div style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #949ba4; font-size: 22px; flex-shrink: 0;" class="gf-icon-btn">+</div>
+              <div style="flex: 1; padding: 11px 4px; color: #dbdee1; font: 400 15px/1.6 var(--font-ui); overflow-wrap: break-word;">
+                {{ vComposerText }}
+              </div>
+              <div style="display: flex; align-items: center; padding: 0 8px; gap: 2px; flex-shrink: 0;">
+                <div style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: #949ba4; font: 700 10px/1 var(--font-ui);" class="gf-icon-btn">GIF</div>
+                <div style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: #949ba4; font-size: 17px;" class="gf-icon-btn">🎭</div>
+                <div style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: #949ba4; font-size: 17px;" class="gf-icon-btn">😊</div>
+                <div style="position: relative; display: inline-flex;" onClick="{{ toggleVPanel }}">
+                  <div style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: {{ vBtnColor }};" class="gf-icon-btn {{ vBtnClass }}">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                  </div>
+                  <sc-if value="{{ vShowBadge }}" hint-placeholder-val="{{ true }}">
+                    <span style="position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font: 700 11px/16px var(--font-ui); text-align: center; padding: 0 4px; pointer-events: none; display: inline-block;">{{ vBadgeCount }}</span>
+                  </sc-if>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p style="text-align: center; font: 400 12px/1.4 var(--font-ui); color: var(--text-faint); margin: 10px 0 0;">Hover a word for the preview pill · click ✏️ for the full corrections panel</p>
+    </div>
+
+    <!-- ═══════════ BROWSER EXTENSION ═══════════ -->
+    <div style="display: flex; flex-direction: column; gap: 24px;">
+
+      <!-- Popup -->
+      <div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px;">
+          <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--success);"></div>
+          <span style="font: 600 11px/1 var(--font-ui); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;">Browser Extension — Popup</span>
+        </div>
+
+        <div data-theme="light" style="width: 320px; padding: 16px; border-radius: 14px; display: flex; flex-direction: column; gap: 11px;" class="glass-light">
+          <div>
+            <div style="font: 700 16px/1 var(--font-ui); color: var(--text-strong);">GrammarForge</div>
+            <div style="font: 400 12px/1.4 var(--font-ui); color: rgba(15,23,42,0.55); margin-top: 3px;">Privacy-first corrections from your local bridge.</div>
+          </div>
+
+          <div style="display: flex; gap: 4px; padding: 3px; border-radius: 9999px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.08);">
+            <button onClick="{{ setStatusTab }}" style="flex: 1; height: 28px; border: none; border-radius: 9999px; font: 600 13px/1 var(--font-ui); cursor: pointer; background: {{ tabStatusBg }}; color: {{ tabStatusColor }}; box-shadow: {{ tabStatusShadow }};" class="pop-tab {{ tabStatusClass }}">Status</button>
+            <button onClick="{{ setSettingsTab }}" style="flex: 1; height: 28px; border: none; border-radius: 9999px; font: 600 13px/1 var(--font-ui); cursor: pointer; background: {{ tabSettingsBg }}; color: {{ tabSettingsColor }}; box-shadow: {{ tabSettingsShadow }};" class="pop-tab {{ tabSettingsClass }}">Settings</button>
+          </div>
+
+          <sc-if value="{{ isStatusTab }}" hint-placeholder-val="{{ true }}">
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 6px; font: 500 13px/1 var(--font-ui); color: var(--band-excellent);">
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--success); display: inline-block; flex-shrink: 0;"></span>
+                Bridge reachable · localhost:8000
+              </div>
+              <button onClick="{{ toggleBSite }}" style="height: 32px; width: 100%; padding: 0 14px; border-radius: 9999px; border: none; font: 600 13px/1 var(--font-ui); cursor: pointer; background: {{ sitePauseBg }}; color: {{ sitePauseColor }};" class="pop-primary">{{ sitePauseLabel }}</button>
+              <label style="display: flex; align-items: center; gap: 8px; font: 400 13px/1 var(--font-ui); color: var(--text-body); cursor: pointer;">
+                <input type="checkbox" checked="{{ sEnabled }}" onChange="{{ toggleSEnabled }}" style="width: 14px; height: 14px; accent-color: var(--accent);" /> Enabled on this browser
+              </label>
+              <button style="height: 32px; width: 100%; border-radius: 9999px; border: 1px solid rgba(134,225,252,0.4); background: linear-gradient(180deg, var(--accent), var(--accent)); color: #fff; font: 600 13px/1 var(--font-ui); cursor: pointer;" class="pop-primary">Check now</button>
+              <button style="height: 32px; width: 100%; border-radius: 9999px; border: 1px solid rgba(0,0,0,0.12); background: rgba(0,0,0,0.04); color: var(--text-body); font: inherit; font-size: 13px; cursor: pointer;" class="pop-sec">Rephrase selection</button>
+              <div>
+                <div style="font: 600 11px/1 var(--font-ui); text-transform: uppercase; letter-spacing: 0.04em; color: rgba(15,23,42,0.45); margin-bottom: 7px;">Focused field</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 5px 12px;">
+                  <span style="display: inline-flex; align-items: center; gap: 5px; font: 400 12px/1 var(--font-ui); color: var(--text-body);"><span style="width: 18px; height: 4px; border-radius: 2px; background: var(--cat-punctuation); display: inline-block;"></span><strong>1</strong> Punctuation</span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px; font: 400 12px/1 var(--font-ui); color: var(--text-body);"><span style="width: 18px; height: 4px; border-radius: 2px; background: var(--cat-grammar); display: inline-block;"></span><strong>1</strong> Grammar</span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px; font: 400 12px/1 var(--font-ui); color: var(--text-body);"><span style="width: 18px; height: 4px; border-radius: 2px; background: var(--cat-style); display: inline-block;"></span><strong>1</strong> Style</span>
+                </div>
+              </div>
+              <div>
+                <div style="font: 600 11px/1 var(--font-ui); text-transform: uppercase; letter-spacing: 0.04em; color: rgba(15,23,42,0.45); margin-bottom: 7px;">Category legend</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px;">
+                  <span style="display: flex; align-items: center; gap: 6px; font: 400 12px/1 var(--font-ui); color: var(--text-body);"><span style="width: 18px; height: 4px; border-radius: 2px; background: var(--cat-spelling); display: inline-block;"></span>Spelling</span>
+                  <span style="display: flex; align-items: center; gap: 6px; font: 400 12px/1 var(--font-ui); color: var(--text-body);"><span style="width: 18px; height: 4px; border-radius: 2px; background: var(--cat-grammar); display: inline-block;"></span>Grammar</span>
+                  <span style="display: flex; align-items: center; gap: 6px; font: 400 12px/1 var(--font-ui); color: var(--text-body);"><span style="width: 18px; height: 4px; border-radius: 2px; background: var(--cat-punctuation); display: inline-block;"></span>Punctuation</span>
+                  <span style="display: flex; align-items: center; gap: 6px; font: 400 12px/1 var(--font-ui); color: var(--text-body);"><span style="width: 18px; height: 4px; border-radius: 2px; background: var(--cat-style); display: inline-block;"></span>Style</span>
+                  <span style="display: flex; align-items: center; gap: 6px; font: 400 12px/1 var(--font-ui); color: var(--text-body);"><span style="width: 18px; height: 4px; border-radius: 2px; background: var(--text-muted); display: inline-block;"></span>Typography</span>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isSettingsTab }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; flex-direction: column; gap: 9px; max-height: 370px; overflow-y: auto; padding-right: 2px;" class="thin-scroll-l">
+              <div style="font: 600 11px/1 var(--font-ui); text-transform: uppercase; letter-spacing: 0.04em; color: rgba(15,23,42,0.45);">Bridge</div>
+              <div style="display: flex; align-items: center; gap: 7px;">
+                <label style="font: 400 12px/1 var(--font-ui); color: var(--text-body); flex-shrink: 0;">URL</label>
+                <input type="text" value="http://localhost:8000" style="flex: 1; min-width: 0;" class="s-input" />
+                <button style="height: 26px; padding: 0 10px; border-radius: 9999px; border: 1px solid rgba(0,0,0,0.12); background: rgba(0,0,0,0.04); font: 500 12px/1 var(--font-ui); cursor: pointer; color: var(--text-body); white-space: nowrap;" class="pop-mini">Save</button>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button style="height: 26px; padding: 0 10px; border-radius: 9999px; border: 1px solid rgba(0,0,0,0.12); background: rgba(0,0,0,0.04); font: 500 12px/1 var(--font-ui); cursor: pointer; color: var(--text-body); white-space: nowrap;" class="pop-mini">Test connection</button>
+                <span style="font: 400 12px/1 var(--font-ui); color: var(--band-excellent);">✓ Reachable</span>
+              </div>
+              <label style="display: flex; align-items: center; gap: 7px; font: 400 12px/1 var(--font-ui); color: var(--text-body); cursor: pointer;"><input type="checkbox" style="accent-color: var(--accent);" /> Allow non-local bridge URLs</label>
+
+              <div style="font: 600 11px/1 var(--font-ui); text-transform: uppercase; letter-spacing: 0.04em; color: rgba(15,23,42,0.45); padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.07);">Behaviour</div>
+              <div style="display: flex; align-items: center; gap: 7px;">
+                <label style="font: 400 12px/1 var(--font-ui); color: var(--text-body); flex-shrink: 0; min-width: 72px;">Check mode</label>
+                <select style="flex: 1;" class="s-select"><option>Realtime (as you type)</option><option>On demand only</option></select>
+              </div>
+              <label style="display: flex; align-items: center; gap: 7px; font: 400 12px/1 var(--font-ui); color: var(--text-body); cursor: pointer;"><input type="checkbox" checked="{{ sCheckPasted }}" onChange="{{ toggleCheckPasted }}" style="accent-color: var(--accent);" /> Check pasted text</label>
+              <label style="display: flex; align-items: center; gap: 7px; font: 400 12px/1 var(--font-ui); color: var(--text-body); cursor: pointer;"><input type="checkbox" checked="{{ sPicky }}" onChange="{{ togglePicky }}" style="accent-color: var(--accent);" /> Picky mode (style suggestions)</label>
+              <label style="display: flex; align-items: center; gap: 7px; font: 400 12px/1 var(--font-ui); color: var(--text-body); cursor: pointer;"><input type="checkbox" checked="{{ sAutocorrect }}" onChange="{{ toggleAutocorrect }}" style="accent-color: var(--accent);" /> Autocorrect (high-confidence)</label>
+              <label style="display: flex; align-items: center; gap: 7px; font: 400 12px/1 var(--font-ui); color: var(--text-body); cursor: pointer;"><input type="checkbox" checked="{{ sSuppressSpell }}" onChange="{{ toggleSuppressSpell }}" style="accent-color: var(--accent);" /> Hide browser's spellcheck</label>
+
+              <div style="font: 600 11px/1 var(--font-ui); text-transform: uppercase; letter-spacing: 0.04em; color: rgba(15,23,42,0.45); padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.07);">Hotkeys</div>
+              <div style="display: flex; align-items: center; gap: 7px;">
+                <label style="font: 400 12px/1 var(--font-ui); color: var(--text-body); flex-shrink: 0; min-width: 72px;">Accept</label>
+                <select style="flex: 1;" class="s-select"><option>Alt + .  (default)</option><option>Ctrl + .</option><option>Ctrl + Shift + .</option></select>
+              </div>
+              <div style="display: flex; align-items: center; gap: 7px;">
+                <label style="font: 400 12px/1 var(--font-ui); color: var(--text-body); flex-shrink: 0; min-width: 72px;">Rephrase</label>
+                <select style="flex: 1;" class="s-select"><option>Ctrl + /  (default)</option><option>Ctrl + Shift + /</option><option>Alt + /</option></select>
+              </div>
+
+              <div style="font: 600 11px/1 var(--font-ui); text-transform: uppercase; letter-spacing: 0.04em; color: rgba(15,23,42,0.45); padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.07);">Blocked sites</div>
+              <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                <span class="chip">reddit.com <button class="chip-x">✕</button></span>
+                <span class="chip">twitter.com <button class="chip-x">✕</button></span>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <input type="text" placeholder="example.com" style="flex: 1;" class="s-input" />
+                <button style="height: 26px; padding: 0 10px; border-radius: 9999px; border: 1px solid rgba(0,0,0,0.12); background: rgba(0,0,0,0.04); font: 500 12px/1 var(--font-ui); cursor: pointer; color: var(--text-body);" class="pop-mini">Add</button>
+              </div>
+
+              <div style="font: 600 11px/1 var(--font-ui); text-transform: uppercase; letter-spacing: 0.04em; color: rgba(15,23,42,0.45); padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.07);">Dictionary</div>
+              <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                <span class="chip">GECToR <button class="chip-x">✕</button></span>
+                <span class="chip">llama <button class="chip-x">✕</button></span>
+              </div>
+
+              <button style="height: 28px; padding: 0 12px; border-radius: 9999px; border: 1px solid rgba(0,0,0,0.12); background: rgba(0,0,0,0.04); font: 500 12px/1 var(--font-ui); cursor: pointer; color: var(--text-body); margin-top: 2px;" class="pop-mini">Open full settings page ↗</button>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+
+      <!-- In-page overlay -->
+      <div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px;">
+          <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--cat-style);"></div>
+          <span style="font: 600 11px/1 var(--font-ui); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;">Browser Extension — In-page Overlay</span>
+        </div>
+
+        <div data-theme="light" style="width: 520px; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.06); overflow: hidden;">
+          <div style="padding: 9px 14px; background: #f5f5f7; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 12px;">
+            <div style="display: flex; gap: 5px; flex-shrink: 0;">
+              <div style="width: 11px; height: 11px; border-radius: 50%; background: #ff5f57;"></div>
+              <div style="width: 11px; height: 11px; border-radius: 50%; background: #febc2e;"></div>
+              <div style="width: 11px; height: 11px; border-radius: 50%; background: #28c840;"></div>
+            </div>
+            <div style="flex: 1; height: 22px; background: #fff; border: 1px solid #e5e7eb; border-radius: 5px; display: flex; align-items: center; padding: 0 8px; font: 400 11px/1 var(--font-ui); color: var(--text-muted);">🔒 github.com/tehan-xyz/grammarforge/issues/12</div>
+          </div>
+
+          <div style="padding: 18px;" onClick="{{ closeAll }}">
+            <div style="font: 600 12px/1 var(--font-ui); color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em;">Issue #12 · Comment</div>
+            <div style="font: 700 17px/1.3 var(--font-ui); color: var(--text-strong); margin-bottom: 14px;">Bridge latency improvements</div>
+
+            <div style="border: 2px solid var(--accent); border-radius: 8px; padding: 14px 12px 12px; min-height: 88px; position: relative; margin-bottom: 14px; background: #fff;" onClick="{{ stopProp }}">
+              {{ bComposerText }}
+              <div onClick="{{ toggleBPillPanel }}" style="position: absolute; bottom: 10px; right: 10px; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 9999px; cursor: pointer; opacity: 0.85; z-index: 5;" class="glass-light br-pill">
+                <span style="min-width: 16px; height: 16px; border-radius: 8px; background: rgba(239,68,68,0.14); color: var(--danger); font: 700 11px/16px var(--font-ui); text-align: center; padding: 0 4px; display: inline-block;">{{ bBadgeCount }}</span>
+                {{ bBarEl }}
+              </div>
+              {{ bPillPanelEl }}
+              {{ bPopoverEl }}
+            </div>
+
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <button style="height: 30px; padding: 0 14px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; font: 500 13px/1 var(--font-ui); color: var(--text-body); cursor: pointer;" class="pop-sec">Cancel</button>
+              <button style="height: 30px; padding: 0 14px; border-radius: 6px; border: 1px solid #166534; background: var(--band-excellent); font: 500 13px/1 var(--font-ui); color: #fff; cursor: pointer;" class="pop-primary">Comment</button>
+            </div>
+          </div>
+        </div>
+        <p style="text-align: center; font: 400 12px/1.4 var(--font-ui); color: var(--text-faint); margin: 10px 0 0;">Hover a word for the preview pill · click the badge pill for all corrections</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    vPanelOpen: false, vActiveItem: null, vApplied: [], vIgnored: [],
+    bTab: 'status', bSitePaused: false,
+    sEnabled: true, sCheckPasted: false, sPicky: false, sAutocorrect: false, sSuppressSpell: true,
+    bPillPanelOpen: false, bActiveItem: null, bApplied: [], bIgnored: [],
+  };
+
+  VCORRS = [
+    { id: 0, cat: 'grammar',  badge: 'var(--cat-grammar)', label: 'Grammar',  orig: 'has',        corr: 'have',      msg: 'Subject–verb agreement: use "have" with "I".' },
+    { id: 1, cat: 'spelling', badge: 'var(--cat-spelling)', label: 'Spelling', orig: 'teh',        corr: 'the',       msg: 'Possible spelling mistake.' },
+    { id: 2, cat: 'spelling', badge: 'var(--cat-spelling)', label: 'Spelling', orig: 'beautifull', corr: 'beautiful', msg: 'Possible spelling mistake.' },
+  ];
+  BCORRS = [
+    { id: 0, cat: 'punctuation', badge: 'var(--cat-punctuation)', label: 'Punctuation', orig: 'However,',   corr: 'However', msg: 'Remove the comma after introductory "However" at sentence start.' },
+    { id: 1, cat: 'grammar',     badge: 'var(--cat-grammar)', label: 'Grammar',     orig: 'there',       corr: 'their',   msg: 'Possibly confused word: "there" vs "their".' },
+    { id: 2, cat: 'style',       badge: 'var(--cat-style)', label: 'Style',       orig: 'very unique', corr: 'unique',  msg: '"Unique" is absolute — "very" is redundant here.' },
+  ];
+
+  glassD = {
+    background: 'linear-gradient(180deg, rgba(41,46,66,0.92) 0%, rgba(22,22,30,0.90) 100%)',
+    border: '1px solid var(--glass-stroke)',
+    backdropFilter: 'blur(22px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(22px) saturate(160%)',
+    boxShadow: 'var(--shadow-lg), var(--glass-rim)',
+    color: 'var(--text-body)', borderRadius: '14px', isolation: 'isolate', fontFamily: 'var(--font-ui)',
+  };
+  glassL = {
+    background: 'color-mix(in oklab, var(--bg-raised) 92%, transparent)',
+    border: '1px solid var(--glass-stroke)',
+    backdropFilter: 'blur(22px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(22px) saturate(160%)',
+    boxShadow: 'var(--shadow-lg), var(--glass-rim)',
+    color: 'var(--text-body)', borderRadius: '14px', isolation: 'isolate', fontFamily: 'var(--font-ui)',
+  };
+
+  HLCLS = { grammar: 'hl-gram', spelling: 'hl-spell', punctuation: 'hl-punc', style: 'hl-style' };
+
+  // A highlighted word + its hover preview pill.
+  makeWord(c, text, dark, onPick) {
+    const oldC = dark ? 'var(--danger)' : 'var(--danger)';
+    const newC = dark ? 'var(--success)' : 'var(--success)';
+    return React.createElement('span', {
+      key: c.id,
+      className: `hl-wrap ${this.HLCLS[c.cat] || 'hl-spell'}`,
+      onClick: e => { e.stopPropagation(); onPick(c.id); },
+    },
+      text,
+      React.createElement('span', { className: dark ? 'hl-tip hl-tip-d' : 'hl-tip hl-tip-l' },
+        React.createElement('span', { className: 'hl-tip-dot', style: { background: c.badge } }),
+        React.createElement('span', { style: { color: oldC, textDecoration: 'line-through' } }, c.orig),
+        React.createElement('span', { className: 'hl-tip-arr' }, '→'),
+        React.createElement('span', { style: { color: newC, fontWeight: 700 } }, c.corr),
+      ),
+    );
+  }
+
+  diffRow(orig, corr, dark) {
+    const oldC = dark ? 'var(--danger)' : 'var(--danger)';
+    const newC = dark ? 'var(--success)' : 'var(--success)';
+    const arr  = dark ? 'rgba(240,240,242,0.45)' : 'rgba(17,17,17,0.35)';
+    return React.createElement('div', { style: { fontSize: '13px', margin: '4px 0 10px' } },
+      React.createElement('span', { style: { color: oldC, textDecoration: 'line-through' } }, orig),
+      React.createElement('span', { style: { color: arr, margin: '0 7px' } }, '→'),
+      React.createElement('span', { style: { color: newC, fontWeight: 700 } }, corr),
+    );
+  }
+
+  makePopover(item, dark, apply, ignore) {
+    const g = dark ? this.glassD : this.glassL;
+    const dimC = dark ? 'rgba(240,240,242,0.7)' : 'rgba(17,17,17,0.6)';
+    const sec = {
+      background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+      border: `1px solid ${dark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)'}`,
+      color: dark ? 'rgba(240,240,242,0.85)' : 'var(--text-body)',
+      font: 'inherit', fontSize: '12px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer',
+    };
+    return React.createElement('div', {
+      className: dark ? 'gf-anim glass-dark' : 'gf-anim glass-light',
+      style: { ...g, position: 'absolute', bottom: '60px', left: '16px', padding: '13px 15px', minWidth: '270px', maxWidth: '340px', zIndex: 300 },
+      onClick: e => e.stopPropagation(),
+    },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' } },
+        React.createElement('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: item.badge, flexShrink: 0, display: 'inline-block' } }),
+        React.createElement('span', { style: { fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.85 } }, item.label),
+      ),
+      React.createElement('div', { style: { fontSize: '13px', lineHeight: 1.4, marginBottom: '8px', color: dimC } }, item.msg),
+      this.diffRow(item.orig, item.corr, dark),
+      React.createElement('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+        React.createElement('button', { onClick: apply, className: 'apply-btn', style: { background: 'var(--accent)', border: '1px solid var(--accent-strong)', color: '#fff', font: 'inherit', fontSize: '12px', fontWeight: 600, padding: '6px 10px', borderRadius: '8px', cursor: 'pointer' } }, 'Apply'),
+        React.createElement('button', { onClick: ignore, className: dark ? 'pa-btn' : 'pa-btn-l', style: sec }, 'Ignore once'),
+        ...(item.cat === 'spelling' ? [React.createElement('button', { onClick: ignore, className: dark ? 'pa-btn' : 'pa-btn-l', style: sec }, 'Add to dictionary')] : []),
+      ),
+    );
+  }
+
+  makePanel(active, applyOne, applyAll, dark) {
+    if (active.length === 0) return null;
+    const g = { ...(dark ? this.glassD : this.glassL), borderRadius: '12px' };
+    const dimC = dark ? 'rgba(240,240,242,0.55)' : 'var(--text-muted)';
+    const rowBase = { display: 'flex', alignItems: 'center', gap: '8px', textAlign: 'left', border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', padding: '5px 8px', borderRadius: '8px', cursor: 'pointer', width: '100%', fontSize: '13px' };
+    const oldC = dark ? 'var(--danger)' : 'var(--danger)';
+    const newC = dark ? 'var(--success)' : 'var(--success)';
+    const rows = active.map(c => React.createElement('button', {
+      key: c.id, onClick: () => applyOne(c.id), className: dark ? 'corr-row' : 'corr-row-l', style: rowBase,
+    },
+      React.createElement('span', { style: { width: '7px', height: '7px', borderRadius: '50%', background: c.badge, flexShrink: 0 } }),
+      React.createElement('span', { style: { color: oldC, textDecoration: 'line-through' } }, c.orig),
+      React.createElement('span', { style: { color: dark ? 'rgba(240,240,242,0.4)' : 'rgba(17,17,17,0.35)', margin: '0 4px' } }, '→'),
+      React.createElement('span', { style: { color: newC, fontWeight: 600 } }, c.corr),
+    ));
+    const aBtn = (label, onClick, disabled) => React.createElement('button', {
+      onClick, disabled, className: dark ? 'pa-btn' : 'pa-btn-l',
+      style: { display: 'inline-flex', alignItems: 'center', gap: '4px', font: 'inherit', fontSize: '11px', padding: '4px 9px', borderRadius: '8px', border: 'none', background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)', color: 'inherit', cursor: disabled ? 'default' : 'pointer' },
+    }, label);
+    return React.createElement('div', {
+      className: dark ? 'gf-anim glass-dark' : 'gf-anim glass-light',
+      style: { ...g, position: 'absolute', bottom: '60px', right: '12px', padding: '8px', minWidth: '224px', maxWidth: '340px', zIndex: 300 },
+      onClick: e => e.stopPropagation(),
+    },
+      React.createElement('div', { style: { fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: dimC, margin: '2px 4px 6px' } }, `${active.length} correction${active.length !== 1 ? 's' : ''}`),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '2px' } }, ...rows),
+      React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px', padding: '6px 4px 2px', borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)'}`, marginTop: '6px' } },
+        React.createElement('button', { onClick: applyAll, className: 'apply-btn', style: { font: 'inherit', fontSize: '11px', fontWeight: 600, padding: '4px 9px', borderRadius: '8px', border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer' } }, 'Apply all'),
+        aBtn('Undo', null, true),
+        aBtn('Recheck', null, false),
+        aBtn('Rephrase', null, false),
+        aBtn('Disable on this site', null, false),
+      ),
+    );
+  }
+
+  makeVComposerText(applied, ignored) {
+    const it = this.VCORRS;
+    const onPick = (id) => this.setState({ vActiveItem: id, vPanelOpen: false });
+    const span = (c, text) => {
+      if (applied.includes(c.id)) return React.createElement('span', { key: c.id, className: 'hl-applied' }, c.corr);
+      if (ignored.includes(c.id)) return React.createElement('span', { key: c.id }, text);
+      return this.makeWord(c, text, true, onPick);
+    };
+    return React.createElement(React.Fragment, null,
+      'I ', span(it[0], 'has'), ' three cats and ', span(it[1], 'teh'), ' dog. They\u2019re very ', span(it[2], 'beautifull'), ' animals.'
+    );
+  }
+
+  makeBComposerText(applied, ignored) {
+    const it = this.BCORRS;
+    const onPick = (id) => this.setState({ bActiveItem: id, bPillPanelOpen: false });
+    const span = (c, text) => {
+      if (applied.includes(c.id)) return React.createElement('span', { key: c.id, className: 'hl-applied-l' }, c.corr);
+      if (ignored.includes(c.id)) return React.createElement('span', { key: c.id }, text);
+      return this.makeWord(c, text, false, onPick);
+    };
+    return React.createElement('p', { style: { color: 'var(--text-strong)', fontSize: '15px', lineHeight: 1.7, fontFamily: 'var(--font-ui)', margin: 0, paddingBottom: '34px' } },
+      span(it[0], 'However,'), ' I believe ', span(it[1], 'there'), ' approach is ', span(it[2], 'very unique'), ' and worth considering for the next release.'
+    );
+  }
+
+  renderVals() {
+    const s = this.state;
+    const VC = this.VCORRS, BC = this.BCORRS;
+    const vActive = VC.filter(c => !s.vApplied.includes(c.id) && !s.vIgnored.includes(c.id));
+    const bActive = BC.filter(c => !s.bApplied.includes(c.id) && !s.bIgnored.includes(c.id));
+
+    const vPanelEl = s.vPanelOpen
+      ? this.makePanel(vActive, (id) => this.setState({ vActiveItem: id, vPanelOpen: false }), () => this.setState({ vPanelOpen: false, vApplied: VC.map(c => c.id) }), true)
+      : null;
+    let vPopoverEl = null;
+    if (s.vActiveItem !== null) {
+      const item = VC[s.vActiveItem];
+      if (item && !s.vApplied.includes(item.id) && !s.vIgnored.includes(item.id)) {
+        vPopoverEl = this.makePopover(item, true,
+          () => this.setState(p => ({ vActiveItem: null, vApplied: [...p.vApplied, item.id] })),
+          () => this.setState(p => ({ vActiveItem: null, vIgnored: [...p.vIgnored, item.id] })));
+      }
+    }
+
+    const bPillPanelEl = s.bPillPanelOpen
+      ? this.makePanel(bActive, (id) => this.setState({ bActiveItem: id, bPillPanelOpen: false }), () => this.setState({ bPillPanelOpen: false, bApplied: BC.map(c => c.id) }), false)
+      : null;
+    let bPopoverEl = null;
+    if (s.bActiveItem !== null) {
+      const item = BC[s.bActiveItem];
+      if (item && !s.bApplied.includes(item.id) && !s.bIgnored.includes(item.id)) {
+        bPopoverEl = this.makePopover(item, false,
+          () => this.setState(p => ({ bActiveItem: null, bApplied: [...p.bApplied, item.id] })),
+          () => this.setState(p => ({ bActiveItem: null, bIgnored: [...p.bIgnored, item.id] })));
+      }
+    }
+
+    const catColors = [
+      (!s.bApplied.includes(0) && !s.bIgnored.includes(0)) ? 'var(--cat-punctuation)' : null,
+      (!s.bApplied.includes(1) && !s.bIgnored.includes(1)) ? 'var(--cat-grammar)' : null,
+      (!s.bApplied.includes(2) && !s.bIgnored.includes(2)) ? 'var(--cat-style)' : null,
+    ].filter(Boolean);
+    const bBarEl = catColors.length > 0
+      ? React.createElement('span', { style: { width: '28px', height: '4px', borderRadius: '2px', overflow: 'hidden', display: 'inline-flex', gap: '1px' } },
+          ...catColors.map((c, i) => React.createElement('span', { key: i, style: { flex: 1, background: c, borderRadius: '2px', opacity: 0.8 } })))
+      : null;
+
+    const isStatusTab = s.bTab === 'status', isSettingsTab = s.bTab === 'settings';
+    const onBg = 'rgba(255,255,255,0.92)', offBg = 'transparent', onC = 'var(--text-strong)', offC = 'rgba(15,23,42,0.5)', onSh = '0 1px 4px rgba(0,0,0,0.18)', offSh = 'none';
+
+    return {
+      vComposerText: this.makeVComposerText(s.vApplied, s.vIgnored),
+      vPanelEl, vPopoverEl,
+      vBadgeCount: vActive.length, vShowBadge: vActive.length > 0,
+      vBtnClass: s.vPanelOpen ? 'on' : '', vBtnColor: s.vPanelOpen ? 'var(--accent)' : '#949ba4',
+      toggleVPanel: e => { e.stopPropagation(); this.setState(p => ({ vPanelOpen: !p.vPanelOpen, vActiveItem: null })); },
+      closeVAll: () => this.setState({ vPanelOpen: false, vActiveItem: null }),
+      stopProp: e => e.stopPropagation(),
+
+      isStatusTab, isSettingsTab, bTab: s.bTab,
+      setStatusTab: e => { e.stopPropagation(); this.setState({ bTab: 'status' }); },
+      setSettingsTab: e => { e.stopPropagation(); this.setState({ bTab: 'settings' }); },
+      tabStatusBg: isStatusTab ? onBg : offBg, tabStatusColor: isStatusTab ? onC : offC, tabStatusShadow: isStatusTab ? onSh : offSh, tabStatusClass: isStatusTab ? 'on' : '',
+      tabSettingsBg: isSettingsTab ? onBg : offBg, tabSettingsColor: isSettingsTab ? onC : offC, tabSettingsShadow: isSettingsTab ? onSh : offSh, tabSettingsClass: isSettingsTab ? 'on' : '',
+      bSitePaused: s.bSitePaused,
+      sitePauseLabel: s.bSitePaused ? 'Resume on github.com' : 'Pause on github.com',
+      sitePauseBg: s.bSitePaused ? 'rgba(0,0,0,0.05)' : 'linear-gradient(180deg,var(--accent),var(--accent))',
+      sitePauseColor: s.bSitePaused ? 'var(--text-body)' : '#fff',
+      toggleBSite: e => { e.stopPropagation(); this.setState(p => ({ bSitePaused: !p.bSitePaused })); },
+      sEnabled: s.sEnabled, toggleSEnabled: e => { e.stopPropagation(); this.setState(p => ({ sEnabled: !p.sEnabled })); },
+      sCheckPasted: s.sCheckPasted, toggleCheckPasted: e => { e.stopPropagation(); this.setState(p => ({ sCheckPasted: !p.sCheckPasted })); },
+      sPicky: s.sPicky, togglePicky: e => { e.stopPropagation(); this.setState(p => ({ sPicky: !p.sPicky })); },
+      sAutocorrect: s.sAutocorrect, toggleAutocorrect: e => { e.stopPropagation(); this.setState(p => ({ sAutocorrect: !p.sAutocorrect })); },
+      sSuppressSpell: s.sSuppressSpell, toggleSuppressSpell: e => { e.stopPropagation(); this.setState(p => ({ sSuppressSpell: !p.sSuppressSpell })); },
+
+      bComposerText: this.makeBComposerText(s.bApplied, s.bIgnored),
+      bPillPanelEl, bPopoverEl, bBarEl, bBadgeCount: bActive.length,
+      toggleBPillPanel: e => { e.stopPropagation(); this.setState(p => ({ bPillPanelOpen: !p.bPillPanelOpen, bActiveItem: null })); },
+      closeAll: () => this.setState({ vPanelOpen: false, vActiveItem: null, bPillPanelOpen: false, bActiveItem: null }),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

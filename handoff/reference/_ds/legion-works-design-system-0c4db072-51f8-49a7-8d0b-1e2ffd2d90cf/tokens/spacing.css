@@ -1,0 +1,23 @@
+/* ============================================================
+   Legion Works — Spacing & Layout
+   4px base grid. Named steps read as t-shirt sizes.
+   ============================================================ */
+:root {
+  --space-0:  0;
+  --space-1:  0.25rem;  /* 4  */
+  --space-2:  0.5rem;   /* 8  */
+  --space-3:  0.75rem;  /* 12 */
+  --space-4:  1rem;     /* 16 */
+  --space-5:  1.5rem;   /* 24 */
+  --space-6:  2rem;     /* 32 */
+  --space-7:  3rem;     /* 48 */
+  --space-8:  4rem;     /* 64 */
+  --space-9:  6rem;     /* 96 */
+  --space-10: 8rem;     /* 128 */
+
+  /* Layout */
+  --container:      1200px;
+  --container-prose:68ch;
+  --gutter:         var(--space-5);
+  --header-h:       64px;
+}

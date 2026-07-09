@@ -1,0 +1,164 @@
+// ============================================================================
+// GrammarForge — Design Tokens  (Legion Works edition)
+// ----------------------------------------------------------------------------
+// GrammarForge now lives inside the **Legion Works Design System** (Tokyo Night
+// based). Chrome, accent, type, and glass all come FROM the design system; this
+// file mirrors the exact values as Sass vars so the existing SCSS pipeline
+// (_glass.scss, components.scss) keeps compiling without a Sass refactor.
+//
+// ► If you can load the Legion Works token CSS into the GF root, prefer the
+//   `var(--*)` custom properties (right-hand column) over these mirrors — they
+//   theme automatically (dark / light / nightowl). See INSTRUCTIONS.md §A.
+//
+//   Sass var            DS custom property     dark value      light value
+//   $gf-accent          --accent               #86E1FC         #2F7D9C
+//   $gf-accent-hover    --accent-strong        #A9EBFF         #245F78
+//   $gf-accent-ink      --accent-ink           #0C1622         #FFFFFF
+//   $gf-ui              --text-strong          #C8D3F5         #1A1B26
+//   $gf-ink             --text-body            #A9B1D6         #2C3044
+//   $gf-muted           --text-muted           #828BB8         #565F89
+//   $gf-faint           --text-faint           #737AA2         #737A8C
+//   (category + band scales are theme-invariant — see below)
+//
+// Host chrome (Discord blurple, the email client, GitHub) is NOT in this system
+// — only the GrammarForge surfaces that float on top of any host.
+// ============================================================================
+
+// ── Brand / accent — Legion Cyan (was blue #2563eb) ─────────────────────────
+// Cyan is LIGHT, so primary buttons take DARK ink, never white. This is the
+// single most important change from the old palette.
+$gf-accent:          #86e1fc;  // --accent (dark). Light theme: #2f7d9c
+$gf-accent-hover:    #a9ebff;  // --accent-strong
+$gf-accent-ink:      #0c1622;  // --accent-ink — text/glyph ON a cyan fill
+$gf-accent-soft:     rgba(134, 225, 252, 0.18); // --accent-muted (tinted fills)
+$gf-accent-glow:     0 6px 18px rgba(134, 225, 252, 0.34); // --glow-cyan-ish
+
+// Signal Blue — links / focus ring only (never a fill)
+$gf-link:            #82aaff;  // --link
+$gf-ring:            rgba(134, 225, 252, 0.58); // --ring (2px focus outline)
+
+// IceTea Amber — the ONE warm touch per view (embers, a single highlight)
+$gf-warm:            #ff966c;  // --accent-warm
+$gf-warm-soft:       #ffc777;  // --amber-300
+
+// ── App-icon tile (the mark sits on a dark tile, not a colored lozenge) ─────
+// Old: a blue gradient lozenge behind a pencil glyph. New: the GrammarForge
+// mark (assets/grammarforge-mark.svg) on a deep-navy tile. See LOGO.md.
+$gf-icon-tile:       linear-gradient(158deg, #2a2f45 0%, #16161e 100%);
+$gf-icon-radius:     22%;   // of tile size (≈ iOS "squircle" feel)
+
+// ── Category palette (issue types) — UNCHANGED, = DS --cat-* ─────────────────
+// Editorial semantics, theme-invariant. Identical across every client and to
+// the composer's underline colors. Keep api/category.ts `CATEGORY_META` == this.
+$gf-cat-spelling:    #ef4444;  // --cat-spelling
+$gf-cat-grammar:     #eab308;  // --cat-grammar
+$gf-cat-punctuation: #06b6d4;  // --cat-punctuation
+$gf-cat-style:       #8b5cf6;  // --cat-style
+$gf-cat-typography:  #6b7280;  // --cat-typography
+
+$gf-categories: (
+  spelling:    $gf-cat-spelling,
+  grammar:     $gf-cat-grammar,
+  punctuation: $gf-cat-punctuation,
+  style:       $gf-cat-style,
+  typography:  $gf-cat-typography,
+);
+
+// Penalty weights — how much each open issue subtracts from the 100-pt score.
+$gf-cat-penalty: (
+  spelling: 5, grammar: 4, punctuation: 3, style: 2, typography: 1,
+);
+
+// ── Score bands — UNCHANGED, = DS --band-* ──────────────────────────────────
+$gf-band-excellent:  #16a34a; // >= 90  (--band-excellent)
+$gf-band-good:       #0891b2; // >= 78  (--band-good)
+$gf-band-fair:       #d97706; // >= 60  (--band-fair)
+$gf-band-needswork:  #dc2626; // < 60   (--band-needswork)
+
+// ── Confidence ──────────────────────────────────────────────────────────────
+$gf-conf-high:       #16a34a; // >= 0.90
+$gf-conf-medium:     #d97706; // >= 0.75
+$gf-conf-low-dark:   #828bb8; // < 0.75 on dark glass (--text-muted)
+$gf-conf-low-light:  #565f89; // < 0.75 on light glass
+
+// ── Diff (strike old → bold new) — semantic red/green ───────────────────────
+$gf-diff-old-light:  #dc2626;
+$gf-diff-new-light:  #16a34a;
+$gf-diff-old-dark:   #ff757f;  // --danger (dark)
+$gf-diff-new-dark:   #c3e88d;  // --success (dark, Tokyo green)
+
+// ── AI / rephrase accent — Geth Purple (was #8b5cf6 violet) ─────────────────
+$gf-ai-violet:       #c099ff;  // --purple-400
+$gf-ai-violet-soft:  #a87ff0;  // --purple-500
+$gf-ai-text-dark:    #d3c1ff;  // legible purple on dark glass
+// AI chip: purple→cyan synthetic gradient (the "two minds" blend)
+$gf-ai-chip-bg:      linear-gradient(135deg, rgba(192,153,255,0.22), rgba(134,225,252,0.20));
+
+// ── Success ──────────────────────────────────────────────────────────────────
+$gf-success:         #c3e88d; // --success (Tokyo green)
+
+// ── Neutral text ramps (per theme) — = DS --text-* ──────────────────────────
+// Light theme (Tokyo Day)
+$gf-ink-light:    #2c3044; // body text being edited      (--text-body)
+$gf-ui-light:     #1a1b26; // headings / primary UI text   (--text-strong)
+$gf-muted-light:  #565f89; // secondary text               (--text-muted)
+$gf-faint-light:  #737a8c; // labels / tertiary            (--text-faint)
+// Dark theme (Tokyo Night)
+$gf-ink-dark:     #a9b1d6; // (--text-body)
+$gf-ui-dark:      #c8d3f5; // (--text-strong)
+$gf-muted-dark:   #828bb8; // (--text-muted)
+$gf-faint-dark:   #737aa2; // (--text-faint)
+
+// Surfaces (opaque, for non-glass reading surfaces)
+$gf-bg-dark:      #16161e; // --bg-base
+$gf-raised-dark:  #222436; // --bg-raised
+$gf-bg-light:     #e6e7ed; // --bg-base (light)
+$gf-raised-light: #ffffff; // --bg-raised (light)
+
+// Hairline borders (= DS --border / --border-strong)
+$gf-border-dark:        rgba(169, 177, 214, 0.14);
+$gf-border-dark-strong: rgba(169, 177, 214, 0.28);
+$gf-border-light:        rgba(26, 27, 38, 0.14);
+$gf-border-light-strong: rgba(26, 27, 38, 0.26);
+
+// ── Typography — Legion Works stack (was system-ui) ─────────────────────────
+// Load from CDN (Google Fonts / jsDelivr) or self-host @font-face. The clients
+// inherit the host composer font for the *edited text*; GF's own UI uses these.
+$gf-font-display: "Space Grotesk", system-ui, sans-serif;  // --font-display (wordmark, headings)
+$gf-font-ui:      "Geist", system-ui, sans-serif;          // --font-ui (body / controls)
+$gf-font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; // --font-mono (all machine data)
+
+$gf-fs-label:    11px; // uppercase section labels (letter-spacing .05em)
+$gf-fs-micro:    10.5px;
+$gf-fs-body:     12.5px;
+$gf-fs-default:  13px;
+$gf-fs-diff:     14px;
+$gf-fs-title:    14px;
+$gf-fs-score:    19px;
+$gf-fs-score-lg: 22px;
+
+// ── Radii ────────────────────────────────────────────────────────────────────
+$gf-r-pill:   9999px;
+$gf-r-panel:  16px;  // 20px for the browser floating panel
+$gf-r-card:   14px;
+$gf-r-input:  10px;  // primary buttons (--radius-md)
+$gf-r-chip:   8px;
+$gf-r-xs:     7px;
+
+// ── Spacing scale ─────────────────────────────────────────────────────────────
+$gf-sp-1: 4px;  $gf-sp-2: 6px;  $gf-sp-3: 8px;  $gf-sp-4: 11px;
+$gf-sp-5: 14px; $gf-sp-6: 16px;
+
+// ── Underline (issue marker) ───────────────────────────────────────────────────
+$gf-underline-thickness: 1.7px;
+$gf-underline-offset:    3px;
+$gf-underline-tint:      0.20; // bg alpha applied ONLY on hover / active
+
+// ── Motion — Legion timings (quick, no bounce) ──────────────────────────────
+$gf-ease:        cubic-bezier(0.22, 1, 0.36, 1);  // --ease (soft ease-out)
+$gf-dur-fast:    120ms;  // --dur-fast
+$gf-dur-pop:     180ms;
+$gf-dur-panel:   200ms;  // --dur-mid
+// Streaming cadence: fast (Harper/GECToR) underlines land immediately; the LLM
+// pass "settles in" after this delay.
+$gf-ai-settle:   650ms;  // re-check; ~1300ms on first load

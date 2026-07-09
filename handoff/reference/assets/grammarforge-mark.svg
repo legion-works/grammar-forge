@@ -1,0 +1,42 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GrammarForge mark">
+  <defs>
+    <linearGradient id="gfCaret" x1="24" y1="12" x2="24" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#c7f2ff"></stop>
+      <stop offset="55%" stop-color="#86e1fc"></stop>
+      <stop offset="100%" stop-color="#82aaff"></stop>
+    </linearGradient>
+    <radialGradient id="gfCore" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e8faff"></stop>
+      <stop offset="55%" stop-color="#86e1fc"></stop>
+      <stop offset="100%" stop-color="#82aaff"></stop>
+    </radialGradient>
+    <radialGradient id="gfEmber" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#ffe6cf"></stop>
+      <stop offset="60%" stop-color="#ffc777"></stop>
+      <stop offset="100%" stop-color="#ff966c"></stop>
+    </radialGradient>
+    <filter id="gfGlow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="1.9" result="b"></feGaussianBlur>
+      <feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
+    </filter>
+  </defs>
+
+  
+  <g stroke-width="2.6" stroke-linecap="round">
+    <line x1="12.5" y1="37.5" x2="16.75" y2="37.5" stroke="#ef4444"></line>
+    <line x1="18.75" y1="37.5" x2="23" y2="37.5" stroke="#eab308"></line>
+    <line x1="25" y1="37.5" x2="29.25" y2="37.5" stroke="#06b6d4"></line>
+    <line x1="31.25" y1="37.5" x2="35.5" y2="37.5" stroke="#8b5cf6"></line>
+  </g>
+
+  
+  <path d="M12.5 28.5 L24 14 L35.5 28.5" fill="none" stroke="url(#gfCaret)" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round" filter="url(#gfGlow)"></path>
+
+  
+  <circle cx="29.4" cy="9.1" r="1.15" fill="url(#gfEmber)" opacity="0.92"></circle>
+  <circle cx="20.6" cy="7.9" r="0.85" fill="url(#gfEmber)" opacity="0.85"></circle>
+
+  
+  <circle cx="24" cy="14" r="3.5" fill="url(#gfCore)" filter="url(#gfGlow)"></circle>
+  <circle cx="24" cy="14" r="3.5" fill="none" stroke="#e6faff" stroke-width="0.8" opacity="0.7"></circle>
+</svg>

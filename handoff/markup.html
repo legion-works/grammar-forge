@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<!--
+  GrammarForge — Canonical surface markup
+  Reference DOM structures for every GF surface, matching components.scss class
+  names. These are STRUCTURE references for the coding agent — in production the
+  browser client renders them with React/preact into a shadow root, and the
+  Vencord client renders the overlay (underlay-mirror) imperatively while the
+  card/panel are framework components. data-gf-theme="light|dark" selects theme.
+
+  Working, fully-interactive reference implementations live in:
+    • GrammarForge Assistant.dc.html   (browser extension — light + dark)
+    • GrammarForge Vencord.dc.html      (Discord plugin — dark, editable composer)
+-->
+<html data-gf-theme="dark">
+<head><meta charset="utf-8"><link rel="stylesheet" href="scss/components.css"></head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     1. COMPOSER + UNDERLINE OVERLAY  (the "overlay-mirror" technique)
+     Two stacked layers share identical font/padding/wrapping so geometry lines
+     up 1:1. The UNDER layer is pointer-events:none and holds the colored issue
+     spans; the editable INPUT sits on top and receives all pointer events. A
+     click/move handler hit-tests the pointer against the under-layer's span
+     rects (this is exactly how the real Vencord orchestrator + browser overlay
+     work). The underline always shows; `.is-on` (hover/active) adds the tint.
+═════════════════════════════════════════════════════════════════════════ -->
+<div class="gf-stack" style="position:relative">
+  <div class="gf-under" aria-hidden="true" style="position:absolute;inset:0;pointer-events:none;color:transparent">
+    I think we
+    <span class="gf-u gf-u--grammar" data-id="grammar:8">should of</span>
+    merged <span class="gf-u gf-u--spelling is-on" data-id="spelling:21">teh</span> fix —
+    a <span class="gf-u gf-u--style" data-id="style:40">big</span> improvement.
+  </div>
+  <div class="gf-input" contenteditable="true" spellcheck="false">I think we should of merged teh fix — a big improvement.</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     2. HOVER PREVIEW PILL  (diff only — no buttons in production)
+     Anchored above the hovered word; measure the word rect BEFORE re-rendering
+     the underlay (a detached span returns a zero rect and the pill flies off).
+═════════════════════════════════════════════════════════════════════════ -->
+<div class="gf-tip">
+  <span class="gf-tip__dot" style="background:#ef4444"></span>
+  <span class="gf-tip__old">teh</span>
+  <span aria-hidden="true">→</span>
+  <span class="gf-tip__new">the</span>
+  <span class="gf-tip__tail"></span>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     3. CORRECTION CARD  (click an underline → opens anchored at the word)
+═════════════════════════════════════════════════════════════════════════ -->
+<div class="gf-card" role="dialog" aria-label="Correction">
+  <span class="gf-card__tail"></span>
+  <div class="gf-card__head">
+    <span class="gf-dot" style="background:#ef4444"></span>
+    <span class="gf-card__cat">Spelling</span>
+    <span style="flex:1"></span>
+    <span class="gf-chip-source"><!-- fast path -->Harper<span class="gf-chip-source__hint"> · instant</span></span>
+    <!-- AI variant: <span class="gf-chip-source gf-chip-source--ai">✨ AI</span> -->
+  </div>
+
+  <div class="gf-diff"><span class="gf-diff__old">teh</span> → <span class="gf-diff__new">the</span></div>
+  <p class="gf-card__msg">Possible spelling mistake.</p>
+
+  <div class="gf-card__conf">
+    <span class="gf-card__conf-label">Confidence</span>
+    <span class="gf-card__confbar"><i style="display:block;height:100%;width:99%;background:#16a34a"></i></span>
+    <span style="color:#16a34a">High</span>
+  </div>
+
+  <div class="gf-card__actions">
+    <button class="gf-btn-primary" style="flex:1">Accept <kbd class="gf-kbd">⏎</kbd></button>
+    <button class="gf-btn-soft">Dismiss</button>
+  </div>
+
+  <!-- alternatives (when replacements.length > 1) -->
+  <div class="gf-card__alts">
+    <span class="gf-card__alts-label">Or:</span>
+    <button class="gf-chip-alt">definitively</button>
+  </div>
+
+  <!-- spelling only -->
+  <button class="gf-card__dict gf-btn-soft">＋ Add “teh” to dictionary</button>
+
+  <!-- navigation across all open issues + keyboard hint -->
+  <nav class="gf-card__nav">
+    <button class="gf-iconbtn" aria-label="Previous">‹</button>
+    <span class="gf-card__nav-count">3 of 8</span>
+    <button class="gf-iconbtn" aria-label="Next">›</button>
+    <span style="flex:1"></span>
+    <span class="gf-card__nav-hint"><kbd class="gf-kbd">→</kbd> next</span>
+  </nav>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     4. ASSISTANT PANEL  (open from the orb / chatbar button)
+═════════════════════════════════════════════════════════════════════════ -->
+<aside class="gf-panel" role="dialog" aria-label="GrammarForge review">
+  <header class="gf-panel__head">
+    <span class="gf-logo"><!-- Forge Caret mark (assets/grammarforge-mark.svg) @ 24px on the $gf-icon-tile --></span>
+    <span class="gf-panel__title">GrammarForge</span>
+    <span style="flex:1"></span>
+    <button class="gf-goals-pill" aria-haspopup="dialog">◎ Neutral</button> <!-- review view only -->
+    <button class="gf-iconbtn" aria-label="Re-check">↻</button>
+    <button class="gf-iconbtn" aria-label="Close">×</button>
+  </header>
+
+  <!-- Review / Stats segmented control -->
+  <div class="gf-panel__tabs" role="tablist">
+    <button class="gf-seg is-active" role="tab">Review</button>
+    <button class="gf-seg" role="tab">Stats</button>
+  </div>
+
+  <!-- streaming banner (only while phase === 'fast') -->
+  <div class="gf-banner"><span class="gf-spinner"></span> Fast results in · AI refining…</div>
+
+  <div class="gf-panel__score">
+    <svg class="gf-ring" viewBox="0 0 60 60" width="60" height="60">
+      <circle cx="30" cy="30" r="24" fill="none" stroke="rgba(127,127,140,.18)" stroke-width="5"/>
+      <circle class="gf-ring__arc" cx="30" cy="30" r="24" fill="none" stroke="#d97706" stroke-width="5"
+              stroke-linecap="round" stroke-dasharray="150.8" stroke-dashoffset="50" transform="rotate(-90 30 30)"/>
+    </svg>
+    <div><div class="gf-band" style="color:#d97706">Fair</div>
+         <div class="gf-panel__sub">8 suggestions as you type</div></div>
+  </div>
+
+  <!-- writing insights -->
+  <div class="gf-panel__insights">
+    <div class="gf-stat"><span class="gf-stat__label">Tone</span><span>● Confident ● Warm</span></div>
+    <div class="gf-stat"><span class="gf-stat__label">Readability</span><span>Clear · Gr 8</span></div>
+    <div class="gf-stat"><span class="gf-stat__label">Words</span><span>22</span></div>
+    <div class="gf-stat"><span class="gf-stat__label">Read time</span><span>7s</span></div>
+  </div>
+
+  <!-- bulk actions -->
+  <div class="gf-panel__actions">
+    <button class="gf-btn-primary" style="width:100%">Accept all 8</button>
+    <button class="gf-btn-soft" style="width:100%">✓ Accept 6 high-confidence only</button>
+    <button class="gf-btn-soft" style="width:100%">✨ Rephrase message</button>
+  </div>
+
+  <!-- grouped corrections -->
+  <div class="gf-panel__list">
+    <div class="gf-group">
+      <div class="gf-group__head"><span class="gf-dot" style="background:#ef4444"></span>Spelling<span>3</span>
+        <span style="flex:1"></span><button class="gf-textbtn">Accept all</button></div>
+      <button class="gf-row"><span class="gf-diff"><span class="gf-diff__old">teh</span> → <span class="gf-diff__new">the</span></span>
+        <span class="gf-chip-source">Harper · instant</span></button>
+    </div>
+    <!-- when goals mute style suggestions: -->
+    <div class="gf-hidden-note">● 1 style suggestion muted by your goals <button class="gf-textbtn">Goals</button></div>
+  </div>
+
+  <footer class="gf-panel__footer">✨ Learns your style<span style="flex:1"></span>
+    <button class="gf-btn-soft">Disable on this site</button></footer>
+</aside>
+
+<!-- Stats view (replaces score→list when the Stats tab is active) -->
+<section class="gf-stats">
+  <div class="gf-stats__grid">
+    <div class="gf-statcard"><b>3,140</b><span>Words this week</span><i>+12% vs last week</i></div>
+    <div class="gf-statcard"><b>96</b><span>Suggestions</span></div>
+    <div class="gf-statcard"><b>100%</b><span>Acceptance</span></div>
+    <div class="gf-statcard"><b>5</b><span>Day streak</span></div>
+  </div>
+  <h4 class="gf-stats__sec">Top issues this week</h4>
+  <div class="gf-bar"><span>Grammar</span><i style="width:100%;background:#eab308"></i><b>58</b></div>
+  <h4 class="gf-stats__sec">Personal dictionary</h4>
+  <div class="gf-dictchips">
+    <span class="gf-dictchip">Vencord <button aria-label="Remove">×</button></span>
+    <span class="gf-dictchip">GECToR <button aria-label="Remove">×</button></span>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     5. REPHRASE CARD  (Wordtune-style — scope + tone + AI alternatives)
+═════════════════════════════════════════════════════════════════════════ -->
+<div class="gf-rephrase" role="dialog" aria-label="Rephrase">
+  <div class="gf-rephrase__head">✨ Rephrase <span class="gf-faint">AI · Gemma</span><span style="flex:1"></span>
+    <button class="gf-iconbtn" aria-label="Close">×</button></div>
+  <div class="gf-seg-group">
+    <button class="gf-seg is-active">This sentence</button><button class="gf-seg">Whole message</button>
+  </div>
+  <div class="gf-seg-group">
+    <button class="gf-seg is-active">Neutral</button><button class="gf-seg">Formal</button><button class="gf-seg">Casual</button>
+  </div>
+  <!-- loading: two .gf-skel blocks + spinner "Generating with Gemma…" -->
+  <div class="gf-rephrase__opts">
+    <button class="gf-chip-alt gf-chip-alt--block">It’s a solid improvement for the whole team.</button>
+  </div>
+  <div class="gf-rephrase__foot"><button class="gf-btn-soft">↻ Regenerate</button>
+    <span style="flex:1"></span><span class="gf-faint">Click one to apply</span></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     6. GOALS POPOVER  (audience / formality / domain — re-weights suggestions)
+═════════════════════════════════════════════════════════════════════════ -->
+<div class="gf-goals" role="dialog" aria-label="Goals">
+  <div class="gf-goals__head">◎ Goals <span class="gf-faint">tunes what surfaces</span></div>
+  <div class="gf-goals__row"><span class="gf-goals__label">Audience</span>
+    <div class="gf-seg-group"><button class="gf-seg is-active">General</button><button class="gf-seg">Informed</button><button class="gf-seg">Expert</button></div></div>
+  <div class="gf-goals__row"><span class="gf-goals__label">Formality</span>
+    <div class="gf-seg-group"><button class="gf-seg">Informal</button><button class="gf-seg is-active">Neutral</button><button class="gf-seg">Formal</button></div></div>
+  <p class="gf-goals__note">Informal mutes style nudges; formal raises the bar.</p>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     7. SYNONYM POPOVER  (double-click any non-flagged word)
+═════════════════════════════════════════════════════════════════════════ -->
+<div class="gf-syn" role="menu" aria-label="Synonyms">
+  <div class="gf-syn__head">⇄ Synonyms</div>
+  <button class="gf-row" role="menuitem">patch</button>
+  <button class="gf-row" role="menuitem">change</button>
+  <span class="gf-syn__tail"></span>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     8. TOAST  (accept / dismiss / dictionary / rephrase — always with Undo)
+═════════════════════════════════════════════════════════════════════════ -->
+<div class="gf-toast" role="status">
+  <span class="gf-toast__icon">✨</span>
+  <div><div class="gf-toast__text">Won’t flag this again</div>
+       <div class="gf-toast__sub">Grammar rule · signal sent</div></div>
+  <button class="gf-btn-soft">Undo</button>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     9. ENTRY POINTS
+     Browser: circular score orb (number = open count; ✓ all-clear; power glyph
+     when disabled; pulsing AI pip while LLM refines).
+     Vencord: chatbar icon button (the Forge Caret mark) + numeric badge.
+═════════════════════════════════════════════════════════════════════════ -->
+<button class="gf-orb" aria-label="Writing score"><svg class="gf-ring">…</svg><span class="gf-orb__count">8</span></button>
+
+<!-- Brand mark: the Forge Caret. Use assets/grammarforge-mark.svg (full color)
+     or assets/grammarforge-mark-mono.svg (currentColor). Full spec in LOGO.md.
+     The old pencil glyph below is RETIRED — do not use. -->
+<svg viewBox="0 0 48 48" width="24" class="gf-mark" aria-label="GrammarForge" fill="none"><!-- see assets/grammarforge-mark.svg --></svg>
+
+</body>
+</html>

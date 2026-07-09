@@ -1,0 +1,87 @@
+/* ============================================================
+   Legion Works — Liquid Glass
+   ------------------------------------------------------------
+   The signature surface. A translucent fill + backdrop blur +
+   saturation lift, a hairline stroke, and a top specular
+   highlight that reads as refracted light on a glass edge.
+   Tokens drive intensity; the .lw-glass utility applies them.
+
+   Layering rule: glass needs something behind it (a gradient,
+   an image, motion) or it reads as flat gray. Always place
+   glass over the aurora/mesh background, never over solid bg.
+   ============================================================ */
+:root {
+  /* Intensity ~70/100 — tasteful Liquid Glass */
+  --glass-blur:      22px;
+  --glass-saturate:  160%;
+  --glass-fill:      rgba(255, 255, 255, 0.055);
+  --glass-fill-strong: rgba(255, 255, 255, 0.09);
+  --glass-stroke:    rgba(255, 255, 255, 0.14);
+  --glass-stroke-top:rgba(255, 255, 255, 0.34);  /* specular edge */
+  --glass-inner-shadow: inset 0 -1px 1px rgba(0,0,0,0.35),
+                        inset 0 1px 0 var(--glass-stroke-top);
+  --glass-tint-cyan: color-mix(in oklab, var(--cyan-400) 10%, transparent);
+}
+
+[data-theme="light"] {
+  --glass-fill:        rgba(255, 255, 255, 0.5);
+  --glass-fill-strong: rgba(255, 255, 255, 0.66);
+  --glass-stroke:      rgba(11, 14, 20, 0.1);
+  --glass-stroke-top:  rgba(255, 255, 255, 0.85);
+  --glass-inner-shadow: inset 0 -1px 2px rgba(11,14,20,0.06),
+                        inset 0 1px 0 var(--glass-stroke-top);
+  --glass-saturate:    140%;
+}
+
+/* Utility: any element becomes a glass panel */
+.lw-glass {
+  position: relative;
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--shadow-lg), var(--glass-inner-shadow);
+  border-radius: var(--radius-lg);
+}
+/* Top-edge specular highlight (the "wet" glass line) */
+.lw-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, var(--glass-stroke-top), transparent 40%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.lw-glass--strong { background: var(--glass-fill-strong); }
+
+/* Aurora / mesh background — what glass floats over.
+   Cool synthetic field with a single warm IceTea bloom. Add the
+   --drift modifier for a slow, tasteful parallax breathing. */
+.lw-aurora {
+  background-color: var(--bg-base);
+  background-image:
+    radial-gradient(60% 80% at 12% -10%, color-mix(in oklab, var(--cyan-500) 30%, transparent), transparent 60%),
+    radial-gradient(50% 60% at 100% 8%, color-mix(in oklab, var(--blue-500) 24%, transparent), transparent 55%),
+    radial-gradient(45% 55% at 85% 105%, color-mix(in oklab, var(--amber-500) 16%, transparent), transparent 60%),
+    radial-gradient(70% 90% at 40% 120%, color-mix(in oklab, var(--purple-500) 12%, transparent), transparent 60%);
+  background-attachment: fixed;
+}
+.lw-aurora--drift {
+  background-size: 140% 140%, 160% 160%, 150% 150%, 170% 170%;
+  animation: lwAuroraDrift 34s var(--ease-in-out) infinite alternate;
+}
+@keyframes lwAuroraDrift {
+  0%   { background-position: 0% 0%, 100% 0%, 100% 100%, 0% 100%; }
+  100% { background-position: 8% 6%, 92% 10%, 88% 90%, 12% 94%; }
+}
+/* Entrance: fade + rise, gated by callers via .lw-enter */
+@keyframes lwRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.lw-enter { animation: lwRise var(--dur-slow) var(--ease) both; }
+@media (prefers-reduced-motion: reduce) {
+  .lw-aurora--drift { animation: none; }
+  .lw-enter { animation: none; }
+}

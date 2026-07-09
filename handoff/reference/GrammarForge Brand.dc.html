@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/fonts.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/ansi.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/radius-shadow.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/glass.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/annotations.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/base.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/styles.css">
+  <script src="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/_ds_bundle.js"></script>
+  <style>
+    body { margin: 0; background: var(--bg-base); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-strong); }
+    h1, h2, p { text-wrap: pretty; margin: 0; }
+    .gfb-label { font-family: var(--font-mono); font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.16em; color: var(--text-faint); display: flex; align-items: center; gap: 8px; }
+    .gfb-cap { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--text-muted); }
+  </style>
+</helmet>
+
+<div class="lw-aurora lw-aurora--drift" style="min-height: 100vh; padding: 52px 32px 96px; font-family: var(--font-ui);">
+  <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px;">
+
+    <!-- ── title ── -->
+    <div>
+      <div class="gfb-label" style="color: var(--accent);">GRAMMARFORGE · IDENTITY</div>
+      <h1 style="font-family: var(--font-display); font-weight: 600; letter-spacing: -0.02em; font-size: 42px; line-height: 1.04; color: var(--text-strong); margin-top: 12px;">A mark of its own</h1>
+      <p style="font-family: var(--font-ui); font-size: 15.5px; line-height: 1.6; color: var(--text-muted); margin-top: 12px; max-width: 62ch;">GrammarForge is a product built <em style="font-style: normal; color: var(--text-body);">with</em> Legion Works — so its mark is a sibling to the Legion aperture, not a copy of it. Same molten cyan core, same glow, same restraint. Its own symbol: the proofreader's caret, its point forged white-hot, resting on a line of text marked up in the four issue-category colors. Grammar and Forge in one glyph.</p>
+    </div>
+
+    <!-- ── hero ── -->
+    <div style="background: color-mix(in oklab, var(--bg-raised) 68%, transparent); border: 1px solid var(--glass-stroke); border-radius: 22px; box-shadow: var(--shadow-lg), var(--glass-rim); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); padding: 40px; display: flex; align-items: center; gap: 44px; flex-wrap: wrap;">
+      <!-- app icon -->
+      <div style="width: 138px; height: 138px; border-radius: 32px; display: grid; place-items: center; position: relative; overflow: hidden; flex-shrink: 0; background: linear-gradient(158deg, #2a2f45 0%, #16161e 100%); border: 1px solid var(--glass-stroke); box-shadow: var(--shadow-xl), var(--glass-rim), 0 0 44px color-mix(in oklab, var(--cyan-400) 24%, transparent);">
+        <div style="position: absolute; inset: 0; opacity: 0.8; background: radial-gradient(58% 52% at 28% 18%, color-mix(in oklab, var(--cyan-400) 34%, transparent), transparent 70%), radial-gradient(52% 48% at 84% 92%, rgba(255,150,108,0.22), transparent 70%);"></div>
+        <img src="assets/grammarforge-mark.svg" width="92" height="92" alt="GrammarForge icon" style="position: relative;">
+      </div>
+      <!-- wordmark -->
+      <div style="flex: 1; min-width: 260px;">
+        <div style="font-family: var(--font-display); font-weight: 600; letter-spacing: -0.02em; font-size: 46px; line-height: 1; color: var(--text-strong);">Grammar<span style="color: var(--accent);">Forge</span></div>
+        <div class="gfb-label" style="margin-top: 14px;">EVERY WORD, FORGED</div>
+        <p style="font-family: var(--font-ui); font-size: 13.5px; line-height: 1.5; color: var(--text-muted); margin-top: 16px; max-width: 46ch;">Self-hosted writing assistant. Spelling · grammar · punctuation · style — checked locally, in your editor, your terminal, your chat.</p>
+      </div>
+    </div>
+
+    <!-- ── three directions ── -->
+    <div style="display: flex; flex-direction: column; gap: 18px;">
+      <div>
+        <div class="gfb-label">▸ THREE DIRECTIONS</div>
+        <p style="font-family: var(--font-ui); font-size: 14px; line-height: 1.55; color: var(--text-muted); margin-top: 12px; max-width: 68ch;">My pick is <a href="#1a">1a</a> — it carries the most meaning at the smallest size and reads instantly as "editing." Say the word and I'll lock in <a href="#1b">1b</a> or <a href="#1c">1c</a> everywhere instead.</p>
+      </div>
+      <div style="display: flex; gap: 18px; flex-wrap: wrap;">
+
+        <!-- 1a -->
+        <div id="1a" style="flex: 1; min-width: 300px; background: color-mix(in oklab, var(--bg-raised) 70%, transparent); border: 1px solid var(--border-accent, color-mix(in oklab, var(--cyan-400) 45%, transparent)); border-radius: 18px; box-shadow: var(--shadow-lg), var(--glass-rim), 0 0 30px color-mix(in oklab, var(--cyan-400) 14%, transparent); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--bg-base); background: var(--accent); border-radius: 6px; padding: 3px 8px;">1a</span>
+            <span style="font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--accent); border: 1px solid color-mix(in oklab, var(--cyan-400) 40%, transparent); border-radius: 999px; padding: 3px 9px;">Recommended</span>
+          </div>
+          <div style="display: flex; justify-content: center; padding: 8px 0;">
+            <div style="width: 104px; height: 104px; border-radius: 24px; display: grid; place-items: center; position: relative; overflow: hidden; background: linear-gradient(158deg, #2a2f45 0%, #16161e 100%); border: 1px solid var(--glass-stroke); box-shadow: var(--shadow-md), var(--glass-rim);">
+              <div style="position: absolute; inset: 0; opacity: 0.78; background: radial-gradient(58% 52% at 28% 18%, color-mix(in oklab, var(--cyan-400) 32%, transparent), transparent 70%), radial-gradient(52% 48% at 84% 92%, rgba(255,150,108,0.2), transparent 70%);"></div>
+              <img src="assets/grammarforge-mark.svg" width="66" height="66" alt="Forge caret mark" style="position: relative;">
+            </div>
+          </div>
+          <div>
+            <div style="font-family: var(--font-display); font-weight: 600; font-size: 18px; letter-spacing: -0.01em; color: var(--text-strong);">The forge caret</div>
+            <p style="font-family: var(--font-ui); font-size: 13px; line-height: 1.55; color: var(--text-muted); margin-top: 6px;">The proofreader's insertion caret — also the terminal <span style="font-family: var(--font-mono); color: var(--text-body);">^</span> — its point forged to a molten core, over the four category underline ticks. Symbol + product signature in one.</p>
+          </div>
+        </div>
+
+        <!-- 1b -->
+        <div id="1b" style="flex: 1; min-width: 300px; background: color-mix(in oklab, var(--bg-raised) 62%, transparent); border: 1px solid var(--glass-stroke); border-radius: 18px; box-shadow: var(--shadow-lg), var(--glass-rim); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+          <span style="align-self: flex-start; font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-strong); background: var(--glass-fill-strong); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px;">1b</span>
+          <div style="display: flex; justify-content: center; padding: 8px 0;">
+            <div style="width: 104px; height: 104px; border-radius: 24px; display: grid; place-items: center; position: relative; overflow: hidden; background: linear-gradient(158deg, #2a2f45 0%, #16161e 100%); border: 1px solid var(--glass-stroke); box-shadow: var(--shadow-md), var(--glass-rim);">
+              <div style="position: absolute; inset: 0; opacity: 0.7; background: radial-gradient(58% 52% at 28% 18%, color-mix(in oklab, var(--cyan-400) 30%, transparent), transparent 70%);"></div>
+              <svg viewBox="0 0 48 48" fill="none" width="66" height="66" style="position: relative;" role="img" aria-label="Forged G monogram">
+                <defs>
+                  <linearGradient id="gGb" x1="24" y1="13" x2="24" y2="35" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stop-color="#c7f2ff"></stop><stop offset="60%" stop-color="#86e1fc"></stop><stop offset="100%" stop-color="#82aaff"></stop>
+                  </linearGradient>
+                  <radialGradient id="gCoreB" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="#e8faff"></stop><stop offset="55%" stop-color="#86e1fc"></stop><stop offset="100%" stop-color="#82aaff"></stop>
+                  </radialGradient>
+                  <radialGradient id="gEmberB" cx="50%" cy="45%" r="55%">
+                    <stop offset="0%" stop-color="#ffe6cf"></stop><stop offset="60%" stop-color="#ffc777"></stop><stop offset="100%" stop-color="#ff966c"></stop>
+                  </radialGradient>
+                  <filter id="gGlowB" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="1.7" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+                </defs>
+                <path d="M32.7 17.6 A10.8 10.8 0 1 0 32.7 30.4 L32.7 24 L25.6 24" fill="none" stroke="url(#gGb)" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" filter="url(#gGlowB)"></path>
+                <circle cx="35.4" cy="12.6" r="1.05" fill="url(#gEmberB)" opacity="0.9"></circle>
+                <circle cx="25.6" cy="24" r="3" fill="url(#gCoreB)" filter="url(#gGlowB)"></circle>
+                <circle cx="25.6" cy="24" r="3" fill="none" stroke="#e6faff" stroke-width="0.7" opacity="0.7"></circle>
+              </svg>
+            </div>
+          </div>
+          <div>
+            <div style="font-family: var(--font-display); font-weight: 600; font-size: 18px; letter-spacing: -0.01em; color: var(--text-strong);">The forged G</div>
+            <p style="font-family: var(--font-ui); font-size: 13px; line-height: 1.55; color: var(--text-muted); margin-top: 6px;">A lettermark: a geometric G, its inner bar ending in the molten core. Ownable and friendly, but a letter, not a concept — it says less about what the product does.</p>
+          </div>
+        </div>
+
+        <!-- 1c -->
+        <div id="1c" style="flex: 1; min-width: 300px; background: color-mix(in oklab, var(--bg-raised) 62%, transparent); border: 1px solid var(--glass-stroke); border-radius: 18px; box-shadow: var(--shadow-lg), var(--glass-rim); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+          <span style="align-self: flex-start; font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-strong); background: var(--glass-fill-strong); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px;">1c</span>
+          <div style="display: flex; justify-content: center; padding: 8px 0;">
+            <div style="width: 104px; height: 104px; border-radius: 24px; display: grid; place-items: center; position: relative; overflow: hidden; background: linear-gradient(158deg, #2a2f45 0%, #16161e 100%); border: 1px solid var(--glass-stroke); box-shadow: var(--shadow-md), var(--glass-rim);">
+              <div style="position: absolute; inset: 0; opacity: 0.7; background: radial-gradient(58% 52% at 28% 18%, color-mix(in oklab, var(--cyan-400) 28%, transparent), transparent 70%);"></div>
+              <svg viewBox="0 0 48 48" fill="none" width="66" height="66" style="position: relative;" role="img" aria-label="Underline signature mark">
+                <defs>
+                  <radialGradient id="gCoreC" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="#e8faff"></stop><stop offset="55%" stop-color="#86e1fc"></stop><stop offset="100%" stop-color="#82aaff"></stop>
+                  </radialGradient>
+                  <filter id="gGlowC" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="1.5" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+                </defs>
+                <g fill="#565f89">
+                  <rect x="11" y="13.5" width="26" height="3.4" rx="1.7"></rect>
+                  <rect x="11" y="22.3" width="21" height="3.4" rx="1.7"></rect>
+                  <rect x="11" y="31.1" width="15.5" height="3.4" rx="1.7"></rect>
+                </g>
+                <g stroke-width="1.9" stroke-linecap="round">
+                  <line x1="24" y1="19.5" x2="34.5" y2="19.5" stroke="#ef4444"></line>
+                  <line x1="11.4" y1="28.3" x2="18.5" y2="28.3" stroke="#06b6d4"></line>
+                  <line x1="18" y1="37.1" x2="25.5" y2="37.1" stroke="#8b5cf6"></line>
+                </g>
+                <rect x="33.4" y="21.1" width="2.5" height="5.8" rx="1.25" fill="url(#gCoreC)" filter="url(#gGlowC)"></rect>
+              </svg>
+            </div>
+          </div>
+          <div>
+            <div style="font-family: var(--font-display); font-weight: 600; font-size: 18px; letter-spacing: -0.01em; color: var(--text-strong);">The underline</div>
+            <p style="font-family: var(--font-ui); font-size: 13px; line-height: 1.55; color: var(--text-muted); margin-top: 6px;">Literally the product: three lines of text, each word underlined in its category color, a live cursor blinking. Truest to the UI — but busiest, and softest at favicon size.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── anatomy ── -->
+    <div style="background: color-mix(in oklab, var(--bg-raised) 68%, transparent); border: 1px solid var(--glass-stroke); border-radius: 22px; box-shadow: var(--shadow-lg), var(--glass-rim); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); padding: 34px; display: flex; gap: 40px; align-items: center; flex-wrap: wrap;">
+      <div style="flex-shrink: 0;">
+        <div class="gfb-label" style="margin-bottom: 18px;">▸ ANATOMY · 1A</div>
+        <img src="assets/grammarforge-mark.svg" width="188" height="188" alt="GrammarForge mark, large" style="display: block;">
+      </div>
+      <div style="flex: 1; min-width: 300px; display: flex; flex-direction: column; gap: 18px;">
+        <div style="display: flex; gap: 14px; align-items: flex-start;">
+          <span style="width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0; background: linear-gradient(180deg, #86e1fc, #82aaff);"></span>
+          <div><div style="font-weight: 600; font-size: 14.5px; color: var(--text-strong);">The caret</div><p style="font-size: 13px; line-height: 1.5; color: var(--text-muted); margin-top: 3px;">The proofreader's "insert here" mark and the terminal prompt caret — universal shorthand for editing text.</p></div>
+        </div>
+        <div style="display: flex; gap: 14px; align-items: flex-start;">
+          <span style="width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; background: radial-gradient(circle at 40% 35%, #e8faff, #86e1fc 55%, #82aaff); box-shadow: 0 0 12px color-mix(in oklab, var(--cyan-400) 55%, transparent);"></span>
+          <div><div style="font-weight: 600; font-size: 14.5px; color: var(--text-strong);">The molten core <span style="color: var(--text-faint); font-weight: 400;">+ amber embers</span></div><p style="font-size: 13px; line-height: 1.5; color: var(--text-muted); margin-top: 3px;">Shared with the Legion mark — the forge, where a correction is minted white-hot. The two amber sparks are the system's one warm touch.</p></div>
+        </div>
+        <div style="display: flex; gap: 14px; align-items: flex-start;">
+          <span style="display: inline-flex; gap: 3px; flex-shrink: 0; padding-top: 8px;"><span style="width: 6px; height: 4px; border-radius: 2px; background: #ef4444;"></span><span style="width: 6px; height: 4px; border-radius: 2px; background: #eab308;"></span><span style="width: 6px; height: 4px; border-radius: 2px; background: #06b6d4;"></span><span style="width: 6px; height: 4px; border-radius: 2px; background: #8b5cf6;"></span></span>
+          <div><div style="font-weight: 600; font-size: 14.5px; color: var(--text-strong);">The category baseline</div><p style="font-size: 13px; line-height: 1.5; color: var(--text-muted); margin-top: 3px;">The four issue categories — spelling, grammar, punctuation, style — in the exact annotation tokens the composer underlines with.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── variants ── -->
+    <div style="background: color-mix(in oklab, var(--bg-raised) 68%, transparent); border: 1px solid var(--glass-stroke); border-radius: 22px; box-shadow: var(--shadow-lg), var(--glass-rim); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); padding: 34px;">
+      <div class="gfb-label" style="margin-bottom: 22px;">▸ VARIANTS</div>
+      <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 150px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+          <div style="width: 100%; aspect-ratio: 1; max-width: 150px; border-radius: 16px; display: grid; place-items: center; background: linear-gradient(158deg, #2a2f45, #16161e); border: 1px solid var(--glass-stroke);"><img src="assets/grammarforge-mark.svg" width="66" height="66" alt=""></div>
+          <span class="gfb-cap">full color</span>
+        </div>
+        <div style="flex: 1; min-width: 150px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+          <div style="width: 100%; aspect-ratio: 1; max-width: 150px; border-radius: 16px; display: grid; place-items: center; background: #16161e; border: 1px solid var(--glass-stroke); color: #c0caf5;">
+            <svg viewBox="0 0 48 48" fill="none" width="66" height="66"><path d="M12.5 28.5 L24 14 L35.5 28.5" fill="none" stroke="currentColor" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"></path><line x1="12.5" y1="37.5" x2="35.5" y2="37.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" opacity="0.5"></line><circle cx="24" cy="14" r="3.3" fill="currentColor"></circle></svg>
+          </div>
+          <span class="gfb-cap">monochrome</span>
+        </div>
+        <div data-theme="light" style="flex: 1; min-width: 150px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+          <div style="width: 100%; aspect-ratio: 1; max-width: 150px; border-radius: 16px; display: grid; place-items: center; background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-strong);">
+            <svg viewBox="0 0 48 48" fill="none" width="66" height="66"><path d="M12.5 28.5 L24 14 L35.5 28.5" fill="none" stroke="currentColor" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"></path><line x1="12.5" y1="37.5" x2="35.5" y2="37.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" opacity="0.5"></line><circle cx="24" cy="14" r="3.3" fill="currentColor"></circle></svg>
+          </div>
+          <span class="gfb-cap" style="color: var(--text-muted);">ink on light</span>
+        </div>
+        <div style="flex: 1; min-width: 150px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+          <div style="width: 100%; aspect-ratio: 1; max-width: 150px; border-radius: 16px; display: grid; place-items: center; background: #16161e; border: 1px solid var(--glass-stroke);">
+            <div style="display: flex; align-items: center; gap: 9px; font-family: var(--font-mono);">
+              <span style="color: var(--accent);">❯</span>
+              <svg viewBox="0 0 48 48" fill="none" width="26" height="26" style="color: var(--text-strong);"><path d="M12.5 28.5 L24 14 L35.5 28.5" fill="none" stroke="currentColor" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"></path><line x1="12.5" y1="37.5" x2="35.5" y2="37.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" opacity="0.5"></line><circle cx="24" cy="14" r="3.3" fill="currentColor"></circle></svg>
+            </div>
+          </div>
+          <span class="gfb-cap">terminal</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── size ramp ── -->
+    <div style="background: color-mix(in oklab, var(--bg-raised) 68%, transparent); border: 1px solid var(--glass-stroke); border-radius: 22px; box-shadow: var(--shadow-lg), var(--glass-rim); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); padding: 34px;">
+      <div class="gfb-label" style="margin-bottom: 26px;">▸ SCALE · legible to 16px</div>
+      <div style="display: flex; gap: 34px; align-items: flex-end; flex-wrap: wrap;">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;"><img src="assets/grammarforge-mark.svg" width="64" height="64" alt=""><span class="gfb-cap">64</span></div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;"><img src="assets/grammarforge-mark.svg" width="48" height="48" alt=""><span class="gfb-cap">48</span></div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;"><img src="assets/grammarforge-mark.svg" width="32" height="32" alt=""><span class="gfb-cap">32</span></div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;"><img src="assets/grammarforge-mark.svg" width="24" height="24" alt=""><span class="gfb-cap">24</span></div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;"><img src="assets/grammarforge-mark.svg" width="16" height="16" alt=""><span class="gfb-cap" style="color: var(--accent);">16 · favicon</span></div>
+      </div>
+    </div>
+
+    <!-- ── lockups ── -->
+    <div style="background: color-mix(in oklab, var(--bg-raised) 68%, transparent); border: 1px solid var(--glass-stroke); border-radius: 22px; box-shadow: var(--shadow-lg), var(--glass-rim); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); padding: 34px;">
+      <div class="gfb-label" style="margin-bottom: 26px;">▸ LOCKUPS</div>
+      <div style="display: flex; gap: 44px; flex-wrap: wrap; align-items: flex-start;">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 13px;">
+            <img src="assets/grammarforge-mark.svg" width="40" height="40" alt="">
+            <span style="font-family: var(--font-display); font-weight: 600; letter-spacing: -0.02em; font-size: 27px; color: var(--text-strong);">Grammar<span style="color: var(--accent);">Forge</span></span>
+          </div>
+          <span class="gfb-cap" style="color: var(--text-faint);">horizontal · primary</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 9px;">
+            <img src="assets/grammarforge-mark.svg" width="46" height="46" alt="">
+            <span style="font-family: var(--font-display); font-weight: 600; letter-spacing: -0.02em; font-size: 22px; color: var(--text-strong);">Grammar<span style="color: var(--accent);">Forge</span></span>
+          </div>
+          <span class="gfb-cap" style="color: var(--text-faint);">stacked</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); padding-top: 8px;">
+            <span style="color: var(--accent);">❯</span>
+            <svg viewBox="0 0 48 48" fill="none" width="22" height="22" style="color: var(--text-strong);"><path d="M12.5 28.5 L24 14 L35.5 28.5" fill="none" stroke="currentColor" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"></path><line x1="12.5" y1="37.5" x2="35.5" y2="37.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" opacity="0.5"></line><circle cx="24" cy="14" r="3.3" fill="currentColor"></circle></svg>
+            <b style="color: var(--text-strong); font-size: 15px; letter-spacing: 0.04em; font-weight: 600;">grammarforge</b>
+          </div>
+          <span class="gfb-cap" style="color: var(--text-faint);">CLI · mono</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── in context ── -->
+    <div style="background: color-mix(in oklab, var(--bg-raised) 68%, transparent); border: 1px solid var(--glass-stroke); border-radius: 22px; box-shadow: var(--shadow-lg), var(--glass-rim); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); padding: 34px;">
+      <div class="gfb-label" style="margin-bottom: 22px;">▸ IN CONTEXT</div>
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- dark header -->
+        <div class="lw-aurora" style="border-radius: 14px; padding: 16px 20px; border: 1px solid var(--glass-stroke); display: flex; align-items: center; gap: 12px; box-shadow: var(--glass-rim);">
+          <img src="assets/grammarforge-mark.svg" width="30" height="30" alt="" style="filter: drop-shadow(0 2px 8px color-mix(in oklab, var(--cyan-400) 40%, transparent));">
+          <span style="font-family: var(--font-display); font-weight: 600; font-size: 16px; letter-spacing: -0.01em; color: var(--text-strong);">GrammarForge</span>
+          <div style="flex: 1;"></div>
+          <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--success);"></span>bridge · localhost:8000</span>
+        </div>
+        <!-- light header -->
+        <div data-theme="light" style="border-radius: 14px; padding: 16px 20px; background: var(--bg-raised); border: 1px solid var(--border); display: flex; align-items: center; gap: 12px;">
+          <img src="assets/grammarforge-mark.svg" width="30" height="30" alt="">
+          <span style="font-family: var(--font-display); font-weight: 600; font-size: 16px; letter-spacing: -0.01em; color: var(--text-strong);">GrammarForge</span>
+          <div style="flex: 1;"></div>
+          <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--success);"></span>bridge · localhost:8000</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- footer -->
+    <p style="font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7; color: var(--text-faint); letter-spacing: 0.02em; margin-top: 4px;">
+      assets/grammarforge-mark.svg · assets/grammarforge-mark-mono.svg &nbsp;—&nbsp; mark 1a is wired into all four GrammarForge UIs (OpenCode · Vencord · Assistant · Prototypes).
+    </p>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

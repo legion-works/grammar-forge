@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/fonts.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/ansi.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/radius-shadow.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/glass.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/annotations.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/tokens/base.css">
+  <link rel="stylesheet" href="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/styles.css">
+  <script src="_ds/legion-works-design-system-0c4db072-51f8-49a7-8d0b-1e2ffd2d90cf/_ds_bundle.js"></script>
+  <style>
+    @keyframes oc-blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+    @keyframes oc-cardin { from { transform: translateY(3px); } to { transform: translateY(0); } }
+    @keyframes oc-land { from { opacity: 0; } to { opacity: 1; } }
+    body { margin: 0; background: var(--bg-base); }
+    .oc-mono { font-family: var(--font-mono); }
+    /* terminal underline = colored straight underline (extmark style) */
+    .oc-u { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; cursor: pointer; transition: background 90ms var(--ease); border-radius: 1px; }
+    .oc-u-spelling    { text-decoration-color: var(--cat-spelling); }
+    .oc-u-grammar     { text-decoration-color: var(--cat-grammar); }
+    .oc-u-punctuation { text-decoration-color: var(--cat-punctuation); }
+    .oc-u-style       { text-decoration-color: var(--cat-style); }
+    .oc-u-unknown     { text-decoration-color: var(--text-muted); }
+    .oc-u.pinned { background: rgba(200,211,245,0.14); } /* terminal selection on the pinned word */
+    .oc-u:hover { background: rgba(200,211,245,0.09); }
+    .oc-card { animation: oc-cardin 130ms var(--ease); }
+    .oc-seg { transition: background 130ms var(--ease), color 130ms var(--ease); cursor: pointer; }
+    .oc-seg:hover { color: var(--text-strong); }
+    .oc-cursor { display: inline-block; width: 8px; height: 17px; background: var(--accent); vertical-align: -3px; margin-left: 1px; animation: oc-blink 1.05s step-end infinite; box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 55%, transparent); }
+    .oc-key { color: var(--text-muted); }
+  </style>
+</helmet>
+
+<div class="oc-mono lw-aurora" style="min-height: 100vh; padding: 30px 24px 54px;" onClick="{{ closeCard }}">
+
+  <!-- header -->
+  <div style="max-width: 1000px; margin: 0 auto 16px; display: flex; align-items: center; gap: 12px;">
+    <img src="assets/grammarforge-mark.svg" width="32" height="32" alt="GrammarForge mark" style="display: block; flex-shrink: 0; filter: drop-shadow(0 2px 9px color-mix(in oklab, var(--cyan-400) 42%, transparent));">
+    <div>
+      <div style="font-family: var(--font-display); font-weight: 600; font-size: 16px; line-height: 1.1; letter-spacing: -0.01em; color: var(--text-strong);">GrammarForge <span style="color: var(--text-muted); font-weight: 500; font-family: var(--font-ui);">· OpenCode TUI plugin</span></div>
+      <div style="font-family: var(--font-ui); font-weight: 500; font-size: 11.5px; line-height: 1.2; color: var(--text-muted); margin-top: 2px;">Grammar checking in OpenCode's prompt input · floating overlay card</div>
+    </div>
+    <div style="flex: 1;"></div>
+    <x-import component-from-global-scope="LegionWorksDesignSystem_0c4db0.Badge" tone="success" dot="{{ true }}" hint-size="auto,26px">bridge · localhost:8000</x-import>
+  </div>
+
+  <!-- demo control strip -->
+  <div style="max-width: 1000px; margin: 0 auto 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px;" onClick="{{ stopProp }}">
+    <div style="display: inline-flex; align-items: center; gap: 8px;">
+      <span style="font-family: var(--font-mono); font-weight: 500; font-size: 10.5px; line-height: 1; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint);">Overlay card</span>
+      <div style="display: inline-flex; padding: 3px; border-radius: 8px; background: var(--glass-fill); border: 1px solid var(--border); gap: 2px;">
+        {{ modeSegsEl }}
+      </div>
+    </div>
+    <sc-if value="{{ isSuggest }}" hint-placeholder-val="{{ true }}">
+      <div style="display: inline-flex; align-items: center; gap: 8px;">
+        <span style="font-family: var(--font-mono); font-weight: 500; font-size: 10.5px; line-height: 1; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint);">Pinned</span>
+        <div style="display: inline-flex; padding: 3px; border-radius: 8px; background: var(--glass-fill); border: 1px solid var(--border); gap: 2px;">
+          {{ pinSegsEl }}
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- terminal window -->
+  <div style="max-width: 1000px; margin: 0 auto; border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-xl), 0 0 0 1px var(--border); background: var(--bg-base);" onClick="{{ stopProp }}">
+    <!-- chrome -->
+    <div style="height: 38px; background: var(--neutral-100); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 13px; padding: 0 14px;">
+      <div style="display: flex; gap: 7px;">
+        <div style="width: 11px; height: 11px; border-radius: 50%; background: #ff5f57;"></div>
+        <div style="width: 11px; height: 11px; border-radius: 50%; background: #febc2e;"></div>
+        <div style="width: 11px; height: 11px; border-radius: 50%; background: #28c840;"></div>
+      </div>
+      <div style="flex: 1; text-align: center; font-size: 12px; color: var(--text-muted);">opencode — grammar-forge — 98×30</div>
+      <div style="width: 54px;"></div>
+    </div>
+
+    <!-- terminal body -->
+    <div style="padding: 16px 18px 14px; font-size: 13.5px; line-height: 1.62; color: var(--text-strong); min-height: 432px; display: flex; flex-direction: column;">
+
+      <!-- session transcript -->
+      <div style="flex: 1;">
+        <div style="display: flex; align-items: center; gap: 8px; color: var(--text-muted); margin-bottom: 14px;">
+          <span style="color: var(--accent);">◆</span> opencode <span style="color: var(--neutral-400);">v0.4.1</span>
+          <span style="color: var(--neutral-400);">·</span> grammar-forge <span style="color: var(--neutral-400);">·</span> anthropic/claude-sonnet
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <div style="color: var(--text-muted); margin-bottom: 2px;"><span style="color: var(--success);">▌</span> You</div>
+          <div style="color: var(--text-strong);">add a retry with exponential backoff to the auth client</div>
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <div style="color: var(--text-muted); margin-bottom: 2px;"><span style="color: var(--accent);">▌</span> opencode</div>
+          <div style="color: var(--text-body);">Added backoff to <span style="color: var(--text-strong);">AuthClient.request</span>. Diff:</div>
+          <div style="margin-top: 7px; padding: 8px 12px; border-radius: 7px; background: var(--neutral-50); border: 1px solid var(--border); color: var(--text-muted);">
+            <div style="color: var(--text-muted);">src/auth/client.ts</div>
+            <div><span style="color: var(--success);">+  for (let i = 0; i &lt; retries; i++) {</span></div>
+            <div><span style="color: var(--success);">+    try { return await this.send(req) }</span></div>
+            <div><span style="color: var(--success);">+    catch { await sleep(backoff(i)) }</span></div>
+            <div><span style="color: var(--success);">+  }</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- prompt input box + floating overlay -->
+      <div style="position: relative;" id="oc-promptwrap">
+
+        <!-- the floating details card (anchored just above the pinned word) -->
+        {{ cardEl }}
+
+        <div style="border: 1px solid var(--border-strong); border-radius: 8px; background: var(--neutral-50); padding: 9px 12px; display: flex; align-items: flex-start; gap: 9px;">
+          <span style="color: var(--accent); flex-shrink: 0;">❯</span>
+          <div id="oc-prompt" style="flex: 1; min-width: 0; color: var(--text-strong); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;">{{ promptEl }}<span class="oc-cursor"></span>{{ ghostEl }}</div>
+        </div>
+      </div>
+
+      <!-- status / keybind line (keyboard-first) -->
+      <div style="display: flex; align-items: center; gap: 14px; margin-top: 8px; font-size: 12px; color: var(--text-faint);">
+        {{ statusEl }}
+        <div style="flex: 1;"></div>
+        <span><span class="oc-key">ctrl+g</span> review</span>
+        <span><span class="oc-key">ctrl+.</span> apply all</span>
+        <span><span class="oc-key">ctrl+/</span> rephrase</span>
+        <span><span class="oc-key">↵</span> send</span>
+      </div>
+    </div>
+  </div>
+
+  <p style="max-width: 1000px; margin: 14px auto 0; text-align: center; font-family: var(--font-ui); font-weight: 400; font-size: 12.5px; line-height: 1.5; color: var(--text-faint);">
+    Keyboard-first: <span class="oc-key">ctrl+g</span> jumps to the next issue (no mouse needed) · <span class="oc-key">ctrl+n</span>/<span class="oc-key">ctrl+p</span> cycle · <span class="oc-key">↵</span> apply · <span class="oc-key">x</span> ignore · ghost completion: <span class="oc-key">⇧Tab</span> accept · <span class="oc-key">esc</span> dismiss
+  </p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { mode: 'suggestion', pin: 0, applied: [], ignored: [], frame: 0, cardPos: null };
+
+  // Faithful to clients/opencode/src/category-palette.ts (CATEGORY_FG) +
+  // details-panel.ts (CATEGORY_LABEL); colors are the Legion Works
+  // annotation tokens (tokens/annotations.css --cat-*).
+  CAT = {
+    spelling:    { label: 'Spelling',    fg: 'var(--cat-spelling)' },
+    grammar:     { label: 'Grammar',     fg: 'var(--cat-grammar)' },
+    punctuation: { label: 'Punctuation', fg: 'var(--cat-punctuation)' },
+    style:       { label: 'Style',       fg: 'var(--cat-style)' },
+    typography:  { label: 'Typography',  fg: 'var(--cat-typography)' },
+    unknown:     { label: 'Issue',       fg: 'var(--text-muted)' },
+  };
+  // Terminal diff + accent colors from themes/opencode/legion.json.
+  DELETE = 'var(--danger)'; INSERT = 'var(--success)'; DIM = 'var(--text-muted)'; REPH = 'var(--purple-400)';
+  GHOST_FG = 'var(--neutral-400)';
+  // Completion mode demo: a coding-agent prompt + its ghost continuation. In
+  // production this is a debounced bridge /complete call (same LLM as rephrase)
+  // returning the most-likely continuation of the caret context; Tab accepts.
+  COMPLETION_PROMPT = 'add a retry with exponential ';
+  GHOST = 'backoff to the auth client, capping at 5 attempts with full jitter';
+  SPINNER = ['\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f'];
+
+  // Prompt content. Flagged words carry a suggestion index `c`.
+  PARTS = [
+    { t: 'fix ' }, { c: 0 },
+    { t: ' login flow \u2014 ' }, { c: 1 },
+    { t: ' one question, and we ' }, { c: 2 },
+    { t: ' added a test' },
+  ];
+  // model field kept for fidelity though the TUI card doesn't show it.
+  SUGG = [
+    { id: 0, cat: 'spelling', orig: 'teh',       repl: 'the',         model: 'harper' },
+    { id: 1, cat: 'grammar',  orig: 'i has',      repl: 'I have',      model: 'gector' },
+    { id: 2, cat: 'grammar',  orig: 'should of',  repl: 'should have', model: 'harper' },
+  ];
+  // Ergonomic cycle keys (settings.cycleNextHotkey / cyclePrevHotkey).
+  // Remapped off `.`/`/` — those collide with normal coding-prompt input
+  // (paths, method calls). ctrl+n / ctrl+p is the readline/emacs/terminal
+  // standard for next/prev and never clashes with typed text.
+  NEXT = 'ctrl+n'; PREV = 'ctrl+p';
+
+  REPH_ORIG = 'and we should of added a test before we shipped it to everyone';
+  REPH_RESULT = 'and we should have added a test before shipping it to everyone';
+
+  componentDidMount() {
+    this._spin = setInterval(() => { if (this.state.mode === 'loading') this.setState(p => ({ frame: p.frame + 1 })); }, 90);
+    this.measure();
+  }
+  componentWillUnmount() { clearInterval(this._spin); }
+  componentDidUpdate(prevP, prevS) {
+    if (!prevS || prevS.pin !== this.state.pin || prevS.mode !== this.state.mode || prevS.applied !== this.state.applied) this.measure();
+  }
+
+  liveSugg() { return this.SUGG.filter(s => !this.state.applied.includes(s.id) && !this.state.ignored.includes(s.id)); }
+  pinnedSugg() { const live = this.liveSugg(); return live[Math.min(this.state.pin, live.length - 1)] || null; }
+
+  // Commit a new cardPos only when it actually changes — setState runs from
+  // componentDidUpdate, so an unconditional setState would loop (React #185).
+  commitPos(next) {
+    const cur = this.state.cardPos;
+    if (next === null) { if (cur !== null) this.setState({ cardPos: null }); return; }
+    if (cur && Math.round(cur.left) === Math.round(next.left) && Math.round(cur.anchorX || 0) === Math.round(next.anchorX || 0)) return;
+    this.setState({ cardPos: next });
+  }
+  measure() {
+    const wrap = document.getElementById('oc-promptwrap');
+    if (!wrap) return;
+    if (this.state.mode === 'completion') { this.commitPos(null); return; }
+    if (this.state.mode === 'loading' || this.state.mode === 'result') {
+      const sp = document.getElementById('oc-w-2') || document.getElementById('oc-prompt');
+      if (!sp) return;
+      const wr = wrap.getBoundingClientRect(); const sr = sp.getBoundingClientRect();
+      let left = sr.left - wr.left; left = Math.max(0, Math.min(left, wr.width - 360));
+      this.commitPos({ left, anchorX: left + 30 }); return;
+    }
+    const s = this.pinnedSugg(); if (!s) { this.commitPos(null); return; }
+    const sp = document.getElementById('oc-w-' + s.id); if (!sp) return;
+    const wr = wrap.getBoundingClientRect(); const sr = sp.getBoundingClientRect();
+    const cardW = 360; let left = (sr.left - wr.left) + sr.width / 2 - 30;
+    left = Math.max(0, Math.min(left, wr.width - cardW));
+    this.commitPos({ left, anchorX: (sr.left - wr.left) + sr.width / 2 });
+  }
+
+  setMode(m) { this.setState({ mode: m, frame: 0 }); }
+  setPin(i) { this.setState({ pin: i, mode: 'suggestion' }); }
+  apply(id) { this.setState(p => ({ applied: [...p.applied, id], pin: 0 })); }
+  ignore(id) { this.setState(p => ({ ignored: [...p.ignored, id], pin: 0 })); }
+
+  // ── prompt rendering (category-colored underlines) ──
+  makePrompt() {
+    // Completion mode: a clean coding prompt being auto-completed (no issues).
+    if (this.state.mode === 'completion') {
+      return [React.createElement('span', { key: 'cp', style: { color: 'var(--text-strong)' } }, this.COMPLETION_PROMPT)];
+    }
+    const out = [];
+    const pinned = this.pinnedSugg();
+    this.PARTS.forEach((p, i) => {
+      if (p.t !== undefined) { out.push(React.createElement('span', { key: 't' + i }, p.t)); return; }
+      const s = this.SUGG[p.c];
+      if (this.state.applied.includes(s.id)) { out.push(React.createElement('span', { key: 'w' + s.id, style: { color: 'var(--success)' } }, s.repl)); return; }
+      if (this.state.ignored.includes(s.id)) { out.push(React.createElement('span', { key: 'w' + s.id }, s.orig)); return; }
+      const isPinned = pinned && pinned.id === s.id && this.state.mode === 'suggestion';
+      out.push(React.createElement('span', {
+        key: 'w' + s.id, id: 'oc-w-' + s.id,
+        className: `oc-u oc-u-${s.cat}${isPinned ? ' pinned' : ''}`,
+        style: { color: 'var(--text-strong)' },
+        onClick: e => { e.stopPropagation(); const idx = this.liveSugg().findIndex(x => x.id === s.id); this.setState({ pin: Math.max(0, idx), mode: 'suggestion' }); },
+      }, s.orig));
+    });
+    return out;
+  }
+
+  // ── the floating bordered card (card-spec.ts) ──
+  makeCard() {
+    const pos = this.state.cardPos; if (!pos) return null;
+    const mode = this.state.mode;
+    if (mode === 'completion') return null;
+    let border, rows;
+
+    if (mode === 'loading') {
+      border = this.REPH;
+      const glyph = this.SPINNER[this.state.frame % this.SPINNER.length];
+      rows = [{ wrap: false, segs: [[`\u270e Rephrase`, this.REPH, true], [`  ${glyph} Rephrasing\u2026`, this.DIM, false]] }];
+    } else if (mode === 'result') {
+      border = this.REPH;
+      // Wrapped, not truncated — the card grows to fit (spec §5).
+      rows = [
+        { wrap: false, segs: [[`\u270e Rephrase`, this.REPH, true], [` 1/2`, this.DIM, false]] },
+        { wrap: true, segs: [[this.REPH_ORIG, this.DIM, false]] },
+        { wrap: true, segs: [[' \u2192 ', this.DIM, false], [this.REPH_RESULT, this.INSERT, false]] },
+        { wrap: false, segs: [['\u21b5 apply \u00b7 esc reject \u00b7 ctrl+/ regen \u00b7 \u2191\u2193 alts', this.DIM, false]] },
+      ];
+    } else {
+      const s = this.pinnedSugg(); if (!s) return null;
+      const live = this.liveSugg(); const idx = live.findIndex(x => x.id === s.id);
+      const meta = this.CAT[s.cat]; border = meta.fg;
+      rows = [
+        { wrap: false, segs: [[`\u270e ${meta.label}`, meta.fg, true], [` ${idx + 1}/${live.length}`, this.DIM, false]] },
+        { wrap: true, segs: [[s.orig, this.DELETE, false], [' \u2192 ', this.DIM, false], [s.repl, this.INSERT, false]] },
+        { wrap: false, segs: [[`\u21b5 apply \u00b7 x ignore \u00b7 ${this.NEXT} ${this.PREV} cycle \u00b7 esc close`, this.DIM, false]] },
+      ];
+    }
+
+    const rowEls = rows.map((row, r) => React.createElement('div', {
+      key: r,
+      style: { display: 'flex', flexWrap: row.wrap ? 'wrap' : 'nowrap', whiteSpace: row.wrap ? 'pre-wrap' : 'pre', wordBreak: 'break-word' },
+    }, ...row.segs.map(([txt, color, bold], k) => React.createElement('span', { key: k, style: { color, fontWeight: bold ? 700 : 400, whiteSpace: row.wrap ? 'pre-wrap' : 'pre' } }, txt))));
+
+    return React.createElement('div', {
+      className: 'oc-card oc-mono',
+      style: {
+        position: 'absolute', left: pos.left + 'px', bottom: 'calc(100% + 8px)', width: '360px',
+        border: `1px solid ${border}`, borderRadius: '6px', background: 'rgba(30,32,48,0.92)',
+        backdropFilter: 'blur(10px) saturate(160%)', WebkitBackdropFilter: 'blur(10px) saturate(160%)',
+        padding: '5px 9px', fontSize: '13.5px', lineHeight: '1.6', zIndex: 50,
+        boxShadow: `var(--shadow-lg), var(--glass-rim)`,
+      },
+      onClick: e => e.stopPropagation(),
+    }, ...rowEls);
+  }
+
+  renderVals() {
+    const live = this.liveSugg();
+    const seg = (active, onClick, label, key) => React.createElement('button', {
+      key, onClick: e => { e.stopPropagation(); onClick(); }, className: 'oc-seg',
+      style: { border: 'none', borderRadius: '6px', padding: '5px 11px', cursor: 'pointer', fontFamily: 'var(--font-ui)',
+        fontSize: '12px', fontWeight: 600, lineHeight: 1, background: active ? 'var(--glass-fill-strong)' : 'transparent',
+        color: active ? 'var(--text-strong)' : 'var(--text-muted)', boxShadow: active ? 'var(--shadow-sm)' : 'none' },
+    }, label);
+
+    const modeSegsEl = React.createElement(React.Fragment, null,
+      seg(this.state.mode === 'suggestion', () => this.setMode('suggestion'), 'Suggestion', 'm0'),
+      seg(this.state.mode === 'completion', () => this.setMode('completion'), 'Completion', 'm3'),
+      seg(this.state.mode === 'loading', () => this.setMode('loading'), 'Rephrasing', 'm1'),
+      seg(this.state.mode === 'result', () => this.setMode('result'), 'Rephrased', 'm2'));
+
+    const pinSegsEl = live.length > 0 ? React.createElement(React.Fragment, null,
+      ...live.map((s, i) => seg(this.state.pin === i, () => this.setPin(i), s.orig, 'p' + s.id))) : null;
+
+    // Ghost completion (Copilot-style): dim continuation after the caret.
+    const ghostEl = this.state.mode === 'completion'
+      ? React.createElement('span', { style: { color: this.GHOST_FG } }, this.GHOST)
+      : null;
+
+    let statusEl;
+    if (this.state.mode === 'completion') statusEl = React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '7px', color: 'var(--text-muted)' } },
+      React.createElement('span', { style: { color: this.GHOST_FG } }, '\u270e completion ready'),
+      React.createElement('span', { style: { color: 'var(--neutral-400)' } }, '\u00b7'),
+      React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '20px', height: '15px', padding: '0 5px', borderRadius: '4px', background: 'var(--glass-fill)', border: '1px solid var(--border-strong)', fontWeight: 600, fontSize: '10px', lineHeight: 1, color: 'var(--text-strong)' } }, '\u21e7Tab'),
+      React.createElement('span', null, 'accept'),
+      React.createElement('span', { style: { color: 'var(--neutral-400)' } }, '\u00b7'),
+      React.createElement('span', { style: { color: 'var(--text-muted)' } }, 'esc dismiss'));
+    else if (this.state.mode === 'loading') statusEl = React.createElement('span', { style: { color: this.REPH } }, '\u270e rephrasing selection\u2026');
+    else if (live.length > 0) statusEl = React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' } },
+      React.createElement('span', { style: { display: 'inline-flex', gap: '4px' } },
+        ...[...new Set(live.map(s => s.cat))].map(c => React.createElement('span', { key: c, style: { width: '13px', height: '2px', background: this.CAT[c].fg, display: 'inline-block' } }))),
+      React.createElement('span', null, `${live.length} issue${live.length !== 1 ? 's' : ''}`),
+      React.createElement('span', { style: { color: 'var(--text-faint)' } }, '\u00b7 ctrl+g review'));
+    else statusEl = React.createElement('span', { style: { color: 'var(--success)' } }, '\u2713 no issues');
+
+    return {
+      promptEl: this.makePrompt(),
+      cardEl: this.makeCard(),
+      ghostEl,
+      modeSegsEl, pinSegsEl, statusEl,
+      isSuggest: this.state.mode === 'suggestion',
+      closeCard: () => { if (this.state.mode !== 'suggestion') this.setState({ mode: 'suggestion' }); },
+      stopProp: e => e.stopPropagation(),
+    };
+  }
+}
+</script>
+</body>
+</html>

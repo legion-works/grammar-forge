@@ -1,0 +1,5 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GrammarForge mark">
+  <path d="M12.5 28.5 L24 14 L35.5 28.5" fill="none" stroke="currentColor" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"></path>
+  <line x1="12.5" y1="37.5" x2="35.5" y2="37.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" opacity="0.5"></line>
+  <circle cx="24" cy="14" r="3.3" fill="currentColor"></circle>
+</svg>

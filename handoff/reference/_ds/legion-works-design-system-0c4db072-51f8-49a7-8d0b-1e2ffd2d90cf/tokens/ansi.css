@@ -1,0 +1,39 @@
+/* ============================================================
+   Legion Works — Terminal ANSI Palette  (Tokyo Night)
+   ------------------------------------------------------------
+   Canonical Tokyo Night ANSI-16, aligned to the owner's OpenCode
+   theme defs. Single source of truth for Ghostty, OpenCode, and
+   the TUI component kit so terminal and web share one palette.
+   The "Legion" deep variant only lowers the background.
+   ============================================================ */
+:root {
+  /* Surface — Tokyo Night */
+  --term-bg:        #1a1b26;
+  --term-fg:        #c8d3f5;
+  --term-cursor:    #86e1fc;
+  --term-selection: #2d3f76;
+
+  /* Surface — Legion deep-night variant (glass-friendly) */
+  --term-bg-legion: #16161e;
+  --term-fg-legion: #c8d3f5;
+
+  /* Normal (0–7) */
+  --ansi-black:   #1b1d2b;
+  --ansi-red:     #ff757f;
+  --ansi-green:   #c3e88d;
+  --ansi-yellow:  #ffc777;
+  --ansi-blue:    #82aaff;
+  --ansi-magenta: #c099ff;
+  --ansi-cyan:    #86e1fc;   /* Legion */
+  --ansi-white:   #828bb8;
+
+  /* Bright (8–15) */
+  --ansi-bright-black:   #444a73;
+  --ansi-bright-red:     #ff8f98;
+  --ansi-bright-green:   #d4f59f;
+  --ansi-bright-yellow:  #ffd493;
+  --ansi-bright-blue:    #9ab8ff;
+  --ansi-bright-magenta: #caa9ff;
+  --ansi-bright-cyan:    #a9ebff;
+  --ansi-bright-white:   #c8d3f5;
+}

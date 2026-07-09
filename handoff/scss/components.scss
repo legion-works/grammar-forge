@@ -1,0 +1,194 @@
+// ============================================================================
+// GrammarForge — Components
+// Theme-agnostic component styles built on the tokens + glass mixins. Where a
+// surface needs both themes, set `data-gf-theme="light|dark"` on (or above) the
+// GF root; the [data-gf-theme] selectors below swap palette + glass.
+//
+// Naming: BEM-ish `.gf-<block>__<el>--<mod>`. Port these into the real shadow
+// roots (browser: overlay/styles.ts, popup/popup.css; Vencord: overlay CSS).
+// ============================================================================
+@use "tokens" as *;
+@use "glass" as *;
+
+// Theme surface wiring -------------------------------------------------------
+[data-gf-theme="light"] .gf-surface { @include gf-glass-light; }
+[data-gf-theme="dark"]  .gf-surface { @include gf-glass-dark; }
+.gf-surface { border-radius: $gf-r-card; }
+
+// ── Issue underline (the in-composer marker) ────────────────────────────────
+// The underline ALWAYS shows. The background tint appears ONLY on hover or when
+// that issue's card is open (`.is-on`). This is the canonical behavior — never
+// paint a permanent background.
+.gf-u {
+  text-decoration: underline wavy;
+  text-decoration-thickness: $gf-underline-thickness;
+  text-underline-offset: $gf-underline-offset;
+  border-radius: 2px;
+  transition: background $gf-dur-fast ease-out;
+  text-decoration-skip-ink: none;
+
+  @each $name, $color in $gf-categories {
+    &--#{$name} { text-decoration-color: $color; }
+    &--#{$name}.is-on { background: rgba($color, $gf-underline-tint); }
+  }
+}
+
+// ── Hover preview pill (diff only — no buttons in production) ────────────────
+.gf-tip {
+  position: absolute;
+  display: inline-flex; align-items: center; gap: $gf-sp-2;
+  white-space: nowrap; padding: 5px 11px; border-radius: $gf-r-pill;
+  font: 500 $gf-fs-body/1 $gf-font-ui;
+  pointer-events: none; z-index: 30;
+
+  &__dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  &__old { text-decoration: line-through; }
+  &__tail { // downward caret
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent;
+  }
+
+  [data-gf-theme="dark"] & { @include gf-glass-tip(true);
+    .gf-tip__old { color: $gf-diff-old-dark; } .gf-tip__new { color: $gf-diff-new-dark; font-weight: 700; }
+    .gf-tip__tail { border-top: 5px solid rgba(28,30,36,0.94); } }
+  [data-gf-theme="light"] & { @include gf-glass-tip(false);
+    .gf-tip__old { color: $gf-diff-old-light; } .gf-tip__new { color: $gf-diff-new-light; font-weight: 700; }
+    .gf-tip__tail { border-top: 5px solid rgba(252,252,254,0.96); } }
+}
+
+// ── Correction card ─────────────────────────────────────────────────────────
+.gf-card {
+  @extend .gf-surface;
+  position: absolute; width: 320px; padding: $gf-sp-5; z-index: 40;
+  animation: gf-pop $gf-dur-pop $gf-ease;
+
+  &__head { display: flex; align-items: center; gap: $gf-sp-3; margin-bottom: 9px; }
+  &__cat  { font: 600 $gf-fs-label/1 $gf-font-ui; text-transform: uppercase; letter-spacing: .05em; }
+  &__msg  { font: 400 $gf-fs-body/1.45 $gf-font-ui; margin-bottom: $gf-sp-4; }
+  &__conf { display: flex; align-items: center; gap: $gf-sp-3; margin-bottom: $gf-sp-5; }
+  &__confbar { flex: 1; max-width: 120px; height: 5px; border-radius: 3px; overflow: hidden;
+               background: rgba(127,127,140,0.16); }
+  &__actions { display: flex; gap: $gf-sp-2; }
+  &__alts { display: flex; flex-wrap: wrap; gap: $gf-sp-2; margin-top: $gf-sp-4; }
+  &__dict { width: 100%; margin-top: $gf-sp-4; } // spelling only
+  &__nav  { display: flex; align-items: center; gap: $gf-sp-3; margin-top: $gf-sp-4;
+            padding-top: $gf-sp-3; border-top: 1px solid rgba(127,127,140,0.18); }
+  &__tail { position: absolute; top: 100%; transform: translateX(-50%); // points to the word
+            width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; }
+}
+
+// ── Source chip (model provenance) ──────────────────────────────────────────
+.gf-chip-source {
+  display: inline-flex; align-items: center; gap: $gf-sp-1; height: 20px; padding: 0 $gf-sp-3;
+  border-radius: $gf-r-pill; font: 600 $gf-fs-micro/1 $gf-font-ui; letter-spacing: .02em;
+  background: rgba(127,127,140,0.10); border: 1px solid rgba(127,127,140,0.18);
+  &--ai { background: $gf-ai-chip-bg; border-color: rgba($gf-ai-violet, 0.40); color: $gf-ai-text-dark; }
+  &__hint { opacity: .6; font-weight: 500; } // "· instant" for fast-path models
+}
+
+// ── Buttons ─────────────────────────────────────────────────────────────────
+.gf-btn-primary {
+  height: 34px; border: none; border-radius: $gf-r-input; cursor: pointer;
+  background: $gf-accent; color: $gf-accent-ink; font: 600 $gf-fs-default/1 $gf-font-ui;
+  transition: background $gf-dur-fast ease-out, transform $gf-dur-fast ease-out, box-shadow 150ms ease-out;
+  &:hover { background: $gf-accent-hover; transform: translateY(-1px); box-shadow: $gf-accent-glow; }
+  &:active { transform: translateY(0); }
+}
+.gf-btn-soft {
+  height: 34px; border: 1px solid rgba(127,127,140,0.22); border-radius: $gf-r-input; cursor: pointer;
+  background: transparent; font: 600 $gf-fs-default/1 $gf-font-ui;
+  transition: background $gf-dur-fast ease-out, transform $gf-dur-fast ease-out;
+  &:hover { background: rgba(127,127,140,0.14); transform: translateY(-1px); }
+}
+
+// ── Assistant panel ─────────────────────────────────────────────────────────
+.gf-panel {
+  @extend .gf-surface;
+  position: absolute; width: 320px; max-height: 460px; border-radius: $gf-r-panel;
+  display: flex; flex-direction: column; overflow: hidden; z-index: 45;
+  animation: gf-panel-in $gf-dur-panel $gf-ease;
+  // Browser variant floats with margins + 20px radius and expands from the orb
+  // corner (transform-origin: 100% 100%); Vencord anchors above the chatbar.
+
+  &__head   { display: flex; align-items: center; gap: 9px; padding: 14px 15px 12px;
+              border-bottom: 1px solid rgba(127,127,140,0.18); }
+  &__tabs   { display: flex; gap: 3px; margin: 12px 15px 2px; padding: 3px; border-radius: 10px;
+              background: rgba(127,127,140,0.10); border: 1px solid rgba(127,127,140,0.14); }
+  &__score  { display: flex; align-items: center; gap: $gf-sp-5; padding: 14px 15px; }
+  &__insights { display: grid; grid-template-columns: 1fr 1fr; gap: $gf-sp-2; padding: 2px 15px 12px; }
+  &__stripe { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; margin: 0 15px 14px; }
+  &__list   { flex: 1; overflow-y: auto; padding: 2px 15px 12px; }
+  &__footer { display: flex; align-items: center; gap: $gf-sp-3; padding: 11px 15px;
+              border-top: 1px solid rgba(127,127,140,0.18); }
+}
+
+// Score ring — SVG circle; arc color = band, dashoffset = (1 - score/100).
+.gf-ring__arc { transition: stroke-dashoffset 600ms $gf-ease, stroke 400ms ease-out; }
+
+// Grouped correction row in the panel list
+.gf-row {
+  display: flex; align-items: center; gap: $gf-sp-3; width: 100%; text-align: left;
+  padding: 8px 9px; border: none; border-radius: 9px; cursor: pointer;
+  background: rgba(127,127,140,0.06);
+  transition: background $gf-dur-fast ease-out, transform $gf-dur-fast ease-out;
+  &:hover { background: rgba(127,127,140,0.14); transform: translateX(3px); }
+}
+
+// ── Status pill / orb (entry point) ─────────────────────────────────────────
+// Browser: a circular score orb (collapses to a power glyph when disabled, a
+// check when all-clear, an AI pip while the LLM pass is mid-flight).
+// Vencord: the chatbar icon button with a numeric badge / AI pip / check dot.
+.gf-orb { @extend .gf-surface; border-radius: 50%; cursor: pointer;
+  transition: transform 200ms $gf-ease;
+  &:hover { transform: scale(1.06); } &:active { transform: scale(0.97); }
+}
+
+// ── Toast (learning loop + undo) ────────────────────────────────────────────
+.gf-toast {
+  @extend .gf-surface;
+  position: absolute; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: $gf-sp-4; padding: 9px 11px 9px 13px;
+  border-radius: 13px; z-index: 60; white-space: nowrap;
+  animation: gf-toast-in 240ms $gf-ease;
+}
+
+// ── Rephrase / goals / synonyms popovers ────────────────────────────────────
+.gf-rephrase, .gf-goals, .gf-syn { @extend .gf-surface; position: absolute; }
+.gf-rephrase { width: 360px; padding: 15px; border-radius: $gf-r-panel; z-index: 50; }
+.gf-goals    { width: 300px; padding: 15px; border-radius: $gf-r-panel; z-index: 55; }
+.gf-syn      { width: 190px; padding: 8px;  border-radius: 13px; z-index: 42; }
+
+// Skeleton shimmer while the LLM generates rephrase options
+.gf-skel {
+  border-radius: 11px;
+  background: linear-gradient(90deg, rgba(127,127,140,0.10) 25%, rgba(134,225,252,0.20) 50%, rgba(127,127,140,0.10) 75%);
+  background-size: 200% 100%;
+  animation: gf-shimmer 1.5s linear infinite;
+}
+
+// Segmented control (view tabs, rephrase scope, goals options, tone chips)
+.gf-seg {
+  border: none; border-radius: 8px; cursor: pointer; font: 600 12px/1 $gf-font-ui;
+  background: transparent; transition: background 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out;
+  &.is-active { background: rgba(127,127,140,0.18); box-shadow: 0 1px 3px rgba(0,0,0,0.18); }
+}
+
+// ── Streaming scan line (fast pass visual) ──────────────────────────────────
+.gf-scanline {
+  position: absolute; left: 0; right: 0; height: 64px; pointer-events: none; z-index: 8;
+  background: linear-gradient(180deg, rgba(134,225,252,0) 0%, rgba(134,225,252,0.12) 50%, rgba(134,225,252,0) 100%);
+  border-top: 1px solid rgba(134,225,252,0.40);
+  animation: gf-scan 1100ms ease-in-out;
+}
+
+// ── Keyframes ───────────────────────────────────────────────────────────────
+// IMPORTANT: entrance keyframes animate transform ONLY (never opacity) so that
+// a reduced-motion / non-animating environment can't strand a surface at
+// opacity:0. Keep surfaces visible by default.
+@keyframes gf-pop      { from { transform: scale(0.985) translateY(2px); } to { transform: none; } }
+@keyframes gf-panel-in { from { transform: scale(0.965) translateY(8px); } to { transform: none; } }
+@keyframes gf-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes gf-shimmer  { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes gf-scan     { 0% { top: -2%; opacity: 0; } 12%,88% { opacity: 1; } 100% { top: 102%; opacity: 0; } }
+@keyframes gf-pip      { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.16); opacity: .78; } }
+@keyframes gf-celebrate{ 0% { transform: scale(1); } 35% { transform: scale(1.16); } 70% { transform: scale(0.96); } 100% { transform: scale(1); } }
