@@ -124,3 +124,82 @@ describe('openRephraseFor — goals-seeded tone', () => {
         expect(cardSpy.mock.calls[0]?.[1]?.tone).toBe('neutral')
     })
 })
+
+// Regression: onScopeChange/onToneChange/onRegenerate used to only
+// debugLog — Formal/Casual/Regenerate taps on the Vencord rephrase card
+// were dead buttons and `tone` never reached the bridge request at all.
+// They must now re-issue the bridge call (mirrors the browser client's
+// re-issue semantics) and the current tone must always be forwarded.
+describe('openRephraseFor — scope/tone/regenerate re-issue the bridge call', () => {
+    function setup() {
+        vi.spyOn(rephraseCard, 'showRephrasePending').mockReturnValue({
+            hide: vi.fn<() => void>(),
+        } as unknown as ReturnType<typeof rephraseCard.showRephrasePending>)
+        const cardSpy = vi
+            .spyOn(rephraseCard, 'showRephraseCard')
+            .mockReturnValue({ hide: vi.fn<() => void>() } as unknown as ReturnType<
+                typeof rephraseCard.showRephraseCard
+            >)
+        cardSpy.mockClear()
+        const rephrase = vi.fn(async (req: { tone?: string }) => ({
+            original: 'hello',
+            rephrased: `hi (${req.tone ?? 'none'})`,
+            alternatives: [],
+        }))
+        const client = { rephrase } as unknown as BridgeClient
+        const deps: RephraseDeps = {
+            client: () => client,
+            overlayRoot: document.createElement('div') as unknown as ShadowRoot,
+            debugLog: vi.fn<(...args: unknown[]) => void>(),
+            defaultTone: () => 'neutral',
+        }
+        const el = document.createElement('div')
+        el.innerHTML = 'hello'
+        document.body.appendChild(el)
+        return { cardSpy, rephrase, deps, el }
+    }
+
+    it('forwards tone to the bridge request on the initial call', async () => {
+        const { rephrase, deps, el } = setup()
+        await openRephraseFor(el, 'hello', { start: 0, end: 5 }, deps, () => {})
+        expect(rephrase).toHaveBeenCalledWith(
+            expect.objectContaining({ text: 'hello', tone: 'neutral' }),
+        )
+    })
+
+    it('onRegenerate re-issues the same scope/tone', async () => {
+        const { cardSpy, rephrase, deps, el } = setup()
+        await openRephraseFor(el, 'hello', { start: 0, end: 5 }, deps, () => {})
+        const opts = cardSpy.mock.calls[0]?.[1] as { onRegenerate: () => void }
+        opts.onRegenerate()
+        await Promise.resolve()
+        await Promise.resolve()
+        expect(rephrase).toHaveBeenCalledTimes(2)
+        expect(rephrase.mock.calls[1]?.[0]).toEqual(
+            expect.objectContaining({ tone: 'neutral' }),
+        )
+    })
+
+    it('onToneChange re-issues with the new tone and updates the card', async () => {
+        const { cardSpy, rephrase, deps, el } = setup()
+        await openRephraseFor(el, 'hello', { start: 0, end: 5 }, deps, () => {})
+        const opts = cardSpy.mock.calls[0]?.[1] as { onToneChange: (t: string) => void }
+        opts.onToneChange('formal')
+        await Promise.resolve()
+        await Promise.resolve()
+        expect(rephrase).toHaveBeenCalledTimes(2)
+        expect(rephrase.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ tone: 'formal' }))
+        expect(cardSpy.mock.calls[1]?.[1]?.tone).toBe('formal')
+    })
+
+    it('onScopeChange re-issues and updates the card scope', async () => {
+        const { cardSpy, rephrase, deps, el } = setup()
+        await openRephraseFor(el, 'hello', { start: 0, end: 5 }, deps, () => {})
+        const opts = cardSpy.mock.calls[0]?.[1] as { onScopeChange: (s: string) => void }
+        opts.onScopeChange('message')
+        await Promise.resolve()
+        await Promise.resolve()
+        expect(rephrase).toHaveBeenCalledTimes(2)
+        expect(cardSpy.mock.calls[1]?.[1]?.scope).toBe('message')
+    })
+})

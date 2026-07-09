@@ -32,7 +32,6 @@ import { getSpanRectsBatch } from '@/overlay/rect'
 import { createHighlightLayer, type HighlightLayer, type HighlightSpec } from '@/overlay/highlight'
 import { showPopover, dismissPopoversIn, type PopoverHandle } from '@/overlay/popover'
 import {
-    renderStatusButton,
     type PillCorrection,
     type StatusButtonHandle,
     type StatusButtonOptions,
@@ -170,11 +169,17 @@ export interface OrchestratorApi {
     /** Tear down every listener, field, overlay, signal queue, and pill. */
     stop: () => void
     /** Live summary of the ACTIVE composer (focused → last-active → zeros).
-     *  Used by an external status surface (e.g. a Vencord toolbar badge). */
+     *  Used by an external status surface (e.g. a Vencord toolbar badge).
+     *  `count` is the GOAL-AWARE visible count (mirrors the panel/orb score
+     *  math — a style suggestion muted by `formality: informal` does not
+     *  bump the badge) since the orb is not mounted in Vencord and the
+     *  chatbar badge is this client's sole count surface. `phase` drives
+     *  the badge's AI-refining pip vs settled count/check states. */
     getSummary: () => {
         count: number
         byCategory: Partial<Record<string, number>>
         paused: boolean
+        phase: Phase
     }
     /** Subscribe to every render / pause-toggle / attach-detach event. The
      *  callback is invoked synchronously; unsubscribe via the returned fn. */
@@ -1013,30 +1018,16 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
 
     // Grace timer for hidePill so moving the pointer from the chat-bar
     // button ONTO the pill (to click its actions) doesn't hide it mid-way.
-    // The pill node re-binds on every fresh mount (renderStatusButton
-    // replaces the element).
+    // The score orb itself is not mounted in Vencord (the chatbar button is
+    // the sole entry point — see showPill/hidePill below); this timer exists
+    // for API symmetry with the browser orchestrator's hide-on-leave and is
+    // invoked from stop() teardown.
     let pillHideTimer: ReturnType<typeof setTimeout> | null = null
     const cancelPillHide = (): void => {
         if (pillHideTimer != null) {
             clearTimeout(pillHideTimer)
             pillHideTimer = null
         }
-    }
-    const PILL_HIDE_GRACE_MS = 250
-
-    // The browser orb idles at opacity 0.1 (styles.ts — it sits over the
-    // user's text field and must not occlude). In the Vencord placement it
-    // hovers over chrome, not text: force full opacity inline (inline style
-    // beats the stylesheet rule; the hover transition still applies).
-    // (Renamed .gf-pill → .gf-orb in the W2 redesign; selector + dataset
-    // key kept distinct so a stale DOM cache doesn't double-bind.)
-    const bindPillNode = (): void => {
-        const node = overlay.root.querySelector<HTMLElement>('.gf-orb')
-        if (!node || node.dataset.gfVencordBound === '1') return
-        node.dataset.gfVencordBound = '1'
-        node.style.opacity = '1'
-        node.addEventListener('mouseenter', cancelPillHide)
-        node.addEventListener('mouseleave', () => hidePill())
     }
 
     const showPill = (anchorRect: DOMRect): void => {
@@ -2114,10 +2105,13 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
         getSummary: () => {
             const el = activeComposer()
             const st = el ? fields.get(el) : null
+            const phase = st?.phase ?? 'done'
+            const visible = st ? visibleItems(st.items, phase, getConfig().goals) : []
             return {
-                count: st?.items.length ?? 0,
+                count: visible.length,
                 byCategory: st ? tallyByCategory(st.items) : {},
                 paused,
+                phase,
             }
         },
         subscribe: (cb) => {

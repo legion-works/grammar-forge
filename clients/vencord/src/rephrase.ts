@@ -15,7 +15,13 @@
 import { getText } from '@/input/text'
 import { applySlateFix, type ApplyTraceLogger } from '@/input/rich-editor-apply'
 import type { BridgeClient } from '@/api/client'
-import { showRephraseCard, showRephraseError, showRephrasePending } from '@/overlay/rephrase-card'
+import {
+    showRephraseCard,
+    showRephraseError,
+    showRephrasePending,
+    type RephraseScope as CardRephraseScope,
+    type RephraseTone,
+} from '@/overlay/rephrase-card'
 import { showToast } from '@/overlay/toast'
 import { selectRephraseTarget, type RephraseSelection } from '@/hotkeys/rephrase-target'
 
@@ -57,24 +63,39 @@ export interface RephraseDeps {
     defaultTone?: () => 'neutral' | 'formal' | 'casual'
 }
 
+/** Re-issue state carried across scope/tone toggles and the Regenerate
+ *  button: same text/span (mirrors the browser client — scope is a card
+ *  affordance, not a distinct re-extraction, in both clients today), but
+ *  the CURRENT tone/scope so a re-open reflects the user's latest choice
+ *  and so `tone` actually reaches the bridge (the original vencord
+ *  implementation seeded the card's tone from goals but never sent it in
+ *  the request — Formal/Casual taps were cosmetic only). */
+interface RephraseReissue {
+    scope: CardRephraseScope
+    tone: RephraseTone
+}
+
 export function openRephraseFor(
     el: HTMLElement,
     text: string,
     span: { start: number; end: number },
     deps: RephraseDeps,
     onAfterApply: () => void,
+    reissue: RephraseReissue | null = null,
 ): Promise<void> {
-    deps.debugLog('rephrase start', { textLen: text.length, span })
+    deps.debugLog('rephrase start', { textLen: text.length, span, reissue })
     const pending = showRephrasePending(deps.overlayRoot, {
         anchorRect: el.getBoundingClientRect(),
         onClose: () => {},
     })
     // W3-3: use the goals-seeded default tone (formal/informal/neutral
-    // → formal/casual/neutral) for the card's initial value.
-    const seedTone = deps.defaultTone?.() ?? 'neutral'
+    // → formal/casual/neutral) for the card's initial value; a reissue
+    // (scope/tone toggle, Regenerate) carries the user's latest choice.
+    const tone: RephraseTone = reissue?.tone ?? deps.defaultTone?.() ?? 'neutral'
+    const scope: CardRephraseScope = reissue?.scope ?? 'sentence'
     return deps
         .client()
-        .rephrase({ text, source: 'vencord' })
+        .rephrase({ text, tone, source: 'vencord' })
         .then((res) => {
             pending.hide()
             showRephraseCard(deps.overlayRoot, {
@@ -82,8 +103,8 @@ export function openRephraseFor(
                 original: res.original,
                 rephrased: res.rephrased,
                 alternatives: res.alternatives,
-                scope: 'sentence',
-                tone: seedTone,
+                scope,
+                tone,
                 onAccept: (chosen: string) => {
                     const live = getText(el)
                     if (live.slice(span.start, span.end) !== text) {
@@ -114,9 +135,21 @@ export function openRephraseFor(
                     })
                 },
                 onClose: () => {},
-                onScopeChange: (scope) => deps.debugLog('rephrase scope change', scope),
-                onToneChange: (tone) => deps.debugLog('rephrase tone change', tone),
-                onRegenerate: () => deps.debugLog('rephrase regenerate'),
+                // Scope/tone toggles and Regenerate all re-issue the bridge
+                // call (previously these only logged — Formal/Casual/
+                // Regenerate were dead buttons in the Vencord card).
+                onScopeChange: (nextScope) =>
+                    void openRephraseFor(el, text, span, deps, onAfterApply, {
+                        scope: nextScope,
+                        tone,
+                    }),
+                onToneChange: (nextTone) =>
+                    void openRephraseFor(el, text, span, deps, onAfterApply, {
+                        scope,
+                        tone: nextTone,
+                    }),
+                onRegenerate: () =>
+                    void openRephraseFor(el, text, span, deps, onAfterApply, { scope, tone }),
                 modelLabel: 'Gemma',
             })
             deps.debugLog('rephrase done', { alternatives: res.alternatives.length })
@@ -127,7 +160,7 @@ export function openRephraseFor(
             showRephraseError(deps.overlayRoot, {
                 anchorRect: el.getBoundingClientRect(),
                 message: 'Rephrase failed',
-                onRetry: () => void openRephraseFor(el, text, span, deps, onAfterApply),
+                onRetry: () => void openRephraseFor(el, text, span, deps, onAfterApply, reissue),
                 onClose: () => {},
             })
         })
