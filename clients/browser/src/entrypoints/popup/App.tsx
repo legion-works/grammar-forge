@@ -157,11 +157,24 @@ export function App() {
 
     return (
         <main className="gf-popup" data-gf-theme={theme}>
-            <header className="gf-popup__header">
-                <h1>GrammarForge</h1>
-                <p className="gf-popup__subtitle">
-                    Privacy-first corrections from your local bridge.
-                </p>
+            <header className="gf-popup__header gf-lockup">
+                <img
+                    className="gf-lockup__mark"
+                    src="/assets/grammarforge-mark.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width={26}
+                    height={26}
+                />
+                <div>
+                    <h1 className="gf-lockup__wordmark">
+                        <span className="gf-lockup__grammar">Grammar</span>
+                        <span className="gf-lockup__forge">Forge</span>
+                    </h1>
+                    <p className="gf-popup__subtitle">
+                        Privacy-first corrections from your local bridge.
+                    </p>
+                </div>
             </header>
 
             <div className="gf-popup__tabs" role="tablist" aria-label="GrammarForge">

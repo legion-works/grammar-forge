@@ -38,7 +38,7 @@ export const OVERLAY_CSS = `
        the tone, but this keeps icons + scrim sane when the user is in
        dark mode themselves. */
     color: light-dark(#111, #f5f5f5);
-    font: 500 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 500 13px/1.4 var(--gf-font-ui, system-ui), -apple-system, "Segoe UI", Roboto, sans-serif;
   }
 
   /* ============================================================
@@ -252,7 +252,7 @@ export const OVERLAY_CSS = `
     font-variant-numeric: tabular-nums;
   }
   .gf-orb__body:focus-visible {
-    outline: 2px solid #93c5fd;
+    outline: 2px solid var(--gf-ring, #86e1fc);
     outline-offset: 2px;
   }
   /* Center glyph wrapper. The orb has four center states (see
@@ -267,17 +267,17 @@ export const OVERLAY_CSS = `
     pointer-events: none;
   }
   .gf-orb__glyph--count {
-    font: 700 14px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 700 14px/1 var(--gf-font-ui, system-ui), -apple-system, "Segoe UI", Roboto, sans-serif;
     color: light-dark(#0f172a, #f5f5f5);
     font-variant-numeric: tabular-nums;
   }
   .gf-orb__glyph--clean {
-    font: 700 22px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 700 22px/1 var(--gf-font-ui, system-ui), -apple-system, "Segoe UI", Roboto, sans-serif;
     color: #4b9e6a;
   }
   .gf-orb__glyph--power svg {
     display: block;
-    color: #9ca3af;
+    color: var(--gf-faint, #9ca3af);
   }
   /* Disabled (paused-on-this-site) modifier — the orb's body still shows the
      power glyph in the center; the ring still conveys the score band. The
@@ -359,9 +359,9 @@ export const OVERLAY_CSS = `
     appearance: none;
     width: 100%;
     margin-top: 8px;
-    border: 1px solid #1d4ed8;
-    background: #2563eb;
-    color: #fff;
+    border: 1px solid var(--gf-accent-hover);
+    background: var(--gf-accent);
+    color: var(--gf-accent-ink);
     font: inherit;
     font-weight: 600;
     font-size: 12px;
@@ -371,10 +371,10 @@ export const OVERLAY_CSS = `
     transition: background 120ms ease-out;
   }
   .gf-pill-panel__apply-all:hover {
-    background: #1d4ed8;
+    background: var(--gf-accent-hover);
   }
   .gf-pill-panel__apply-all:focus-visible {
-    outline: 2px solid #93c5fd;
+    outline: 2px solid var(--gf-ring, #86e1fc);
     outline-offset: 1px;
   }
 
@@ -509,7 +509,7 @@ export const OVERLAY_CSS = `
     border-radius: 9999px;
     isolation: isolate;
     contain: layout paint;
-    font: 600 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 600 12px/1.2 var(--gf-font-ui, system-ui), -apple-system, "Segoe UI", Roboto, sans-serif;
     background: rgba(28, 28, 30, 0.82);
     background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.82));
     color: light-dark(#111, #f5f5f5);
@@ -525,7 +525,7 @@ export const OVERLAY_CSS = `
     background: rgba(255, 255, 255, 0.12);
   }
   .gf-rephrase-btn:focus-visible {
-    outline: 2px solid #93c5fd;
+    outline: 2px solid var(--gf-ring, #86e1fc);
     outline-offset: 1px;
   }
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -591,11 +591,11 @@ export const OVERLAY_CSS = `
     margin-bottom: 12px;
   }
   .gf-rephrase__head-label {
-    font: 700 13px/1 system-ui, -apple-system, sans-serif;
+    font: 700 13px/1 var(--gf-font-ui, system-ui), -apple-system, sans-serif;
     color: light-dark(#0f172a, #f5f5f5);
   }
   .gf-rephrase__head-model {
-    font: 500 11px/1 system-ui, -apple-system, sans-serif;
+    font: 500 11px/1 var(--gf-font-ui, system-ui), -apple-system, sans-serif;
     color: light-dark(rgba(15, 23, 42, 0.45), rgba(255, 255, 255, 0.45));
   }
   .gf-rephrase__head-spacer { flex: 1; }
@@ -611,7 +611,7 @@ export const OVERLAY_CSS = `
     border-radius: 7px;
     background: transparent;
     color: light-dark(rgba(15, 23, 42, 0.45), rgba(255, 255, 255, 0.45));
-    font: 500 16px/1 system-ui, sans-serif;
+    font: 500 16px/1 var(--gf-font-ui, system-ui), sans-serif;
     cursor: pointer;
     transition: background 120ms ease-out, color 120ms ease-out;
   }
@@ -620,7 +620,7 @@ export const OVERLAY_CSS = `
     color: light-dark(#0f172a, #f5f5f5);
   }
   .gf-rephrase__head-close:focus-visible {
-    outline: 2px solid #93c5fd;
+    outline: 2px solid var(--gf-ring, #86e1fc);
     outline-offset: 1px;
   }
 
@@ -640,21 +640,21 @@ export const OVERLAY_CSS = `
     border-radius: 9999px;
     border: none;
     cursor: pointer;
-    font: 600 11.5px/1 system-ui, -apple-system, sans-serif;
+    font: 600 11.5px/1 var(--gf-font-ui, system-ui), -apple-system, sans-serif;
     background: transparent;
     color: light-dark(rgba(15, 23, 42, 0.55), rgba(255, 255, 255, 0.55));
     transition: background 130ms ease-out, color 130ms ease-out;
   }
   .gf-rephrase__seg.is-active {
-    background: #2563eb;
-    color: #fff;
+    background: var(--gf-accent);
+    color: var(--gf-accent-ink);
   }
   .gf-rephrase__seg:hover:not(.is-active) {
     background: light-dark(rgba(15, 23, 42, 0.06), rgba(255, 255, 255, 0.08));
     color: light-dark(#0f172a, #f5f5f5);
   }
   .gf-rephrase__seg:focus-visible {
-    outline: 2px solid #93c5fd;
+    outline: 2px solid var(--gf-ring, #86e1fc);
     outline-offset: 1px;
   }
 
@@ -671,14 +671,14 @@ export const OVERLAY_CSS = `
     border: 1px solid light-dark(rgba(15, 23, 42, 0.12), rgba(255, 255, 255, 0.15));
     background: transparent;
     color: light-dark(rgba(15, 23, 42, 0.55), rgba(255, 255, 255, 0.55));
-    font: 600 12px/1 system-ui, -apple-system, sans-serif;
+    font: 600 12px/1 var(--gf-font-ui, system-ui), -apple-system, sans-serif;
     cursor: pointer;
     transition: background 130ms ease-out, border-color 130ms ease-out, color 130ms ease-out;
   }
   .gf-rephrase__tone.is-active {
-    background: #2563eb;
-    border-color: #2563eb;
-    color: #fff;
+    background: var(--gf-accent);
+    border-color: var(--gf-accent);
+    color: var(--gf-accent-ink);
   }
   .gf-rephrase__tone:hover:not(.is-active) {
     background: light-dark(rgba(15, 23, 42, 0.06), rgba(255, 255, 255, 0.08));
@@ -687,7 +687,7 @@ export const OVERLAY_CSS = `
 
   /* Original text: italic, muted, surface background (DC: T.surf bg) */
   .gf-rephrase__original {
-    font: 400 12.5px/1.5 system-ui, -apple-system, sans-serif;
+    font: 400 12.5px/1.5 var(--gf-font-ui, system-ui), -apple-system, sans-serif;
     font-style: italic;
     color: light-dark(rgba(15, 23, 42, 0.55), rgba(255, 255, 255, 0.55));
     padding: 8px 11px;
@@ -700,7 +700,7 @@ export const OVERLAY_CSS = `
 
   /* Rephrased text: primary result, readable */
   .gf-rephrase__text {
-    font: 400 13.5px/1.45 system-ui, -apple-system, sans-serif;
+    font: 400 13.5px/1.45 var(--gf-font-ui, system-ui), -apple-system, sans-serif;
     color: light-dark(#0f172a, #f5f5f5);
     margin-bottom: 12px;
     word-break: break-word;
@@ -716,15 +716,15 @@ export const OVERLAY_CSS = `
     padding: 0 16px;
     border-radius: 9px;
     border: none;
-    background: #2563eb;
-    color: #fff;
-    font: 600 13px/1 system-ui, -apple-system, sans-serif;
+    background: var(--gf-accent);
+    color: var(--gf-accent-ink);
+    font: 600 13px/1 var(--gf-font-ui, system-ui), -apple-system, sans-serif;
     cursor: pointer;
     transition: background 120ms ease-out;
     margin-bottom: 8px;
   }
-  .gf-rephrase__accept:hover { background: #1d4ed8; }
-  .gf-rephrase__accept:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-rephrase__accept:hover { background: var(--gf-accent-hover); }
+  .gf-rephrase__accept:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
 
   /* Alternatives (alt chips — DC: gf-alt style) */
   .gf-rephrase__opts {
@@ -740,7 +740,7 @@ export const OVERLAY_CSS = `
     border: 1px solid light-dark(rgba(15, 23, 42, 0.10), rgba(255, 255, 255, 0.12));
     background: light-dark(rgba(15, 23, 42, 0.04), rgba(255, 255, 255, 0.06));
     color: light-dark(#0f172a, #f5f5f5);
-    font: 400 13px/1.45 system-ui, -apple-system, sans-serif;
+    font: 400 13px/1.45 var(--gf-font-ui, system-ui), -apple-system, sans-serif;
     cursor: pointer;
     transition: background 120ms ease-out, border-color 120ms ease-out;
   }
@@ -799,20 +799,20 @@ export const OVERLAY_CSS = `
     word-break: break-word;
   }
   .gf-diff__old {
-    color: light-dark(#b91c1c, #fca5a5);
+    color: var(--gf-diff-old, light-dark(#b91c1c, #fca5a5));
     text-decoration: line-through;
-    text-decoration-color: #ef4444;
+    text-decoration-color: var(--gf-cat-spelling, #ef4444);
   }
   .gf-diff__arrow {
     opacity: 0.7;
     margin: 0 2px;
   }
   .gf-diff__new {
-    color: #4ade80;
+    color: var(--gf-diff-new, #4ade80);
     font-weight: 700;
   }
   .gf-diff__removed {
-    color: #9ca3af;
+    color: var(--gf-faint, #9ca3af);
     font-style: italic;
   }
   .gf-panel__diff {
@@ -850,7 +850,7 @@ export const OVERLAY_CSS = `
   }
   .gf-panel__replacement {
     font-weight: 600;
-    color: #f5f5f5;
+    color: var(--gf-ui, #f5f5f5);
   }
   .gf-panel__actions {
     display: flex;
@@ -876,17 +876,17 @@ export const OVERLAY_CSS = `
     border-color: rgba(255, 255, 255, 0.30);
   }
   .gf-panel__btn:focus-visible {
-    outline: 2px solid #93c5fd;
+    outline: 2px solid var(--gf-ring, #86e1fc);
     outline-offset: 1px;
   }
   .gf-panel__btn--primary {
-    background: #2563eb;
-    border-color: #1d4ed8;
-    color: #fff;
+    background: var(--gf-accent);
+    border-color: var(--gf-accent-hover);
+    color: var(--gf-accent-ink);
   }
   .gf-panel__btn--primary:hover {
-    background: #1d4ed8;
-    border-color: #1e40af;
+    background: var(--gf-accent-hover);
+    border-color: var(--gf-accent-hover);
   }
   .gf-panel__btn--ghost {
     background: transparent;
@@ -894,7 +894,7 @@ export const OVERLAY_CSS = `
     color: rgba(245, 245, 245, 0.8);
   }
   .gf-panel__btn--ghost:hover {
-    color: #fff;
+    color: var(--gf-ui);
     background: rgba(255, 255, 255, 0.08);
   }
   .gf-panel__alternatives {
@@ -950,13 +950,13 @@ export const OVERLAY_CSS = `
     border: none;
     background: transparent;
     cursor: pointer;
-    color: #60a5fa;
+    color: var(--gf-accent, #60a5fa);
     font: inherit;
     font-weight: 600;
     padding: 0;
   }
   .gf-toast__action:focus-visible {
-    outline: 2px solid #93c5fd;
+    outline: 2px solid var(--gf-ring, #86e1fc);
     outline-offset: 1px;
   }
 
@@ -1032,7 +1032,7 @@ export const OVERLAY_CSS = `
 
   /* ============================================================
    * SHARED DESIGN SYSTEM (ported from
-   * .opencode/specs/2026-06-15-client-redesign/handoff/scss/).
+   * handoff/scss/ — Legion Works design system, see handoff/README.md).
    * The [data-gf-theme="light|dark"] attribute on the host picks
    * the palette; Vencord always renders data-gf-theme="dark", the
    * browser extension should set it from page/OS theme. No-attribute
@@ -1048,11 +1048,18 @@ export const OVERLAY_CSS = `
    * (they are not surface popovers).
    * ============================================================ */
 
-  /* ----- Design tokens: light theme ----- */
+  /* ----- Design tokens: light theme (Tokyo Day) -----
+   * Legion Cyan is a saturated teal at this lightness (#2F7D9C), dark
+   * enough that WHITE text reads on it — --gf-accent-ink is #fff here.
+   * (Dark theme's brighter cyan needs the opposite: dark ink.) */
   :host([data-gf-theme="light"]) {
-    --gf-accent: #2563eb;
-    --gf-accent-hover: #1d4ed8;
-    --gf-accent-soft: rgba(37, 99, 235, 0.18);
+    --gf-accent: #2f7d9c;
+    --gf-accent-hover: #245f78;
+    --gf-accent-ink: #ffffff;
+    --gf-accent-soft: color-mix(in oklab, #2f7d9c 15%, transparent);
+    --gf-link: #3760bf;
+    --gf-ring: color-mix(in oklab, #2f7d9c 52%, transparent);
+    --gf-warm: #e0744c;
     --gf-cat-spelling: #ef4444;
     --gf-cat-grammar: #eab308;
     --gf-cat-punctuation: #06b6d4;
@@ -1064,18 +1071,22 @@ export const OVERLAY_CSS = `
     --gf-band-needswork: #dc2626;
     --gf-conf-high: #16a34a;
     --gf-conf-medium: #d97706;
-    --gf-conf-low: #64748b;
-    --gf-diff-old: #b91c1c;
-    --gf-diff-new: #15803d;
-    --gf-ai-violet: #8b5cf6;
-    --gf-ai-text: #7c3aed;
-    --gf-success: #22c55e;
-    --gf-ui: #0f172a;
-    --gf-muted: #64748b;
-    --gf-faint: #94a3b8;
-    --gf-ink: #21242b;
+    --gf-conf-low: #565f89;
+    --gf-diff-old: #dc2626;
+    --gf-diff-new: #16a34a;
+    --gf-ai-violet: #a87ff0;
+    --gf-ai-violet-soft: #8347d9;
+    --gf-ai-text: #7c4fc9;
+    --gf-success: #a8d472;
+    --gf-ui: #1a1b26;
+    --gf-muted: #565f89;
+    --gf-faint: #737a8c;
+    --gf-ink: #2c3044;
+    --gf-font-display: "Space Grotesk", "Geist", ui-sans-serif, system-ui, sans-serif;
+    --gf-font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --gf-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
     --gf-r-pill: 9999px;
-    --gf-r-panel: 16px;
+    --gf-r-panel: 20px;
     --gf-r-card: 14px;
     --gf-r-chip: 8px;
     --gf-sp-1: 4px;
@@ -1085,15 +1096,21 @@ export const OVERLAY_CSS = `
     --gf-sp-5: 14px;
     --gf-dur-fast: 120ms;
     --gf-dur-pop: 180ms;
-    --gf-dur-panel: 240ms;
+    --gf-dur-panel: 200ms;
     --gf-ease: cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  /* ----- Design tokens: dark theme ----- */
+  /* ----- Design tokens: dark theme (Tokyo Night, default) -----
+   * Legion Cyan is bright here (#86E1FC) — DARK ink (#0C1622), never
+   * white, on any accent-filled surface. This is the #1 rule. */
   :host([data-gf-theme="dark"]) {
-    --gf-accent: #2563eb;
-    --gf-accent-hover: #1d4ed8;
-    --gf-accent-soft: rgba(37, 99, 235, 0.18);
+    --gf-accent: #86e1fc;
+    --gf-accent-hover: #a9ebff;
+    --gf-accent-ink: #0c1622;
+    --gf-accent-soft: color-mix(in oklab, #86e1fc 18%, transparent);
+    --gf-link: #82aaff;
+    --gf-ring: color-mix(in oklab, #86e1fc 58%, transparent);
+    --gf-warm: #ff966c;
     --gf-cat-spelling: #ef4444;
     --gf-cat-grammar: #eab308;
     --gf-cat-punctuation: #06b6d4;
@@ -1105,18 +1122,22 @@ export const OVERLAY_CSS = `
     --gf-band-needswork: #dc2626;
     --gf-conf-high: #16a34a;
     --gf-conf-medium: #d97706;
-    --gf-conf-low: #6d7079;
-    --gf-diff-old: #fca5a5;
-    --gf-diff-new: #86efac;
-    --gf-ai-violet: #8b5cf6;
-    --gf-ai-text: #c4b5fd;
-    --gf-success: #22c55e;
-    --gf-ui: #f1f3f6;
-    --gf-muted: #b5bac1;
-    --gf-faint: #6d7079;
-    --gf-ink: #dfe2e8;
+    --gf-conf-low: #828bb8;
+    --gf-diff-old: #ff757f;
+    --gf-diff-new: #c3e88d;
+    --gf-ai-violet: #c099ff;
+    --gf-ai-violet-soft: #a87ff0;
+    --gf-ai-text: #d3c1ff;
+    --gf-success: #c3e88d;
+    --gf-ui: #c8d3f5;
+    --gf-muted: #828bb8;
+    --gf-faint: #737aa2;
+    --gf-ink: #a9b1d6;
+    --gf-font-display: "Space Grotesk", "Geist", ui-sans-serif, system-ui, sans-serif;
+    --gf-font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --gf-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
     --gf-r-pill: 9999px;
-    --gf-r-panel: 16px;
+    --gf-r-panel: 20px;
     --gf-r-card: 14px;
     --gf-r-chip: 8px;
     --gf-sp-1: 4px;
@@ -1126,7 +1147,7 @@ export const OVERLAY_CSS = `
     --gf-sp-5: 14px;
     --gf-dur-fast: 120ms;
     --gf-dur-pop: 180ms;
-    --gf-dur-panel: 240ms;
+    --gf-dur-panel: 200ms;
     --gf-ease: cubic-bezier(0.22, 1, 0.36, 1);
   }
 
@@ -1138,13 +1159,14 @@ export const OVERLAY_CSS = `
   :host([data-gf-theme="light"]) .gf-surface {
     position: relative;
     isolation: isolate;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.80) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.70);
-    backdrop-filter: blur(34px) saturate(195%) brightness(1.04);
-    -webkit-backdrop-filter: blur(34px) saturate(195%) brightness(1.04);
-    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08), 0 18px 50px rgba(15, 23, 42, 0.16);
+    background: color-mix(in oklab, #ffffff 90%, transparent);
+    border: 1px solid rgba(26, 27, 38, 0.10);
+    backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    box-shadow: 0 18px 50px rgba(26, 27, 38, 0.14);
     color: var(--gf-ui);
     border-radius: var(--gf-r-card);
+    font-family: var(--gf-font-ui);
   }
   :host([data-gf-theme="light"]) .gf-surface::after {
     content: "";
@@ -1153,22 +1175,21 @@ export const OVERLAY_CSS = `
     border-radius: inherit;
     pointer-events: none;
     box-shadow:
-      inset 0 2px 1.5px rgba(255, 255, 255, 0.95),
-      inset 1px 0 1px rgba(255, 255, 255, 0.50),
-      inset -1px 0 1px rgba(255, 255, 255, 0.50),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.50),
-      inset 0 -1.5px 1.5px rgba(15, 23, 42, 0.06);
+      inset 0 1px 1.5px rgba(255, 255, 255, 0.90),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.10),
+      inset 0 -1px 1px rgba(26, 27, 38, 0.06);
   }
   :host([data-gf-theme="dark"]) .gf-surface {
     position: relative;
     isolation: isolate;
-    background: linear-gradient(180deg, rgba(54, 58, 68, 0.84) 0%, rgba(33, 36, 43, 0.80) 100%);
+    background: linear-gradient(180deg, rgba(41, 46, 66, 0.90) 0%, rgba(22, 22, 30, 0.88) 100%);
     border: 1px solid rgba(255, 255, 255, 0.10);
-    backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
-    -webkit-backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.46), 0 22px 56px rgba(0, 0, 0, 0.56);
+    backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.50);
     color: var(--gf-ink);
     border-radius: var(--gf-r-card);
+    font-family: var(--gf-font-ui);
   }
   :host([data-gf-theme="dark"]) .gf-surface::after {
     content: "";
@@ -1177,11 +1198,9 @@ export const OVERLAY_CSS = `
     border-radius: inherit;
     pointer-events: none;
     box-shadow:
-      inset 0 2px 2px rgba(255, 255, 255, 0.22),
-      inset 1px 0 1px rgba(255, 255, 255, 0.10),
-      inset -1px 0 1px rgba(255, 255, 255, 0.10),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.11),
-      inset 0 -2px 2px rgba(0, 0, 0, 0.42);
+      inset 0 1px 1.5px rgba(255, 255, 255, 0.50),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.10),
+      inset 0 -1px 1px rgba(0, 0, 0, 0.16);
   }
 
   /* ----- Issue underline (in-composer marker) — design-system block -----
@@ -1208,7 +1227,7 @@ export const OVERLAY_CSS = `
     white-space: nowrap;
     padding: 5px 11px;
     border-radius: var(--gf-r-pill);
-    font: 500 12.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font: 500 12.5px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     pointer-events: none;
     /* Base solid scrim — readable on any page without backdrop-filter */
     background: rgba(28, 28, 30, 0.92);
@@ -1234,7 +1253,7 @@ export const OVERLAY_CSS = `
     background: rgba(22, 163, 74, 0.16);
     color: #16a34a;
     cursor: pointer;
-    font: 700 12px/1 system-ui, -apple-system, sans-serif;
+    font: 700 12px/1 var(--gf-font-ui, system-ui), -apple-system, sans-serif;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1268,8 +1287,8 @@ export const OVERLAY_CSS = `
     border-bottom: 5px solid transparent;
   }
   :host([data-gf-theme="dark"]) .gf-tip {
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
     background: rgba(28, 30, 36, 0.94);
     border: 1px solid rgba(255, 255, 255, 0.12);
     color: var(--gf-ink);
@@ -1282,8 +1301,8 @@ export const OVERLAY_CSS = `
   /* Flipped (below): upward caret = border-bottom colored. */
   :host([data-gf-theme="dark"]) .gf-tip--below .gf-tip__tail { border-bottom: 5px solid rgba(28, 30, 36, 0.94); border-top: none; }
   :host([data-gf-theme="light"]) .gf-tip {
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
     background: rgba(252, 252, 254, 0.96);
     border: 1px solid rgba(15, 23, 42, 0.10);
     color: #1f2937;
@@ -1328,7 +1347,7 @@ export const OVERLAY_CSS = `
     isolation: isolate;
     contain: layout paint;
     /* base font so the card never inherits the host page's font-size */
-    font: 500 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 500 13px/1.4 var(--gf-font-ui, system-ui), -apple-system, "Segoe UI", Roboto, sans-serif;
     /* default solid scrim — text reads on any page background */
     background: rgba(28, 28, 30, 0.78);
     background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
@@ -1348,33 +1367,33 @@ export const OVERLAY_CSS = `
         color-mix(in oklab, #1c1c1e 40%, transparent)
       );
       border-color: color-mix(in oklab, white 14%, transparent);
-      -webkit-backdrop-filter: blur(16px) saturate(180%);
-      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      backdrop-filter: blur(22px) saturate(160%);
     }
   }
   .gf-card__head { display: flex; align-items: center; gap: var(--gf-sp-3); margin-bottom: 9px; }
-  .gf-card__cat  { font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.05em; }
-  .gf-card__msg  { font: 400 12.5px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin-bottom: var(--gf-sp-4); }
+  .gf-card__cat  { font: 600 11px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-transform: uppercase; letter-spacing: 0.05em; }
+  .gf-card__msg  { font: 400 12.5px/1.45 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin-bottom: var(--gf-sp-4); }
   .gf-card__conf { display: flex; align-items: center; gap: var(--gf-sp-3); margin-bottom: var(--gf-sp-5); }
-  .gf-card__conf-label { font: 500 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; opacity: 0.7; }
+  .gf-card__conf-label { font: 500 11px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; opacity: 0.7; }
   .gf-card__confbar { flex: 1; max-width: 120px; height: 5px; border-radius: 3px; overflow: hidden;
                       background: rgba(127, 127, 140, 0.16); }
   .gf-card__confbar-fill { display: block; height: 100%; border-radius: inherit; }
   .gf-card__confbar-fill--high   { background: var(--gf-conf-high); }
   .gf-card__confbar-fill--medium { background: var(--gf-conf-medium); }
   .gf-card__confbar-fill--low    { background: var(--gf-conf-low); }
-  .gf-card__conf-color          { font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .gf-card__conf-color          { font: 600 11px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .gf-card__conf-color--high   { color: var(--gf-conf-high); }
   .gf-card__conf-color--medium { color: var(--gf-conf-medium); }
   .gf-card__conf-color--low    { color: var(--gf-conf-low); }
   .gf-card__actions { display: flex; gap: var(--gf-sp-2); }
   .gf-card__alts { display: flex; flex-wrap: wrap; gap: var(--gf-sp-2); margin-top: var(--gf-sp-4); }
-  .gf-card__alts-label { font: 500 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; opacity: 0.7; align-self: center; }
+  .gf-card__alts-label { font: 500 11px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; opacity: 0.7; align-self: center; }
   .gf-card__dict { width: 100%; margin-top: var(--gf-sp-4); }
   .gf-card__nav  { display: flex; align-items: center; gap: var(--gf-sp-3); margin-top: var(--gf-sp-4);
                    padding-top: var(--gf-sp-3); border-top: 1px solid rgba(127, 127, 140, 0.18); }
-  .gf-card__nav-count { font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  .gf-card__nav-hint  { font: 500 10.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; opacity: 0.6; }
+  .gf-card__nav-count { font: 600 11px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .gf-card__nav-hint  { font: 500 10.5px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; opacity: 0.6; }
   .gf-card__tail { position: absolute; top: 100%; transform: translateX(-50%);
                    width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; }
 
@@ -1385,7 +1404,7 @@ export const OVERLAY_CSS = `
     border-radius: 13px;
     border: 1px solid rgba(127, 127, 140, 0.22);
     background: rgba(127, 127, 140, 0.06);
-    font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font: 500 12px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     color: inherit;
     cursor: pointer;
     transition: background 120ms ease-out, transform 120ms ease-out;
@@ -1403,7 +1422,7 @@ export const OVERLAY_CSS = `
     border: 1px solid rgba(127, 127, 140, 0.22);
     background: transparent;
     color: inherit;
-    font: 700 14px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font: 700 14px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     cursor: pointer;
     transition: background 120ms ease-out, transform 120ms ease-out;
   }
@@ -1417,7 +1436,7 @@ export const OVERLAY_CSS = `
     padding: 1px 5px;
     border-radius: 4px;
     background: rgba(127, 127, 140, 0.18);
-    font: 600 10.5px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font: 600 10.5px/1.2 var(--gf-font-mono, ui-monospace), SFMono-Regular, Menlo, monospace;
   }
   .gf-btn-primary .gf-kbd { background: rgba(255, 255, 255, 0.22); }
 
@@ -1438,14 +1457,18 @@ export const OVERLAY_CSS = `
     height: 20px;
     padding: 0 var(--gf-sp-3);
     border-radius: var(--gf-r-pill);
-    font: 600 10.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font: 600 10.5px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     letter-spacing: 0.02em;
     background: rgba(127, 127, 140, 0.10);
     border: 1px solid rgba(127, 127, 140, 0.18);
   }
   .gf-chip-source--ai {
-    background: linear-gradient(135deg, rgba(139, 92, 246, 0.22), rgba(37, 99, 235, 0.22));
-    border-color: rgba(139, 92, 246, 0.40);
+    background: linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--gf-ai-violet, #c099ff) 22%, transparent),
+      color-mix(in oklab, var(--gf-accent, #86e1fc) 20%, transparent)
+    );
+    border-color: color-mix(in oklab, var(--gf-ai-violet, #c099ff) 40%, transparent);
     color: var(--gf-ai-text);
   }
   .gf-chip-source__hint { opacity: 0.6; font-weight: 500; }
@@ -1457,11 +1480,11 @@ export const OVERLAY_CSS = `
     border-radius: 9px;
     cursor: pointer;
     background: var(--gf-accent);
-    color: #fff;
-    font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: var(--gf-accent-ink);
+    font: 600 13px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     transition: background 120ms ease-out, transform 120ms ease-out, box-shadow 150ms ease-out;
   }
-  .gf-btn-primary:hover { background: var(--gf-accent-hover); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(37, 99, 235, 0.42); }
+  .gf-btn-primary:hover { background: var(--gf-accent-hover); transform: translateY(-1px); box-shadow: 0 6px 18px color-mix(in oklab, var(--gf-accent, #86e1fc) 42%, transparent); }
   .gf-btn-primary:active { transform: translateY(0); }
   .gf-btn-soft {
     height: 34px;
@@ -1469,7 +1492,7 @@ export const OVERLAY_CSS = `
     border-radius: 9px;
     cursor: pointer;
     background: transparent;
-    font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font: 600 13px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     transition: background 120ms ease-out, transform 120ms ease-out;
   }
   .gf-btn-soft:hover { background: rgba(127, 127, 140, 0.14); transform: translateY(-1px); }
@@ -1511,7 +1534,7 @@ export const OVERLAY_CSS = `
   /* ----- Skeleton shimmer (LLM generating rephrase) ----- */
   .gf-skel {
     border-radius: 11px;
-    background: linear-gradient(90deg, rgba(127, 127, 140, 0.10) 25%, rgba(37, 99, 235, 0.18) 50%, rgba(127, 127, 140, 0.10) 75%);
+    background: linear-gradient(90deg, rgba(127, 127, 140, 0.10) 25%, color-mix(in oklab, var(--gf-accent, #86e1fc) 18%, transparent) 50%, rgba(127, 127, 140, 0.10) 75%);
     background-size: 200% 100%;
     animation: gf-shimmer 1.5s linear infinite;
   }
@@ -1521,7 +1544,7 @@ export const OVERLAY_CSS = `
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font: 600 12px/1 var(--gf-font-ui, system-ui), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: transparent;
     transition: background 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out;
   }
@@ -1535,8 +1558,8 @@ export const OVERLAY_CSS = `
     height: 64px;
     pointer-events: none;
     z-index: 8;
-    background: linear-gradient(180deg, rgba(37, 99, 235, 0) 0%, rgba(37, 99, 235, 0.12) 50%, rgba(37, 99, 235, 0) 100%);
-    border-top: 1px solid rgba(37, 99, 235, 0.40);
+    background: linear-gradient(180deg, transparent 0%, color-mix(in oklab, var(--gf-accent, #86e1fc) 12%, transparent) 50%, transparent 100%);
+    border-top: 1px solid color-mix(in oklab, var(--gf-accent, #86e1fc) 40%, transparent);
     animation: gf-scan 1100ms ease-in-out;
   }
 
@@ -1586,12 +1609,18 @@ export const OVERLAY_CSS = `
   .gf-banner {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
+    gap: 9px;
+    padding: 9px 12px;
     margin: -8px -8px 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-    font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    color: light-dark(#334155, #d4d4d8);
+    border-radius: 12px;
+    background: linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--gf-ai-violet, #c099ff) 13%, transparent),
+      color-mix(in oklab, var(--gf-accent, #86e1fc) 13%, transparent)
+    );
+    border: 1px solid color-mix(in oklab, var(--gf-ai-violet, #c099ff) 22%, transparent);
+    font: 600 12px/1.3 var(--gf-font-ui);
+    color: var(--gf-ai-violet, #c099ff);
   }
   .gf-banner__text {
     flex: 1;
@@ -1601,8 +1630,8 @@ export const OVERLAY_CSS = `
     width: 13px;
     height: 13px;
     border-radius: 50%;
-    border: 2px solid rgba(37, 99, 235, 0.25);
-    border-top-color: #2563eb;
+    border: 2px solid color-mix(in oklab, var(--gf-accent, #86e1fc) 25%, transparent);
+    border-top-color: var(--gf-accent);
     animation: gf-spin 0.7s linear infinite;
     flex-shrink: 0;
   }
@@ -1630,7 +1659,7 @@ export const OVERLAY_CSS = `
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    border-radius: 16px;
+    border-radius: var(--gf-r-panel, 20px);
     isolation: isolate;
     contain: layout paint;
     /* Base solid scrim — opaque enough to read on any page background.
@@ -1666,8 +1695,8 @@ export const OVERLAY_CSS = `
         linear-gradient(180deg, rgba(58, 62, 72, 0.84) 0%, rgba(33, 36, 43, 0.80) 100%)
       );
       border-color: light-dark(rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.10));
-      -webkit-backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
-      backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      backdrop-filter: blur(22px) saturate(160%);
       box-shadow:
         0 4px 16px rgba(0, 0, 0, 0.42),
         0 18px 50px rgba(0, 0, 0, 0.52);
@@ -1697,16 +1726,20 @@ export const OVERLAY_CSS = `
   .gf-panel__logo {
     width: 22px;
     height: 22px;
-    border-radius: 7px;
-    background: linear-gradient(150deg, #3b82f6, #2563eb);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
     flex: 0 0 auto;
   }
+  .gf-panel__logo img,
+  .gf-panel__logo svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
   .gf-panel__title {
-    font: 700 14px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 600 14px/1 var(--gf-font-display, "Space Grotesk", system-ui, sans-serif);
+    letter-spacing: -0.01em;
     color: inherit;
   }
   .gf-panel__spacer { flex: 1; }
@@ -1723,11 +1756,11 @@ export const OVERLAY_CSS = `
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font: 500 18px/1 system-ui, sans-serif;
+    font: 500 18px/1 var(--gf-font-ui, system-ui), sans-serif;
     transition: background 120ms ease-out, opacity 120ms ease-out;
   }
   .gf-panel__iconbtn:hover { background: rgba(127, 127, 140, 0.16); opacity: 1; }
-  .gf-panel__iconbtn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-panel__iconbtn:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
   .gf-goals-pill {
     appearance: none;
     display: inline-flex;
@@ -1739,12 +1772,12 @@ export const OVERLAY_CSS = `
     border: 1px solid rgba(127, 127, 140, 0.22);
     background: rgba(127, 127, 140, 0.06);
     color: inherit;
-    font: 600 11px/1 system-ui, sans-serif;
+    font: 600 11px/1 var(--gf-font-ui, system-ui), sans-serif;
     cursor: pointer;
     transition: background 120ms ease-out, transform 120ms ease-out;
   }
   .gf-goals-pill:hover { background: rgba(127, 127, 140, 0.14); }
-  .gf-goals-pill:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-goals-pill:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
   .gf-goals-pill__dot {
     width: 6px; height: 6px; border-radius: 50%;
     background: rgba(127, 127, 140, 0.5);
@@ -1769,7 +1802,7 @@ export const OVERLAY_CSS = `
     color: inherit;
     opacity: 0.7;
     cursor: pointer;
-    font: 600 12px/1 system-ui, sans-serif;
+    font: 600 12px/1 var(--gf-font-ui, system-ui), sans-serif;
     transition: background 120ms ease-out, opacity 120ms ease-out, box-shadow 120ms ease-out;
   }
   .gf-tab.is-active {
@@ -1777,7 +1810,7 @@ export const OVERLAY_CSS = `
     background: light-dark(#fff, rgba(255, 255, 255, 0.12));
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
   }
-  .gf-tab:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-tab:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
 
   /* Score block: ring + band label + count message. */
   .gf-panel__score {
@@ -1794,10 +1827,10 @@ export const OVERLAY_CSS = `
     stroke-width: 5;
   }
   .gf-band {
-    font: 600 14px/1.2 system-ui, sans-serif;
+    font: 600 14px/1.2 var(--gf-font-ui, system-ui), sans-serif;
   }
   .gf-panel__sub {
-    font: 400 12px/1.4 system-ui, sans-serif;
+    font: 400 12px/1.4 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.7;
     margin-top: 3px;
   }
@@ -1817,14 +1850,14 @@ export const OVERLAY_CSS = `
     border: 1px solid rgba(127, 127, 140, 0.10);
   }
   .gf-stat__label {
-    font: 600 9.5px/1 system-ui, sans-serif;
+    font: 600 9.5px/1 var(--gf-font-ui, system-ui), sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     opacity: 0.6;
     margin-bottom: 6px;
   }
   .gf-stat__body {
-    font: 600 12.5px/1 system-ui, sans-serif;
+    font: 600 12.5px/1 var(--gf-font-ui, system-ui), sans-serif;
     font-variant-numeric: tabular-nums;
   }
   .gf-stat__tone-dot {
@@ -1848,15 +1881,15 @@ export const OVERLAY_CSS = `
     width: 100%;
     height: 34px;
     border-radius: 10px;
-    border: 1px solid #1d4ed8;
-    background: #2563eb;
-    color: #fff;
-    font: 600 13px/1 system-ui, sans-serif;
+    border: 1px solid var(--gf-accent-hover);
+    background: var(--gf-accent);
+    color: var(--gf-accent-ink);
+    font: 600 13px/1 var(--gf-font-ui, system-ui), sans-serif;
     cursor: pointer;
     transition: background 120ms ease-out;
   }
-  .gf-panel__primary:hover { background: #1d4ed8; }
-  .gf-panel__primary:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-panel__primary:hover { background: var(--gf-accent-hover); }
+  .gf-panel__primary:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
   .gf-panel__primary:disabled { opacity: 0.5; cursor: default; }
   .gf-panel__soft {
     appearance: none;
@@ -1866,7 +1899,7 @@ export const OVERLAY_CSS = `
     border: 1px solid rgba(127, 127, 140, 0.22);
     background: rgba(127, 127, 140, 0.06);
     color: inherit;
-    font: 600 12.5px/1 system-ui, sans-serif;
+    font: 600 12.5px/1 var(--gf-font-ui, system-ui), sans-serif;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -1875,7 +1908,7 @@ export const OVERLAY_CSS = `
     transition: background 120ms ease-out, transform 120ms ease-out;
   }
   .gf-panel__soft:hover { background: rgba(127, 127, 140, 0.14); transform: translateY(-1px); }
-  .gf-panel__soft:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-panel__soft:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
 
   /* Grouped corrections list (scrollable). */
   .gf-panel__list {
@@ -1892,7 +1925,7 @@ export const OVERLAY_CSS = `
     align-items: center;
     gap: 7px;
     margin: 0 4px 6px;
-    font: 600 11px/1 system-ui, sans-serif;
+    font: 600 11px/1 var(--gf-font-ui, system-ui), sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     opacity: 0.85;
@@ -1909,14 +1942,14 @@ export const OVERLAY_CSS = `
     appearance: none;
     background: transparent;
     border: none;
-    color: var(--gf-accent, #2563eb);
-    font: 500 11px/1 system-ui, sans-serif;
+    color: var(--gf-accent);
+    font: 500 11px/1 var(--gf-font-ui, system-ui), sans-serif;
     cursor: pointer;
     padding: 3px 6px;
     border-radius: 6px;
   }
-  .gf-textbtn:hover { background: rgba(37, 99, 235, 0.10); }
-  .gf-textbtn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-textbtn:hover { background: color-mix(in oklab, var(--gf-accent, #86e1fc) 10%, transparent); }
+  .gf-textbtn:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
   .gf-row-item {
     appearance: none;
     width: 100%;
@@ -1935,7 +1968,7 @@ export const OVERLAY_CSS = `
     transition: background 120ms ease-out, transform 120ms ease-out;
   }
   .gf-row-item:hover { background: rgba(127, 127, 140, 0.14); transform: translateX(3px); }
-  .gf-row-item:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-row-item:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
   .gf-row-item__diff { flex: 1; min-width: 0; }
   .gf-chip-source {
     display: inline-flex;
@@ -1948,13 +1981,17 @@ export const OVERLAY_CSS = `
     border: 1px solid rgba(127, 127, 140, 0.18);
     color: inherit;
     opacity: 0.85;
-    font: 600 10.5px/1 system-ui, sans-serif;
+    font: 600 10.5px/1 var(--gf-font-ui, system-ui), sans-serif;
     flex: 0 0 auto;
   }
   .gf-chip-source--ai {
-    background: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(37, 99, 235, 0.18));
-    border-color: rgba(139, 92, 246, 0.35);
-    color: light-dark(#7c3aed, #c4b5fd);
+    background: linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--gf-ai-violet, #c099ff) 18%, transparent),
+      color-mix(in oklab, var(--gf-accent, #86e1fc) 18%, transparent)
+    );
+    border-color: color-mix(in oklab, var(--gf-ai-violet, #c099ff) 35%, transparent);
+    color: var(--gf-ai-text, #c4b5fd);
   }
   .gf-chip-source__hint { opacity: 0.6; font-weight: 500; }
   .gf-hidden-note {
@@ -1965,7 +2002,7 @@ export const OVERLAY_CSS = `
     border-radius: 9px;
     background: rgba(127, 127, 140, 0.04);
     border: 1px dashed rgba(127, 127, 140, 0.22);
-    font: 500 11.5px/1.3 system-ui, sans-serif;
+    font: 500 11.5px/1.3 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.85;
     margin-top: 2px;
   }
@@ -1979,7 +2016,7 @@ export const OVERLAY_CSS = `
     border-top: 1px solid rgba(127, 127, 140, 0.18);
     flex: 0 0 auto;
   }
-  .gf-panel__learns { font: 500 11.5px/1.3 system-ui, sans-serif; opacity: 0.65; }
+  .gf-panel__learns { font: 500 11.5px/1.3 var(--gf-font-ui, system-ui), sans-serif; opacity: 0.65; }
 
   /* ============================================================
    * Goals popover (.gf-goals-pop) — the audience/formality/domain
@@ -2017,18 +2054,18 @@ export const OVERLAY_CSS = `
         linear-gradient(180deg, rgba(58, 62, 72, 0.84) 0%, rgba(33, 36, 43, 0.80) 100%)
       );
       border-color: light-dark(rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.10));
-      -webkit-backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
-      backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      backdrop-filter: blur(22px) saturate(160%);
     }
   }
   .gf-goals__head {
     display: flex;
     align-items: center;
     gap: 7px;
-    font: 600 13px/1 system-ui, sans-serif;
+    font: 600 13px/1 var(--gf-font-ui, system-ui), sans-serif;
     margin-bottom: 11px;
   }
-  .gf-goals__faint { font: 500 11px/1 system-ui, sans-serif; opacity: 0.6; margin-left: 6px; }
+  .gf-goals__faint { font: 500 11px/1 var(--gf-font-ui, system-ui), sans-serif; opacity: 0.6; margin-left: 6px; }
   .gf-goals__row {
     display: flex;
     align-items: center;
@@ -2037,7 +2074,7 @@ export const OVERLAY_CSS = `
   }
   .gf-goals__label {
     flex: 0 0 70px;
-    font: 600 11px/1 system-ui, sans-serif;
+    font: 600 11px/1 var(--gf-font-ui, system-ui), sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     opacity: 0.7;
@@ -2059,7 +2096,7 @@ export const OVERLAY_CSS = `
     color: inherit;
     opacity: 0.7;
     cursor: pointer;
-    font: 600 12px/1 system-ui, sans-serif;
+    font: 600 12px/1 var(--gf-font-ui, system-ui), sans-serif;
     transition: background 120ms ease-out, opacity 120ms ease-out, box-shadow 120ms ease-out;
   }
   .gf-seg.is-active {
@@ -2068,10 +2105,10 @@ export const OVERLAY_CSS = `
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.16);
   }
   .gf-seg:hover:not(.is-active) { background: rgba(127, 127, 140, 0.10); }
-  .gf-seg:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-seg:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
   .gf-goals__note {
     margin: 8px 0 0;
-    font: 500 11.5px/1.45 system-ui, sans-serif;
+    font: 500 11.5px/1.45 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.7;
   }
 
@@ -2107,7 +2144,7 @@ export const OVERLAY_CSS = `
     gap: 3px;
   }
   .gf-statcard__value {
-    font: 700 20px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 700 20px/1 var(--gf-font-ui, system-ui), -apple-system, "Segoe UI", Roboto, sans-serif;
     color: inherit;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.01em;
@@ -2118,18 +2155,18 @@ export const OVERLAY_CSS = `
     border-radius: 6px;
   }
   .gf-statcard__label {
-    font: 600 10px/1.2 system-ui, sans-serif;
+    font: 600 10px/1.2 var(--gf-font-ui, system-ui), sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     opacity: 0.65;
   }
   .gf-statcard__sub {
-    font: 400 11px/1.2 system-ui, sans-serif;
+    font: 400 11px/1.2 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.65;
     font-style: normal;
   }
   .gf-stats__sec {
-    font: 600 10.5px/1 system-ui, sans-serif;
+    font: 600 10.5px/1 var(--gf-font-ui, system-ui), sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     opacity: 0.7;
@@ -2147,7 +2184,7 @@ export const OVERLAY_CSS = `
   }
   .gf-bar__label {
     width: 74px;
-    font: 500 11.5px/1 system-ui, sans-serif;
+    font: 500 11.5px/1 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.75;
     flex: 0 0 auto;
   }
@@ -2167,7 +2204,7 @@ export const OVERLAY_CSS = `
   .gf-bar__count {
     width: 24px;
     text-align: right;
-    font: 600 11.5px/1 system-ui, sans-serif;
+    font: 600 11.5px/1 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.7;
     font-variant-numeric: tabular-nums;
   }
@@ -2185,7 +2222,7 @@ export const OVERLAY_CSS = `
     border-radius: 9999px;
     background: rgba(127, 127, 140, 0.08);
     border: 1px solid rgba(127, 127, 140, 0.18);
-    font: 500 12px/1 system-ui, sans-serif;
+    font: 500 12px/1 var(--gf-font-ui, system-ui), sans-serif;
     color: inherit;
   }
   .gf-dictchip__x {
@@ -2198,7 +2235,7 @@ export const OVERLAY_CSS = `
     color: inherit;
     opacity: 0.6;
     cursor: pointer;
-    font: 500 13px/1 system-ui, sans-serif;
+    font: 500 13px/1 var(--gf-font-ui, system-ui), sans-serif;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2206,13 +2243,13 @@ export const OVERLAY_CSS = `
     transition: opacity 120ms ease-out, background 120ms ease-out;
   }
   .gf-dictchip__x:hover { opacity: 1; background: rgba(127, 127, 140, 0.16); }
-  .gf-dictchip__x:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-dictchip__x:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
   .gf-stats__empty {
-    font: 400 12px/1.35 system-ui, sans-serif;
+    font: 400 12px/1.35 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.65;
   }
   .gf-stats__note {
-    font: 400 11px/1.45 system-ui, sans-serif;
+    font: 400 11px/1.45 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.6;
     margin-top: 6px;
     padding-top: 12px;
@@ -2227,7 +2264,7 @@ export const OVERLAY_CSS = `
     background: rgba(239, 68, 68, 0.08);
     border: 1px solid rgba(239, 68, 68, 0.18);
     color: inherit;
-    font: 500 12px/1.3 system-ui, sans-serif;
+    font: 500 12px/1.3 var(--gf-font-ui, system-ui), sans-serif;
   }
 
   /* ============================================================
@@ -2266,12 +2303,12 @@ export const OVERLAY_CSS = `
         linear-gradient(180deg, rgba(58, 62, 72, 0.84) 0%, rgba(33, 36, 43, 0.80) 100%)
       );
       border-color: light-dark(rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.10));
-      -webkit-backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
-      backdrop-filter: blur(34px) saturate(200%) brightness(1.05);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      backdrop-filter: blur(22px) saturate(160%);
     }
   }
   .gf-syn__head {
-    font: 600 10px/1 system-ui, sans-serif;
+    font: 600 10px/1 var(--gf-font-ui, system-ui), sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     opacity: 0.6;
@@ -2295,15 +2332,15 @@ export const OVERLAY_CSS = `
     border: none;
     background: transparent;
     color: inherit;
-    font: 500 13px/1 system-ui, sans-serif;
+    font: 500 13px/1 var(--gf-font-ui, system-ui), sans-serif;
     cursor: pointer;
     transition: background 120ms ease-out;
   }
   .gf-syn__row:hover { background: rgba(127, 127, 140, 0.14); }
-  .gf-syn__row:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+  .gf-syn__row:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
   .gf-syn__empty {
     padding: 7px 9px;
-    font: 400 12px/1.35 system-ui, sans-serif;
+    font: 400 12px/1.35 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.65;
   }
   .gf-syn__tail {
@@ -2322,7 +2359,7 @@ export const OVERLAY_CSS = `
     align-items: center;
     gap: 7px;
     padding: 9px 11px;
-    font: 500 12px/1 system-ui, sans-serif;
+    font: 500 12px/1 var(--gf-font-ui, system-ui), sans-serif;
     opacity: 0.7;
   }
   .gf-syn__spinner {

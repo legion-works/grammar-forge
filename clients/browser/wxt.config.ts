@@ -32,6 +32,20 @@ export default defineConfig({
         description: 'Privacy-first grammar corrections from your self-hosted GrammarForge bridge.',
         permissions: ['storage', 'activeTab'],
         optional_host_permissions: ['<all_urls>'],
+        // The overlay's review panel (overlay/panel.ts) renders the Forge
+        // Caret mark via `browser.runtime.getURL('/assets/grammarforge-mark.svg')`
+        // inside a content-script shadow root injected into arbitrary host
+        // pages. Without a web_accessible_resources entry, Chrome/Firefox
+        // block third-party pages from loading chrome-extension:// resources
+        // (net::ERR_BLOCKED_BY_CLIENT) — the mark would silently fail to
+        // render in-page (popup/options load it fine since they ARE the
+        // extension origin already).
+        web_accessible_resources: [
+            {
+                resources: ['assets/*.svg'],
+                matches: ['<all_urls>'],
+            },
+        ],
         commands: {
             'trigger-check': {
                 suggested_key: { default: 'Ctrl+Shift+Period' },

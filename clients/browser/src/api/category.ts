@@ -4,8 +4,9 @@ import type { BridgeSuggestion, Category } from '@/api/types'
  * Per-category display metadata.
  *
  * The single source of truth for GrammarForge's category palette is
- * `.opencode/specs/2026-06-15-client-redesign/handoff/scss/_tokens.scss`
- * (the `$gf-cat-*` Sass map). The two colour fields here play
+ * `handoff/scss/_tokens.scss` (the `$gf-cat-*` Sass map / Legion Works
+ * `--cat-*` design tokens — see handoff/README.md). The two colour
+ * fields here play
  * distinct roles:
  *
  * - `badge` is the canonical token colour (`#ef4444` / `#eab308` /

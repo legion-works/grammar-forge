@@ -27,14 +27,16 @@
   --gf-radius-pill: 9999px;
   --gf-blur: blur(16px) saturate(180%);
   --gf-blur-pill: blur(10px) saturate(160%);
-  --gf-font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --gf-font: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   /* Shared design tokens (mirrors clients/browser/src/overlay/styles.ts
      -> :host([data-gf-theme]). Kept in sync with the in-page OVERLAY_CSS
      so popup swatches + legend dots + status dots agree with the
-     composer. Single source of truth is .opencode/specs/2026-06-15-
-     client-redesign/handoff/scss/_tokens.scss. */
-  --gf-accent: #2563eb;
-  --gf-accent-hover: #1d4ed8;
+     composer. Single source of truth is handoff/scss/_tokens.scss
+     (Legion Works design system — see handoff/README.md). */
+  --gf-accent: #86e1fc;
+  --gf-accent-hover: #a9ebff;
+  --gf-accent-ink: #0c1622;
+  --gf-ai-violet: #c099ff;
   --gf-cat-spelling: #ef4444;
   --gf-cat-grammar: #eab308;
   --gf-cat-punctuation: #06b6d4;
@@ -44,6 +46,21 @@
   --gf-band-good: #0891b2;
   --gf-band-fair: #d97706;
   --gf-band-needswork: #dc2626;
+  --gf-font-display: "Space Grotesk", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --gf-font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --gf-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Light theme swaps the accent to the darker, more saturated cyan (Legion
+   Cyan reads too bright/illegible for buttons at light-mode contrast) —
+   dark enough that WHITE button text (--gf-accent-ink) still works, unlike
+   the bright dark-theme cyan which needs dark ink. See handoff/LOGO.md /
+   INSTRUCTIONS.md §A: "primary buttons use dark ink, never white" applies
+   to the DARK theme's bright cyan; light theme's --accent-ink is white. */
+:root:has(main[data-gf-theme='light']) {
+  --gf-accent: #2f7d9c;
+  --gf-accent-hover: #245f78;
+  --gf-accent-ink: #ffffff;
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -91,6 +108,38 @@ h3 {
   margin: 0;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+h1 {
+  font-family: var(--gf-font-display);
+}
+
+/* Mark + wordmark lockup (popup header, options header). The mark is
+   theme-invariant (its own gradient reads on any ground — LOGO.md); the
+   wordmark is two-tone: "Grammar" in strong text, "Forge" in the accent. */
+.gf-lockup {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.gf-lockup__mark {
+  flex: 0 0 auto;
+  display: block;
+}
+.gf-lockup__wordmark {
+  font-family: var(--gf-font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.gf-lockup__grammar {
+  color: var(--gf-text, inherit);
+}
+.gf-lockup__forge {
+  color: var(--gf-accent);
+}
+.gf-lockup__suffix {
+  color: var(--gf-text-dim, inherit);
+  font-weight: 500;
 }
 
 button {
@@ -157,7 +206,7 @@ textarea {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
 }
 .gf-popup__tab:focus-visible {
-  outline: 2px solid #93c5fd;
+  outline: 2px solid var(--gf-accent, #93c5fd);
   outline-offset: 1px;
 }
 
@@ -268,9 +317,10 @@ textarea {
 
 .gf-popup__btn--primary {
   background: var(--gf-accent);
-  color: white;
+  color: var(--gf-accent-ink, white);
   border-color: var(--gf-accent-hover);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  font-weight: 600;
+  text-shadow: none;
 }
 
 .gf-popup__legend h2 {

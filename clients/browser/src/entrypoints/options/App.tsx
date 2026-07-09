@@ -7,11 +7,25 @@ import { SettingsForm } from '@/entrypoints/settings/SettingsForm'
 export function App() {
     return (
         <main className="gf-options">
-            <header>
-                <h1>GrammarForge settings</h1>
-                <p className="gf-options__lead">
-                    Privacy-first grammar corrections from your self-hosted bridge.
-                </p>
+            <header className="gf-lockup">
+                <img
+                    className="gf-lockup__mark"
+                    src="/assets/grammarforge-mark.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width={30}
+                    height={30}
+                />
+                <div>
+                    <h1 className="gf-lockup__wordmark">
+                        <span className="gf-lockup__grammar">Grammar</span>
+                        <span className="gf-lockup__forge">Forge</span>
+                        <span className="gf-lockup__suffix"> settings</span>
+                    </h1>
+                    <p className="gf-options__lead">
+                        Privacy-first grammar corrections from your self-hosted bridge.
+                    </p>
+                </div>
             </header>
             <aside className="gf-options__privacy" role="note">
                 <strong>Privacy</strong>

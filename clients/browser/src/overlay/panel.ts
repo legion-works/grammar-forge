@@ -382,7 +382,7 @@ function renderChrome(
     // Head
     const head = el(aside, 'div', 'gf-panel__head')
     const logo = el(head, 'span', 'gf-panel__logo')
-    logo.appendChild(svgInline(LOGO_PATH))
+    logo.appendChild(buildMarkImg())
     el(head, 'span', 'gf-panel__title').textContent = 'GrammarForge'
     el(head, 'span', 'gf-panel__spacer')
     const goalsPill = el(head, 'button', 'gf-goals-pill') as HTMLButtonElement
@@ -580,7 +580,11 @@ function renderReviewBodyContent(
         if (m.showMutedNote) {
             const note = el(list, 'div', 'gf-hidden-note')
             const noteDot = el(note, 'span', 'gf-group__dot')
-            noteDot.style.background = '#8b5cf6'
+            // Geth Purple (--gf-ai-violet) — this note is the AI/goals
+            // accent, not the (unrelated, coincidentally-same-hex-before-
+            // the-rebrand) style category color. See handoff/LOGO.md /
+            // _tokens.scss: cat-style stays #8b5cf6, AI violet is now #c099ff.
+            noteDot.style.background = 'var(--gf-ai-violet, #c099ff)'
             note.appendChild(
                 document.createTextNode(
                     `${String(m.mutedStyleCount)} style suggestion${m.mutedStyleCount === 1 ? '' : 's'} muted by your goals`,
@@ -611,10 +615,49 @@ function iconButton(parent: HTMLElement, kind: 'recheck' | 'close', ariaLabel: s
     return btn
 }
 
-const LOGO_PATH =
-    'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z'
 const RECHECK_PATH =
     'M20 11 A8 8 0 1 0 18.4 16 M20 4 L20 11 L13 11'
+
+/** The Forge Caret mark (handoff/LOGO.md) — retired the old pencil-in-a-
+ *  lozenge glyph. The mark is theme-invariant (its own gradient/glow read
+ *  on any ground) so it's shipped as a static asset. NOT the same element
+ *  as the score orb (LOGO.md: "the orb is NOT the logo").
+ *
+ *  This module is shared by the Vencord client, which is NOT an extension —
+ *  `browser.runtime` does not exist there. Prefer the extension URL (crisp,
+ *  cacheable) when the WebExtension API is present; otherwise fall back to
+ *  a data: URI of the same SVG so the mark renders in any host context. */
+const MARK_SVG =
+    `<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GrammarForge mark">` +
+    `<defs>` +
+    `<linearGradient id="gfCaret" x1="24" y1="12" x2="24" y2="30" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#c7f2ff"/><stop offset="55%" stop-color="#86e1fc"/><stop offset="100%" stop-color="#82aaff"/></linearGradient>` +
+    `<radialGradient id="gfCore" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#e8faff"/><stop offset="55%" stop-color="#86e1fc"/><stop offset="100%" stop-color="#82aaff"/></radialGradient>` +
+    `<radialGradient id="gfEmber" cx="50%" cy="45%" r="55%"><stop offset="0%" stop-color="#ffe6cf"/><stop offset="60%" stop-color="#ffc777"/><stop offset="100%" stop-color="#ff966c"/></radialGradient>` +
+    `<filter id="gfGlow" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="1.9" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>` +
+    `</defs>` +
+    `<g stroke-width="2.6" stroke-linecap="round">` +
+    `<line x1="12.5" y1="37.5" x2="16.75" y2="37.5" stroke="#ef4444"/><line x1="18.75" y1="37.5" x2="23" y2="37.5" stroke="#eab308"/><line x1="25" y1="37.5" x2="29.25" y2="37.5" stroke="#06b6d4"/><line x1="31.25" y1="37.5" x2="35.5" y2="37.5" stroke="#8b5cf6"/>` +
+    `</g>` +
+    `<path d="M12.5 28.5 L24 14 L35.5 28.5" fill="none" stroke="url(#gfCaret)" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round" filter="url(#gfGlow)"/>` +
+    `<circle cx="29.4" cy="9.1" r="1.15" fill="url(#gfEmber)" opacity="0.92"/><circle cx="20.6" cy="7.9" r="0.85" fill="url(#gfEmber)" opacity="0.85"/>` +
+    `<circle cx="24" cy="14" r="3.5" fill="url(#gfCore)" filter="url(#gfGlow)"/><circle cx="24" cy="14" r="3.5" fill="none" stroke="#e6faff" stroke-width="0.8" opacity="0.7"/>` +
+    `</svg>`
+
+function markUrl(): string {
+    const ext = (globalThis as { browser?: { runtime?: { getURL?: (p: string) => string } } }).browser
+    if (ext?.runtime?.getURL) return ext.runtime.getURL('/assets/grammarforge-mark.svg')
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(MARK_SVG)}`
+}
+
+function buildMarkImg(): HTMLImageElement {
+    const img = document.createElement('img')
+    img.src = markUrl()
+    img.alt = ''
+    img.setAttribute('aria-hidden', 'true')
+    img.width = 22
+    img.height = 22
+    return img
+}
 
 function svgInline(pathData: string): SVGElement {
     const svg = document.createElementNS(SVG_NS, 'svg')
@@ -697,7 +740,7 @@ function toneHTML(): HTMLElement {
     const c2 = document.createElement('span')
     const dot2 = document.createElement('span')
     dot2.className = 'gf-stat__tone-dot'
-    dot2.style.background = '#2563eb'
+    dot2.style.background = 'var(--gf-accent, #86e1fc)'
     c2.appendChild(dot2)
     c2.appendChild(document.createTextNode('Warm'))
     wrap.append(c1, sep, c2)
