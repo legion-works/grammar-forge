@@ -88,6 +88,15 @@ describe("buildDetailsViewModel — bordered card shape", () => {
         expect(vmDefault.hints).not.toMatch(/n\/p/);
         expect(vmExplicit.hints).not.toMatch(/n\/p/);
     });
+    test("exposes the resolved cycleNextKey/cyclePrevKey so card-spec can build discrete hint segments", () => {
+        const vm = buildDetailsViewModel(item(), 0, 1, "ctrl+n", "ctrl+p");
+        expect(vm.cycleNextKey).toBe("ctrl+n");
+        expect(vm.cyclePrevKey).toBe("ctrl+p");
+        const vmDefault = buildDetailsViewModel(item(), 0, 1);
+        expect(vmDefault.cycleNextKey).toBe("/");
+        expect(vmDefault.cyclePrevKey).toBe(".");
+    });
+
     test("category label uses the override category", () => {
         const vm = buildDetailsViewModel(item({ category: "grammar" }), 0, 1);
         expect(vm.categoryLabel).toBe("Grammar");

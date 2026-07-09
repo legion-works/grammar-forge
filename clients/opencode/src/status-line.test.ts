@@ -20,6 +20,31 @@ describe("buildStatusLine", () => {
         expect(result).not.toContain("rephrase");
     });
 
+    test("REGRESSION GUARD: every real Category gets its own tick glyph (punctuation must not fall through to the 'unknown' tick)", () => {
+        // clients/browser/src/api/types.ts Category union. Bug: the tick map
+        // previously omitted "punctuation" (and had a stray "misc" that isn't
+        // a real category), so punctuation issues silently rendered the same
+        // glyph as "unknown" — visually indistinguishable in the status line.
+        const categories = ["spelling", "grammar", "punctuation", "style", "typography"] as const;
+        const ticksByCategory = categories.map(
+            (c) => buildStatusLine({ state: "flagged", issueCount: 1, categories: [c] }),
+        );
+        // Every category must produce a distinct tick glyph.
+        expect(new Set(ticksByCategory).size).toBe(categories.length);
+        // Specifically: punctuation's tick must differ from unknown's fallback tick.
+        const punctuationLine = buildStatusLine({
+            state: "flagged",
+            issueCount: 1,
+            categories: ["punctuation"],
+        });
+        const unknownLine = buildStatusLine({
+            state: "flagged",
+            issueCount: 1,
+            categories: ["some-made-up-category"],
+        });
+        expect(punctuationLine).not.toBe(unknownLine);
+    });
+
     test("FLAGGED: singular noun for a single issue", () => {
         const result = buildStatusLine({ state: "flagged", issueCount: 1, applyAllKey: "ctrl+." });
         expect(result).toContain("1 issue ");

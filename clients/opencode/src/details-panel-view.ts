@@ -105,6 +105,16 @@ export interface PanelController {
     onCyclePrev?: () => void;
     onRephraseAccept?: () => void;
     onRephraseReject?: () => void;
+    /** Mouse mirrors of ↑/↓/tab (cycle alternatives) and PgUp/PgDn (scroll a
+     *  tall rephrase card) — opencode-interaction.md §4: "click an
+     *  alternative → select it" / "scroll wheel over a tall rephrase card →
+     *  scroll the wrapped text". Wired by the orchestrator alongside
+     *  onRephraseAccept/onRephraseReject; undefined until a rephrase-result
+     *  is showing (mirrors the gated keymap layer). */
+    onRephraseCycleNext?: () => void;
+    onRephraseCyclePrev?: () => void;
+    onRephraseScrollUp?: () => void;
+    onRephraseScrollDown?: () => void;
 }
 
 export function createDetailsPanelController(): PanelController {

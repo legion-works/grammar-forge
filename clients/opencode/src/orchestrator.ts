@@ -329,8 +329,11 @@ export function startOrchestrator(
     // Unpatched OpenCode build (no prompt facade): warn once, return no-op.
     if (!api.prompt) {
         logDebug("feature-detect: api.prompt missing — plugin disabled", {});
+        // CLI lockup (LOGO.md): "❯ " + the mono mark's textual form. This is
+        // the one surface where the plugin identifies itself to the user, so
+        // it carries the brand mark instead of a plain "GrammarForge:" prefix.
         api.ui.toast({
-            message: "GrammarForge: this OpenCode build lacks the prompt facade — plugin disabled",
+            message: "❯ grammarforge — this OpenCode build lacks the prompt facade; plugin disabled",
             variant: "warning",
         });
         return () => undefined;
@@ -1141,6 +1144,61 @@ export function startOrchestrator(
 
     // Rephrase result/loading layer — gated: active whenever state.rephrase !== null.
     // enter accepts (no-op if still loading), esc cancels in both modes.
+    //
+    // The alt-cycle / scroll handlers are named top-level closures (not
+    // inlined into the commands array) so the SAME function can back both
+    // the keymap binding (↑/↓/tab, PgUp/PgDn) and the mouse mirror wired
+    // onto the panel controller below (opencode-interaction.md §4: "click
+    // an alternative → select it" / "scroll wheel → scroll the wrapped
+    // text") — one source of truth per action, never two implementations
+    // that could drift.
+    const rephraseCycleAlt = (direction: 1 | -1): void => {
+        if (state.rephrase?.mode !== "result") return;
+        const total = 1 + state.rephrase.alternatives.length;
+        if (total <= 1) return;
+        const nextIdx = ((state.rephrase.altIndex + direction) % total + total) % total;
+        state.rephrase.altIndex = nextIdx;
+        const ctrl = rephraseController;
+        if (!ctrl) return;
+        const currentText =
+            nextIdx === 0 ? state.rephrase.rephrased! : state.rephrase.alternatives[nextIdx - 1]!;
+        ctrl.setView({
+            kind: "rephrase-result",
+            original: state.rephrase.original,
+            rephrased: currentText,
+            alternatives: state.rephrase.alternatives,
+            altIndex: nextIdx,
+            altTotal: total,
+            scrollOffset: state.rephrase.scrollOffset,
+            displayStart: 0,
+        });
+    };
+    const rephraseCycleAltNext = (): void => rephraseCycleAlt(1);
+    const rephraseCycleAltPrev = (): void => rephraseCycleAlt(-1);
+
+    const rephraseScroll = (direction: 1 | -1): void => {
+        if (state.rephrase?.mode !== "result") return;
+        state.rephrase.scrollOffset = Math.max(0, state.rephrase.scrollOffset + direction);
+        const ctrl = rephraseController;
+        if (!ctrl) return;
+        const currentText =
+            state.rephrase.altIndex === 0
+                ? state.rephrase.rephrased!
+                : state.rephrase.alternatives[state.rephrase.altIndex - 1]!;
+        ctrl.setView({
+            kind: "rephrase-result",
+            original: state.rephrase.original,
+            rephrased: currentText,
+            alternatives: state.rephrase.alternatives,
+            altIndex: state.rephrase.altIndex,
+            altTotal: 1 + state.rephrase.alternatives.length,
+            scrollOffset: state.rephrase.scrollOffset,
+            displayStart: 0,
+        });
+    };
+    const rephraseScrollUp = (): void => rephraseScroll(-1);
+    const rephraseScrollDown = (): void => rephraseScroll(1);
+
     const disposeRephraseLayer = api.keymap.registerLayer({
         priority: 500,
         enabled: () => state.rephrase !== null,
@@ -1163,112 +1221,34 @@ export function startOrchestrator(
             {
                 name: "grammarforge.rephrase.cycleAltNext",
                 title: "GrammarForge: next alternative",
-                run: () => {
-                    if (state.rephrase?.mode !== "result") return;
-                    const total = 1 + state.rephrase.alternatives.length;
-                    if (total <= 1) return;
-                    const nextIdx = ((state.rephrase.altIndex + 1) % total + total) % total;
-                    state.rephrase.altIndex = nextIdx;
-                    const ctrl = rephraseController;
-                    if (!ctrl) return;
-                    const currentText = nextIdx === 0
-                        ? state.rephrase.rephrased!
-                        : state.rephrase.alternatives[nextIdx - 1]!;
-                    ctrl.setView({
-                        kind: "rephrase-result",
-                        original: state.rephrase.original,
-                        rephrased: currentText,
-                        alternatives: state.rephrase.alternatives,
-                        altIndex: nextIdx,
-                        altTotal: total,
-                        scrollOffset: state.rephrase.scrollOffset,
-                        displayStart: 0,
-                    });
-                },
+                run: rephraseCycleAltNext,
             },
-                {
-                    name: "grammarforge.rephrase.cycleAltPrev",
-                    title: "GrammarForge: previous alternative",
-                    run: () => {
-                        if (state.rephrase?.mode !== "result") return;
-                        const total = 1 + state.rephrase.alternatives.length;
-                        if (total <= 1) return;
-                        const prevIdx = ((state.rephrase.altIndex - 1) % total + total) % total;
-                        state.rephrase.altIndex = prevIdx;
-                        const ctrl = rephraseController;
-                        if (!ctrl) return;
-                        const currentText = prevIdx === 0
-                            ? state.rephrase.rephrased!
-                            : state.rephrase.alternatives[prevIdx - 1]!;
-                        ctrl.setView({
-                            kind: "rephrase-result",
-                            original: state.rephrase.original,
-                            rephrased: currentText,
-                            alternatives: state.rephrase.alternatives,
-                            altIndex: prevIdx,
-                            altTotal: total,
-                            scrollOffset: state.rephrase.scrollOffset,
-                            displayStart: 0,
-                        });
-                    },
-                },
-                {
-                    name: "grammarforge.rephrase.scrollUp",
-                    title: "GrammarForge: scroll rephrase up",
-                    run: () => {
-                        if (state.rephrase?.mode !== "result") return;
-                        state.rephrase.scrollOffset = Math.max(0, state.rephrase.scrollOffset - 1);
-                        const ctrl = rephraseController;
-                        if (!ctrl) return;
-                        const currentText = state.rephrase.altIndex === 0
-                            ? state.rephrase.rephrased!
-                            : state.rephrase.alternatives[state.rephrase.altIndex - 1]!;
-                        ctrl.setView({
-                            kind: "rephrase-result",
-                            original: state.rephrase.original,
-                            rephrased: currentText,
-                            alternatives: state.rephrase.alternatives,
-                            altIndex: state.rephrase.altIndex,
-                            altTotal: 1 + state.rephrase.alternatives.length,
-                            scrollOffset: state.rephrase.scrollOffset,
-                            displayStart: 0,
-                        });
-                    },
-                },
-                {
-                    name: "grammarforge.rephrase.scrollDown",
-                    title: "GrammarForge: scroll rephrase down",
-                    run: () => {
-                        if (state.rephrase?.mode !== "result") return;
-                        state.rephrase.scrollOffset = state.rephrase.scrollOffset + 1;
-                        const ctrl = rephraseController;
-                        if (!ctrl) return;
-                        const currentText = state.rephrase.altIndex === 0
-                            ? state.rephrase.rephrased!
-                            : state.rephrase.alternatives[state.rephrase.altIndex - 1]!;
-                        ctrl.setView({
-                            kind: "rephrase-result",
-                            original: state.rephrase.original,
-                            rephrased: currentText,
-                            alternatives: state.rephrase.alternatives,
-                            altIndex: state.rephrase.altIndex,
-                            altTotal: 1 + state.rephrase.alternatives.length,
-                            scrollOffset: state.rephrase.scrollOffset,
-                            displayStart: 0,
-                        });
-                    },
-                },
-            ],
-            bindings: [
-                { key: "return", cmd: "grammarforge.rephrase.accept" },
-                { key: "escape", cmd: "grammarforge.rephrase.reject" },
-                { key: "ctrl+/", cmd: "grammarforge.rephrase.regenerate" },
-                { key: "down", cmd: "grammarforge.rephrase.cycleAltNext" },
-                { key: "up", cmd: "grammarforge.rephrase.cycleAltPrev" },
-                { key: "tab", cmd: "grammarforge.rephrase.cycleAltNext" },
-                { key: "pageup", cmd: "grammarforge.rephrase.scrollUp" },
-                { key: "pagedown", cmd: "grammarforge.rephrase.scrollDown" },
-            ],
+            {
+                name: "grammarforge.rephrase.cycleAltPrev",
+                title: "GrammarForge: previous alternative",
+                run: rephraseCycleAltPrev,
+            },
+            {
+                name: "grammarforge.rephrase.scrollUp",
+                title: "GrammarForge: scroll rephrase up",
+                run: rephraseScrollUp,
+            },
+            {
+                name: "grammarforge.rephrase.scrollDown",
+                title: "GrammarForge: scroll rephrase down",
+                run: rephraseScrollDown,
+            },
+        ],
+        bindings: [
+            { key: "return", cmd: "grammarforge.rephrase.accept" },
+            { key: "escape", cmd: "grammarforge.rephrase.reject" },
+            { key: "ctrl+/", cmd: "grammarforge.rephrase.regenerate" },
+            { key: "down", cmd: "grammarforge.rephrase.cycleAltNext" },
+            { key: "up", cmd: "grammarforge.rephrase.cycleAltPrev" },
+            { key: "tab", cmd: "grammarforge.rephrase.cycleAltNext" },
+            { key: "pageup", cmd: "grammarforge.rephrase.scrollUp" },
+            { key: "pagedown", cmd: "grammarforge.rephrase.scrollDown" },
+        ],
     });
 
     // Details layer — gated by enabled. When nothing is pinned, the
@@ -1571,6 +1551,14 @@ export function startOrchestrator(
         }
         controller.onRephraseAccept = rephraseAccept;
         controller.onRephraseReject = rephraseReject;
+        // Mouse mirrors of ↑/↓/tab (alternative cycling) and PgUp/PgDn
+        // (scroll) — same functions the gated rephrase keymap layer binds,
+        // so clicking the title row / scrolling the wheel can never drift
+        // from what the keyboard does (opencode-interaction.md §4 + §8).
+        controller.onRephraseCycleNext = rephraseCycleAltNext;
+        controller.onRephraseCyclePrev = rephraseCycleAltPrev;
+        controller.onRephraseScrollUp = rephraseScrollUp;
+        controller.onRephraseScrollDown = rephraseScrollDown;
 
         // ── A6: Status-line push helper ──────────────────────────────
         pushStatusLine = (): void => {

@@ -7,6 +7,7 @@ import {
     jumpPrev,
     type Decoration,
     type OrchestratorDeps,
+    type PanelController,
 } from "./orchestrator";
 
 describe("resolveSettings", () => {
@@ -1806,12 +1807,14 @@ describe("startOrchestrator", () => {
             lifecycle: { onDispose: () => () => undefined },
         } as unknown as Parameters<typeof startOrchestrator>[0];
 
-        const panelController = {
-            setView: (v: import("./details-panel-view").PanelView | null) => setViewCalls.push(v),
+        const panelController: PanelController = {
+            setView: (v) => setViewCalls.push(v),
             subscribe: () => () => undefined,
+            currentView: () => null,
             dispose: () => undefined,
             setStatusText: () => undefined,
             subscribeStatus: () => () => undefined,
+            currentStatus: () => "",
         };
 
         const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
@@ -1839,6 +1842,7 @@ describe("startOrchestrator", () => {
             pendingRephraseReject,
             replaceRangeCalls,
             getRephraseLayer,
+            panelController,
             stop,
         };
     };
@@ -2280,6 +2284,108 @@ describe("startOrchestrator", () => {
 
         expect(replaceRangeCalls.length).toBe(1);
         expect(replaceRangeCalls[0]![2]).toBe("He is going to school");
+
+        stop();
+    });
+
+    // ─── §4/§8: mouse mirrors of the rephrase keymap (click an alternative /
+    // wheel-scroll a tall card) — same functions the keyboard binds, wired
+    // onto the panel controller so a click/scroll can never drift from what
+    // ctrl+/ + ↑/↓/tab + PgUp/PgDn do. ─────────────────────────────────────
+
+    test("mouse mirror: onRephraseCycleNext advances the SAME alternative the keyboard cycle does", async () => {
+        const { commandHandlers, pendingRephrase, replaceRangeCalls, panelController, stop } =
+            makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+        pendingRephrase[0]!({
+            original: "He go to school",
+            rephrased: "He goes to school",
+            alternatives: ["He is going to school", "He went to school"],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(panelController.onRephraseCycleNext).toBeDefined();
+        panelController.onRephraseCycleNext!();
+
+        const acceptFn = commandHandlers.get("grammarforge.rephrase.accept") as () => void;
+        acceptFn();
+
+        expect(replaceRangeCalls.length).toBe(1);
+        expect(replaceRangeCalls[0]![2]).toBe("He is going to school");
+
+        stop();
+    });
+
+    test("mouse mirror: onRephraseCyclePrev wraps backward to the last alternative", async () => {
+        const { commandHandlers, pendingRephrase, replaceRangeCalls, panelController, stop } =
+            makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+        pendingRephrase[0]!({
+            original: "He go to school",
+            rephrased: "He goes to school",
+            alternatives: ["He is going to school", "He went to school"],
+        });
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(panelController.onRephraseCyclePrev).toBeDefined();
+        panelController.onRephraseCyclePrev!(); // wraps from index 0 to the LAST alt
+
+        const acceptFn = commandHandlers.get("grammarforge.rephrase.accept") as () => void;
+        acceptFn();
+
+        expect(replaceRangeCalls.length).toBe(1);
+        expect(replaceRangeCalls[0]![2]).toBe("He went to school");
+
+        stop();
+    });
+
+    test("mouse mirror: onRephraseScrollDown/onRephraseScrollUp push the SAME scrollOffset the PgDn/PgUp keys do", async () => {
+        const { commandHandlers, pendingRephrase, setViewCalls, panelController, stop } =
+            makeRephraseEnv();
+
+        const longText = Array.from({ length: 12 }, (_, i) => `Line ${i + 1}: ${"x".repeat(30)}`).join(
+            "\n",
+        );
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+        pendingRephrase[0]!({ original: "Hello world", rephrased: longText, alternatives: [] });
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(panelController.onRephraseScrollDown).toBeDefined();
+        expect(panelController.onRephraseScrollUp).toBeDefined();
+
+        panelController.onRephraseScrollDown!();
+        let last = setViewCalls[setViewCalls.length - 1];
+        expect(last?.kind).toBe("rephrase-result");
+        expect((last as { scrollOffset: number }).scrollOffset).toBe(1);
+
+        panelController.onRephraseScrollDown!();
+        last = setViewCalls[setViewCalls.length - 1];
+        expect((last as { scrollOffset: number }).scrollOffset).toBe(2);
+
+        panelController.onRephraseScrollUp!();
+        last = setViewCalls[setViewCalls.length - 1];
+        expect((last as { scrollOffset: number }).scrollOffset).toBe(1);
+
+        stop();
+    });
+
+    test("mouse mirror: onRephraseScrollUp never pushes scrollOffset below 0", async () => {
+        const { commandHandlers, pendingRephrase, setViewCalls, panelController, stop } =
+            makeRephraseEnv();
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+        pendingRephrase[0]!({ original: "Hello world", rephrased: "Hi there", alternatives: [] });
+        await new Promise((r) => setTimeout(r, 10));
+
+        panelController.onRephraseScrollUp!();
+        const last = setViewCalls[setViewCalls.length - 1];
+        expect((last as { scrollOffset: number }).scrollOffset).toBe(0);
 
         stop();
     });

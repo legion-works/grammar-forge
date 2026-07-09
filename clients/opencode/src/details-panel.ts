@@ -60,6 +60,13 @@ export interface DetailsViewModel {
     hints: string;
     /** The full text (debug / accessibility). */
     fullText: string;
+    /** Resolved cycle-next/prev hotkeys, threaded through so card-spec can
+     *  build DISCRETE clickable hint segments (opencode-interaction.md §8
+     *  mouse: "click apply/ignore words in the hint row") without
+     *  re-parsing the pre-joined `hints` string. Always mirrors the same
+     *  keys baked into `hints`. */
+    cycleNextKey: string;
+    cyclePrevKey: string;
 }
 
 export interface DetailsItemInput {
@@ -114,5 +121,7 @@ export function buildDetailsViewModel(
         diffMode,
         hints,
         fullText,
+        cycleNextKey,
+        cyclePrevKey,
     };
 }

@@ -11,13 +11,18 @@ export interface StatusLineInput {
     cyclePrevKey?: string;
 }
 
-/** Category → single-block tick. */
+/** Category → single-block tick. Order/heights mirror the Forge Caret's
+ *  four-tick baseline (LOGO.md: spelling · grammar · punctuation · style),
+ *  extended with typography/unknown. Every member of `Category`
+ *  (clients/browser/src/api/types.ts) must have its own glyph — a category
+ *  silently falling through to the `unknown` fallback would make two
+ *  different issue types visually indistinguishable in the status line. */
 const CATEGORY_TICK: Record<string, string> = {
     spelling: "▁",
     grammar: "▂",
-    style: "▃",
-    typography: "▄",
-    misc: "▅",
+    punctuation: "▃",
+    style: "▄",
+    typography: "▅",
     unknown: "▆",
 };
 

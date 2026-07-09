@@ -46,6 +46,7 @@ import {
     buildCardSpec,
     buildRephraseLoadingCardSpec,
     buildRephraseResultCardSpec,
+    DIM_HEX,
 } from "./card-spec";
 import { clampAnchor, ghostAnchor } from "./overlay-anchor";
 import {
@@ -61,9 +62,18 @@ const ID = "grammarforge";
 
 // Card dimensions (columns × rows, including border).
 // Width: 44 cols is wide enough for most suggestions without
-// dominating the terminal. Height: 3 content rows + 2 border = 5.
+// dominating the terminal. Height: 3 content rows + 2 border = 5
+// (the suggestion/rephrase-result kinds grow this via spec.contentRows
+// when their diff/rephrase text wraps onto more than one line).
 const CARD_W = 44;
 const CARD_H = 5; // 3 content rows + top/bottom border
+
+// Legion Works OpenCode theme — the TUI has no web glass/blur; per
+// INSTRUCTIONS.md §E the "glass" equivalent is a bordered card with the
+// theme's raised background (handoff/scss/_tokens.scss $gf-raised-dark
+// = --bg-raised, dark/Tokyo Night). Opaque, not translucent — see
+// INSTRUCTIONS.md §H: "opaque --bg-raised for any dense/reading surface."
+const CARD_BG = RGBA.fromInts(0x22, 0x24, 0x36, 255);
 
 const tui: TuiPlugin = async (api: TuiApi, options) => {
     logDebug("tui() entered", { id: ID, hasOptions: options !== undefined });
@@ -160,11 +170,14 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                 non-null initial output or it prunes the entry and
                 the component is never mounted (gotcha 3). */}
             <box width={0} height={0} />
-            {/* Status-line (A6) — always-on dim row under the prompt. */}
+            {/* Status-line (A6) — always-on dim row under the prompt.
+                Legion --text-muted (dark) — same DIM_HEX card-spec.ts
+                uses for hints, so the status line never drifts from the
+                card's own dim tone. */}
             <Show when={statusText()} keyed>
                 {(t) => (
                     <box flexDirection="row">
-                        <text fg="#6b7280">{t}</text>
+                        <text fg={DIM_HEX}>{t}</text>
                     </box>
                 )}
             </Show>
@@ -203,7 +216,7 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                 current.cycleNextKey,
                                 current.cyclePrevKey,
                             );
-                            spec = buildCardSpec(vm);
+                            spec = buildCardSpec(vm, makeDisplayWidth(bunSegmentWidth));
                         }
                         // Lazily read the prompt ref at render time (gotcha 4:
                         // ref is null at tui()-time; it's mounted by now because
@@ -215,10 +228,15 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                         const dims = dimensions();
                         const screenW = dims.width;
                         const screenH = dims.height;
-                        // Card height varies by kind.
-                        const cardH = current.kind === "rephrase-result"
-                            ? (spec as unknown as { contentRows: number }).contentRows + 4
-                            : CARD_H;
+                        // Card height varies by kind. "suggestion" and
+                        // "rephrase-result" both report contentRows (the
+                        // number of wrapped diff/rephrase lines) — grow the
+                        // card to fit rather than clipping a wrapped diff
+                        // (opencode-interaction.md §5.5). "rephrase-loading"
+                        // is always a single fixed-height line.
+                        const cardH = current.kind === "rephrase-loading"
+                            ? CARD_H
+                            : (spec as unknown as { contentRows: number }).contentRows + 4;
                         const clamped = anchor
                             ? clampAnchor(anchor, CARD_W, cardH, screenW, screenH)
                             : null;
@@ -256,14 +274,17 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                 border
                                 borderStyle="single"
                                 borderColor={spec.borderColor}
-                                backgroundColor={RGBA.fromInts(28, 28, 30, 210)}
+                                backgroundColor={CARD_BG}
                                 paddingLeft={1}
                                 paddingRight={1}
                                 paddingTop={0}
                                 paddingBottom={0}
                                 flexDirection="column"
                                 onMouseDown={() => {
-                                    // A7: Click on the card → apply the pinned suggestion.
+                                    // A7 / §4: click the card body → apply the pinned
+                                    // suggestion, or accept the rephrase. Discrete
+                                    // apply/ignore hint spans (below) stopPropagation
+                                    // so they don't ALSO fire this default.
                                     // Degrades gracefully when terminal doesn't report mouse.
                                     if (current.kind === "suggestion") {
                                         props.controller.onApply?.();
@@ -271,11 +292,62 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                         props.controller.onRephraseAccept?.();
                                     }
                                 }}
+                                onMouseScroll={(e: { scroll?: { direction: string } }) => {
+                                    // §4: "scroll wheel over a tall rephrase card → scroll
+                                    // the wrapped text" (PgUp/PgDn's mouse mirror). No-op
+                                    // for the "suggestion" / "rephrase-loading" kinds —
+                                    // only the rephrase-result body can overflow (§5).
+                                    if (current.kind !== "rephrase-result") return;
+                                    if (e.scroll?.direction === "up") {
+                                        props.controller.onRephraseScrollUp?.();
+                                    } else if (e.scroll?.direction === "down") {
+                                        props.controller.onRephraseScrollDown?.();
+                                    }
+                                }}
                             >
-                                {spec.rows.map((row) => (
-                                    <box flexDirection="row">
+                                {spec.rows.map((row, rowIndex) => (
+                                    <box
+                                        flexDirection="row"
+                                        onMouseDown={
+                                            // §4: "click an alternative in a multi-option
+                                            // rephrase → select it" (↑/↓/tab's mouse mirror).
+                                            // The title row is where the `‹ k/n ›` indicator
+                                            // renders (card-spec.ts buildRephraseResultCardSpec) —
+                                            // clicking it cycles to the next alternative.
+                                            // stopPropagation so the card's default onMouseDown
+                                            // (accept) doesn't ALSO fire from the same click.
+                                            current.kind === "rephrase-result" &&
+                                            rowIndex === 0 &&
+                                            current.altTotal > 1
+                                                ? (e: { stopPropagation: () => void }) => {
+                                                      e.stopPropagation();
+                                                      props.controller.onRephraseCycleNext?.();
+                                                  }
+                                                : undefined
+                                        }
+                                    >
                                         {row.segments.map((seg) => (
-                                            <text fg={seg.fg}>
+                                            <text
+                                                fg={seg.fg}
+                                                onMouseDown={
+                                                    // §4/§8: discrete apply/ignore clickable
+                                                    // hint spans (only the suggestion card's
+                                                    // hints row carries an `action`).
+                                                    // stopPropagation so the click doesn't
+                                                    // bubble to the card's default apply.
+                                                    seg.action === "apply"
+                                                        ? (e: { stopPropagation: () => void }) => {
+                                                              e.stopPropagation();
+                                                              props.controller.onApply?.();
+                                                          }
+                                                        : seg.action === "ignore"
+                                                          ? (e: { stopPropagation: () => void }) => {
+                                                                e.stopPropagation();
+                                                                props.controller.onIgnore?.();
+                                                            }
+                                                          : undefined
+                                                }
+                                            >
                                                 {seg.bold ? <b>{seg.text}</b> : seg.text}
                                             </text>
                                         ))}
@@ -366,7 +438,9 @@ function GhostComponent(props: { api: TuiApi }) {
                             width={ghostW}
                             height={1}
                         >
-                            <text fg="#6b7280">{current.text}</text>
+                            {/* Legion --text-muted (dark) — same dim tone as
+                                the status line + card hints. */}
+                            <text fg={DIM_HEX}>{current.text}</text>
                         </box>
                     </Portal>
                 );

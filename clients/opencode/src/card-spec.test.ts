@@ -6,6 +6,9 @@ import {
     SPINNER_FRAMES,
     REPHRASE_ACCENT_HEX,
     MAX_CONTENT_ROWS,
+    DELETE_HEX,
+    INSERT_HEX,
+    DIM_HEX,
 } from "./card-spec";
 import { buildDetailsViewModel } from "./details-panel";
 import { CATEGORY_FG } from "./category-palette";
@@ -93,12 +96,12 @@ describe("buildCardSpec", () => {
         ];
         expect(left.text).toBe("teh");
         expect(left.colorKey).toBe("delete");
-        expect(left.fg).toBe("#ef4444");
+        expect(left.fg).toBe(DELETE_HEX);
         expect(arrow.text).toBe(" → ");
         expect(arrow.colorKey).toBe("dim");
         expect(right.text).toBe("the");
         expect(right.colorKey).toBe("insert");
-        expect(right.fg).toBe("#22c55e");
+        expect(right.fg).toBe(INSERT_HEX);
     });
 
     test("diff row: DELETION mode — left=delete(red), arrow=dim, right=dim", () => {
@@ -129,12 +132,35 @@ describe("buildCardSpec", () => {
         expect(right.colorKey).toBe("insert");
     });
 
-    test("hints row: single dim segment containing all four bindings (default keys)", () => {
+    test("hints row: discrete apply/ignore clickable segments + trailing cycle/close text (default keys)", () => {
+        // §8 mouse checklist: "click apply / ignore words in the hint row
+        // (NEW: render them as discrete clickable spans)". The row is split
+        // into segments so the renderer can wire per-segment onMouseDown,
+        // but the concatenation is byte-identical to the pre-split string.
         const spec = buildCardSpec(vm());
         const hintsRow = spec.rows[2]!;
-        expect(hintsRow.segments).toHaveLength(1);
-        expect(hintsRow.segments[0]!.colorKey).toBe("dim");
-        expect(hintsRow.segments[0]!.text).toBe("⏎ apply · x ignore · / . cycle · esc close");
+        for (const seg of hintsRow.segments) {
+            expect(seg.colorKey).toBe("dim");
+        }
+        const joined = hintsRow.segments.map((s) => s.text).join("");
+        expect(joined).toBe("⏎ apply · x ignore · / . cycle · esc close");
+        const applySeg = hintsRow.segments.find((s) => s.action === "apply");
+        const ignoreSeg = hintsRow.segments.find((s) => s.action === "ignore");
+        expect(applySeg?.text).toBe("⏎ apply");
+        expect(ignoreSeg?.text).toBe("x ignore");
+        // Everything else carries no action — a click there falls through
+        // to the card's default (apply the pinned suggestion).
+        const unactioned = hintsRow.segments.filter((s) => s.action === undefined);
+        expect(unactioned.length).toBeGreaterThan(0);
+    });
+
+    test("hints row: apply/ignore segments reflect the actually bound cycle keys", () => {
+        const item = { category: "spelling", original: "teh", replacement: "the" };
+        const v = buildDetailsViewModel(item, 0, 1, "ctrl+n", "ctrl+p");
+        const spec = buildCardSpec(v);
+        const hintsRow = spec.rows[2]!;
+        const joined = hintsRow.segments.map((s) => s.text).join("");
+        expect(joined).toBe("⏎ apply · x ignore · ctrl+n ctrl+p cycle · esc close");
     });
 
     test("category color resolves correctly for every known category", () => {
@@ -149,6 +175,65 @@ describe("buildCardSpec", () => {
             const spec = buildCardSpec(vm({ category: cat }));
             expect(spec.borderColor).toBe(CATEGORY_FG[cat]);
         }
+    });
+
+    test("REGRESSION GUARD: diff/dim colors are the Legion Works OpenCode theme tokens, not the old defaults", () => {
+        // Legion tokens (handoff/scss/_tokens.scss, dark/Tokyo Night):
+        // --danger #ff757f, --success #c3e88d (Tokyo green), --text-muted #828bb8.
+        // Guards against silently reverting to the pre-redesign ad-hoc reds/greens.
+        expect(DELETE_HEX).toBe("#ff757f");
+        expect(INSERT_HEX).toBe("#c3e88d");
+        expect(DIM_HEX).toBe("#828bb8");
+        // Distinct from the `style` category color (#8b5cf6) and from each other.
+        expect(REPHRASE_ACCENT_HEX).not.toBe(CATEGORY_FG.style);
+    });
+
+    test("short diff (fits inner width): unchanged single-row shape, contentRows=1", () => {
+        const spec = buildCardSpec(vm());
+        expect(spec.rows).toHaveLength(3);
+        expect(spec.contentRows).toBe(1);
+    });
+
+    test("WRAP (§5.5): a long replacement wraps the diff row instead of overflowing", () => {
+        const longOriginal = "should of";
+        const longReplacement =
+            "should have already merged the fix before the release went out the door";
+        const spec = buildCardSpec(
+            vm({ original: longOriginal, replacement: longReplacement }),
+            (s) => s.length,
+        );
+        // Grew past the 1-row fast path.
+        expect(spec.contentRows).toBeGreaterThan(1);
+        // Title + N diff rows + hints.
+        expect(spec.rows).toHaveLength(2 + spec.contentRows);
+        // Nothing truncated — the full replacement text appears somewhere,
+        // reconstructed by joining every insert-colored segment.
+        const insertText = spec.rows
+            .flatMap((r) => r.segments)
+            .filter((s) => s.colorKey === "insert")
+            .map((s) => s.text)
+            .join("");
+        expect(insertText.replace(/\s+/g, " ")).toContain("already merged the fix");
+        for (const row of spec.rows) {
+            for (const seg of row.segments) {
+                expect(seg.text).not.toContain("…");
+            }
+        }
+    });
+
+    test("WRAP: the arrow prefixes the first wrapped replacement line", () => {
+        const spec = buildCardSpec(
+            vm({
+                original: "x",
+                replacement: "a very long replacement string that will not fit on one line at all",
+            }),
+            (s) => s.length,
+        );
+        // Find the row containing the arrow.
+        const arrowRow = spec.rows.find((r) => r.segments.some((s) => s.text === " → "));
+        expect(arrowRow).toBeDefined();
+        const arrowIdx = arrowRow!.segments.findIndex((s) => s.text === " → ");
+        expect(arrowRow!.segments[arrowIdx + 1]!.colorKey).toBe("insert");
     });
 });
 
