@@ -176,4 +176,50 @@ describe('showToast', () => {
         expect(toasts).toHaveLength(1)
         expect(toasts[0]!.querySelector('.gf-toast__text')?.textContent).toBe('B')
     })
+
+    it('placement audit: replacing a toast fires the OLD toast\'s onDismiss immediately (matches the documented "or replacement" contract)', () => {
+        // Previously the replacement path was a blunt DOM sweep
+        // (querySelectorAll('.gf-toast').forEach(n => n.remove())) that
+        // bypassed the old toast's own dismiss() entirely — its onDismiss
+        // never fired at replacement time (contradicting the "or
+        // replacement" contract documented at the top of this file) and its
+        // auto-dismiss timer kept ticking in the background.
+        const root = mkRoot()
+        const onDismissA = vi.fn<() => void>()
+        showToast(root, { message: 'A', onAction: () => {}, onDismiss: onDismissA })
+        expect(onDismissA).not.toHaveBeenCalled()
+        showToast(root, { message: 'B', onAction: () => {} })
+        expect(onDismissA).toHaveBeenCalledTimes(1)
+    })
+
+    it("placement audit: replacing a toast cancels the OLD toast's auto-dismiss timer — no orphaned late-firing onDismiss", () => {
+        const root = mkRoot()
+        const onDismissA = vi.fn<() => void>()
+        showToast(root, {
+            message: 'A',
+            onAction: () => {},
+            onDismiss: onDismissA,
+            durationMs: 5000,
+        })
+        showToast(root, { message: 'B', onAction: () => {} })
+        expect(onDismissA).toHaveBeenCalledTimes(1)
+        // Advance well past toast A's original 5000ms duration — its timer
+        // must already be cleared, so onDismiss must NOT fire a second time.
+        vi.advanceTimersByTime(10000)
+        expect(onDismissA).toHaveBeenCalledTimes(1)
+    })
+
+    it('a rapid-fire sequence of several toasts only ever leaves the LAST one mounted, each prior firing onDismiss exactly once', () => {
+        const root = mkRoot()
+        const dismisses: string[] = []
+        showToast(root, { message: 'A', onAction: () => {}, onDismiss: () => dismisses.push('A') })
+        showToast(root, { message: 'B', onAction: () => {}, onDismiss: () => dismisses.push('B') })
+        showToast(root, { message: 'C', onAction: () => {}, onDismiss: () => dismisses.push('C') })
+        expect(dismisses).toEqual(['A', 'B'])
+        expect(root.querySelectorAll('.gf-toast')).toHaveLength(1)
+        expect(root.querySelector('.gf-toast__text')?.textContent).toBe('C')
+        vi.advanceTimersByTime(5000)
+        // C auto-dismisses naturally; A and B must not fire again.
+        expect(dismisses).toEqual(['A', 'B', 'C'])
+    })
 })

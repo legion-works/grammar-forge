@@ -82,10 +82,23 @@ export function openRephraseFor(
     deps: RephraseDeps,
     onAfterApply: () => void,
     reissue: RephraseReissue | null = null,
+    /**
+     * Placement audit: the rect the pending/result/error card should
+     * anchor to (mirrors the browser client's clients/browser/src/
+     * entrypoints/content/rephrase.ts). When the flow was triggered from an
+     * actual selection (the split control's primary segment), this is that
+     * selection's viewport rect — the card then appears where the control
+     * was, instead of jumping to the whole composer's bounding box.
+     * Undefined for a whole-field rephrase, which falls back to
+     * `el.getBoundingClientRect()` as before. Reused verbatim across the
+     * scope/tone/regenerate re-issue chain.
+     */
+    anchorRect: DOMRect | undefined = undefined,
 ): Promise<void> {
+    const anchor = anchorRect ?? el.getBoundingClientRect()
     deps.debugLog('rephrase start', { textLen: text.length, span, reissue })
     const pending = showRephrasePending(deps.overlayRoot, {
-        anchorRect: el.getBoundingClientRect(),
+        anchorRect: anchor,
         onClose: () => {},
     })
     // W3-3: use the goals-seeded default tone (formal/informal/neutral
@@ -99,7 +112,7 @@ export function openRephraseFor(
         .then((res) => {
             pending.hide()
             showRephraseCard(deps.overlayRoot, {
-                anchorRect: el.getBoundingClientRect(),
+                anchorRect: anchor,
                 original: res.original,
                 rephrased: res.rephrased,
                 alternatives: res.alternatives,
@@ -139,17 +152,27 @@ export function openRephraseFor(
                 // call (previously these only logged — Formal/Casual/
                 // Regenerate were dead buttons in the Vencord card).
                 onScopeChange: (nextScope) =>
-                    void openRephraseFor(el, text, span, deps, onAfterApply, {
-                        scope: nextScope,
-                        tone,
-                    }),
+                    void openRephraseFor(
+                        el,
+                        text,
+                        span,
+                        deps,
+                        onAfterApply,
+                        { scope: nextScope, tone },
+                        anchor,
+                    ),
                 onToneChange: (nextTone) =>
-                    void openRephraseFor(el, text, span, deps, onAfterApply, {
-                        scope,
-                        tone: nextTone,
-                    }),
+                    void openRephraseFor(
+                        el,
+                        text,
+                        span,
+                        deps,
+                        onAfterApply,
+                        { scope, tone: nextTone },
+                        anchor,
+                    ),
                 onRegenerate: () =>
-                    void openRephraseFor(el, text, span, deps, onAfterApply, { scope, tone }),
+                    void openRephraseFor(el, text, span, deps, onAfterApply, { scope, tone }, anchor),
                 modelLabel: 'Gemma',
             })
             deps.debugLog('rephrase done', { alternatives: res.alternatives.length })
@@ -158,9 +181,10 @@ export function openRephraseFor(
             deps.debugLog('rephrase failed', e)
             pending.hide()
             showRephraseError(deps.overlayRoot, {
-                anchorRect: el.getBoundingClientRect(),
+                anchorRect: anchor,
                 message: 'Rephrase failed',
-                onRetry: () => void openRephraseFor(el, text, span, deps, onAfterApply, reissue),
+                onRetry: () =>
+                    void openRephraseFor(el, text, span, deps, onAfterApply, reissue, anchor),
                 onClose: () => {},
             })
         })

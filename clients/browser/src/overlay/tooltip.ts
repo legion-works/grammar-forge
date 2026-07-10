@@ -147,8 +147,13 @@ function positionTooltip(tip: HTMLElement, anchor: DOMRect, view: Window): void 
 
     // Vertical + caret direction.
     if (showBelow) {
-        // No room above → place below, caret points UP.
-        tip.style.top = `${anchor.bottom + ANCHOR_GAP}px`
+        // No room above → place below, caret points UP. Placement audit
+        // (HOVER PILL): also clamp to the BOTTOM of the viewport — a word
+        // near the top edge of a short viewport (the case that triggers
+        // this branch) can still overflow the bottom if the pill is tall,
+        // otherwise rendering (partially) off-screen and invisible.
+        const top = Math.min(anchor.bottom + ANCHOR_GAP, vh - pillHeight - VIEWPORT_GUTTER)
+        tip.style.top = `${top}px`
         tip.style.bottom = 'auto'
         tip.classList.add('gf-tip--below')
     } else {

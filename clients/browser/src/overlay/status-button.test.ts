@@ -471,6 +471,72 @@ describe('renderStatusButton (W2 score orb — hover panel retired in W2b)', () 
         expect(root.querySelector('.gf-pill-panel')).toBeNull()
     })
 
+    it('hides the orb (gf-orb--offscreen) when the field scrolls entirely above the viewport', () => {
+        // Placement audit regression: previously the viewport clamp in
+        // positionAbsolute() pinned the orb to the top of the screen even
+        // when the field itself was scrolled hundreds of pixels away — a
+        // detached, floating orb. It must now hide instead.
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        const orb = root.querySelector('.gf-orb') as HTMLElement
+        expect(orb.classList.contains('gf-orb--offscreen')).toBe(false)
+        // Field scrolled fully above the viewport (bottom <= 0).
+        handle.reposition(new DOMRect(100, -500, 400, 200))
+        expect(orb.classList.contains('gf-orb--offscreen')).toBe(true)
+    })
+
+    it('hides the orb when the field scrolls entirely below the viewport', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        const orb = root.querySelector('.gf-orb') as HTMLElement
+        // jsdom default innerHeight is 768.
+        handle.reposition(new DOMRect(100, 2000, 400, 200))
+        expect(orb.classList.contains('gf-orb--offscreen')).toBe(true)
+    })
+
+    it('reveals the orb again once the field scrolls back into view', () => {
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        const orb = root.querySelector('.gf-orb') as HTMLElement
+        handle.reposition(new DOMRect(100, -500, 400, 200))
+        expect(orb.classList.contains('gf-orb--offscreen')).toBe(true)
+        handle.reposition(ANCHOR)
+        expect(orb.classList.contains('gf-orb--offscreen')).toBe(false)
+        // And it re-anchors correctly, not stuck at a stale position.
+        expect(positionOf(orb).x).toBe(448)
+        expect(positionOf(orb).y).toBe(248)
+    })
+
+    it('a field only PARTIALLY scrolled off-screen still shows the orb, clamped to the visible edge', () => {
+        // Only fully-offscreen fields hide the orb — a field that's mostly
+        // scrolled past the top but still has its bottom-right corner (where
+        // the orb docks) on screen must keep tracking normally.
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions())
+        const orb = root.querySelector('.gf-orb') as HTMLElement
+        // top is way above the viewport, but bottom (300) is still positive
+        // and within the viewport — partially visible.
+        handle.reposition(new DOMRect(100, -900, 400, 1200))
+        expect(orb.classList.contains('gf-orb--offscreen')).toBe(false)
+    })
+
+    it('the offscreen hide is independent of the focus-only hidden class', () => {
+        // gf-orb--hidden (focus) and gf-orb--offscreen (scroll visibility)
+        // must not clobber each other — a focused-but-offscreen orb keeps
+        // BOTH classes; clearing one must not clear the other.
+        const root = mkRoot()
+        const handle = renderStatusButton(root, mkOptions({ initiallyVisible: false }))
+        const orb = root.querySelector('.gf-orb') as HTMLElement
+        expect(orb.classList.contains('gf-orb--hidden')).toBe(true)
+        handle.reposition(new DOMRect(100, -500, 400, 200))
+        expect(orb.classList.contains('gf-orb--offscreen')).toBe(true)
+        expect(orb.classList.contains('gf-orb--hidden')).toBe(true)
+        handle.setVisible(true)
+        expect(orb.classList.contains('gf-orb--hidden')).toBe(false)
+        // Still offscreen even though focus-visibility was restored.
+        expect(orb.classList.contains('gf-orb--offscreen')).toBe(true)
+    })
+
     it('W2b: arcOffset + BAND_COLOR are consumed only via orbState (no dead void stubs)', () => {
         // The W2a review-flag nit: the old `void arcOffset` / `void BAND_COLOR`
         // suppression stubs (with their imports) are GONE — arcOffset/BAND_COLOR

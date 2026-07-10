@@ -453,6 +453,64 @@ describe('showPanel (W2b review panel)', () => {
         expect(onClose).toHaveBeenCalledOnce()
     })
 
+    it('a pointerdown inside a sibling .gf-rephrase (rephrase result card) does NOT close the panel', async () => {
+        // Placement audit regression: the panel's "Rephrase message" button
+        // opens the rephrase-card flow WITHOUT closing the panel, but the
+        // outside-dismiss exclusion list omitted `.gf-rephrase` (and
+        // `.gf-rephrase-btn`) — so interacting with a rephrase card opened
+        // from inside the panel immediately dismissed the panel underneath
+        // it as a false "outside click".
+        const root = mkRoot()
+        const onClose = vi.fn<() => void>()
+        showPanel(root, mkOptions({ onClose }))
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        const rephraseCard = document.createElement('div')
+        rephraseCard.className = 'gf-rephrase'
+        root.appendChild(rephraseCard)
+        const inside = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true })
+        rephraseCard.dispatchEvent(inside)
+        expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('a pointerdown inside a sibling .gf-rephrase-btn (split control) does NOT close the panel', async () => {
+        const root = mkRoot()
+        const onClose = vi.fn<() => void>()
+        showPanel(root, mkOptions({ onClose }))
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        const control = document.createElement('div')
+        control.className = 'gf-rephrase-btn'
+        root.appendChild(control)
+        const inside = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true })
+        control.dispatchEvent(inside)
+        expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('reposition() re-anchors the panel to a fresh rect (placement audit — tracks the field on scroll)', () => {
+        // Previously the panel had NO reposition path; the orchestrator's
+        // scroll/resize loop could only destroy it, never re-anchor it, so
+        // it visually drifted from the orb as the page scrolled.
+        const root = mkRoot()
+        const handle = showPanel(root, mkOptions())
+        const panel = root.querySelector('.gf-panel-aside') as HTMLElement
+        const leftBefore = panel.style.left
+        const topBefore = panel.style.top
+        handle.reposition(new DOMRect(900, 900, 40, 20))
+        // Same DOM node — reposition() moves it in place, no rebuild.
+        expect(root.querySelector('.gf-panel-aside')).toBe(panel)
+        const leftAfter = panel.style.left
+        const topAfter = panel.style.top
+        // Re-anchored to a rect far from the original ANCHOR (100,100) —
+        // the position must have changed.
+        expect(leftAfter === leftBefore && topAfter === topBefore).toBe(false)
+    })
+
+    it('reposition() is a safe no-op after destroy()', () => {
+        const root = mkRoot()
+        const handle = showPanel(root, mkOptions())
+        handle.destroy()
+        expect(() => handle.reposition(new DOMRect(1, 2, 3, 4))).not.toThrow()
+    })
+
     it('clicking "Disable on this site" fires onDisableSite', () => {
         const root = mkRoot()
         const onDisableSite = vi.fn<() => void>()

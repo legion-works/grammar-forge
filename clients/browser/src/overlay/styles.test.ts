@@ -213,13 +213,94 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
             expect(perCat, '.gf-u--spelling.is-on must set a background tint').not.toBeNull()
         })
 
-        it('.gf-tip is position: fixed with z-index at Z_OVERLAY (not position:absolute z-index:30)', () => {
+        it('.gf-tip is position: fixed with a z-index ABOVE the highlight layer (not position:absolute z-index:30)', () => {
             // Bug-fix: .gf-tip was position:absolute z-index:30. The highlight
-            // nodes are position:fixed at z-index:2147483647 — the tooltip was
-            // rendered BEHIND them and invisible. Must be position:fixed at the
-            // same z-index as other overlay surfaces.
-            const rule = /\.gf-tip\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*2147483647/s.exec(OVERLAY_CSS)
-            expect(rule, '.gf-tip must be position:fixed z-index:2147483647').not.toBeNull()
+            // nodes are position:fixed at a lower ladder tier (Z_HIGHLIGHT) —
+            // the tooltip was rendered BEHIND them and invisible. Must be
+            // position:fixed at a numerically higher z-index than .gf-u.
+            const rule = /\.gf-tip\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*(\d+)/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-tip must be position:fixed with a numeric z-index').not.toBeNull()
+            const tipZ = Number(rule![1])
+            const uRule = /\.gf-u\s*\{[^}]*z-index:\s*(\d+)/s.exec(OVERLAY_CSS)
+            const highlightZ = Number(uRule![1])
+            expect(tipZ).toBeGreaterThan(highlightZ)
+        })
+    })
+
+    describe('z-index ladder (placement audit)', () => {
+        // Every GF surface used to share the SAME literal z-index
+        // (2147483647), so paint order among them was decided entirely by
+        // DOM append order — a highlight-layer reconcile() running AFTER a
+        // popover mounted would silently paint the underline on top of it.
+        // A leftover duplicate CSS block also regressed the live
+        // `.gf-rephrase` (rephrase result card) z-index down to 50 by
+        // appearing later in the cascade. These tests pin the fix: every
+        // tier gets its own DISTINCT value, in the intended order, and the
+        // dead duplicate block can never come back silently.
+        function zIndexOf(selector: string): number {
+            const escaped = selector.replace(/[.]/g, '\\.')
+            const re = new RegExp(`${escaped}\\s*\\{[^}]*z-index:\\s*(\\d+)`, 'gs')
+            const matches = [...OVERLAY_CSS.matchAll(re)]
+            expect(matches.length, `${selector} must declare a numeric z-index at least once`).toBeGreaterThan(0)
+            // The cascade's EFFECTIVE value is whichever declaration comes
+            // LAST in the stylesheet (equal specificity, same property) —
+            // mirror that here instead of just checking the first match.
+            const last = matches[matches.length - 1]!
+            return Number(last[1])
+        }
+
+        it('every surface has a distinct z-index — no ties', () => {
+            const tiers = [
+                '.gf-u',
+                '.gf-orb',
+                '.gf-tip',
+                '.gf-rephrase-btn',
+                '.gf-panel-aside',
+                '.gf-card',
+                '.gf-toast',
+            ].map(zIndexOf)
+            expect(new Set(tiers).size).toBe(tiers.length)
+        })
+
+        it('follows the intended ordering: highlight < orb < tooltip < control < panel < popover-tier < toast', () => {
+            const highlight = zIndexOf('.gf-u')
+            const orb = zIndexOf('.gf-orb')
+            const tooltip = zIndexOf('.gf-tip')
+            const control = zIndexOf('.gf-rephrase-btn')
+            const panel = zIndexOf('.gf-panel-aside')
+            const card = zIndexOf('.gf-card')
+            const toast = zIndexOf('.gf-toast')
+            expect(highlight).toBeLessThan(orb)
+            expect(orb).toBeLessThan(tooltip)
+            expect(tooltip).toBeLessThan(control)
+            expect(control).toBeLessThan(panel)
+            expect(panel).toBeLessThan(card)
+            expect(card).toBeLessThan(toast)
+        })
+
+        it('the correction card, rephrase card, synonyms popover, and Goals popover share the same popover tier (all must out-rank the panel)', () => {
+            const panel = zIndexOf('.gf-panel-aside')
+            const card = zIndexOf('.gf-card')
+            const rephrase = zIndexOf('.gf-rephrase')
+            const syn = zIndexOf('.gf-syn')
+            const goals = zIndexOf('.gf-goals-pop')
+            expect(card).toBe(rephrase)
+            expect(card).toBe(syn)
+            expect(card).toBe(goals)
+            expect(card).toBeGreaterThan(panel)
+        })
+
+        it('regression guard: .gf-rephrase never resolves to the old dead-code z-index (50)', () => {
+            // The exact bug this ladder fixes: a duplicate `.gf-rephrase`
+            // rule appearing LATER in the stylesheet silently won the
+            // cascade with z-index:50, sinking the live rephrase card
+            // below the highlight layer and every other surface.
+            expect(zIndexOf('.gf-rephrase')).not.toBe(50)
+            expect(zIndexOf('.gf-syn')).not.toBe(42)
+        })
+
+        it('the dead duplicate "canonical popovers" .gf-goals rule is gone', () => {
+            expect(/\.gf-goals\s*\{/.test(OVERLAY_CSS)).toBe(false)
         })
     })
 

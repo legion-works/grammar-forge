@@ -125,6 +125,17 @@ export interface PanelHandle {
         phase: Phase,
         hasRephrase: boolean,
     ) => boolean
+    /**
+     * Placement audit: re-anchor the panel to a fresh rect (the shared
+     * scroll/resize loop calls this every frame, mirroring
+     * StatusButtonHandle.reposition). Previously the panel had NO
+     * reposition path at all — the caller's onScrollResize hook only ever
+     * destroyed the panel when the field scrolled fully out of view, but
+     * did nothing when the field was merely scrolled to a DIFFERENT
+     * on-screen position, so the panel visually drifted away from the orb
+     * it's supposed to track. No-op after destroy().
+     */
+    reposition: (anchorRect: DOMRect) => void
 }
 
 const VIEWPORT_GUTTER = 8
@@ -265,6 +276,14 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
             if (el.classList.contains('gf-goals-pop')) return true
             if (el.classList.contains('gf-syn')) return true
             if (el.classList.contains('gf-card')) return true
+            // Placement audit: the panel's "Rephrase message" button
+            // (onRephrase) opens the rephrase-card flow (.gf-rephrase / the
+            // split control .gf-rephrase-btn) WITHOUT closing the panel —
+            // this was missing here, so interacting with (or even just
+            // clicking inside) a rephrase card opened from the panel
+            // dismissed the panel underneath it as an "outside click".
+            if (el.classList.contains('gf-rephrase')) return true
+            if (el.classList.contains('gf-rephrase-btn')) return true
             return false
         },
         () => options.onClose(),
@@ -324,6 +343,10 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
             // Atomic swap: no intermediate empty state.
             bodyRef.replaceChildren(frag)
             return true
+        },
+        reposition: (anchorRect: DOMRect) => {
+            if (!aside.isConnected) return
+            positionPanel(aside, anchorRect, view)
         },
     }
     registerPanel(root, handle)

@@ -89,6 +89,63 @@ describe('showRephraseButton (split control: Rephrase + Synonyms)', () => {
         expect(root.querySelector('.gf-rephrase-btn')).toBeNull()
     })
 
+    describe('clearRect (placement audit — Discord composer/toolbar clearance)', () => {
+        // jsdom defaults: innerWidth=1024, innerHeight=768.
+        // REPHRASE_BUTTON_HEIGHT_FALLBACK=32, ANCHOR_GAP=6 (module-private).
+
+        it('when flipped ABOVE, clears the TOP of clearRect (not just the selection) when clearRect starts higher', () => {
+            // anchor near the bottom → forces the above-flip
+            // (spaceBelow = 768-760=8 < 32+6=38).
+            const anchor = new DOMRect(100, 740, 80, 20) // bottom=760
+            const root = mkRoot()
+            showRephraseButton(root, {
+                anchorRect: anchor,
+                onClick: vi.fn<() => void>(),
+                clearRect: new DOMRect(50, 700, 400, 200), // top=700, higher than anchor.top=740
+            })
+            const container = root.querySelector('.gf-rephrase-btn') as HTMLElement
+            // Without clearRect: bottom = 768 - 740 + 6 = 34.
+            // With clearRect (top=700 < anchor.top=740): bottom = 768 - 700 + 6 = 74.
+            expect(container.style.bottom).toBe('74px')
+        })
+
+        it('when flipped ABOVE and clearRect is a NO-OP (fully inside the anchor), positions the same as without it', () => {
+            const anchor = new DOMRect(100, 740, 80, 20)
+            const root = mkRoot()
+            showRephraseButton(root, {
+                anchorRect: anchor,
+                onClick: vi.fn<() => void>(),
+                // clearRect.top BELOW anchor.top → aboveEdge stays anchor.top.
+                clearRect: new DOMRect(50, 750, 400, 5),
+            })
+            const container = root.querySelector('.gf-rephrase-btn') as HTMLElement
+            expect(container.style.bottom).toBe('34px')
+        })
+
+        it('when placed BELOW, clears the BOTTOM of clearRect when it extends past the selection', () => {
+            // Plenty of room below → no flip (spaceBelow = 768-100=668 >= 38).
+            const anchor = new DOMRect(100, 80, 80, 20) // bottom=100
+            const root = mkRoot()
+            showRephraseButton(root, {
+                anchorRect: anchor,
+                onClick: vi.fn<() => void>(),
+                clearRect: new DOMRect(50, 60, 400, 240), // bottom=300, past anchor.bottom=100
+            })
+            const container = root.querySelector('.gf-rephrase-btn') as HTMLElement
+            // Without clearRect: top = 100 + 6 = 106.
+            // With clearRect (bottom=300 > anchor.bottom=100): top = 300 + 6 = 306.
+            expect(container.style.top).toBe('306px')
+        })
+
+        it('omitting clearRect positions exactly as before (back-compat — browser client passes none)', () => {
+            const anchor = new DOMRect(100, 80, 80, 20)
+            const root = mkRoot()
+            showRephraseButton(root, { anchorRect: anchor, onClick: vi.fn<() => void>() })
+            const container = root.querySelector('.gf-rephrase-btn') as HTMLElement
+            expect(container.style.top).toBe('106px')
+        })
+    })
+
     describe('Synonyms segment enablement', () => {
         it('defaults to disabled (aria-disabled + native disabled) when synonymsEnabled is omitted', () => {
             const root = mkRoot()

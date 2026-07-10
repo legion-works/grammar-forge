@@ -36,6 +36,18 @@ export interface RephraseButtonOptions {
      *  and surfaced via `aria-disabled` for assistive tech. Only used when
      *  `synonymsEnabled` is false. */
     synonymsDisabledReason?: string
+    /**
+     * Placement audit: optional viewport rect of host chrome the control
+     * must clear (mirrors synonyms.ts's `clearRect`). Vencord's Discord
+     * composer anchors a floating selection-formatting toolbar (B/I/U/…)
+     * above ANY selection, and the composer itself sits at the bottom of
+     * the screen — the control flips above the selection and, without
+     * this, sat flush against (or under) that host chrome. The synonyms
+     * popover already clears this rect; the split control did not. When
+     * omitted (the browser client, which has no such host chrome), the
+     * control positions exactly as before.
+     */
+    clearRect?: DOMRect
 }
 
 export interface RephraseButtonHandle {
@@ -107,7 +119,7 @@ export function showRephraseButton(
     }
     container.appendChild(synonyms)
 
-    positionRephraseButton(container, options.anchorRect, view)
+    positionRephraseButton(container, options.anchorRect, view, options.clearRect)
     root.appendChild(container)
 
     return {
@@ -124,7 +136,12 @@ export function dismissRephraseButtonsIn(root: ShadowRoot): void {
     root.querySelectorAll('.gf-rephrase-btn').forEach((el) => el.remove())
 }
 
-function positionRephraseButton(container: HTMLElement, anchor: DOMRect, view: Window): void {
+function positionRephraseButton(
+    container: HTMLElement,
+    anchor: DOMRect,
+    view: Window,
+    clear?: DOMRect,
+): void {
     const vw = view.innerWidth
     const vh = view.innerHeight
     const width = container.offsetWidth || REPHRASE_BUTTON_WIDTH_FALLBACK
@@ -138,11 +155,19 @@ function positionRephraseButton(container: HTMLElement, anchor: DOMRect, view: W
     }
     if (left < VIEWPORT_GUTTER) left = VIEWPORT_GUTTER
     container.style.left = `${left}px`
+    // Placement audit: when `clear` (host chrome, e.g. Discord's composer +
+    // its floating selection-formatting toolbar) is supplied, widen the
+    // edge the control clears past just the selection — mirrors
+    // synonyms.ts's positionPopover. The selection alone is not enough in
+    // Discord: the selection sits INSIDE the composer, so clearing only the
+    // selection still let the control overlap the composer chrome.
     if (showAbove) {
-        container.style.bottom = `${vh - anchor.top + ANCHOR_GAP}px`
+        const aboveEdge = clear ? Math.min(anchor.top, clear.top) : anchor.top
+        container.style.bottom = `${vh - aboveEdge + ANCHOR_GAP}px`
         container.style.top = 'auto'
     } else {
-        container.style.top = `${anchor.bottom + ANCHOR_GAP}px`
+        const belowEdge = clear ? Math.max(anchor.bottom, clear.bottom) : anchor.bottom
+        container.style.top = `${belowEdge + ANCHOR_GAP}px`
         container.style.bottom = 'auto'
     }
 }

@@ -203,3 +203,86 @@ describe('openRephraseFor — scope/tone/regenerate re-issue the bridge call', (
         expect(cardSpy.mock.calls[1]?.[1]?.scope).toBe('message')
     })
 })
+
+// Placement audit: the pending/result/error card must anchor to the
+// SELECTION rect (when supplied) instead of always falling back to the
+// composer's whole bounding box — mirrors the browser client's fix in
+// clients/browser/src/entrypoints/content/rephrase.ts. Without this, the
+// split control's Rephrase segment opened a card anchored to the
+// selection (via the control) that then visibly jumped to the composer's
+// bounding box the instant the pending/result card mounted.
+describe('openRephraseFor — anchors to the supplied rect, not the composer (placement audit)', () => {
+    function setup() {
+        const pendingSpy = vi.spyOn(rephraseCard, 'showRephrasePending').mockReturnValue({
+            hide: vi.fn<() => void>(),
+        } as unknown as ReturnType<typeof rephraseCard.showRephrasePending>)
+        const cardSpy = vi
+            .spyOn(rephraseCard, 'showRephraseCard')
+            .mockReturnValue({ hide: vi.fn<() => void>() } as unknown as ReturnType<
+                typeof rephraseCard.showRephraseCard
+            >)
+        pendingSpy.mockClear()
+        cardSpy.mockClear()
+        const rephrase = vi.fn<(req: unknown) => Promise<unknown>>(async () => ({
+            original: 'hello',
+            rephrased: 'hi',
+            alternatives: [],
+        }))
+        const client = { rephrase } as unknown as BridgeClient
+        const deps: RephraseDeps = {
+            client: () => client,
+            overlayRoot: document.createElement('div') as unknown as ShadowRoot,
+            debugLog: vi.fn<(...args: unknown[]) => void>(),
+            defaultTone: () => 'neutral',
+        }
+        const el = document.createElement('div')
+        el.innerHTML = 'hello'
+        document.body.appendChild(el)
+        // Distinct from the selection rect below — if the card falls back
+        // to this, the test catches the regression.
+        vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 900, 900))
+        return { pendingSpy, cardSpy, deps, el }
+    }
+
+    it('uses the supplied anchorRect for the pending AND result card, not el.getBoundingClientRect()', async () => {
+        const { pendingSpy, cardSpy, deps, el } = setup()
+        const selectionRect = new DOMRect(42, 84, 50, 16)
+        await openRephraseFor(
+            el,
+            'hello',
+            { start: 0, end: 5 },
+            deps,
+            () => {},
+            null,
+            selectionRect,
+        )
+        expect(pendingSpy.mock.calls[0]?.[1]?.anchorRect).toBe(selectionRect)
+        expect(cardSpy.mock.calls[0]?.[1]?.anchorRect).toBe(selectionRect)
+    })
+
+    it('falls back to el.getBoundingClientRect() when no anchorRect is supplied (whole-field rephrase)', async () => {
+        const { pendingSpy, deps, el } = setup()
+        await openRephraseFor(el, 'hello', { start: 0, end: 5 }, deps, () => {})
+        expect(pendingSpy.mock.calls[0]?.[1]?.anchorRect).toEqual(new DOMRect(0, 0, 900, 900))
+    })
+
+    it('reuses the SAME anchor across the onRegenerate re-issue', async () => {
+        const { cardSpy, deps, el } = setup()
+        const selectionRect = new DOMRect(10, 20, 30, 12)
+        await openRephraseFor(
+            el,
+            'hello',
+            { start: 0, end: 5 },
+            deps,
+            () => {},
+            null,
+            selectionRect,
+        )
+        const opts = cardSpy.mock.calls[0]?.[1] as { onRegenerate: () => void }
+        opts.onRegenerate()
+        await Promise.resolve()
+        await Promise.resolve()
+        const secondAnchor = cardSpy.mock.calls[1]?.[1]?.anchorRect
+        expect(secondAnchor).toBe(selectionRect)
+    })
+})

@@ -75,6 +75,27 @@ const PASTE_GRACE_MS = 1500
 // dblclick selects a word. The synonyms popover must clear it too.
 const SELECTION_TOOLBAR_CLEARANCE_PX = 56
 
+/**
+ * Placement audit: the viewport rect a selection-anchored popover/control
+ * must clear to avoid Discord's own chrome — the composer box itself PLUS
+ * a band above it for the floating selection-formatting toolbar (B/I/U/…),
+ * which Discord anchors above ANY selection. A selection's own rect is not
+ * enough on its own: the selection sits INSIDE the composer, so clearing
+ * just the selection still lets a flipped-above surface overlap the
+ * composer chrome (overlap reported live 2026-07 — see openSynonymsForWord,
+ * the first surface this was fixed for). Shared by the synonyms popover and
+ * the Rephrase/Synonyms split control so both clear the same band.
+ */
+function composerClearRect(el: HTMLElement): DOMRect {
+    const composerRect = el.getBoundingClientRect()
+    return new DOMRect(
+        composerRect.x,
+        composerRect.y - SELECTION_TOOLBAR_CLEARANCE_PX,
+        composerRect.width,
+        composerRect.height + SELECTION_TOOLBAR_CLEARANCE_PX,
+    )
+}
+
 export type InputDecision = 'check' | 'skip' | 'grace'
 
 /** Compact, log-safe description of the current selection RELATIVE to a
@@ -812,13 +833,7 @@ export function startOrchestrator(
         // reported live 2026-07). Discord ALSO anchors a floating selection
         // formatting toolbar (B/I/U/\u2026) above ANY selection (not just a
         // dblclick) \u2014 clear a fixed band above the composer that covers it.
-        const composerRect = el.getBoundingClientRect()
-        const clearRect = new DOMRect(
-            composerRect.x,
-            composerRect.y - SELECTION_TOOLBAR_CLEARANCE_PX,
-            composerRect.width,
-            composerRect.height + SELECTION_TOOLBAR_CLEARANCE_PX,
-        )
+        const clearRect = composerClearRect(el)
         hideTooltipNow()
         closeSynonyms()
         synonymsHandle = showSynonyms(overlay.root, {
@@ -1029,9 +1044,53 @@ export function startOrchestrator(
             found ? { el: found.el, text: found.text, span: found.span } : null,
         )
         if (!scope) return
-        void openRephraseFor(scope.el, scope.text, scope.span, rephraseDeps, () => {
-            void rerunFor(el)(getText(el))
-        })
+        // Placement audit: only use the selection's rect when the resolved
+        // scope IS that selection — resolveRephraseScope can fall back to
+        // the whole field (e.g. a trivial/whitespace-only selection), in
+        // which case `found.rect` would anchor the card to the wrong span.
+        const anchorRect =
+            found && found.span.start === scope.span.start && found.span.end === scope.span.end
+                ? found.rect
+                : undefined
+        void openRephraseFor(
+            scope.el,
+            scope.text,
+            scope.span,
+            rephraseDeps,
+            () => {
+                void rerunFor(el)(getText(el))
+            },
+            null,
+            anchorRect,
+        )
+    }
+
+    /**
+     * Rephrase a SPECIFIC, already-resolved selection (the split control's
+     * primary "Rephrase" segment click). Unlike `rephraseFor`, there is no
+     * ambiguity here — `found` IS the selection the control was anchored
+     * to — so its rect is always the right anchor for the pending/result/
+     * error card, and resolveRephraseScope's whole-field fallback never
+     * applies here (a non-empty selection was required for the control to
+     * be shown at all).
+     */
+    const rephraseForSelection = (found: {
+        el: HTMLElement
+        text: string
+        span: { start: number; end: number }
+        rect: DOMRect
+    }): void => {
+        void openRephraseFor(
+            found.el,
+            found.text,
+            found.span,
+            rephraseDeps,
+            () => {
+                void rerunFor(found.el)(getText(found.el))
+            },
+            null,
+            found.rect,
+        )
     }
 
     // ---- Floating split control (Rephrase + Synonyms), Feature 2 ----
@@ -1068,9 +1127,16 @@ export function startOrchestrator(
             const cleanWord = isSingleCleanWordSelection(fullText, found.span, flagged)
             rephraseButtonHandle = showRephraseButton(overlay.root, {
                 anchorRect: found.rect,
+                // Placement audit: the synonyms popover already clears
+                // Discord's composer + its floating selection-formatting
+                // toolbar (see openSynonymsForWord's clearRect below) — the
+                // split control anchors to the SAME kind of selection rect
+                // and needs the same clearance, or it flips above the
+                // selection straight into that toolbar / the composer edge.
+                clearRect: composerClearRect(found.el),
                 onClick: () => {
                     hideRephraseButton()
-                    rephraseFor(found.el)
+                    rephraseForSelection(found)
                 },
                 synonymsEnabled: cleanWord !== null,
                 synonymsDisabledReason: cleanWord

@@ -360,6 +360,20 @@ function positionPill(
     view: Window,
     offset: { dx: number; dy: number } = { dx: 0, dy: 0 },
 ): void {
+    // Placement audit (SCORE ORB): when the field this orb belongs to has
+    // scrolled entirely out of the viewport, HIDE the orb instead of letting
+    // the viewport clamp below pin it to the nearest edge — an orb floating
+    // at (say) the top-left of the screen while its field is scrolled
+    // hundreds of pixels away reads as a stray, detached widget, not a
+    // status indicator for anything the user can see. `gf-orb--offscreen`
+    // is a SEPARATE class from the focus-driven `gf-orb--hidden` (see
+    // styles.ts) so the two independent hide-reasons don't clobber each
+    // other. Toggled on every reposition() call (the shared scroll/resize
+    // loop), so the orb reappears the instant any part of the field
+    // re-enters the viewport.
+    const offscreen = isRectOffscreen(anchor, view)
+    pill.classList.toggle('gf-orb--offscreen', offscreen)
+    if (offscreen) return
     const width = pill.offsetWidth || PILL_WIDTH_FALLBACK
     const height = pill.offsetHeight || PILL_HEIGHT_FALLBACK
     // Default anchor: bottom-right of the field, shifted by the live drag
@@ -372,6 +386,15 @@ function positionPill(
     // orb the field-clamp pins the orb to the field's bottom-right corner.
     const pos = clampToRect({ left, top }, width, height, anchor)
     positionAbsolute(pill, pos, view)
+}
+
+/** True when `rect` has NO intersection with the viewport at all (fully
+ *  scrolled above/below/left/right of it) — as opposed to merely partially
+ *  clipped, which still leaves the orb meaningfully anchored. */
+function isRectOffscreen(rect: DOMRect, view: Window): boolean {
+    const vw = view.innerWidth
+    const vh = view.innerHeight
+    return rect.bottom <= 0 || rect.top >= vh || rect.right <= 0 || rect.left >= vw
 }
 
 /**

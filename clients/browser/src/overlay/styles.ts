@@ -24,6 +24,49 @@
 
 const Z_OVERLAY = 2147483647
 
+// ------------------------------------------------------------------------
+// Z-INDEX LADDER (placement audit — see overlay/*.ts "z-index ladder"
+// notes). Every GrammarForge surface lives inside ONE shadow root, which is
+// itself a single stacking context pinned above host-page chrome via the
+// host element's own z-index:2147483647 (shadow-host.ts) — that is the
+// ONLY place a max-int value needs to appear. Reusing the same max-int
+// value on every CHILD surface (the pre-audit state) meant ties were broken
+// by DOM append order alone: a highlight-layer reconcile() that ran AFTER a
+// popover mounted (e.g. a background re-check completing while the user has
+// a card open) would silently paint the underline ON TOP of the popover.
+// Distinct, strictly-increasing tiers remove that footgun — no two GF
+// surfaces share a value, so paint order no longer depends on DOM order.
+//
+// Lowest → highest:
+//   1. Z_HIGHLIGHT — the underline/highlight layer (.gf-u). Purely
+//      decorative + pointer-events:none; always the base layer.
+//   2. Z_ORB       — the per-field score orb (.gf-orb). Persistent but
+//      unobtrusive; everything transient floats above it.
+//   3. Z_TOOLTIP   — the hover pill (.gf-tip). Transient, dismissed on
+//      scroll (see tooltip.ts / the reanchor onScrollResize hook).
+//   4. Z_CONTROL   — the Rephrase/Synonyms split control (.gf-rephrase-btn).
+//      Transient, selection-anchored.
+//   5. Z_PANEL     — the review panel (.gf-panel-aside). Large + persistent,
+//      but a CHILD popover (Goals, Synonyms, the correction card, or a
+//      rephrase card opened via the panel's "Rephrase message" button) can
+//      be open AT THE SAME TIME — panel.ts's outside-dismiss explicitly
+//      excludes those from auto-closing the panel — so they must paint
+//      above it, not below.
+//   6. Z_POPOVER   — the correction card (.gf-card), the rephrase result/
+//      pending/error card (.gf-rephrase), the synonyms popover (.gf-syn),
+//      and the Goals popover (.gf-goals-pop). All are transient, single-
+//      purpose action surfaces that can coexist with (and must win over)
+//      the review panel.
+//   7. Z_TOAST     — the mutation toast (.gf-toast). A global, ephemeral
+//      notification that must never be hidden behind anything else.
+const Z_HIGHLIGHT = Z_OVERLAY - 6
+const Z_ORB = Z_OVERLAY - 5
+const Z_TOOLTIP = Z_OVERLAY - 4
+const Z_CONTROL = Z_OVERLAY - 3
+const Z_PANEL = Z_OVERLAY - 2
+const Z_POPOVER = Z_OVERLAY - 1
+const Z_TOAST = Z_OVERLAY
+
 const SCALE_TOOLTIP = 0.96
 const DURATION_TOOLTIP_MS = 180
 
@@ -58,7 +101,7 @@ export const OVERLAY_CSS = `
   .gf-u {
     position: fixed;
     pointer-events: none;
-    z-index: ${Z_OVERLAY};
+    z-index: ${Z_HIGHLIGHT};
     border-radius: 2px;
     background: transparent;
     overflow: visible;
@@ -129,6 +172,11 @@ export const OVERLAY_CSS = `
    * ============================================================ */
   .gf-orb {
     position: fixed;
+    /* Explicit z-index (ladder tier 2 — see Z_HIGHLIGHT..Z_TOAST above).
+       Previously omitted (z-index:auto) — position:fixed with no explicit
+       z-index still stacks by DOM order relative to auto siblings, an
+       implicit dependency the ladder removes. */
+    z-index: ${Z_ORB};
     display: block;
     width: 44px;
     height: 44px;
@@ -171,6 +219,16 @@ export const OVERLAY_CSS = `
      is unfocused. display:none so it neither paints nor intercepts pointer
      events; the orchestrator toggles this on field focus/blur. */
   .gf-orb--hidden { display: none; }
+  /* Placement audit (SCORE ORB): the field this orb is anchored to has
+     scrolled completely out of the viewport. Without this, positionAbsolute's
+     viewport clamp used to pin the orb to the nearest viewport edge (e.g.
+     top-left) even though the field itself was nowhere on screen — the orb
+     floated DETACHED from any visible context instead of disappearing with
+     its field. A SEPARATE class from .gf-orb--hidden (which tracks focus)
+     so the two independent hide-reasons (focus / scroll-visibility) don't
+     stomp each other — both just resolve to display:none. Toggled by
+     positionPill()/reposition() in status-button.ts. */
+  .gf-orb--offscreen { display: none; }
   /* Collapsed (disabled-on-this-site) orb: just the muted power glyph in the
      center. The ring stays full (it still conveys the score band) but the
      whole element reads quieter. */
@@ -266,7 +324,7 @@ export const OVERLAY_CSS = `
     display: inline-flex;
     align-items: stretch;
     pointer-events: auto;
-    z-index: ${Z_OVERLAY};
+    z-index: ${Z_CONTROL};
     border-radius: 9999px;
     isolation: isolate;
     contain: layout paint;
@@ -345,7 +403,7 @@ export const OVERLAY_CSS = `
   .gf-rephrase {
     position: fixed;
     pointer-events: auto;
-    z-index: ${Z_OVERLAY};
+    z-index: ${Z_POPOVER};
     /* Popover-API top-layer fix: reset UA inset:0 + margin:auto so our
        JS positionCard() left/top wins. */
     margin: 0;
@@ -733,7 +791,7 @@ export const OVERLAY_CSS = `
     left: 50%;
     bottom: 24px;
     transform: translateX(-50%);
-    z-index: ${Z_OVERLAY};
+    z-index: ${Z_TOAST};
     display: inline-flex;
     align-items: center;
     gap: 10px;
@@ -1000,12 +1058,15 @@ export const OVERLAY_CSS = `
   /* ----- Hover preview pill (diff only) ----- */
   .gf-tip {
     /* Bug-fix: was position:absolute z-index:30. The highlight nodes are
-       position:fixed at z-index:Z_OVERLAY (2147483647) — the tooltip was
-       rendered BEHIND them and invisible. Also needs a base background so
-       it reads on any page (the :host([data-gf-theme]) selectors below
-       upgrade to glass; the base is the solid fallback). */
+       position:fixed and (ladder tier 1, Z_HIGHLIGHT) always paint below
+       the tooltip (ladder tier 3) — the tooltip used to render BEHIND them
+       and invisible. Also needs a base background so it reads on any page
+       (the :host([data-gf-theme]) selectors below upgrade to glass; the
+       base is the solid fallback). See the Z-INDEX LADDER note atop this
+       file for the full ordering + why every tier now gets a DISTINCT
+       value instead of sharing Z_OVERLAY. */
     position: fixed;
-    z-index: 2147483647;
+    z-index: ${Z_TOOLTIP};
     display: inline-flex;
     align-items: center;
     gap: var(--gf-sp-2);
@@ -1123,7 +1184,7 @@ export const OVERLAY_CSS = `
      * is also unclickable. Replicate the .gf-panel glass recipe here. */
     position: fixed;
     pointer-events: auto;
-    z-index: ${Z_OVERLAY};
+    z-index: ${Z_POPOVER};
     margin: 0;
     inset: auto;
     width: 320px;
@@ -1307,14 +1368,21 @@ export const OVERLAY_CSS = `
   }
   .gf-row:hover { background: rgba(127, 127, 140, 0.14); transform: translateX(3px); }
 
-  /* ----- Rephrase / goals / synonyms popovers (new design).
-   *       Existing .gf-rephrase-btn / .gf-rephrase-card above are the
-   *       live in-page rephrase flow; the .gf-rephrase / .gf-goals /
-   *       .gf-syn classes here are the design-system canonical
-   *       popovers. */
-  .gf-rephrase { width: 360px; padding: 15px; border-radius: var(--gf-r-panel); z-index: 50; }
-  .gf-goals    { width: 300px; padding: 15px; border-radius: var(--gf-r-panel); z-index: 55; }
-  .gf-syn      { width: 190px; padding: 8px;  border-radius: 13px; z-index: 42; }
+  /* NOTE: an earlier "design-system canonical popovers" stub block used to
+   * live here, re-declaring .gf-rephrase / .gf-goals / .gf-syn with
+   * placeholder z-index values (50 / 55 / 42). .gf-rephrase and .gf-syn
+   * are REAL, live classes (rephrase-card.ts / synonyms.ts) — because this
+   * stub appeared LATER in the stylesheet than .gf-rephrase's real,
+   * full definition above, the cascade let its z-index:50 silently WIN,
+   * regressing the live rephrase card from Z_POPOVER (2147483646) down to
+   * 50 — well below the highlight layer, the tooltip, and every other
+   * overlay surface. (.gf-syn's real definition happens to appear even
+   * later in the file, below, so it was not affected the same way — but
+   * the collision was still live, undocumented, and one reorder away from
+   * breaking it too.) .gf-goals was simply dead (the goals popover is
+   * .gf-goals-pop). Removed outright — see the Z-INDEX LADDER note atop
+   * this file + the real definitions of .gf-rephrase / .gf-syn /
+   * .gf-goals-pop below for the single source of truth. */
 
   /* ----- Skeleton shimmer (LLM generating rephrase) ----- */
   .gf-skel {
@@ -1438,7 +1506,7 @@ export const OVERLAY_CSS = `
   .gf-panel-aside {
     position: fixed;
     pointer-events: auto;
-    z-index: 2147483647;
+    z-index: ${Z_PANEL};
     width: 344px;
     max-height: 80vh;
     overflow: hidden;
@@ -1793,7 +1861,7 @@ export const OVERLAY_CSS = `
   .gf-goals-pop {
     position: fixed;
     pointer-events: auto;
-    z-index: 2147483647;
+    z-index: ${Z_POPOVER};
     width: 300px;
     padding: 14px 15px;
     border-radius: 14px;
@@ -2043,7 +2111,7 @@ export const OVERLAY_CSS = `
   .gf-syn {
     position: fixed;
     pointer-events: auto;
-    z-index: 2147483647;
+    z-index: ${Z_POPOVER};
     padding: 8px;
     border-radius: 13px;
     isolation: isolate;

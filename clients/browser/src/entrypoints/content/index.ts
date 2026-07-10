@@ -1043,24 +1043,30 @@ function wireRuntime(
                 const panelField = runtime.panelFor
                 const panelSt = runtime.fields.get(panelField)
                 if (panelSt?.statusHandle) {
-                    // Re-anchor the panel to the orb's current position
-                    // (the orb was already repositioned by remeasureField
-                    // above via statusHandle.reposition). Read the field
-                    // rect as the panel anchor.
                     const fieldRect = panelField.getBoundingClientRect()
                     if (fieldRect.width > 0 || fieldRect.height > 0) {
-                        // positionPanel is internal to panel.ts; we close
-                        // and reopen instead (the panel is rebuilt with
-                        // fresh data on reopen, which is correct).
-                        // Only reopen if the field is still in the viewport.
                         const inViewport =
                             fieldRect.bottom > 0 &&
                             fieldRect.top < (window.innerHeight ?? 9999)
                         if (!inViewport) {
+                            // Field scrolled fully out of view — dismiss
+                            // rather than leave a panel anchored to nothing
+                            // the user can see.
                             runtime.panelHandle.destroy()
                             runtime.panelHandle = null
                             runtime.panelFor = null
                             runtime.panelField = null
+                        } else {
+                            // Placement audit: the field is STILL on screen
+                            // (just at a different position) — re-anchor the
+                            // panel via its own reposition(), mirroring the
+                            // orb's reposition() above. Previously there was
+                            // no `else` branch here at all: the panel stayed
+                            // glued to its render-time viewport coordinates
+                            // for as long as the field remained anywhere in
+                            // the (loosely-defined) viewport, visibly
+                            // drifting away from the orb it's meant to track.
+                            runtime.panelHandle.reposition(fieldRect)
                         }
                     }
                 }

@@ -237,6 +237,37 @@ describe('showTooltip (preview pill)', () => {
         expect(tip.querySelector('.gf-tip__accept')).toBeNull()
     })
 
+    it('placement audit: the flipped-below pill clamps to the BOTTOM of a short viewport (does not overflow off-screen)', () => {
+        // Bug-fix: `vh` (view.innerHeight) was computed but never
+        // consumed in the showBelow branch — the pill's top was
+        // `anchor.bottom + ANCHOR_GAP` with no ceiling, so a word near the
+        // top edge of a SHORT viewport (exactly the case that triggers the
+        // flip) could still push the pill's bottom edge past the bottom of
+        // the viewport, rendering it partially/fully off-screen.
+        const root = mkRoot()
+        const origInnerHeight = window.innerHeight
+        Object.defineProperty(window, 'innerHeight', { value: 40, configurable: true })
+        try {
+            // top=5,bottom=23 → forces showBelow (spaceAbove = 5-10 = -5).
+            // pillHeight fallback = TOOLTIP_HEIGHT_ESTIMATE = 36.
+            // Naive (unclamped) top = 23 + 6 = 29 → bottom edge at 65, well
+            // past a 40px-tall viewport. Clamped top = 40 - 36 - 10 = -6.
+            const nearTopAnchor = new DOMRect(200, 5, 80, 18)
+            showTooltip(root, {
+                anchorRect: nearTopAnchor,
+                category: 'grammar',
+                diffOriginal: 'was',
+                diffCorrected: 'were',
+                diffIsDeletion: false,
+            })
+            const tip = root.querySelector('.gf-tip') as HTMLElement
+            expect(tip.classList.contains('gf-tip--below')).toBe(true)
+            expect(parseInt(tip.style.top, 10)).toBe(-6)
+        } finally {
+            Object.defineProperty(window, 'innerHeight', { value: origInnerHeight, configurable: true })
+        }
+    })
+
     it('positions ABOVE the anchor (default) even when near the bottom of the viewport', () => {
         // Round 10: default is now ABOVE. A word near the bottom of the
         // viewport has plenty of space above → still shows above.

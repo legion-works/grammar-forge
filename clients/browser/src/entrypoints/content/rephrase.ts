@@ -159,7 +159,23 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
          *  absent (initial open), we seed scope='sentence' and tone
          *  from the focused field's goals. */
         reissueState: { scope: CardRephraseScope; tone: RephraseTone } | null = null,
+        /**
+         * Placement audit: the rect the pending/result/error card should
+         * anchor to. When the flow was triggered from an actual selection
+         * (the split control's primary segment, or a hotkey/message with a
+         * selection in scope), this is that selection's viewport rect — the
+         * same rect the Rephrase/Synonyms control itself anchored to, so the
+         * card appears where the button was instead of jumping to the
+         * field's bounding box. Undefined for a whole-field rephrase (no
+         * selection in scope), which falls back to `el.getBoundingClientRect()`
+         * as before. Reused verbatim across the scope/tone/regenerate
+         * re-issue chain — the field hasn't moved mid-session (a scroll
+         * would have already dismissed the card; see the reanchor
+         * onScrollResize hook), so no re-measure is needed.
+         */
+        anchorRect: DOMRect | undefined = undefined,
     ): Promise<void> => {
+        const anchor = anchorRect ?? el.getBoundingClientRect()
         const s = await getSettings()
         // W3-2: seed the rephrase default tone from the FOCUSED field's
         // goals. `formality === 'formal'` → 'formal', `informal` → 'casual',
@@ -175,7 +191,7 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
         const scope: CardRephraseScope = reissueState?.scope ?? 'sentence'
         hideRephraseButton()
         const pending: RephraseCardHandle = showRephrasePending(deps.overlayRoot, {
-            anchorRect: el.getBoundingClientRect(),
+            anchorRect: anchor,
             onClose: () => {},
         })
         try {
@@ -190,7 +206,7 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
             if (!deps.ctxIsValid()) return
             pending.hide()
             showRephraseCard(deps.overlayRoot, {
-                anchorRect: el.getBoundingClientRect(),
+                anchorRect: anchor,
                 original: res.original,
                 rephrased: res.rephrased,
                 alternatives: res.alternatives,
@@ -215,14 +231,15 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                     // the same text/span/tone, and replace the card via
                     // pending → result. The re-issue path (via
                     // reissueState) preserves the user's current scope
-                    // and tone across calls.
-                    void openRephraseFor(el, text, span, { scope: nextScope, tone: rephraseTone })
+                    // and tone across calls. Reuse the SAME anchor so the
+                    // re-issued card doesn't jump position mid-session.
+                    void openRephraseFor(el, text, span, { scope: nextScope, tone: rephraseTone }, anchor)
                 },
                 onToneChange: (nextTone) => {
-                    void openRephraseFor(el, text, span, { scope, tone: nextTone })
+                    void openRephraseFor(el, text, span, { scope, tone: nextTone }, anchor)
                 },
                 onRegenerate: () => {
-                    void openRephraseFor(el, text, span, { scope, tone: rephraseTone })
+                    void openRephraseFor(el, text, span, { scope, tone: rephraseTone }, anchor)
                 },
                 modelLabel: 'Gemma',
             })
@@ -231,9 +248,9 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
             if (!deps.ctxIsValid()) return
             pending.hide()
             showRephraseError(deps.overlayRoot, {
-                anchorRect: el.getBoundingClientRect(),
+                anchorRect: anchor,
                 message: 'Rephrase failed',
-                onRetry: () => void openRephraseFor(el, text, span, reissueState),
+                onRetry: () => void openRephraseFor(el, text, span, reissueState, anchor),
                 onClose: () => {},
             })
         }
@@ -243,7 +260,16 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
         const found = resolveSelection(el)
         const scope = resolveRephraseScope(el, found)
         if (!scope) return
-        void openRephraseFor(el, scope.text, scope.span)
+        // Placement audit: only use the selection's rect when the resolved
+        // scope IS that selection (resolveRephraseScope can fall back to
+        // the whole field — e.g. a trivial/whitespace-only selection — in
+        // which case `found.rect` would anchor the card to the wrong span
+        // entirely). Matching span bounds is the cheap, exact check.
+        const anchorRect =
+            found && found.span.start === scope.span.start && found.span.end === scope.span.end
+                ? found.rect
+                : undefined
+        void openRephraseFor(el, scope.text, scope.span, null, anchorRect)
     }
 
     let selectionDebounce: ReturnType<typeof setTimeout> | null = null
@@ -269,7 +295,13 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                 anchorRect: found.rect,
                 onClick: () => {
                     hideRephraseButton()
-                    void openRephraseFor(found.el, found.text, found.span)
+                    // Placement audit: anchor the pending/result/error card
+                    // to the SAME selection rect the split control itself
+                    // anchored to — previously this fell through to
+                    // openRephraseFor's `el.getBoundingClientRect()` default,
+                    // so the card visibly jumped from beside the selection to
+                    // the field's bounding box the instant it opened.
+                    void openRephraseFor(found.el, found.text, found.span, null, found.rect)
                 },
                 synonymsEnabled: cleanWord !== null,
                 synonymsDisabledReason: cleanWord

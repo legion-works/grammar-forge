@@ -30,8 +30,22 @@ export interface ToastHandle {
     dismiss: () => void
 }
 
+// Placement audit (TOASTS): one toast per root, but the previous
+// implementation replaced a still-showing toast with a blunt
+// `querySelectorAll('.gf-toast').forEach(n => n.remove())` DOM sweep — that
+// removes the node WITHOUT going through the old toast's own `dismiss()`,
+// so its auto-dismiss `setTimeout` kept running in the background and its
+// `onDismiss` (when a caller supplies one) fired later, un-cancelled,
+// against a toast the user never saw close. Several mutation toasts firing
+// in quick succession (accept-all, then an immediate undo, etc.) could
+// leave multiple orphaned timers ticking. Track the single active handle
+// per root and call ITS `dismiss()` before creating the next one, so the
+// previous toast's timer is cancelled and its lifecycle-once `onDismiss`
+// (if any) fires deterministically at replacement time, not later.
+const ACTIVE = new WeakMap<ShadowRoot, ToastHandle>()
+
 export function showToast(root: ShadowRoot, opts: ToastOptions): ToastHandle {
-    root.querySelectorAll('.gf-toast').forEach((n) => n.remove())
+    ACTIVE.get(root)?.dismiss()
     const doc = root.ownerDocument
     const el = doc.createElement('div')
     el.className = 'gf-toast'
@@ -78,15 +92,24 @@ export function showToast(root: ShadowRoot, opts: ToastOptions): ToastHandle {
         opts.durationMs ?? 1200,
     )
 
-    let dismissed = false
-    function dismiss(): void {
-        if (dismissed) return
-        dismissed = true
+    // Shared teardown: cancel the timer, remove the node, and release this
+    // toast's ACTIVE-registry slot (but only if it's STILL this toast's
+    // handle — a newer showToast() on the same root already replaced the
+    // entry before this one's dismiss() could run, so don't clobber it).
+    const teardown = (): void => {
         if (timer != null) {
             clearTimeout(timer)
             timer = null
         }
         if (el.isConnected) el.remove()
+        if (ACTIVE.get(root) === handle) ACTIVE.delete(root)
+    }
+
+    let dismissed = false
+    function dismiss(): void {
+        if (dismissed) return
+        dismissed = true
+        teardown()
         // Fire onDismiss exactly once per toast lifecycle. The Undo branch
         // skips this so the orchestrator's "show on every mutation +
         // dismiss → signal(rejected)" wiring (W3) can decide what to do
@@ -97,18 +120,18 @@ export function showToast(root: ShadowRoot, opts: ToastOptions): ToastHandle {
     btn.addEventListener('click', (e) => {
         e.preventDefault()
         e.stopPropagation()
+        if (dismissed) return
+        dismissed = true
         // Cancel the auto-dismiss timer without firing onDismiss — the
         // Undo button IS the user's exit; onDismiss is for natural fade-outs.
-        if (timer != null) {
-            clearTimeout(timer)
-            timer = null
-        }
-        if (el.isConnected) el.remove()
+        teardown()
         // onUndo wins over onAction when both are passed.
         if (opts.onUndo) opts.onUndo()
         else if (opts.onAction) opts.onAction()
     })
 
+    const handle: ToastHandle = { dismiss }
+    ACTIVE.set(root, handle)
     root.appendChild(el)
-    return { dismiss }
+    return handle
 }

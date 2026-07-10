@@ -292,6 +292,119 @@ describe('rephrase flow — goals-derived default tone (W3-2)', () => {
     })
 })
 
+// Placement audit: the split control's primary "Rephrase" segment opens
+// beside the SELECTION (found.rect) — the pending/result card must anchor
+// to that same rect, not silently fall back to the whole field's bounding
+// box (a regression that made the card visibly jump the instant it opened).
+describe('rephrase flow — pending/result card anchors to the selection, not the field (placement audit)', () => {
+    it('anchors the pending + result card to found.rect from the split control click, not el.getBoundingClientRect()', async () => {
+        const pendingSpy = vi.spyOn(rephraseCard, 'showRephrasePending').mockReturnValue({
+            hide: vi.fn<() => void>(),
+        } as unknown as ReturnType<typeof rephraseCard.showRephrasePending>)
+        const cardSpy = vi.spyOn(rephraseCard, 'showRephraseCard').mockReturnValue({
+            hide: vi.fn<() => void>(),
+        } as unknown as ReturnType<typeof rephraseCard.showRephraseCard>)
+        const btnSpy = vi.spyOn(rephraseButton, 'showRephraseButton').mockReturnValue({
+            hide: vi.fn<() => void>(),
+            isOpen: () => true,
+        } as unknown as ReturnType<typeof rephraseButton.showRephraseButton>)
+
+        const el = document.createElement('textarea')
+        document.body.appendChild(el)
+        el.value = 'hello world'
+        // Distinct from the selection rect below — if the card falls back
+        // to this, the test catches the regression.
+        vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(
+            new DOMRect(0, 0, 900, 900),
+        )
+        const selectionRect = new DOMRect(42, 84, 50, 16)
+
+        const flow = mountRephraseFlow({
+            client: makeClient(),
+            overlayRoot: document.createElement('div') as unknown as ShadowRoot,
+            rerun: () => {},
+            ctxIsValid: () => true,
+            resolveActiveSelection: () => ({
+                el,
+                text: 'hello world',
+                span: { start: 0, end: 11 },
+                rect: selectionRect,
+            }),
+            applyEdit: async () => {},
+            getFlaggedRanges: () => [],
+        })
+        document.dispatchEvent(new Event('selectionchange'))
+        await vi.advanceTimersByTimeAsync(150)
+
+        const btnOptions = btnSpy.mock.calls[btnSpy.mock.calls.length - 1]?.[1]
+        // The control itself is anchored to the selection.
+        expect(btnOptions?.anchorRect).toBe(selectionRect)
+        btnOptions?.onClick()
+        await vi.runAllTimersAsync()
+
+        // Mocks are shared/accumulated across tests in this file (no
+        // mockClear between tests, matching the file's existing pattern) —
+        // use the LAST call, not the first.
+        const pendingAnchor = pendingSpy.mock.calls[pendingSpy.mock.calls.length - 1]?.[1]
+            ?.anchorRect as DOMRect | undefined
+        const cardAnchor = cardSpy.mock.calls[cardSpy.mock.calls.length - 1]?.[1]
+            ?.anchorRect as DOMRect | undefined
+        expect(pendingAnchor).toBe(selectionRect)
+        expect(cardAnchor).toBe(selectionRect)
+        flow.stop()
+    })
+
+    it('re-issue paths (scope/tone change, regenerate) reuse the SAME anchor — the card does not jump mid-session', async () => {
+        vi.spyOn(rephraseCard, 'showRephrasePending').mockReturnValue({
+            hide: vi.fn<() => void>(),
+        } as unknown as ReturnType<typeof rephraseCard.showRephrasePending>)
+        const cardSpy = vi.spyOn(rephraseCard, 'showRephraseCard').mockReturnValue({
+            hide: vi.fn<() => void>(),
+        } as unknown as ReturnType<typeof rephraseCard.showRephraseCard>)
+        const btnSpy = vi.spyOn(rephraseButton, 'showRephraseButton').mockReturnValue({
+            hide: vi.fn<() => void>(),
+            isOpen: () => true,
+        } as unknown as ReturnType<typeof rephraseButton.showRephraseButton>)
+
+        const el = document.createElement('textarea')
+        document.body.appendChild(el)
+        el.value = 'hello world'
+        vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 900, 900))
+        const selectionRect = new DOMRect(10, 20, 30, 12)
+
+        const flow = mountRephraseFlow({
+            client: makeClient(),
+            overlayRoot: document.createElement('div') as unknown as ShadowRoot,
+            rerun: () => {},
+            ctxIsValid: () => true,
+            resolveActiveSelection: () => ({
+                el,
+                text: 'hello world',
+                span: { start: 0, end: 11 },
+                rect: selectionRect,
+            }),
+            applyEdit: async () => {},
+            getFlaggedRanges: () => [],
+        })
+        document.dispatchEvent(new Event('selectionchange'))
+        await vi.advanceTimersByTimeAsync(150)
+        const btnOptions = btnSpy.mock.calls[btnSpy.mock.calls.length - 1]?.[1]
+        btnOptions?.onClick()
+        await vi.runAllTimersAsync()
+
+        const firstCardOpts = cardSpy.mock.calls[cardSpy.mock.calls.length - 1]?.[1] as
+            | { onRegenerate?: () => void }
+            | undefined
+        firstCardOpts?.onRegenerate?.()
+        await vi.runAllTimersAsync()
+
+        const secondCardAnchor = cardSpy.mock.calls[cardSpy.mock.calls.length - 1]?.[1]
+            ?.anchorRect as DOMRect | undefined
+        expect(secondCardAnchor).toBe(selectionRect)
+        flow.stop()
+    })
+})
+
 // Feature 2b: the split control's Synonyms segment is enabled only for a
 // selection that resolves to a single "clean" word (isSingleCleanWordSelection
 // from @/overlay/synonyms — no active correction on it). These tests drive
