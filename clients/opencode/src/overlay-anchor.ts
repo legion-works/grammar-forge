@@ -80,3 +80,31 @@ export function ghostAnchor(
     const top = Math.min(Math.max(0, anchor.y), Math.max(0, screenH - 1));
     return { left, top };
 }
+
+/** Smallest sane card width (border + padding + at least a couple columns of
+ *  content). Below this the card stops being useful, but we still clamp here
+ *  rather than going negative/zero on a pathologically narrow terminal. */
+const MIN_CARD_W = 10;
+
+/**
+ * P1-5: derive the card's width (in columns, including border) from the
+ * terminal's actual width instead of always using the fixed 44-column
+ * default. `clampAnchor` above only clamps the card's LEFT position so it
+ * doesn't overflow the right edge — it never shrinks the card itself, so on
+ * a terminal narrower than `maxWidth` (e.g. an 80-col default minus a split
+ * pane, or a genuinely small window) the card still renders at its full
+ * fixed width and overflows.
+ *
+ * @param screenW   Terminal width in columns (from useTerminalDimensions()).
+ * @param maxWidth  The card's preferred/maximum width. Defaults to 44 (the
+ *                  fixed CARD_W tui-entry.tsx used before this fix).
+ * @param margin    Columns to leave clear on at least one side so the card
+ *                  never touches the terminal edge. Defaults to 2.
+ */
+export function computeCardWidth(
+    screenW: number,
+    maxWidth: number = 44,
+    margin: number = 2,
+): number {
+    return Math.max(MIN_CARD_W, Math.min(maxWidth, screenW - margin));
+}

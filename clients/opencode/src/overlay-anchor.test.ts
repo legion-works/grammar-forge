@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clampAnchor, ghostAnchor } from "./overlay-anchor";
+import { clampAnchor, ghostAnchor, computeCardWidth } from "./overlay-anchor";
 
 // Terminal: 80 cols × 24 rows. Card: 44 wide × 5 tall.
 const SCREEN_W = 80;
@@ -86,5 +86,39 @@ describe("ghostAnchor", () => {
         const pos = ghostAnchor({ x: -3, y: -2 }, 120, 40);
         expect(pos.left).toBe(0);
         expect(pos.top).toBe(0);
+    });
+});
+
+describe("computeCardWidth (P1-5)", () => {
+    it("wide terminal: returns the fixed max width (44)", () => {
+        expect(computeCardWidth(120)).toBe(44);
+        expect(computeCardWidth(80)).toBe(44);
+    });
+
+    it("narrow terminal: shrinks to screenW - margin", () => {
+        // screenW=30, margin=2 (default) → 28, below maxWidth=44.
+        expect(computeCardWidth(30)).toBe(28);
+    });
+
+    it("exact boundary: screenW - margin === maxWidth stays at maxWidth", () => {
+        expect(computeCardWidth(46)).toBe(44); // 46 - 2 = 44
+    });
+
+    it("pathologically narrow terminal: floors at MIN_CARD_W (10), never negative/zero", () => {
+        expect(computeCardWidth(5)).toBe(10);
+        expect(computeCardWidth(0)).toBe(10);
+        expect(computeCardWidth(-100)).toBe(10);
+    });
+
+    it("custom maxWidth/margin are honored", () => {
+        expect(computeCardWidth(100, 60, 4)).toBe(60); // wide enough for the custom max
+        expect(computeCardWidth(50, 60, 4)).toBe(46); // 50 - 4 = 46, below the custom max
+    });
+
+    it("the resulting width, combined with clampAnchor, never places the card past the right edge", () => {
+        const screenW = 30;
+        const cardW = computeCardWidth(screenW);
+        const pos = clampAnchor({ x: 25, y: 10 }, cardW, 5, screenW, 24);
+        expect(pos.left + cardW).toBeLessThanOrEqual(screenW);
     });
 });

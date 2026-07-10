@@ -109,4 +109,10 @@ describe("buildStatusLine", () => {
         const result = buildStatusLine(input);
         expect(result).toContain("no issues");
     });
+
+    test("P2-11 CHECKING: shows a transient checking indication (ctrl+g responsiveness while text has drifted)", () => {
+        const input: StatusLineInput = { state: "checking" };
+        const result = buildStatusLine(input);
+        expect(result).toContain("checking");
+    });
 });

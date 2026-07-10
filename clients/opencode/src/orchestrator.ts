@@ -36,12 +36,14 @@ import {
 } from "./display-width";
 import { collectPartRanges, overlapsAnyRange, type DisplaySpan } from "./part-filter";
 import { maskPastePlaceholders } from "./paste-mask";
+import { hitTestEndInclusive } from "./hit-test";
 import { createDetailsState, type DetailsState } from "./details-state";
 import { detectPromptPinSupport } from "./feature-detect";
 import { logDebug } from "./debug";
 import { buildStatusLine } from "./status-line";
 import { joinContinuation, lineLooksUnfinished, type GhostRenderer } from "./ghost-overlay";
 import { CATEGORY_FG } from "./category-palette";
+import { rephraseContentRowCount, MAX_CONTENT_ROWS } from "./card-spec";
 import type { PromptRef, TuiApi } from "./opencode-types";
 import type { PanelController, PanelView } from "./details-panel-view";
 
@@ -492,10 +494,16 @@ export function startOrchestrator(
         if (bridgeText.length !== text.length) {
             // Invariant: maskPastePlaceholders must return equal-length output.
             // This branch should never be reached; it is a defensive assertion.
-            logDebug("paste mask length mismatch (bug — using original text)", {
+            // P0-2 FIX: FAIL CLOSED. Sending `text` (the original, UNMASKED
+            // buffer) here would defeat the entire point of masking — a paste
+            // placeholder's real content living in `part.source.text.value`
+            // could leak to the bridge. Skip this check cycle instead; the
+            // next edit re-triggers scheduleCheck and gets a fresh attempt.
+            logDebug("paste mask length mismatch (bug — skipping bridge call, fail-closed)", {
                 origLen: text.length,
                 maskedLen: bridgeText.length,
             });
+            return;
         }
         if (bridgeText !== text) {
             logDebug("paste mask applied", {
@@ -507,7 +515,7 @@ export function startOrchestrator(
         const seq = ++state.checkSeq;
         try {
             const res = await correctFn({
-                text: bridgeText.length === text.length ? bridgeText : text,
+                text: bridgeText,
                 source: SIGNAL_SOURCE,
             });
             // Stale-seq guard: the ref-swap path bumps state.checkSeq to
@@ -802,6 +810,14 @@ export function startOrchestrator(
         // Clear any suggestion pin so the suggestion card doesn't fight the rephrase card.
         detailsState.unpin();
         clearActiveExtmarks();
+        // Clear any completion ghost — same chokepoint as pushFromDetailsState
+        // (the single place every pin path clears the ghost). Without this,
+        // firing rephraseHotkey while a ghost is visible left BOTH the
+        // priority-500 completion layer (esc dismiss) and the priority-500
+        // rephrase layer (esc reject) enabled at once with conflicting esc
+        // bindings, and pushStatusLine below would show "completion ready"
+        // fighting the rephrase card it's about to render.
+        clearCompletionGhost();
         const seq = ++rephraseSeq;
         state.rephrase = { mode: "loading", original: text, alternatives: [], altIndex: 0, scrollOffset: 0, seq, ref };
         pushStatusLine();
@@ -1107,6 +1123,12 @@ export function startOrchestrator(
         if (state.items.length === 0) return;
         if (ref.text !== state.checkedText) {
             // Text drifted — no safe hit-test; schedule a check and retry.
+            // P2-11: silently doing nothing here reads as an unresponsive
+            // ctrl+g — push a transient "checking…" status so the keypress
+            // feels acknowledged. pushStatusLine() (called from runCheck once
+            // the debounced re-check resolves) overwrites this with the real
+            // state, so it's self-clearing.
+            rephraseController?.setStatusText(buildStatusLine({ state: "checking" }));
             scheduleCheck(ref);
             return;
         }
@@ -1121,6 +1143,7 @@ export function startOrchestrator(
         if (!ref) return;
         if (state.items.length === 0) return;
         if (ref.text !== state.checkedText) {
+            rephraseController?.setStatusText(buildStatusLine({ state: "checking" }));
             scheduleCheck(ref);
             return;
         }
@@ -1178,13 +1201,32 @@ export function startOrchestrator(
 
     const rephraseScroll = (direction: 1 | -1): void => {
         if (state.rephrase?.mode !== "result") return;
-        state.rephrase.scrollOffset = Math.max(0, state.rephrase.scrollOffset + direction);
-        const ctrl = rephraseController;
-        if (!ctrl) return;
         const currentText =
             state.rephrase.altIndex === 0
                 ? state.rephrase.rephrased!
                 : state.rephrase.alternatives[state.rephrase.altIndex - 1]!;
+        // P2-8: clamp scrollOffset to [0, maxScroll] HERE, in state — not just
+        // at render time (buildRephraseResultCardSpec's own clamp). Without
+        // this, scrollOffset could grow past the true max (e.g. holding
+        // scroll-down after reaching the bottom), and the render-side clamp
+        // would silently cap the DISPLAY while state kept climbing — so
+        // scrolling back up needed that many no-op decrements before the
+        // display visibly moved. maxScroll uses DEFAULT_INNER_WIDTH as the
+        // wrap-width proxy (the orchestrator has no live terminal-width
+        // signal — that's tui-entry.tsx's concern per P1-5); this is a
+        // best-effort bound, not the render's source of truth.
+        const totalContent = rephraseContentRowCount(
+            state.rephrase.original,
+            currentText,
+            displayWidthOf,
+        );
+        const maxScroll = Math.max(0, totalContent - MAX_CONTENT_ROWS);
+        state.rephrase.scrollOffset = Math.max(
+            0,
+            Math.min(maxScroll, state.rephrase.scrollOffset + direction),
+        );
+        const ctrl = rephraseController;
+        if (!ctrl) return;
         ctrl.setView({
             kind: "rephrase-result",
             original: state.rephrase.original,
@@ -1485,18 +1527,16 @@ export function startOrchestrator(
                     displayEnd: span.end,
                 });
             }
-            let matchIndex: number | null = null;
-            for (let i = 0; i < candidateSpans.length; i++) {
-                const cs = candidateSpans[i]!;
-                // END-INCLUSIVE. Pre-fix used < (end-exclusive) which
-                // rejected word-end clicks: offset 14 vs span [8,14)
-                // returned no match. End-inclusive pins the word-end
-                // click. See hit-test.ts for the unit-tested contract.
-                if (offset >= cs.displayStart && offset <= cs.displayEnd) {
-                    matchIndex = i;
-                    break;
-                }
-            }
+            // END-INCLUSIVE hit-test — one source of truth in hit-test.ts
+            // (previously this loop was hand-rolled here, duplicating the
+            // exact contract hit-test.ts documents and unit-tests). Pre-fix
+            // used < (end-exclusive) which rejected word-end clicks: offset
+            // 14 vs span [8,14) returned no match. End-inclusive pins the
+            // word-end click.
+            const matchIndex = hitTestEndInclusive(
+                offset,
+                candidateSpans.map((cs) => ({ start: cs.displayStart, end: cs.displayEnd })),
+            );
             logDebug("hit-test", {
                 offset,
                 textLength: ref.text.length,

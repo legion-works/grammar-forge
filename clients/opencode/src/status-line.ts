@@ -1,5 +1,12 @@
 export interface StatusLineInput {
-    state: "flagged" | "pinned" | "rephrase-loading" | "rephrase-result" | "completion" | "clear";
+    state:
+        | "flagged"
+        | "pinned"
+        | "rephrase-loading"
+        | "rephrase-result"
+        | "completion"
+        | "clear"
+        | "checking";
     issueCount?: number;
     categories?: string[];
     pinnedIndex?: number;
@@ -66,6 +73,14 @@ export function buildStatusLine(input: StatusLineInput): string {
         }
         case "clear": {
             return "✓ no issues";
+        }
+        case "checking": {
+            // P2-11: ctrl+g/ctrl+shift+g (reviewNext/reviewPrev) no-op when the
+            // text has drifted since the last check — a re-check is scheduled,
+            // but silently doing nothing reads as an unresponsive keypress.
+            // This transient line covers the gap until the debounced check
+            // resolves and pushStatusLine() overwrites it with the real state.
+            return "⏳ checking…";
         }
     }
 }

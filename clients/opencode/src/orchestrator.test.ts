@@ -1322,9 +1322,9 @@ describe("startOrchestrator", () => {
         stop();
     });
 
-    test("cycle bindings: details layer uses '.' for cycleNext and '/' for cyclePrev (not n/p)", () => {
+    test("cycle bindings: details layer uses ctrl+n for cycleNext and ctrl+p for cyclePrev (not './')", () => {
         // Regression guard: after the rebind, the details layer must bind
-        // "." → cycleNext and "/" → cyclePrev. "n", "p", and "," must NOT appear.
+        // "ctrl+n" → cycleNext and "ctrl+p" → cyclePrev. "/" and "." must NOT appear.
         const layers: Array<{
             priority?: number;
             enabled?: () => boolean;
@@ -2390,6 +2390,53 @@ describe("startOrchestrator", () => {
         stop();
     });
 
+    // ─── P2-8: scrollOffset must be clamped in STATE, not just at render ──
+
+    test("P2-8: scrollOffset is clamped to maxScroll in STATE — excess scroll-down doesn't require equal scroll-ups to undo", async () => {
+        const { ref, commandHandlers, pendingRephrase, setViewCalls, stop } = makeRephraseEnv();
+
+        // 12 short lines (each its own paragraph, well under the 40-col wrap
+        // width) + a 1-line rephrase → totalContent = 12 + 1 = 13,
+        // maxScroll = 13 - MAX_CONTENT_ROWS(8) = 5.
+        // state.rephrase.original is captured from ref.text AT rephrase-start
+        // time (rephrase() reads `const text = ref.text`), not from the
+        // resolved payload's `original` field — so the long text must be on
+        // the ref BEFORE calling rephrase().
+        const longText = Array.from(
+            { length: 12 },
+            (_, i) => `Line ${i + 1}: ${"x".repeat(20)}`,
+        ).join("\n");
+        ref.text = longText;
+
+        const rephraseFn = commandHandlers.get("grammarforge.rephrase") as () => void;
+        rephraseFn();
+        pendingRephrase[0]!({ rephrased: "short", alternatives: [] });
+        await new Promise((r) => setTimeout(r, 10));
+
+        const scrollDown = commandHandlers.get("grammarforge.rephrase.scrollDown") as () => void;
+        const scrollUp = commandHandlers.get("grammarforge.rephrase.scrollUp") as () => void;
+        expect(scrollDown).toBeDefined();
+        expect(scrollUp).toBeDefined();
+
+        // Scroll down WAY past the bottom (20 times, but maxScroll is only 5).
+        for (let i = 0; i < 20; i++) scrollDown();
+        const afterExcessDown = setViewCalls[setViewCalls.length - 1] as {
+            scrollOffset: number;
+        };
+        // Pre-fix: state.scrollOffset would be 20 (unclamped) even though
+        // only 5 is ever visible. Post-fix: state itself is capped at 5.
+        expect(afterExcessDown.scrollOffset).toBe(5);
+
+        // A SINGLE scroll-up must immediately move the visible offset —
+        // pre-fix this would still report 20 (no-op scroll-ups needed first
+        // to walk state back down to the render-clamped value).
+        scrollUp();
+        const afterOneUp = setViewCalls[setViewCalls.length - 1] as { scrollOffset: number };
+        expect(afterOneUp.scrollOffset).toBe(4);
+
+        stop();
+    });
+
     // ─── A8: Eager dismiss on edit ─────────────────────────────────────
 
     test("A8 eager-dismiss: onChange textChanged clears pinned card immediately", async () => {
@@ -2687,6 +2734,257 @@ describe("startOrchestrator", () => {
         stop();
     });
 
+    // ─── P1-7: suggestion-card controller wiring (mouse mirrors of the
+    // keymap layer's return/x/ctrl+n/ctrl+p/esc) — controller.onApply /
+    // onIgnore / onUnpin / onCycleNext / onCyclePrev, gated the same way the
+    // keymap layer is (cursorPinSupported). ──────────────────────────────
+
+    describe("suggestion-card controller wiring (A7 mouse mirrors)", () => {
+        const makeEnv = () => {
+            const text = "I has a apple and teh cat";
+            // "has"=[2,5), "apple"=[8,13), "teh"=[18,21)
+            let resolveCorrect!: (res: unknown) => void;
+            const commandHandlers = new Map<string, () => unknown>();
+            let onCursorChangeCb = (): void => undefined;
+            const setViewCalls: Array<import("./details-panel-view").PanelView | null> = [];
+            const replaceRangeCalls: Array<[number, number, string]> = [];
+            const setCursorOffsetCalls: number[] = [];
+            const deletedIds: number[] = [];
+            let extmarkCounter = 0;
+
+            const ref = {
+                text,
+                current: { input: text, parts: [] },
+                cursorOffset: 8, // inside "apple" (index 1)
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => {
+                        extmarkCounter++;
+                        return extmarkCounter;
+                    },
+                    getAllForTypeId: () => [],
+                    delete: (id: number) => {
+                        deletedIds.push(id);
+                        return true;
+                    },
+                },
+                getTextRange: (s: number, e: number) => text.slice(s, e),
+                replaceRange: (s: number, e: number, r: string) => {
+                    replaceRangeCalls.push([s, e, r]);
+                },
+                focus: () => undefined,
+                setCursorOffset: (offset: number) => {
+                    setCursorOffsetCalls.push(offset);
+                },
+            };
+
+            const api = {
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        void cb;
+                        return () => undefined;
+                    },
+                    onCursorChange: (cb: () => void) => {
+                        onCursorChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        commands?: Array<{ name: string; run: () => unknown }>;
+                    }) => {
+                        for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                        return () => undefined;
+                    },
+                },
+                ui: { toast: () => undefined },
+                theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+                lifecycle: { onDispose: () => () => undefined },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            const panelController: PanelController = {
+                setView: (v) => setViewCalls.push(v),
+                subscribe: () => () => undefined,
+                currentView: () => null,
+                dispose: () => undefined,
+                setStatusText: () => undefined,
+                subscribeStatus: () => () => undefined,
+                currentStatus: () => "",
+            };
+
+            const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+                correct: () =>
+                    new Promise<unknown>((resolve) => {
+                        resolveCorrect = resolve;
+                    }),
+                panelRenderer: () => panelController,
+            } as unknown as OrchestratorDeps);
+
+            return {
+                ref,
+                commandHandlers,
+                setViewCalls,
+                replaceRangeCalls,
+                setCursorOffsetCalls,
+                deletedIds,
+                panelController,
+                onCursorChangeCb: () => onCursorChangeCb(),
+                resolveCorrect: (res: unknown) => resolveCorrect(res),
+                stop,
+            };
+        };
+
+        const threeItemSuggestions = (text: string) => ({
+            original: text,
+            score: 90,
+            suggestions: [
+                { id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" },
+                { id: 2, span: { start: 8, end: 13 }, replacement: "an apple", model: "harper" },
+                { id: 3, span: { start: 18, end: 21 }, replacement: "the", model: "harper" },
+            ],
+        });
+
+        test("controller.onApply applies the pinned suggestion — same effect as grammarforge.details.apply", async () => {
+            const env = makeEnv();
+            await new Promise((r) => setTimeout(r, 30));
+            env.resolveCorrect(threeItemSuggestions(env.ref.text));
+            await new Promise((r) => setTimeout(r, 10));
+
+            // Pin "apple" (index 1) via cursor move.
+            env.onCursorChangeCb();
+
+            expect(env.panelController.onApply).toBeDefined();
+            env.panelController.onApply!();
+
+            expect(env.replaceRangeCalls).toEqual([[8, 13, "an apple"]]);
+            // Same post-apply cleanup the keymap path does: underlines cleared.
+            expect(env.deletedIds.length).toBeGreaterThanOrEqual(1);
+
+            env.stop();
+        });
+
+        test("controller.onIgnore drops the pinned suggestion — same effect as grammarforge.details.ignore", async () => {
+            const env = makeEnv();
+            await new Promise((r) => setTimeout(r, 30));
+            env.resolveCorrect(threeItemSuggestions(env.ref.text));
+            await new Promise((r) => setTimeout(r, 10));
+
+            env.onCursorChangeCb(); // pins "apple" (index 1)
+
+            expect(env.panelController.onIgnore).toBeDefined();
+            env.panelController.onIgnore!();
+
+            // No edit happened (ignore doesn't touch the buffer).
+            expect(env.replaceRangeCalls).toEqual([]);
+            // The card unpinned (setView(null) pushed) as part of the ignore.
+            expect(env.setViewCalls[env.setViewCalls.length - 1]).toBeNull();
+
+            env.stop();
+        });
+
+        test("controller.onCycleNext / onCyclePrev cycle the pin AND move the cursor — same effect as ctrl+n/ctrl+p", async () => {
+            const env = makeEnv();
+            await new Promise((r) => setTimeout(r, 30));
+            env.resolveCorrect(threeItemSuggestions(env.ref.text));
+            await new Promise((r) => setTimeout(r, 10));
+
+            env.onCursorChangeCb(); // pins index 1 ("apple", cursorOffset=8)
+
+            expect(env.panelController.onCycleNext).toBeDefined();
+            env.panelController.onCycleNext!();
+            // Cycled to index 2 ("teh", span start=18).
+            expect(env.setCursorOffsetCalls[env.setCursorOffsetCalls.length - 1]).toBe(18);
+
+            expect(env.panelController.onCyclePrev).toBeDefined();
+            env.panelController.onCyclePrev!();
+            // Back to index 1 ("apple", span start=8).
+            expect(env.setCursorOffsetCalls[env.setCursorOffsetCalls.length - 1]).toBe(8);
+
+            env.stop();
+        });
+
+        test("controller.onUnpin closes the card without editing or cycling — same effect as esc", async () => {
+            const env = makeEnv();
+            await new Promise((r) => setTimeout(r, 30));
+            env.resolveCorrect(threeItemSuggestions(env.ref.text));
+            await new Promise((r) => setTimeout(r, 10));
+
+            env.onCursorChangeCb(); // pins index 1
+
+            expect(env.panelController.onUnpin).toBeDefined();
+            env.panelController.onUnpin!();
+
+            expect(env.replaceRangeCalls).toEqual([]);
+            expect(env.setViewCalls[env.setViewCalls.length - 1]).toBeNull();
+
+            env.stop();
+        });
+
+        test("cursorPinSupported gate: onApply/onIgnore/onUnpin/onCycleNext/onCyclePrev stay undefined when api.prompt.onCursorChange is absent", () => {
+            // Mirrors the keymap-layer gate test ("feature-detect: when
+            // api.prompt.onCursorChange is absent, no slot wiring fires") but
+            // for the A7 mouse-mirror wiring: without the cursor facade there
+            // is nothing to pin, so the controller must never receive these
+            // callbacks (clicking a card that can never appear would be dead
+            // code, and a stray reference could NPE against absent state).
+            const api = {
+                prompt: {
+                    ref: () => ({
+                        text: "hello",
+                        current: { input: "hello", parts: [] },
+                        cursorOffset: 0,
+                        extmarks: {
+                            registerType: () => 1,
+                            create: () => 1,
+                            getAllForTypeId: () => [],
+                            delete: () => true,
+                        },
+                        getTextRange: () => "",
+                        replaceRange: () => undefined,
+                        focus: () => undefined,
+                    }),
+                    onChange: () => () => undefined,
+                    // NOTE: no onCursorChange — cursorPinSupported === false.
+                },
+                keymap: { registerLayer: () => () => undefined },
+                ui: { toast: () => undefined },
+                theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+                lifecycle: { onDispose: () => () => undefined },
+                slots: { register: () => "id" },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            const panelController: PanelController = {
+                setView: () => undefined,
+                subscribe: () => () => undefined,
+                currentView: () => null,
+                dispose: () => undefined,
+                setStatusText: () => undefined,
+                subscribeStatus: () => () => undefined,
+                currentStatus: () => "",
+            };
+
+            const stop = startOrchestrator(api, undefined, {
+                panelRenderer: () => panelController,
+            });
+
+            expect(panelController.onApply).toBeUndefined();
+            expect(panelController.onIgnore).toBeUndefined();
+            expect(panelController.onUnpin).toBeUndefined();
+            expect(panelController.onCycleNext).toBeUndefined();
+            expect(panelController.onCyclePrev).toBeUndefined();
+            // The entire slot-panel controller wiring (including the
+            // rephrase mouse mirrors) is gated on
+            // `cursorPinSupported && deps?.panelRenderer` as ONE block
+            // (orchestrator.ts's "Slot-panel wiring" section) — without the
+            // cursor facade, NONE of it runs, so these also stay undefined.
+            expect(panelController.onRephraseAccept).toBeUndefined();
+            expect(panelController.onRephraseReject).toBeUndefined();
+
+            stop();
+        });
+    });
+
     // ─── BLOCKER 1: in-flight rephrase cancelled on prompt ref swap ────────────
 
     test("rephrase: ref swap during loading cancels rephrase — result not rendered", async () => {
@@ -2955,6 +3253,160 @@ describe("startOrchestrator", () => {
         test("prev: returns null for empty items", () => {
             const result = jumpPrev(0, [], []);
             expect(result).toBeNull();
+        });
+    });
+
+    // ─── P2-11: reviewNext/reviewPrev push a transient "checking…" status
+    // when text drifted since the last check, instead of silently no-op'ing
+    // (ctrl+g felt unresponsive). ─────────────────────────────────────────
+
+    describe("review.next / review.prev: transient status on drift (P2-11)", () => {
+        const makeEnv = () => {
+            const text = "I has a apple";
+            let resolveCorrect!: (res: unknown) => void;
+            let correctCallCount = 0;
+            const commandHandlers = new Map<string, () => unknown>();
+            const statusTexts: string[] = [];
+
+            const ref = {
+                text,
+                current: { input: text, parts: [] },
+                cursorOffset: 0,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: (s: number, e: number) => ref.text.slice(s, e),
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+
+            const api = {
+                prompt: {
+                    ref: () => ref,
+                    onChange: () => () => undefined,
+                    onCursorChange: () => () => undefined,
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        commands?: Array<{ name: string; run: () => unknown }>;
+                    }) => {
+                        for (const c of layer.commands ?? []) commandHandlers.set(c.name, c.run);
+                        return () => undefined;
+                    },
+                },
+                ui: { toast: () => undefined },
+                theme: { syntax: () => ({ registerStyle: () => 1, getStyleId: () => 1 }) },
+                lifecycle: { onDispose: () => () => undefined },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            const panelController: PanelController = {
+                setView: () => undefined,
+                subscribe: () => () => undefined,
+                currentView: () => null,
+                dispose: () => undefined,
+                setStatusText: (t) => statusTexts.push(t),
+                subscribeStatus: () => () => undefined,
+                currentStatus: () => "",
+            };
+
+            const stop = startOrchestrator(api, { realtimeDelayMs: 5 }, {
+                correct: () => {
+                    correctCallCount++;
+                    return new Promise<unknown>((resolve) => {
+                        resolveCorrect = resolve;
+                    });
+                },
+                panelRenderer: () => panelController,
+            } as unknown as OrchestratorDeps);
+
+            return {
+                ref,
+                commandHandlers,
+                statusTexts,
+                stop,
+                resolveCorrect: (res: unknown) => resolveCorrect(res),
+                getCorrectCallCount: () => correctCallCount,
+            };
+        };
+
+        test("reviewNext: text drifted → pushes '⏳ checking…' AND schedules a re-check", async () => {
+            const env = makeEnv();
+            // Initial check completes with one item so state.items is non-empty
+            // (reviewNext no-ops early when there are zero items — we need the
+            // drift branch, not the empty-items branch, to be what's tested).
+            await new Promise((r) => setTimeout(r, 30));
+            env.resolveCorrect({
+                original: env.ref.text,
+                score: 90,
+                suggestions: [{ id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" }],
+            });
+            await new Promise((r) => setTimeout(r, 10));
+            const callsAfterInitialCheck = env.getCorrectCallCount();
+
+            // Drift: mutate ref.text WITHOUT going through onChange, so
+            // state.checkedText is now stale relative to ref.text.
+            env.ref.text = "I has a apple and more";
+
+            const reviewNextFn = env.commandHandlers.get("grammarforge.review.next") as () => void;
+            expect(reviewNextFn).toBeDefined();
+            reviewNextFn();
+
+            // Transient "checking…" status was pushed — ctrl+g doesn't feel
+            // like a no-op even though no pin happened this call.
+            expect(env.statusTexts[env.statusTexts.length - 1]).toContain("checking");
+            // A re-check was scheduled (correctFn call count grows).
+            await new Promise((r) => setTimeout(r, 10));
+            expect(env.getCorrectCallCount()).toBeGreaterThan(callsAfterInitialCheck);
+
+            env.stop();
+        });
+
+        test("reviewPrev: text drifted → pushes '⏳ checking…' AND schedules a re-check", async () => {
+            const env = makeEnv();
+            await new Promise((r) => setTimeout(r, 30));
+            env.resolveCorrect({
+                original: env.ref.text,
+                score: 90,
+                suggestions: [{ id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" }],
+            });
+            await new Promise((r) => setTimeout(r, 10));
+            const callsAfterInitialCheck = env.getCorrectCallCount();
+
+            env.ref.text = "I has a apple and more";
+
+            const reviewPrevFn = env.commandHandlers.get("grammarforge.review.prev") as () => void;
+            expect(reviewPrevFn).toBeDefined();
+            reviewPrevFn();
+
+            expect(env.statusTexts[env.statusTexts.length - 1]).toContain("checking");
+            await new Promise((r) => setTimeout(r, 10));
+            expect(env.getCorrectCallCount()).toBeGreaterThan(callsAfterInitialCheck);
+
+            env.stop();
+        });
+
+        test("reviewNext: NOT drifted (text matches checkedText) → no 'checking' status pushed", async () => {
+            const env = makeEnv();
+            await new Promise((r) => setTimeout(r, 30));
+            env.resolveCorrect({
+                original: env.ref.text,
+                score: 90,
+                suggestions: [{ id: 1, span: { start: 2, end: 5 }, replacement: "have", model: "harper" }],
+            });
+            await new Promise((r) => setTimeout(r, 10));
+            env.statusTexts.length = 0; // only care about what reviewNext itself pushes
+
+            // No drift — ref.text still equals what was last checked.
+            const reviewNextFn = env.commandHandlers.get("grammarforge.review.next") as () => void;
+            reviewNextFn();
+
+            expect(env.statusTexts.some((t) => t.includes("checking"))).toBe(false);
+
+            env.stop();
         });
     });
 
@@ -3584,6 +4036,103 @@ describe("startOrchestrator", () => {
             await vi.advanceTimersByTimeAsync(0);
             // Ghost should NOT be rendered because pin is active.
             expect(ghostCalls).toHaveLength(0);
+            vi.useRealTimers();
+        });
+
+        test("P0-1 regression: rephrase() clears a visible completion ghost so completion + rephrase layers are never both enabled", async () => {
+            vi.useFakeTimers();
+            const ghostCalls: Array<{ text: string }> = [];
+            const clearCalls: unknown[] = [];
+            const commandHandlers = new Map<string, () => unknown>();
+            const layers: Array<{
+                enabled?: () => boolean;
+                commands?: Array<{ name: string; run: () => unknown }>;
+            }> = [];
+            let onChangeCb: () => void = () => undefined;
+
+            const ref = {
+                text: "The quick brown",
+                current: { input: "The quick brown", parts: [] },
+                cursorOffset: 15,
+                extmarks: {
+                    registerType: () => 1,
+                    create: () => 1,
+                    getAllForTypeId: () => [],
+                    delete: () => true,
+                },
+                getTextRange: () => "",
+                replaceRange: () => undefined,
+                focus: () => undefined,
+                setCursorOffset: () => undefined,
+            };
+            const api = {
+                ...baseApi(),
+                prompt: {
+                    ref: () => ref,
+                    onChange: (cb: () => void) => {
+                        onChangeCb = cb;
+                        return () => undefined;
+                    },
+                },
+                keymap: {
+                    registerLayer: (layer: {
+                        enabled?: () => boolean;
+                        commands?: Array<{ name: string; run: () => unknown }>;
+                    }) => {
+                        layers.push(layer);
+                        for (const cmd of layer.commands ?? []) commandHandlers.set(cmd.name, cmd.run);
+                        return () => undefined;
+                    },
+                },
+            } as unknown as Parameters<typeof startOrchestrator>[0];
+
+            startOrchestrator(api, { completionEnabled: true, completionDebounceMs: 100 }, {
+                complete: async () => ({ continuation: "fox jumps" }),
+                rephrase: () => new Promise(() => undefined), // never resolves — loading card stays up
+                ghostRenderer: {
+                    renderGhost: (text) => ghostCalls.push({ text }),
+                    clearGhost: () => clearCalls.push(undefined),
+                },
+                panelRenderer: () => ({
+                    setView: () => undefined,
+                    subscribe: () => () => undefined,
+                    currentView: () => null,
+                    dispose: () => undefined,
+                    setStatusText: () => undefined,
+                    subscribeStatus: () => () => undefined,
+                    currentStatus: () => "",
+                }),
+            });
+
+            // Trigger completion — the ghost becomes visible.
+            onChangeCb();
+            await vi.advanceTimersByTimeAsync(150);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(ghostCalls).toHaveLength(1);
+            clearCalls.length = 0; // only care about clears AFTER the ghost is visible
+
+            const completionLayer = layers.find((l) =>
+                (l.commands ?? []).some((c) => c.name === "grammarforge.completion.accept"),
+            );
+            const rephraseLayer = layers.find((l) =>
+                (l.commands ?? []).some((c) => c.name === "grammarforge.rephrase.accept"),
+            );
+            expect(completionLayer?.enabled?.()).toBe(true); // ghost visible → layer enabled
+            expect(rephraseLayer?.enabled?.()).toBe(false); // no rephrase active yet
+
+            // Fire ctrl+/ (rephrase) WHILE the completion ghost is still visible.
+            const rephraseCmd = commandHandlers.get("grammarforge.rephrase");
+            expect(rephraseCmd).toBeDefined();
+            rephraseCmd!();
+
+            // The ghost must be cleared as part of rephrase() starting (the P0-1 fix) —
+            // otherwise both priority-500 gated layers (completion's esc-dismiss and
+            // rephrase's esc-reject) would be enabled simultaneously with conflicting
+            // escape bindings.
+            expect(clearCalls.length).toBeGreaterThanOrEqual(1);
+            expect(completionLayer?.enabled?.()).toBe(false);
+            expect(rephraseLayer?.enabled?.()).toBe(true);
+
             vi.useRealTimers();
         });
 

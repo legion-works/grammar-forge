@@ -64,6 +64,38 @@ The steps below are documented but have NOT been confirmed:
 - Actual underline rendering — requires a running OpenCode with the prompt
   facade patch applied.
 
+## Known scope gaps (documented decisions, not omissions)
+
+- **Click-outside-dismiss for the rephrase card is keyboard-only by design.**
+  opencode-interaction.md §4 lists "click outside the card / underlines →
+  dismiss" as a mouse accelerator, but OpenCode's plugin API
+  (opencode-types.ts) exposes no "global click outside this element" event —
+  only per-element `onMouseDown`/`onMouseScroll` on the card/rows/segments
+  themselves (see mouse-dispatch.ts). `esc` is the full, always-available
+  keyboard equivalent (§1: "mouse is a secondary accelerator... never the
+  only path to anything"), so this is a scoped-out mouse convenience, not a
+  missing keyboard path.
+- **Goals / Stats / streaming / score-surface parity with the web clients is
+  out of scope for this client, pending spec.** opencode-interaction.md (the
+  authoritative interaction spec for this client) does not mention Goals,
+  Stats, streaming settle-in, or a score orb/ring — those are
+  `clients/browser` / `clients/vencord` panel features (INSTRUCTIONS.md §C/§D).
+  A terminal TUI has no equivalent "panel" surface today; adding one is a
+  design decision for a future spec revision, not a gap in implementing the
+  current one.
+- **Terminal theme (light/dark) detection is best-effort and UNVERIFIED live**
+  (see `src/terminal-theme.ts`). OpenCode's plugin API does not expose a
+  typed background/appearance field on `TuiApi.theme` — detection defensively
+  probes a few common property names, then falls back to the `COLORFGBG`
+  environment variable (the standard signal most terminal emulators/
+  multiplexers set), and defaults to dark when neither is present. This has
+  NOT been confirmed against a running patched OpenCode build — same
+  "unverified" status as the rest of this harness below. If a future patched
+  build exposes a real theme/background API, wire it into
+  `detectTerminalTheme`'s `themeApi` probe (the shape is already forward-
+  compatible: any of `background`/`appearance`/`mode`/`kind` containing the
+  substring "light"/"dark" is honored ahead of the env-var fallback).
+
 ## v1 deferrals (2026-06-23 review)
 
 - **A7 granular per-row clickable apply/ignore spans**: card-level `onMouseDown` stays

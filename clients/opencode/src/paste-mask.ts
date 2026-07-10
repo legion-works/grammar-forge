@@ -14,6 +14,17 @@
 //   - Otherwise → fall back to text.indexOf(value) and mask all occurrences.
 // Equal-length replacement (value.length spaces) preserves all downstream
 // offsets and extmarks — no offset remapping needed.
+//
+// P0-2 FIX: the working buffer MUST be indexed by UTF-16 code unit, matching
+// `start`/`end` (verified above via `text.slice`). `Array.from(text)` iterates
+// by UNICODE CODE POINT — it collapses a surrogate pair (e.g. an emoji outside
+// the BMP) into a single array element. Any astral character appearing BEFORE
+// a placeholder then shifts every subsequent code-unit index left by one per
+// astral char, so `chars[i] = " "` masks the wrong window and `chars.join("")`
+// comes back SHORTER than `text` — tripping the length-mismatch guard in
+// orchestrator.ts, which (pre-fix) fell back to sending the ORIGINAL UNMASKED
+// text to the bridge. `text.split("")` splits by UTF-16 code unit (surrogate
+// halves stay separate elements), keeping indices aligned with `start`/`end`.
 
 import type { PromptPart } from "./opencode-types";
 
@@ -44,8 +55,10 @@ export function maskPastePlaceholders(text: string, parts: ReadonlyArray<PromptP
         if (!value) continue;
 
         // Lazy-allocate the char array on first actual mask operation.
+        // UTF-16 code units (NOT Array.from's code-point iteration) — see
+        // the P0-2 note above.
         if (chars === null) {
-            chars = Array.from(text);
+            chars = text.split("");
         }
 
         // Self-verify: are start/end UTF-16 code-unit offsets into text?

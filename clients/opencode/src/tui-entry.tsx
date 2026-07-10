@@ -46,9 +46,9 @@ import {
     buildCardSpec,
     buildRephraseLoadingCardSpec,
     buildRephraseResultCardSpec,
-    DIM_HEX,
+    paletteFor,
 } from "./card-spec";
-import { clampAnchor, ghostAnchor } from "./overlay-anchor";
+import { clampAnchor, ghostAnchor, computeCardWidth } from "./overlay-anchor";
 import {
     currentGhostPayload,
     pushGhostPayload,
@@ -57,6 +57,14 @@ import {
 } from "./ghost-overlay";
 import { logDebug } from "./debug";
 import { makeDisplayWidth, bunSegmentWidth } from "./display-width";
+import { detectTerminalTheme, type TerminalTheme } from "./terminal-theme";
+import {
+    dispatchCardClick,
+    dispatchCardScroll,
+    dispatchRowClick,
+    dispatchSegmentClick,
+    runDispatchedAction,
+} from "./mouse-dispatch";
 
 const ID = "grammarforge";
 
@@ -77,6 +85,14 @@ const CARD_BG = RGBA.fromInts(0x22, 0x24, 0x36, 255);
 
 const tui: TuiPlugin = async (api: TuiApi, options) => {
     logDebug("tui() entered", { id: ID, hasOptions: options !== undefined });
+    // P1-4: best-effort dark/light detection (COLORFGBG + any theme hint the
+    // host's api.theme facade exposes — see terminal-theme.ts). Computed ONCE
+    // at plugin start: the terminal's light/dark-ness doesn't change mid-session,
+    // and re-detecting per render would be wasted work.
+    const terminalTheme: TerminalTheme = detectTerminalTheme(
+        api.theme as unknown as Record<string, unknown>,
+    );
+    logDebug("terminal theme detected", { terminalTheme });
     const controller: PanelController = createDetailsPanelController();
     const panelRenderer = (): PanelController => controller;
     const ghostRenderer = {
@@ -108,8 +124,8 @@ const tui: TuiPlugin = async (api: TuiApi, options) => {
                     logDebug("slot fn home_prompt_right invoked");
                     return (
                         <>
-                            <PanelComponent controller={controller} api={api} />
-                            <GhostComponent api={api} />
+                            <PanelComponent controller={controller} api={api} theme={terminalTheme} />
+                            <GhostComponent api={api} theme={terminalTheme} />
                         </>
                     );
                 },
@@ -117,8 +133,8 @@ const tui: TuiPlugin = async (api: TuiApi, options) => {
                     logDebug("slot fn session_prompt_right invoked");
                     return (
                         <>
-                            <PanelComponent controller={controller} api={api} />
-                            <GhostComponent api={api} />
+                            <PanelComponent controller={controller} api={api} theme={terminalTheme} />
+                            <GhostComponent api={api} theme={terminalTheme} />
                         </>
                     );
                 },
@@ -142,7 +158,8 @@ export default plugin;
 // The load-bearing piece: localView is a createSignal CREATED INSIDE
 // this function — it rides the host's scheduler. The controller's
 // setView fanout pushes the payload into localView via subscribe.
-function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
+function PanelComponent(props: { controller: PanelController; api: TuiApi; theme: TerminalTheme }) {
+    const dimHex = paletteFor(props.theme).dim;
     // Initialize from the controller's CURRENT values, not null/"". The host
     // re-invokes the slot fn on prompt re-renders, re-mounting PanelComponent;
     // a null default would blank the live card/status on the next keystroke.
@@ -171,13 +188,13 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                 the component is never mounted (gotcha 3). */}
             <box width={0} height={0} />
             {/* Status-line (A6) — always-on dim row under the prompt.
-                Legion --text-muted (dark) — same DIM_HEX card-spec.ts
-                uses for hints, so the status line never drifts from the
-                card's own dim tone. */}
+                Legion --text-muted, theme-selected (P1-4: dark/light via
+                paletteFor) — same dim tone card-spec.ts uses for hints, so
+                the status line never drifts from the card's own dim tone. */}
             <Show when={statusText()} keyed>
                 {(t) => (
                     <box flexDirection="row">
-                        <text fg={DIM_HEX}>{t}</text>
+                        <text fg={dimHex}>{t}</text>
                     </box>
                 )}
             </Show>
@@ -201,12 +218,32 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
             >
                 <Show when={localView()} keyed>
                     {(current) => {
+                        // P1-5: derive the card's actual width from the terminal's
+                        // current width instead of always using the fixed 44-col
+                        // default — clampAnchor only clamps the LEFT position, it
+                        // never shrinks the card, so a narrower terminal used to
+                        // overflow. Read dimensions FIRST so both the card width
+                        // and the wrap width (innerWidth) can depend on it.
+                        const dims = dimensions();
+                        const screenW = dims.width;
+                        const screenH = dims.height;
+                        const cardWidth = computeCardWidth(screenW, CARD_W);
+                        const innerWidth = Math.max(6, cardWidth - 4); // − 2 border − 2 pad
+
                         // Build the card spec by discriminating on kind.
+                        // Theme (P1-4) and innerWidth (P1-5) thread into every
+                        // builder so the card's colors match the detected terminal
+                        // background and its wrap width fits the actual terminal.
                         let spec;
                         if (current.kind === "rephrase-loading") {
-                            spec = buildRephraseLoadingCardSpec(current.frame);
+                            spec = buildRephraseLoadingCardSpec(current.frame, props.theme);
                         } else if (current.kind === "rephrase-result") {
-                            spec = buildRephraseResultCardSpec(current, makeDisplayWidth(bunSegmentWidth));
+                            spec = buildRephraseResultCardSpec(
+                                current,
+                                makeDisplayWidth(bunSegmentWidth),
+                                props.theme,
+                                innerWidth,
+                            );
                         } else {
                             // kind === "suggestion"
                             const vm = buildDetailsViewModel(
@@ -216,7 +253,12 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                 current.cycleNextKey,
                                 current.cyclePrevKey,
                             );
-                            spec = buildCardSpec(vm, makeDisplayWidth(bunSegmentWidth));
+                            spec = buildCardSpec(
+                                vm,
+                                makeDisplayWidth(bunSegmentWidth),
+                                props.theme,
+                                innerWidth,
+                            );
                         }
                         // Lazily read the prompt ref at render time (gotcha 4:
                         // ref is null at tui()-time; it's mounted by now because
@@ -225,9 +267,6 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                         // a live ref).
                         const anchor =
                             props.api.prompt?.ref()?.offsetToScreen?.(current.displayStart) ?? null;
-                        const dims = dimensions();
-                        const screenW = dims.width;
-                        const screenH = dims.height;
                         // Card height varies by kind. "suggestion" and
                         // "rephrase-result" both report contentRows (the
                         // number of wrapped diff/rephrase lines) — grow the
@@ -238,7 +277,7 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                             ? CARD_H
                             : (spec as unknown as { contentRows: number }).contentRows + 4;
                         const clamped = anchor
-                            ? clampAnchor(anchor, CARD_W, cardH, screenW, screenH)
+                            ? clampAnchor(anchor, cardWidth, cardH, screenW, screenH)
                             : null;
                         if (current.kind === "suggestion") {
                             logDebug("panel content visible", {
@@ -257,7 +296,7 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                             clampedTop: clamped?.top ?? null,
                             screenW,
                             screenH,
-                            cardW: CARD_W,
+                            cardW: cardWidth,
                             cardH,
                         });
                         // If offsetToScreen returned null (prompt unmounted,
@@ -270,7 +309,7 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                 zIndex={4000}
                                 left={clamped.left}
                                 top={clamped.top}
-                                width={CARD_W}
+                                width={cardWidth}
                                 border
                                 borderStyle="single"
                                 borderColor={spec.borderColor}
@@ -286,23 +325,22 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                     // apply/ignore hint spans (below) stopPropagation
                                     // so they don't ALSO fire this default.
                                     // Degrades gracefully when terminal doesn't report mouse.
-                                    if (current.kind === "suggestion") {
-                                        props.controller.onApply?.();
-                                    } else if (current.kind === "rephrase-result") {
-                                        props.controller.onRephraseAccept?.();
-                                    }
+                                    // P1-6: the actual (kind → action) decision lives in
+                                    // mouse-dispatch.ts (pure, unit-tested) — this handler
+                                    // is just the caller.
+                                    runDispatchedAction(dispatchCardClick(current.kind), props.controller);
                                 }}
                                 onMouseScroll={(e: { scroll?: { direction: string } }) => {
                                     // §4: "scroll wheel over a tall rephrase card → scroll
                                     // the wrapped text" (PgUp/PgDn's mouse mirror). No-op
                                     // for the "suggestion" / "rephrase-loading" kinds —
                                     // only the rephrase-result body can overflow (§5).
-                                    if (current.kind !== "rephrase-result") return;
-                                    if (e.scroll?.direction === "up") {
-                                        props.controller.onRephraseScrollUp?.();
-                                    } else if (e.scroll?.direction === "down") {
-                                        props.controller.onRephraseScrollDown?.();
-                                    }
+                                    const direction = e.scroll?.direction;
+                                    if (direction !== "up" && direction !== "down") return;
+                                    runDispatchedAction(
+                                        dispatchCardScroll(current.kind, direction),
+                                        props.controller,
+                                    );
                                 }}
                             >
                                 {spec.rows.map((row, rowIndex) => (
@@ -316,12 +354,25 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                             // clicking it cycles to the next alternative.
                                             // stopPropagation so the card's default onMouseDown
                                             // (accept) doesn't ALSO fire from the same click.
-                                            current.kind === "rephrase-result" &&
-                                            rowIndex === 0 &&
-                                            current.altTotal > 1
+                                            dispatchRowClick(
+                                                current.kind,
+                                                rowIndex,
+                                                current.kind === "rephrase-result"
+                                                    ? current.altTotal
+                                                    : 1,
+                                            ) !== null
                                                 ? (e: { stopPropagation: () => void }) => {
                                                       e.stopPropagation();
-                                                      props.controller.onRephraseCycleNext?.();
+                                                      runDispatchedAction(
+                                                          dispatchRowClick(
+                                                              current.kind,
+                                                              rowIndex,
+                                                              current.kind === "rephrase-result"
+                                                                  ? current.altTotal
+                                                                  : 1,
+                                                          ),
+                                                          props.controller,
+                                                      );
                                                   }
                                                 : undefined
                                         }
@@ -335,17 +386,15 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
                                                     // hints row carries an `action`).
                                                     // stopPropagation so the click doesn't
                                                     // bubble to the card's default apply.
-                                                    seg.action === "apply"
+                                                    dispatchSegmentClick(seg.action) !== null
                                                         ? (e: { stopPropagation: () => void }) => {
                                                               e.stopPropagation();
-                                                              props.controller.onApply?.();
+                                                              runDispatchedAction(
+                                                                  dispatchSegmentClick(seg.action),
+                                                                  props.controller,
+                                                              );
                                                           }
-                                                        : seg.action === "ignore"
-                                                          ? (e: { stopPropagation: () => void }) => {
-                                                                e.stopPropagation();
-                                                                props.controller.onIgnore?.();
-                                                            }
-                                                          : undefined
+                                                        : undefined
                                                 }
                                             >
                                                 {seg.bold ? <b>{seg.text}</b> : seg.text}
@@ -371,12 +420,13 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi }) {
 
 const GHOST_Z_INDEX = 3500; // below the suggestion card (4000)
 
-function GhostComponent(props: { api: TuiApi }) {
+function GhostComponent(props: { api: TuiApi; theme: TerminalTheme }) {
     // Initialize from the current ghost payload, not null — the host re-invokes
     // the slot fn on prompt re-renders, re-mounting this component; a null
     // default would blank a live ghost. Same fix as PanelComponent.
     const [ghost, setGhost] = createSignal<GhostPayload | null>(currentGhostPayload());
     const dimensions = useTerminalDimensions();
+    const dimHex = paletteFor(props.theme).dim;
 
     // Subscribe this instance's setter so the orchestrator's imperative
     // renderGhost/clearGhost calls reach it. Unlike the old single-setter
@@ -438,9 +488,9 @@ function GhostComponent(props: { api: TuiApi }) {
                             width={ghostW}
                             height={1}
                         >
-                            {/* Legion --text-muted (dark) — same dim tone as
-                                the status line + card hints. */}
-                            <text fg={DIM_HEX}>{current.text}</text>
+                            {/* Legion --text-muted, theme-selected (P1-4) — same
+                                dim tone as the status line + card hints. */}
+                            <text fg={dimHex}>{current.text}</text>
                         </box>
                     </Portal>
                 );

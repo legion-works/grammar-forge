@@ -204,6 +204,74 @@ describe("maskPastePlaceholders", () => {
         }
     });
 
+    // ── P0-2 regression: astral chars (surrogate pairs) before/around a
+    // placeholder must not shift the mask window. Array.from(text) iterates
+    // by CODE POINT (combining a surrogate pair into one element) while
+    // start/end are UTF-16 CODE-UNIT offsets — the two disagree by one
+    // index per astral char preceding the placeholder. ────────────────────
+
+    test("P0-2: emoji (astral, 2 code units) BEFORE the placeholder does not shift the mask window", () => {
+        const placeholder = "[Pasted ~5 lines]";
+        const emoji = "\u{1F600}"; // 😀 — one code point, TWO UTF-16 code units
+        const text = `Hi ${emoji} ${placeholder} world`;
+        const start = text.indexOf(placeholder);
+        const end = start + placeholder.length;
+        expect(text.slice(start, end)).toBe(placeholder); // self-verify fixture
+
+        const parts: PromptPart[] = [textPartCodeUnit(start, end, placeholder)];
+        const result = maskPastePlaceholders(text, parts);
+
+        // Length invariant — this is exactly the guard orchestrator.ts relies
+        // on to decide "mask succeeded, safe to send"; a broken mask that
+        // produces a SHORTER string here would (pre-fix) fall back to sending
+        // the ORIGINAL unmasked text to the bridge.
+        expect(result.length).toBe(text.length);
+        // The placeholder window is fully masked — not shifted left/right.
+        expect(result.slice(start, end)).toBe(" ".repeat(placeholder.length));
+        expect(result.slice(0, start)).toBe(`Hi ${emoji} `);
+        expect(result.slice(end)).toBe(" world");
+    });
+
+    test("P0-2: emoji inside the surrounding (non-masked) text is preserved intact", () => {
+        const placeholder = "[Pasted ~3 lines]";
+        const emoji = "\u{1F600}\u{1F601}"; // two astral chars, 4 UTF-16 units
+        const text = `${emoji} start ${placeholder} end ${emoji}`;
+        const start = text.indexOf(placeholder);
+        const end = start + placeholder.length;
+        expect(text.slice(start, end)).toBe(placeholder);
+
+        const parts: PromptPart[] = [textPartCodeUnit(start, end, placeholder)];
+        const result = maskPastePlaceholders(text, parts);
+
+        expect(result.length).toBe(text.length);
+        expect(result.slice(start, end)).toBe(" ".repeat(placeholder.length));
+        // Surrounding text — including BOTH emoji runs — survives byte-for-byte.
+        expect(result.slice(0, start)).toBe(`${emoji} start `);
+        expect(result.slice(end)).toBe(` end ${emoji}`);
+    });
+
+    test("P0-2: multiple placeholders with surrogate pairs between them stay aligned", () => {
+        const p1 = "[Pasted ~2 lines]";
+        const p2 = "[Pasted ~4 lines]";
+        const emoji = "\u{1F60E}"; // 😎
+        const text = `${p1}${emoji}middle${emoji}${p2}`;
+        const s1 = text.indexOf(p1);
+        const e1 = s1 + p1.length;
+        const s2 = text.indexOf(p2);
+        const e2 = s2 + p2.length;
+        expect(text.slice(s1, e1)).toBe(p1);
+        expect(text.slice(s2, e2)).toBe(p2);
+
+        const parts: PromptPart[] = [textPartCodeUnit(s1, e1, p1), textPartCodeUnit(s2, e2, p2)];
+        const result = maskPastePlaceholders(text, parts);
+
+        expect(result.length).toBe(text.length);
+        expect(result.slice(s1, e1)).toBe(" ".repeat(p1.length));
+        expect(result.slice(s2, e2)).toBe(" ".repeat(p2.length));
+        // The emoji-flanked "middle" section between the two placeholders is untouched.
+        expect(result.slice(e1, s2)).toBe(`${emoji}middle${emoji}`);
+    });
+
     test("mixed: text part with placeholder + file part + agent part", () => {
         const placeholder = "[Pasted ~7 lines]";
         const text = `@agent ${placeholder} end`;

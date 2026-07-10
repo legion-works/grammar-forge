@@ -9,6 +9,14 @@ import {
     DELETE_HEX,
     INSERT_HEX,
     DIM_HEX,
+    DELETE_HEX_DARK,
+    INSERT_HEX_DARK,
+    DIM_HEX_DARK,
+    DELETE_HEX_LIGHT,
+    INSERT_HEX_LIGHT,
+    DIM_HEX_LIGHT,
+    paletteFor,
+    DEFAULT_INNER_WIDTH,
 } from "./card-spec";
 import { buildDetailsViewModel } from "./details-panel";
 import { CATEGORY_FG } from "./category-palette";
@@ -181,11 +189,60 @@ describe("buildCardSpec", () => {
         // Legion tokens (handoff/scss/_tokens.scss, dark/Tokyo Night):
         // --danger #ff757f, --success #c3e88d (Tokyo green), --text-muted #828bb8.
         // Guards against silently reverting to the pre-redesign ad-hoc reds/greens.
+        // Bare re-exports default to DARK (unchanged pre-P1-4 behavior).
         expect(DELETE_HEX).toBe("#ff757f");
         expect(INSERT_HEX).toBe("#c3e88d");
         expect(DIM_HEX).toBe("#828bb8");
+        expect(DELETE_HEX).toBe(DELETE_HEX_DARK);
+        expect(INSERT_HEX).toBe(INSERT_HEX_DARK);
+        expect(DIM_HEX).toBe(DIM_HEX_DARK);
         // Distinct from the `style` category color (#8b5cf6) and from each other.
         expect(REPHRASE_ACCENT_HEX).not.toBe(CATEGORY_FG.style);
+    });
+
+    test("P1-4 REGRESSION GUARD: paletteFor resolves BOTH the dark and light Legion token sets", () => {
+        // Dark (Tokyo Night, default — unchanged values from before P1-4).
+        const dark = paletteFor("dark");
+        expect(dark).toEqual({ delete: "#ff757f", insert: "#c3e88d", dim: "#828bb8" });
+        expect(paletteFor()).toEqual(dark); // omitted theme defaults to dark
+
+        // Light (Tokyo Day — handoff/scss/_tokens.scss $gf-diff-old-light /
+        // $gf-diff-new-light / $gf-muted-light).
+        const light = paletteFor("light");
+        expect(light).toEqual({ delete: "#dc2626", insert: "#16a34a", dim: "#565f89" });
+        expect(light).toEqual({
+            delete: DELETE_HEX_LIGHT,
+            insert: INSERT_HEX_LIGHT,
+            dim: DIM_HEX_LIGHT,
+        });
+
+        // The two palettes are fully distinct — a light-theme card must never
+        // silently render with dark-theme colors (or vice versa).
+        expect(light.delete).not.toBe(dark.delete);
+        expect(light.insert).not.toBe(dark.insert);
+        expect(light.dim).not.toBe(dark.dim);
+    });
+
+    test("P1-4: buildCardSpec threads the theme param into every dim/diff color", () => {
+        const v = vm({ original: "teh", replacement: "the" });
+        const darkSpec = buildCardSpec(v, undefined, "dark");
+        const lightSpec = buildCardSpec(v, undefined, "light");
+
+        const diffRowDark = darkSpec.rows[1]!;
+        const diffRowLight = lightSpec.rows[1]!;
+        expect(diffRowDark.segments[0]!.fg).toBe(DELETE_HEX_DARK);
+        expect(diffRowDark.segments[2]!.fg).toBe(INSERT_HEX_DARK);
+        expect(diffRowLight.segments[0]!.fg).toBe(DELETE_HEX_LIGHT);
+        expect(diffRowLight.segments[2]!.fg).toBe(INSERT_HEX_LIGHT);
+
+        // The title row's index segment and the hints row are both "dim" —
+        // must also follow the theme.
+        expect(darkSpec.rows[0]!.segments[1]!.fg).toBe(DIM_HEX_DARK);
+        expect(lightSpec.rows[0]!.segments[1]!.fg).toBe(DIM_HEX_LIGHT);
+
+        // Omitting theme defaults to dark — byte-identical to explicit "dark".
+        const defaultSpec = buildCardSpec(v);
+        expect(defaultSpec).toEqual(darkSpec);
     });
 
     test("short diff (fits inner width): unchanged single-row shape, contentRows=1", () => {
@@ -235,6 +292,43 @@ describe("buildCardSpec", () => {
         const arrowIdx = arrowRow!.segments.findIndex((s) => s.text === " → ");
         expect(arrowRow!.segments[arrowIdx + 1]!.colorKey).toBe("insert");
     });
+
+    test("P1-5: narrow innerWidth (30) wraps a diff that already wraps at the default 40 into MORE rows", () => {
+        const replacement =
+            "should have already merged the fix before the release went out the door";
+        const v = vm({ original: "should of", replacement });
+        const defaultSpec = buildCardSpec(v, (s) => s.length, "dark", DEFAULT_INNER_WIDTH);
+        const narrowSpec = buildCardSpec(v, (s) => s.length, "dark", 30);
+        expect(defaultSpec.contentRows).toBeGreaterThan(1); // already wraps at 40
+        // The narrower card wraps into MORE (or equal) rows than the default-width one.
+        expect(narrowSpec.contentRows).toBeGreaterThanOrEqual(defaultSpec.contentRows);
+        // Every WRAPPED content line (delete/insert-colored segments — the
+        // arrow prefix is a separate short "dim" segment, not part of the
+        // wrap budget) respects the narrower width.
+        for (const row of narrowSpec.rows) {
+            for (const seg of row.segments) {
+                if (seg.colorKey === "delete" || seg.colorKey === "insert") {
+                    expect(seg.text.length).toBeLessThanOrEqual(30);
+                }
+            }
+        }
+    });
+
+    test("P1-5: a diff that fits one line at innerWidth=40 wraps at a narrower innerWidth=20", () => {
+        const replacement = "short but not tiny replacement"; // fits at 40, not at 20
+        const v = vm({ original: "x", replacement });
+        const wide = buildCardSpec(v, (s) => s.length, "dark", 40);
+        const narrow = buildCardSpec(v, (s) => s.length, "dark", 20);
+        expect(wide.contentRows).toBe(1); // fits on one line at the default width
+        expect(narrow.contentRows).toBeGreaterThan(1); // must wrap at the narrower width
+    });
+
+    test("P1-5: omitting innerWidth defaults to DEFAULT_INNER_WIDTH (40) — unchanged behavior", () => {
+        const v = vm({ original: "x", replacement: "a very long replacement string that will not fit on one line at all" });
+        const explicit = buildCardSpec(v, (s) => s.length, "dark", DEFAULT_INNER_WIDTH);
+        const defaulted = buildCardSpec(v, (s) => s.length, "dark");
+        expect(defaulted).toEqual(explicit);
+    });
 });
 
 describe("buildRephraseLoadingCardSpec", () => {
@@ -278,6 +372,14 @@ describe("buildRephraseLoadingCardSpec", () => {
         expect(spec0.rows[0]!.segments[1]!.text).toBe(specN.rows[0]!.segments[1]!.text);
     });
 
+    test("P1-4: theme param selects the dim color for the spinner text; defaults to dark", () => {
+        const darkSpec = buildRephraseLoadingCardSpec(0, "dark");
+        const lightSpec = buildRephraseLoadingCardSpec(0, "light");
+        expect(darkSpec.rows[0]!.segments[1]!.fg).toBe(DIM_HEX_DARK);
+        expect(lightSpec.rows[0]!.segments[1]!.fg).toBe(DIM_HEX_LIGHT);
+        expect(buildRephraseLoadingCardSpec(0)).toEqual(darkSpec);
+    });
+
     test("REGRESSION GUARD: every segment.text is a non-empty string", () => {
         for (let frame = 0; frame < SPINNER_FRAMES.length * 2; frame++) {
             const spec = buildRephraseLoadingCardSpec(frame);
@@ -308,6 +410,56 @@ describe("buildRephraseResultCardSpec", () => {
     test("returns a spec with the rephrase accent border color", () => {
         const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
         expect(spec.borderColor).toBe(REPHRASE_ACCENT_HEX);
+    });
+
+    test("P1-5: narrow innerWidth (30) wraps rephrase text into MORE rows than the default 40", () => {
+        const original = "In hindsight we should have merged the fix last week already";
+        const rephrased = "We should have merged the fix last week";
+        const view = makeView(original, rephrased);
+        const wide = buildRephraseResultCardSpec(view, stubW, "dark", DEFAULT_INNER_WIDTH);
+        const narrow = buildRephraseResultCardSpec(view, stubW, "dark", 30);
+        expect(narrow.contentRows).toBeGreaterThanOrEqual(wide.contentRows);
+        // Every wrapped content line (the "delete"-colored original lines and
+        // "insert"-colored rephrased lines — the arrow prefix is a separate
+        // short "dim" segment) respects the narrower width. Strip a trailing
+        // " ↓ more" overflow affordance before measuring.
+        for (const row of narrow.rows) {
+            for (const seg of row.segments) {
+                if (seg.colorKey === "delete" || seg.colorKey === "insert") {
+                    expect(seg.text.replace(" ↓ more", "").length).toBeLessThanOrEqual(30);
+                }
+            }
+        }
+    });
+
+    test("P1-5: omitting innerWidth defaults to DEFAULT_INNER_WIDTH — unchanged behavior", () => {
+        const view = makeView("hello world", "hi there friend");
+        const explicit = buildRephraseResultCardSpec(view, stubW, "dark", DEFAULT_INNER_WIDTH);
+        const defaulted = buildRephraseResultCardSpec(view, stubW, "dark");
+        expect(defaulted).toEqual(explicit);
+    });
+
+    test("P1-4: theme param selects the dim/insert palette; defaults to dark", () => {
+        const darkSpec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW, "dark");
+        const lightSpec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW, "light");
+
+        const origDark = darkSpec.rows[1]!.segments[0]!;
+        const origLight = lightSpec.rows[1]!.segments[0]!;
+        expect(origDark.fg).toBe(DIM_HEX_DARK);
+        expect(origLight.fg).toBe(DIM_HEX_LIGHT);
+
+        const replSegDark = darkSpec.rows.flatMap((r) => r.segments).find((s) => s.text === "hi there")!;
+        const replSegLight = lightSpec.rows.flatMap((r) => r.segments).find((s) => s.text === "hi there")!;
+        expect(replSegDark.fg).toBe(INSERT_HEX_DARK);
+        expect(replSegLight.fg).toBe(INSERT_HEX_LIGHT);
+
+        const hintsDark = darkSpec.rows[darkSpec.rows.length - 1]!.segments[0]!;
+        const hintsLight = lightSpec.rows[lightSpec.rows.length - 1]!.segments[0]!;
+        expect(hintsDark.fg).toBe(DIM_HEX_DARK);
+        expect(hintsLight.fg).toBe(DIM_HEX_LIGHT);
+
+        // Omitting theme defaults to dark.
+        expect(buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW)).toEqual(darkSpec);
     });
 
     test("has at least 4 rows: title, original lines, arrow+rephrased, hints", () => {
