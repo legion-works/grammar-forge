@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     buildStatsViewModel,
     mountStatsView,
@@ -104,12 +104,23 @@ describe('buildStatsViewModel (pure data → view-model)', () => {
 })
 
 describe('mountStatsView (DOM mount + injected deps)', () => {
+    // mountStatsView's refresh() is pure Promise chaining (loadStats /
+    // loadDict / removeDictWord mocks resolve immediately) — no real
+    // timers are involved in production code. Fake timers +
+    // runAllTimersAsync flush that microtask chain deterministically
+    // instead of racing a real setTimeout(0) against mock resolution.
+    beforeEach(() => {
+        vi.useFakeTimers()
+    })
+    afterEach(() => {
+        vi.useRealTimers()
+    })
+
     it('mounts a .gf-stats section in the container and shows the loaded view after deps resolve', async () => {
         const container = mkContainer()
         const handle = mountStatsView(container, mkDeps())
-        // Wait for the microtask + a tick for the async load.
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        // Let the pending load chain flush.
+        await vi.runAllTimersAsync()
         const root = container.querySelector('.gf-stats')
         expect(root).not.toBeNull()
         // Stat grid renders all four cards.
@@ -126,8 +137,7 @@ describe('mountStatsView (DOM mount + injected deps)', () => {
     it('renders the dictionary chips with a × remove button per word', async () => {
         const container = mkContainer()
         const handle = mountStatsView(container, mkDeps())
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         const chips = container.querySelectorAll('.gf-dictchip')
         expect(chips.length).toBe(2)
         expect(chips[0]?.textContent).toContain('GECToR')
@@ -139,8 +149,7 @@ describe('mountStatsView (DOM mount + injected deps)', () => {
     it('renders one .gf-bar per category in the top-issues list', async () => {
         const container = mkContainer()
         const handle = mountStatsView(container, mkDeps())
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         const bars = container.querySelectorAll('.gf-bar')
         expect(bars.length).toBe(5)
         handle.destroy()
@@ -154,16 +163,12 @@ describe('mountStatsView (DOM mount + injected deps)', () => {
             .mockResolvedValueOnce(['GECToR', 'Vencord'])
             .mockResolvedValueOnce(['Vencord'])
         const handle = mountStatsView(container, mkDeps({ removeDictWord, loadDict }))
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         const removeBtn = container.querySelector('.gf-dictchip button') as HTMLButtonElement
         removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
         expect(removeDictWord).toHaveBeenCalledWith('GECToR')
         // Wait for refresh to settle.
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         const chips = container.querySelectorAll('.gf-dictchip')
         expect(chips.length).toBe(1)
         expect(chips[0]?.textContent).toContain('Vencord')
@@ -175,8 +180,7 @@ describe('mountStatsView (DOM mount + injected deps)', () => {
     it('renders the "Computed locally" footer note', async () => {
         const container = mkContainer()
         const handle = mountStatsView(container, mkDeps())
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         const note = container.querySelector('.gf-stats__note')
         expect(note).not.toBeNull()
         expect(note?.textContent).toContain('Computed locally')
@@ -186,8 +190,7 @@ describe('mountStatsView (DOM mount + injected deps)', () => {
     it('shows an empty-state message when the dictionary is empty', async () => {
         const container = mkContainer()
         const handle = mountStatsView(container, mkDeps({ loadDict: async () => [] }))
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         const empty = container.querySelector('.gf-stats__empty')
         expect(empty).not.toBeNull()
         expect(empty?.textContent).toContain('No custom words yet')
@@ -201,17 +204,13 @@ describe('mountStatsView (DOM mount + injected deps)', () => {
             .mockRejectedValueOnce(new Error('boom'))
             .mockResolvedValueOnce(baseStats)
         const handle = mountStatsView(container, mkDeps({ loadStats }))
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         const err = container.querySelector('.gf-stats__error')
         expect(err).not.toBeNull()
         // Retry button wires a refresh.
         const retry = err?.querySelector('button') as HTMLButtonElement
         retry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         // After retry the loaded state appears.
         const cards = container.querySelectorAll('.gf-statcard')
         expect(cards.length).toBe(4)
@@ -224,8 +223,7 @@ describe('mountStatsView (DOM mount + injected deps)', () => {
             container,
             mkDeps({ loadDict: async () => Promise.reject(new Error('boom')) }),
         )
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         // Stats still loaded, dict shows nothing (no chip list, no error).
         const chips = container.querySelectorAll('.gf-dictchip')
         expect(chips.length).toBe(0)
@@ -237,8 +235,7 @@ describe('mountStatsView (DOM mount + injected deps)', () => {
     it('destroy() removes the section; isOpen() reports false afterwards', async () => {
         const container = mkContainer()
         const handle = mountStatsView(container, mkDeps())
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         expect(handle.isOpen()).toBe(true)
         handle.destroy()
         expect(handle.isOpen()).toBe(false)
@@ -256,8 +253,7 @@ describe('mountStatsView (DOM mount + injected deps)', () => {
         const container = mkContainer()
         const loadStats = vi.fn<StatsViewDeps['loadStats']>(async () => baseStats)
         const handle = mountStatsView(container, mkDeps({ loadStats }))
-        await new Promise((r) => setTimeout(r, 0))
-        await Promise.resolve()
+        await vi.runAllTimersAsync()
         const callsBefore = loadStats.mock.calls.length
         // Two concurrent refreshes → only one underlying loadStats call.
         await Promise.all([handle.refresh(), handle.refresh()])

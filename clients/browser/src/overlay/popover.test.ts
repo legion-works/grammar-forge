@@ -163,14 +163,45 @@ describe('showPopover (W1-3: correction card)', () => {
         expect(root.querySelector('.gf-card__nav')).toBeNull()
     })
 
-    it('positions the card within the viewport (clamped)', () => {
-        showPopover(root, mkOptions({ anchorRect: new DOMRect(-9999, -9999, 80, 16) }))
+    it('clamps left to the viewport gutter when the anchor is far off-screen', () => {
+        // jsdom's default viewport is 1024x768. anchor.left=-9999 is well
+        // under VIEWPORT_GUTTER (10) → left clamps up to 10.
+        // anchor.bottom = -9999+16 = -9983; spaceBelow = 768-(-9983)=10751,
+        // way over PANEL_HEIGHT_ESTIMATE (220) → no vertical flip, so
+        // top = anchor.bottom + 8 = -9975 and bottom is unset ('auto').
+        const anchor = new DOMRect(-9999, -9999, 80, 16)
+        showPopover(root, mkOptions({ anchorRect: anchor }))
         const card = root.querySelector('.gf-card') as HTMLElement
-        // left/top must parse as numbers (jsdom leaves them as "")
-        const left = parseFloat(card.style.left)
-        const top = parseFloat(card.style.top)
-        expect(Number.isFinite(left)).toBe(true)
-        expect(Number.isFinite(top)).toBe(true)
+        expect(card.style.left).toBe('10px')
+        expect(card.style.top).toBe('-9975px')
+        expect(card.style.bottom).toBe('auto')
+    })
+
+    it('flips ABOVE the anchor when there is not enough room below (vertical flip)', () => {
+        // anchor near the bottom edge: bottom = 700+16 = 716; spaceBelow =
+        // vh(768) - 716 = 52, well under PANEL_HEIGHT_ESTIMATE (220) → the
+        // panel flips above the anchor: bottom = vh - anchor.top + 8 =
+        // 768 - 700 + 8 = 76, and top is left unset ('auto') so the panel
+        // grows upward from the anchor instead of downward.
+        const anchor = new DOMRect(100, 700, 80, 16)
+        showPopover(root, mkOptions({ anchorRect: anchor }))
+        const card = root.querySelector('.gf-card') as HTMLElement
+        expect(card.style.bottom).toBe('76px')
+        expect(card.style.top).toBe('auto')
+    })
+
+    it('clamps horizontally to the viewport gutter when the anchor is near the right edge', () => {
+        // anchor.left=900; left + PANEL_WIDTH(300) = 1200 > vw(1024) → clamp
+        // to vw - PANEL_WIDTH - VIEWPORT_GUTTER = 1024 - 300 - 10 = 714.
+        // anchor.bottom = 100+16 = 116; spaceBelow = 768-116 = 652, over
+        // PANEL_HEIGHT_ESTIMATE (220) → no vertical flip, so
+        // top = anchor.bottom + 8 = 124 and bottom is unset ('auto').
+        const anchor = new DOMRect(900, 100, 80, 16)
+        showPopover(root, mkOptions({ anchorRect: anchor }))
+        const card = root.querySelector('.gf-card') as HTMLElement
+        expect(card.style.left).toBe('714px')
+        expect(card.style.top).toBe('124px')
+        expect(card.style.bottom).toBe('auto')
     })
 
     it('Apply button (data-action="apply") calls onApply with index 0', () => {

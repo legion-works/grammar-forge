@@ -22,7 +22,7 @@
 //   1. installOutsideDismiss self-removes (view.removeEventListener) before
 //      calling onDismiss() — one-shot behavior.
 //   2. Goals/synonyms onClose now calls handle.destroy() before nulling.
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOverlayHost } from '@/overlay/shadow-host'
 import { showGoals, type GoalsOptions } from '@/overlay/goals'
 import { showSynonyms, type SynonymsOptions } from '@/overlay/synonyms'
@@ -54,14 +54,25 @@ function mkSynOptions(overrides: Partial<SynonymsOptions> = {}): SynonymsOptions
 }
 
 describe('light-dismiss via outside-click (createOverlayHost path)', () => {
+    // installOutsideDismiss arms its window listener on a real setTimeout(0)
+    // (see dismiss.ts). Fake timers + advanceTimersByTime deterministically
+    // fire that arm timer instead of racing a real 0ms sleep against the
+    // event loop.
+    beforeEach(() => {
+        vi.useFakeTimers()
+    })
+    afterEach(() => {
+        vi.useRealTimers()
+    })
+
     // ── Goals ──────────────────────────────────────────────────────────────
 
-    it('Goals: outside pointerdown fires onClose (the working panel pattern)', async () => {
+    it('Goals: outside pointerdown fires onClose (the working panel pattern)', () => {
         const overlay = createOverlayHost()
         const onClose = vi.fn<() => void>()
         showGoals(overlay.root, mkGoalsOptions({ onClose }))
         // Wait for the arm timer (setTimeout 0).
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        vi.advanceTimersByTime(10)
         // Pointerdown outside the popover → should close.
         document.body.dispatchEvent(
             new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
@@ -70,11 +81,11 @@ describe('light-dismiss via outside-click (createOverlayHost path)', () => {
         overlay.destroy()
     })
 
-    it('Goals: pointerdown INSIDE the popover does NOT fire onClose', async () => {
+    it('Goals: pointerdown INSIDE the popover does NOT fire onClose', () => {
         const overlay = createOverlayHost()
         const onClose = vi.fn<() => void>()
         showGoals(overlay.root, mkGoalsOptions({ onClose }))
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        vi.advanceTimersByTime(10)
         // Pointerdown on the popover itself → must NOT close.
         const pop = overlay.root.querySelector('.gf-goals-pop') as HTMLElement
         pop.dispatchEvent(
@@ -84,11 +95,11 @@ describe('light-dismiss via outside-click (createOverlayHost path)', () => {
         overlay.destroy()
     })
 
-    it('Goals: clicking a seg option (inside) does NOT fire onClose', async () => {
+    it('Goals: clicking a seg option (inside) does NOT fire onClose', () => {
         const overlay = createOverlayHost()
         const onClose = vi.fn<() => void>()
         showGoals(overlay.root, mkGoalsOptions({ onClose }))
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        vi.advanceTimersByTime(10)
         const seg = overlay.root.querySelector('.gf-seg') as HTMLElement
         seg.dispatchEvent(
             new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
@@ -99,13 +110,13 @@ describe('light-dismiss via outside-click (createOverlayHost path)', () => {
 
     // ── Synonyms ───────────────────────────────────────────────────────────
 
-    it('Synonyms: outside pointerdown fires onClose', async () => {
+    it('Synonyms: outside pointerdown fires onClose', () => {
         const overlay = createOverlayHost()
         const field = document.createElement('textarea')
         document.body.appendChild(field)
         const onClose = vi.fn<() => void>()
         showSynonyms(overlay.root, mkSynOptions({ onClose }))
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        vi.advanceTimersByTime(10)
         document.body.dispatchEvent(
             new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
         )
@@ -114,13 +125,13 @@ describe('light-dismiss via outside-click (createOverlayHost path)', () => {
         overlay.destroy()
     })
 
-    it('Synonyms: pointerdown INSIDE the popover does NOT fire onClose', async () => {
+    it('Synonyms: pointerdown INSIDE the popover does NOT fire onClose', () => {
         const overlay = createOverlayHost()
         const field = document.createElement('textarea')
         document.body.appendChild(field)
         const onClose = vi.fn<() => void>()
         showSynonyms(overlay.root, mkSynOptions({ onClose }))
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        vi.advanceTimersByTime(10)
         const pop = overlay.root.querySelector('.gf-syn') as HTMLElement
         pop.dispatchEvent(
             new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
@@ -135,8 +146,14 @@ describe('installOutsideDismiss one-shot + DOM removal regression (round 8)', ()
     // Regression guard for the two bugs found via live [gf-dismiss] logs:
     // 1. The listener must self-remove after firing (one-shot) — no repeats.
     // 2. onDismiss must actually remove the DOM node (not just null a handle).
+    beforeEach(() => {
+        vi.useFakeTimers()
+    })
+    afterEach(() => {
+        vi.useRealTimers()
+    })
 
-    it('Goals: outside pointerdown removes the .gf-goals-pop node (not just nulls handle)', async () => {
+    it('Goals: outside pointerdown removes the .gf-goals-pop node (not just nulls handle)', () => {
         // Bug 2: onClose was () => { handle = null } — node stayed mounted.
         // Fix: onClose must call handle.destroy() which removes the node.
         // This test verifies the node is gone after dismiss.
@@ -147,7 +164,7 @@ describe('installOutsideDismiss one-shot + DOM removal regression (round 8)', ()
             if (pop) pop.remove()
         })
         showGoals(overlay.root, mkGoalsOptions({ onClose }))
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        vi.advanceTimersByTime(10)
         expect(overlay.root.querySelector('.gf-goals-pop')).not.toBeNull()
         document.body.dispatchEvent(
             new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
@@ -157,14 +174,14 @@ describe('installOutsideDismiss one-shot + DOM removal regression (round 8)', ()
         overlay.destroy()
     })
 
-    it('Goals: outside pointerdown fires onClose exactly ONCE (listener self-removes)', async () => {
+    it('Goals: outside pointerdown fires onClose exactly ONCE (listener self-removes)', () => {
         // Bug 1: installOutsideDismiss did not self-remove after firing.
         // Every subsequent outside click re-fired onDismiss → 15+ repeats.
         // Fix: self-remove before calling onDismiss (one-shot).
         const overlay = createOverlayHost()
         const onClose = vi.fn<() => void>()
         showGoals(overlay.root, mkGoalsOptions({ onClose }))
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        vi.advanceTimersByTime(10)
         // Fire three outside clicks.
         for (let i = 0; i < 3; i++) {
             document.body.dispatchEvent(
@@ -176,13 +193,13 @@ describe('installOutsideDismiss one-shot + DOM removal regression (round 8)', ()
         overlay.destroy()
     })
 
-    it('Synonyms: outside pointerdown fires onClose exactly ONCE (one-shot)', async () => {
+    it('Synonyms: outside pointerdown fires onClose exactly ONCE (one-shot)', () => {
         const overlay = createOverlayHost()
         const field = document.createElement('textarea')
         document.body.appendChild(field)
         const onClose = vi.fn<() => void>()
         showSynonyms(overlay.root, mkSynOptions({ onClose }))
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        vi.advanceTimersByTime(10)
         for (let i = 0; i < 3; i++) {
             document.body.dispatchEvent(
                 new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),

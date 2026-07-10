@@ -6,7 +6,7 @@
 // transition (no user interaction, no separate tick). The test pins
 // THIS contract against the current openRephraseFor body.
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as rephraseCard from '@/overlay/rephrase-card'
 import * as rephraseButton from '@/overlay/rephrase-button'
 import { mountRephraseFlow } from './rephrase'
@@ -43,6 +43,17 @@ function makeClient(): BridgeClient {
     } as unknown as BridgeClient
 }
 
+// The pending -> client.rephrase -> card sequence is driven entirely by
+// microtasks (no real setTimeout in the production path); fake timers let
+// vi.runAllTimersAsync() flush that chain deterministically instead of
+// racing a real 10ms sleep against the mocked promise resolution.
+beforeEach(() => {
+    vi.useFakeTimers()
+})
+afterEach(() => {
+    vi.useRealTimers()
+})
+
 describe('rephrase flow — pending → result is a single user-perceived transition', () => {
     it('shows pending, awaits rephrase, hides pending, shows result card', async () => {
         const pendingSpy = vi.spyOn(rephraseCard, 'showRephrasePending').mockReturnValue({
@@ -75,7 +86,7 @@ describe('rephrase flow — pending → result is a single user-perceived transi
 
         flow.rephraseFor(el)
         // Let the synchronous pending.show → client.rephrase → card.show sequence flush.
-        await new Promise((r) => setTimeout(r, 10))
+        await vi.runAllTimersAsync()
 
         // pending was shown exactly once
         expect(pendingSpy.mock.calls.length).toBe(1)
@@ -142,7 +153,7 @@ describe('rephrase flow — goals-derived default tone (W3-2)', () => {
             getGoals: () => ({ audience: 'general', formality: 'formal' }),
         })
         flow.rephraseFor(el)
-        await new Promise((r) => setTimeout(r, 10))
+        await vi.runAllTimersAsync()
         const req = rephraseFn.mock.calls[0]?.[0] as RecordedRephrase | undefined
         expect(req?.tone).toBe('formal')
         // Result card shows the same tone as the active seg. The
@@ -185,7 +196,7 @@ describe('rephrase flow — goals-derived default tone (W3-2)', () => {
             getGoals: () => ({ audience: 'general', formality: 'informal' }),
         })
         flow.rephraseFor(el)
-        await new Promise((r) => setTimeout(r, 10))
+        await vi.runAllTimersAsync()
         const req = rephraseFn.mock.calls[0]?.[0] as RecordedRephrase | undefined
         expect(req?.tone).toBe('casual')
         flow.stop()
@@ -220,7 +231,7 @@ describe('rephrase flow — goals-derived default tone (W3-2)', () => {
             getGoals: () => ({ audience: 'general', formality: 'neutral' }),
         })
         flow.rephraseFor(el)
-        await new Promise((r) => setTimeout(r, 10))
+        await vi.runAllTimersAsync()
         const req = rephraseFn.mock.calls[0]?.[0] as RecordedRephrase | undefined
         // 'neutral' is the bridge's default (no tone field sent).
         expect(req?.tone).toBe('neutral')
@@ -266,7 +277,7 @@ describe('rephrase flow — goals-derived default tone (W3-2)', () => {
             applyEdit: async () => {},
         })
         flow.rephraseFor(el)
-        await new Promise((r) => setTimeout(r, 10))
+        await vi.runAllTimersAsync()
         const req = rephraseFn.mock.calls[0]?.[0] as RecordedRephrase | undefined
         // The vi.mock at the top of the file wins (the doMock
         // wouldn't override the already-imported module). The intent
