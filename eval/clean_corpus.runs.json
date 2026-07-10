@@ -1,0 +1,49 @@
+{
+  "bridge_url": "http://127.0.0.1:8001",
+  "corpus_file": "clean_corpus.jsonl",
+  "n_runs": 1,
+  "runs": [
+    {
+      "summary": {
+        "total": 155,
+        "false_positives": 18,
+        "fp_rate": 0.11612903225806452,
+        "by_register": {
+          "golden": {
+            "total": 125,
+            "fp": 5
+          },
+          "casual": {
+            "total": 12,
+            "fp": 12
+          },
+          "technical": {
+            "total": 10,
+            "fp": 0
+          },
+          "british": {
+            "total": 8,
+            "fp": 1
+          }
+        },
+        "by_model": {
+          "llm": 32
+        },
+        "by_category": {
+          "grammar": 26,
+          "spelling": 6
+        }
+      },
+      "latency": {
+        "n": 155,
+        "mean_ms": 99.27,
+        "p50_ms": 92.56,
+        "p95_ms": 131.8,
+        "p99_ms": 164.9,
+        "min_ms": 63.89,
+        "max_ms": 661.24
+      }
+    }
+  ],
+  "aggregate": null
+}

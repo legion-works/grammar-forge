@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-07-10T21:58:46Z",
+  "bridge_commit": "4c54bd6",
+  "bridge_url": "http://127.0.0.1:8001",
+  "artifacts": [
+    "results.json",
+    "results.latency.json",
+    "clean_corpus.runs.json",
+    "benchmarks/conll14/conll14_results.json",
+    "benchmarks/bea19/bea19_results.json",
+    "jfleg_results.json",
+    "calibration_results.json"
+  ]
+}

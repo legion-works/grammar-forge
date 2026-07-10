@@ -1,5 +1,5 @@
 {
-  "source": "results.json",
+  "source": "~/projects/grammar-forge/eval/results.json",
   "n_buckets": 10,
   "n_rows_scored": 125,
   "n_rows_total": 125,

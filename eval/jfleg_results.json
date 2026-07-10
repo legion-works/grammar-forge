@@ -1,0 +1,26 @@
+{
+  "benchmark": "jfleg-dev",
+  "bridge_url": "http://127.0.0.1:8001",
+  "n_runs": 1,
+  "runs": [
+    {
+      "gleu_mean": 0.4109218823346918,
+      "gleu_std": 0.006864551419891999,
+      "ci95_lo": 0.3911279312825774,
+      "ci95_hi": 0.4307738303393198,
+      "n_sentences": 754,
+      "unchanged": 1,
+      "request_errors": 0,
+      "latency": {
+        "n": 754,
+        "mean_ms": 152.49,
+        "p50_ms": 140.53,
+        "p95_ms": 259.34,
+        "p99_ms": 354.17,
+        "min_ms": 40.45,
+        "max_ms": 714.58
+      }
+    }
+  ],
+  "aggregate": null
+}
