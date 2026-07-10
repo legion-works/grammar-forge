@@ -7,6 +7,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,6 +67,14 @@ func (fakePB) BuildComplete(text string, _ Source) Prompt {
 }
 
 type fakeStore struct {
+	// mu guards every field below. Most tests are single-goroutine and never
+	// contend on it; the Phase-1b concurrency tests (singleflight dedup,
+	// parallel fast path) call Correct from multiple goroutines against the
+	// SAME fakeStore, and finalize's LogCorrection call must not race on
+	// these plain fields — a real Store implementation (SQLite) handles its
+	// own connection-level synchronization, so this mutex just gives the
+	// fake the same "safe for concurrent callers" contract.
+	mu         sync.Mutex
 	lastEvent  Event
 	lastSignal Signal
 	lastID     int64
@@ -77,6 +87,8 @@ type fakeStore struct {
 }
 
 func (f *fakeStore) LogCorrection(_ context.Context, ev Event) (int64, []int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastEvent = ev
 	f.count++
 	editIDs := make([]int64, len(ev.Edits))
@@ -87,12 +99,18 @@ func (f *fakeStore) LogCorrection(_ context.Context, ev Event) (int64, []int64, 
 }
 
 func (f *fakeStore) LogSignal(_ context.Context, id int64, s Signal) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastID, f.lastSignal = id, s
 	return nil
 }
 
-func (f *fakeStore) LogTone(_ context.Context, _ ToneEvent) error    { return nil }
-func (f *fakeStore) CountCorrections(context.Context) (int64, error) { return f.count, nil }
+func (f *fakeStore) LogTone(_ context.Context, _ ToneEvent) error { return nil }
+func (f *fakeStore) CountCorrections(context.Context) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.count, nil
+}
 func (f *fakeStore) CountSignals(context.Context) (SignalCounts, error) {
 	return SignalCounts{}, nil
 }
@@ -102,6 +120,8 @@ func (f *fakeStore) PersonalizationExamples(context.Context) (PersonalizationDat
 }
 
 func (f *fakeStore) CountStatsExtended(_ context.Context, _ time.Time) (StatsExtended, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.extendedStats, nil
 }
 func (f *fakeStore) Close() error { return nil }
@@ -1973,4 +1993,238 @@ func TestRejectSuppressorDropsMatchingFastPathSuggestion(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, gotSup.Suggestions,
 		"the rejected pair must drop the matching fast-path suggestion")
+}
+
+// ---- Phase 1b: parallel fast path (runFast / runFastIncremental) ----
+
+// delayedCorrector is fakeCorrector plus an artificial delay, so tests can
+// force a specific completion order (the SLOWEST corrector is listed FIRST
+// in s.fast) and prove the concurrent implementation still produces the
+// exact same output the old serial "for _, c := range s.fast" loop would
+// have, regardless of which goroutine actually finishes first.
+type delayedCorrector struct {
+	name  string
+	sugs  []Suggestion
+	err   error
+	delay time.Duration
+}
+
+func (d delayedCorrector) Name() Model { return Model(d.name) }
+func (d delayedCorrector) Correct(_ context.Context, _ Request) ([]Suggestion, error) {
+	time.Sleep(d.delay)
+	return d.sugs, d.err
+}
+
+// TestRunFastConcurrentIsDeterministic proves runFast's concurrent
+// implementation is byte-identical to the serial baseline: the FIRST
+// corrector (Harper's slot) is made the SLOWEST, so if concatenation order
+// were accidentally driven by completion order instead of s.fast's
+// configured order, this test would catch the resulting mismatch (a
+// different tie-break in mergeSuggestions' stable sort, or a different
+// element order on a non-overlapping merge).
+func TestRunFastConcurrentIsDeterministic(t *testing.T) {
+	harper := delayedCorrector{
+		name:  string(ModelHarper),
+		delay: 30 * time.Millisecond,
+		sugs:  []Suggestion{{Span: Span{0, 3}, Replacement: "Foo", Model: ModelHarper, Confidence: 0.9, Category: CategorySpelling}},
+	}
+	gector := delayedCorrector{
+		name:  string(ModelGECToR),
+		delay: 2 * time.Millisecond,
+		sugs:  []Suggestion{{Span: Span{4, 7}, Replacement: "bar", Model: ModelGECToR, Confidence: 0.9}},
+	}
+	svc := NewService(fakePB{}, []Corrector{harper, gector}, fakeLLM{err: errAlways}, &fakeStore{}, "m", fastPolicy())
+	req := Request{Text: "xxx yyy"}
+
+	got := svc.runFast(context.Background(), req)
+
+	// Serial baseline: literally the pre-concurrency loop body, computed
+	// synchronously in s.fast's configured order.
+	var raw []Suggestion
+	for _, c := range []Corrector{harper, gector} {
+		sugs, err := c.Correct(context.Background(), req)
+		require.NoError(t, err)
+		raw = append(raw, sugs...)
+	}
+	want := mergeSuggestions(raw)
+
+	require.Equal(t, want, got, "concurrent runFast must match the serial baseline byte-for-byte")
+}
+
+// TestRunFastRecoversPanickingCorrector proves a panicking corrector is
+// best-effort (logged, skipped) and never takes down sibling correctors'
+// goroutines or the request — extending the existing error-handling
+// contract (TestServiceFastPathContinuesOnCorrectorError) to panics, which
+// only matters once correctors run in their own goroutines.
+type panickyCorrector struct{ name string }
+
+func (p panickyCorrector) Name() Model { return Model(p.name) }
+func (p panickyCorrector) Correct(context.Context, Request) ([]Suggestion, error) {
+	panic("simulated corrector panic")
+}
+
+func TestRunFastRecoversPanickingCorrector(t *testing.T) {
+	bad := panickyCorrector{name: string(ModelHarper)}
+	good := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{0, 1}, Replacement: "X", Model: ModelGECToR, Confidence: 0.9}},
+	}
+	svc := NewService(fakePB{}, []Corrector{bad, good}, fakeLLM{err: errAlways}, &fakeStore{}, "m", fastPolicy())
+
+	var got []Suggestion
+	require.NotPanics(t, func() {
+		got = svc.runFast(context.Background(), Request{Text: "x"})
+	})
+	require.Len(t, got, 1)
+	require.Equal(t, ModelGECToR, got[0].Model)
+}
+
+// TestRunFastIncrementalIsDeterministic mirrors
+// TestRunFastConcurrentIsDeterministic for the streaming preview path: the
+// onFast frames must be emitted in s.fast's configured order (Harper frame,
+// then Harper+GECToR combined frame) even though Harper is the slowest
+// corrector and GECToR's goroutine finishes first.
+func TestRunFastIncrementalIsDeterministic(t *testing.T) {
+	harper := delayedCorrector{
+		name:  string(ModelHarper),
+		delay: 30 * time.Millisecond,
+		sugs:  []Suggestion{{Span: Span{0, 3}, Replacement: "Foo", Model: ModelHarper, Confidence: 0.9}},
+	}
+	gector := delayedCorrector{
+		name:  string(ModelGECToR),
+		delay: 2 * time.Millisecond,
+		sugs:  []Suggestion{{Span: Span{4, 7}, Replacement: "bar", Model: ModelGECToR, Confidence: 0.9}},
+	}
+	svc := NewService(fakePB{}, []Corrector{harper, gector}, fakeLLM{err: errAlways}, &fakeStore{}, "m", fastPolicy())
+	req := Request{Text: "xxx yyy"}
+
+	var frames []Correction
+	svc.runFastIncremental(context.Background(), req, func(c Correction) {
+		frames = append(frames, c)
+	})
+
+	require.Len(t, frames, 2, "one frame per configured corrector")
+	require.Equal(t, mergeSuggestions(harper.sugs), frames[0].Suggestions,
+		"frame 0 must be Harper alone, in configured order, not whichever corrector finished first")
+	combined := append(append([]Suggestion{}, harper.sugs...), gector.sugs...)
+	require.Equal(t, mergeSuggestions(combined), frames[1].Suggestions,
+		"frame 1 must be the full Harper+GECToR combination")
+}
+
+// ---- Phase 1b: singleflight escalation dedup ----
+
+// slowLLM is an LLMClient stub that counts calls and blocks for `delay`
+// before returning `out`, so tests can force two concurrent Correct calls
+// to actually overlap in time (rather than racing to completion so fast
+// the second one never has a chance to observe the first's in-flight call).
+type slowLLM struct {
+	calls int64
+	delay time.Duration
+	out   string
+}
+
+func (s *slowLLM) Complete(_ context.Context, _ Prompt) (string, error) {
+	atomic.AddInt64(&s.calls, 1)
+	time.Sleep(s.delay)
+	return s.out, nil
+}
+
+// TestSingleflightDedupsConcurrentIdenticalWholeTextCorrect proves two
+// concurrent Correct calls on the SAME unmodified text (the whole-text
+// fallback path, len(segs) < 2 — e.g. two clients/tabs checking the same
+// short field, or a debounce race) collapse onto ONE underlying LLM call,
+// and BOTH callers still get the correct result.
+func TestSingleflightDedupsConcurrentIdenticalWholeTextCorrect(t *testing.T) {
+	llm := &slowLLM{delay: 50 * time.Millisecond, out: "I have a cat"}
+	svc := NewService(fakePB{}, nil, llm, &fakeStore{}, "m", fastPolicy())
+
+	var wg sync.WaitGroup
+	results := make([]Correction, 2)
+	errs := make([]error, 2)
+	start := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			results[i], errs[i] = svc.Correct(context.Background(), Request{Text: "I has a cat"})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
+	require.EqualValues(t, 1, atomic.LoadInt64(&llm.calls), "concurrent identical misses must share ONE LLM call")
+	for i := range results {
+		require.Len(t, results[i].Suggestions, 1, "both callers must still get the corrected result")
+		require.Equal(t, "I have a cat", applyAll("I has a cat", results[i].Suggestions),
+			"each caller's own copy of the shared singleflight result must apply cleanly")
+	}
+}
+
+// TestSingleflightDedupsConcurrentIdenticalSentence mirrors the above for
+// the sentence-loop path (len(segs) >= 2): two concurrent Correct calls
+// sharing an unresolved SENTENCE (not the whole text) still collapse onto
+// one correctOnce call for that sentence.
+func TestSingleflightDedupsConcurrentIdenticalSentence(t *testing.T) {
+	llm := &slowLLM{delay: 50 * time.Millisecond}
+	svc := NewService(fakePB{}, nil, llmFunc(func(_ context.Context, p Prompt) (string, error) {
+		atomic.AddInt64(&llm.calls, 1)
+		time.Sleep(llm.delay)
+		return p.User, nil // echo: fakePB puts sentence text verbatim in p.User
+	}), &fakeStore{}, "m", fastPolicy())
+	svc.SetSentenceCache(64)
+
+	text := "This is the first sentence. This is the second sentence."
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	start := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			_, errs[i] = svc.Correct(context.Background(), Request{Text: text})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
+	// Two sentences, each checked once across BOTH concurrent requests
+	// (echoed text == input, so no correction — but the LLM must still
+	// only be called once per distinct sentence, not once per (request,
+	// sentence) pair).
+	require.EqualValues(t, 2, atomic.LoadInt64(&llm.calls),
+		"2 distinct sentences shared across 2 concurrent identical requests must total 2 LLM calls, not 4")
+}
+
+// TestCacheMetricsCountsHitsMissesAndDedup exercises Service.CacheMetrics
+// end to end: a cold sentence-cache miss followed by a warm hit, plus the
+// singleflight dedup counter from the concurrent-sentence test above (run
+// fresh here so the count is exact).
+func TestCacheMetricsCountsHitsMissesAndDedup(t *testing.T) {
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "clean"}, &fakeStore{}, "m", fastPolicy())
+	svc.SetSentenceCache(64)
+	svc.SetToneCache(64)
+	svc.SetCompleteCache(64)
+
+	text := "First sentence here. Second sentence here."
+	_, err := svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	m := svc.CacheMetrics()
+	require.EqualValues(t, 0, m.Sentence.Hits, "cold: every sentence must miss")
+	require.EqualValues(t, 2, m.Sentence.Misses)
+
+	_, err = svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	m = svc.CacheMetrics()
+	require.EqualValues(t, 2, m.Sentence.Hits, "warm: every sentence must hit")
+	require.EqualValues(t, 2, m.Sentence.Misses, "misses must not grow on a warm request")
+
+	// No LLM backend implements breakerStater here (fakeLLM is a plain
+	// stub), so the metrics block must stay empty rather than panicking.
+	require.Empty(t, m.LLMBreakerState)
 }

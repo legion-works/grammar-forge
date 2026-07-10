@@ -32,3 +32,28 @@ func TestCompleteCache(t *testing.T) {
 	require.False(t, ok)
 	disabled.add(k, "x") // must not panic
 }
+
+func TestCompleteCacheStatsCountsHitsAndMisses(t *testing.T) {
+	c := newCompleteCache(4)
+	k := completeCacheKey(SourceOpenCode, "some text")
+
+	_, ok := c.get(k)
+	require.False(t, ok)
+	hits, misses := c.stats()
+	require.EqualValues(t, 0, hits)
+	require.EqualValues(t, 1, misses)
+
+	c.add(k, "continuation")
+	_, ok = c.get(k)
+	require.True(t, ok)
+	_, ok = c.get(k)
+	require.True(t, ok)
+	hits, misses = c.stats()
+	require.EqualValues(t, 2, hits)
+	require.EqualValues(t, 1, misses)
+
+	var disabled *completeCache
+	h, m := disabled.stats()
+	require.Zero(t, h)
+	require.Zero(t, m)
+}

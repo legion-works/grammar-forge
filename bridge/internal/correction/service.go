@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/grammarforge/bridge/internal/thesaurus"
+	"golang.org/x/sync/singleflight"
 )
 
 // Service orchestrates the correction pipeline:
@@ -153,6 +155,31 @@ type Service struct {
 	// (zero value); enabled by SetCapitalizationFix(true) /
 	// GF_CAPITALIZATION_FIX=true (default true in config).
 	capitalizationFix bool
+	// sf collapses concurrent identical-key correctOnce calls onto ONE
+	// execution (singleflight escalation quick-win). Debounce races (a
+	// client re-sending the same keystroke-triggered check before the first
+	// reply lands) and multiple simultaneous clients checking the same
+	// unmodified text are the common case; without this, each concurrent
+	// miss pays its own full fast-path-plus-LLM cost even though they would
+	// produce byte-identical output. Keyed the same way as the sentence
+	// cache (sentenceCacheKey — model + system prompt + text + picky), on
+	// BOTH the sentence-loop path and the whole-text fallback path (see
+	// Correct). The zero value is a ready-to-use singleflight.Group; no
+	// constructor wiring needed. Every caller that piggybacks on an
+	// in-flight Do() gets the SAME underlying []Suggestion value back (that
+	// is the whole point of singleflight), so callers MUST defensively copy
+	// before applying any caller-specific mutation (e.g. the sentence
+	// path's span-offset shift) — see the copies taken right after every
+	// sf.Do call below. Logging (finalize) still runs once per caller, so
+	// /signal and the stored Event stay per-request as today; only the
+	// expensive compute is shared.
+	sf singleflight.Group
+	// sfDedupCount counts every sf.Do call that returned shared=true — i.e.
+	// every time a caller piggybacked on an in-flight correctOnce instead of
+	// paying for its own, on EITHER the whole-text or sentence-loop path.
+	// Surfaced via CacheMetrics for the /stats cache_metrics block. Atomic:
+	// bumped from whichever goroutine's Correct call observed shared=true.
+	sfDedupCount uint64
 }
 
 // MergeFastEditsMode values for Service.mergeFastEditsMode
@@ -415,9 +442,29 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 	// for the single-segment case (len(segs) < 2), where segmenting would
 	// not save any work and the legacy whole-text path is faster.
 	if len(segs) < 2 {
-		all, err := s.correctOnce(ctx, req)
+		// Singleflight-dedup keyed the same way as the sentence cache (see
+		// the sf field doc): concurrent identical whole-text misses (e.g.
+		// two clients hammering /correct with the same unmodified field, or
+		// a debounce race) share one correctOnce call. There is no LRU here
+		// (the whole-text path has never populated the sentence cache — a
+		// single-segment input wouldn't benefit from segmenting), just the
+		// in-flight collapse. Every piggybacking caller gets the SAME
+		// underlying slice back, so it is copied before finalize (finalize
+		// tags IDs into the slice in place — sharing it across callers would
+		// race and cross-contaminate their edit IDs).
+		key := sentenceCacheKey(s.baseModel, s.pb.Build(req).System, req.Text, req.Picky)
+		v, err, shared := s.sf.Do(key, func() (any, error) {
+			return s.correctOnce(ctx, req)
+		})
 		if err != nil {
 			return Correction{}, err
+		}
+		all := v.([]Suggestion)
+		if shared {
+			atomic.AddUint64(&s.sfDedupCount, 1)
+			cp := make([]Suggestion, len(all))
+			copy(cp, all)
+			all = cp
 		}
 		return s.finalize(ctx, req, all)
 	}
@@ -435,13 +482,26 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 		key := sentenceCacheKey(s.baseModel, s.pb.Build(sreq).System, sentence, req.Picky)
 		sugs, hit := s.sentenceCache.get(key)
 		if !hit {
-			var err error
-			sugs, err = s.correctOnce(ctx, sreq)
+			// Singleflight-dedup: concurrent requests racing on the SAME
+			// unresolved sentence (common while a user is mid-edit and
+			// several clients/tabs re-check the same paragraph) share one
+			// correctOnce call instead of each paying the fast-path+LLM
+			// cost. See the sf field doc for the sharing/copy contract.
+			v, err, shared := s.sf.Do(key, func() (any, error) {
+				return s.correctOnce(ctx, sreq)
+			})
 			if err != nil {
 				failures++
 				lastErr = err
 				s.log.Warn("sentence check failed; skipping sentence", "err", err)
 				continue
+			}
+			sugs = v.([]Suggestion)
+			if shared {
+				atomic.AddUint64(&s.sfDedupCount, 1)
+				cp := make([]Suggestion, len(sugs))
+				copy(cp, sugs)
+				sugs = cp
 			}
 			s.sentenceCache.add(key, sugs)
 		}
@@ -736,20 +796,29 @@ func (s *Service) finalize(ctx context.Context, req Request, all []Suggestion) (
 	return result, nil
 }
 
-// runFast invokes every fast corrector in order, collects suggestions, and
-// returns them deduped/merged. Corrector errors are logged at Warn and
-// skipped (best-effort).
+// runFast invokes every fast corrector CONCURRENTLY (one goroutine per
+// corrector — the Harper-vs-GECToR overlap-within-a-request quick win) and
+// returns the deduped/merged result. Corrector errors AND panics are
+// best-effort: logged and skipped, exactly mirroring the historical serial
+// contract (one bad corrector never blocks or takes down the others).
+//
+// Concurrency does NOT change the output. mergeSuggestions's greedy
+// confidence-DESC dedup (routing.go) only cares about the SET of
+// suggestions plus, for tie-breaking, the ORDER they were concatenated in —
+// never wall-clock completion order. runFastConcurrent collects each
+// corrector's post-processed slice into a results array INDEXED by the
+// corrector's position in s.fast, and this function concatenates those
+// slices in that same index order before merging: byte-identical to the old
+// "for _, c := range s.fast { raw = append(raw, sugs...) }" loop regardless
+// of which corrector's goroutine happens to finish first. The correctors'
+// own internal mutexes (gector.GECToR.mu, harperffi's equivalent) still
+// serialize inference ACROSS requests — this win is purely the two
+// correctors' inference overlapping WITHIN one request.
 func (s *Service) runFast(ctx context.Context, req Request) []Suggestion {
 	if len(s.fast) == 0 {
 		return nil
 	}
-	var raw []Suggestion
-	for _, c := range s.fast {
-		sugs, err := c.Correct(ctx, req)
-		if err != nil {
-			s.log.Warn("fast corrector failed", "model", c.Name(), "err", err)
-			continue
-		}
+	repair := func(_ Corrector, sugs []Suggestion) []Suggestion {
 		// Repair Harper's irregular-plural possessive misfires before merging.
 		// Applied per-corrector so the fix fires on Harper's slice before
 		// GECToR suggestions are appended (safe: GECToR never emits
@@ -760,9 +829,63 @@ func (s *Service) runFast(ctx context.Context, req Request) []Suggestion {
 		// true sentence-start capitalizations are always preserved. Applied
 		// per-corrector for the same reason as repairIrregularPluralPossessive.
 		sugs = dropMidSentenceCapitalization(s.capitalizationFix, req.Text, sugs)
-		raw = append(raw, sugs...)
+		return sugs
+	}
+	results, done := s.runFastConcurrent(ctx, req, repair)
+	var raw []Suggestion
+	for i := range results {
+		<-done[i]
+		raw = append(raw, results[i]...)
 	}
 	return mergeSuggestions(raw)
+}
+
+// runFastConcurrent launches one goroutine per configured fast corrector and
+// returns a same-length results slice plus one completion channel per index.
+// Callers MUST read results[i] only after receiving from done[i] — the
+// channel close happens-after the write, so the standard Go
+// channel-close-as-a-signal rule gives a data-race-free handoff even though
+// every element is written by a different goroutine. Consuming done[] in
+// ASCENDING index order (as both runFast and runFastIncremental do) is what
+// makes the result deterministic: goroutines run concurrently, but the
+// caller only ever observes them in the fixed s.fast configuration order.
+//
+// repair is the caller-specific per-corrector post-processing step (runFast
+// runs the full repair chain; runFastIncremental's streaming preview runs a
+// lighter one — see their respective callers) applied to each corrector's
+// raw output before it is stored.
+//
+// Each goroutine's corrector call (and its repair step) is wrapped in its
+// own recover() so a panicking corrector cannot take down the request or
+// any sibling corrector's goroutine — the same best-effort posture the
+// serial loop already gave errors, extended to panics because concurrent
+// goroutines cannot rely on the caller's stack to catch one for them.
+func (s *Service) runFastConcurrent(ctx context.Context, req Request, repair func(c Corrector, sugs []Suggestion) []Suggestion) ([][]Suggestion, []chan struct{}) {
+	n := len(s.fast)
+	results := make([][]Suggestion, n)
+	done := make([]chan struct{}, n)
+	for i := range done {
+		done[i] = make(chan struct{})
+	}
+	for i, c := range s.fast {
+		go func(i int, c Corrector) {
+			defer close(done[i])
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						s.log.Warn("fast corrector panicked; skipping", "model", c.Name(), "panic", r)
+					}
+				}()
+				sugs, err := c.Correct(ctx, req)
+				if err != nil {
+					s.log.Warn("fast corrector failed", "model", c.Name(), "err", err)
+					return
+				}
+				results[i] = repair(c, sugs)
+			}()
+		}(i, c)
+	}
+	return results, done
 }
 
 // CorrectStaged runs the staged pipeline for streaming transports (SSE):
@@ -797,17 +920,25 @@ func (s *Service) runFastIncremental(ctx context.Context, req Request, onFast fu
 		onFast(Correction{Original: req.Text, Score: score(req.Text, nil)})
 		return
 	}
-	var accumulated []Suggestion
-	for _, c := range s.fast {
-		sugs, err := c.Correct(ctx, req)
-		if err != nil {
-			s.log.Warn("fast corrector failed", "model", c.Name(), "err", err)
-			continue
-		}
+	// Every corrector's inference runs CONCURRENTLY (same runFastConcurrent
+	// helper as runFast), but the onFast callbacks are still emitted in
+	// ASCENDING s.fast order, one per corrector, exactly as the old serial
+	// loop did — done[i] blocks until corrector i has actually finished, so
+	// a slow corrector at index 0 still gates emission of frame 0 even
+	// though a faster corrector at index 1 may have already finished in the
+	// background. This preserves BOTH the deterministic "Harper preview,
+	// then Harper+GECToR combined" frame sequence AND the latency win (the
+	// two correctors' inference overlaps instead of running back-to-back).
+	repair := func(_ Corrector, sugs []Suggestion) []Suggestion {
 		// Mirror runFast: repair irregular-plural possessive misfires before
 		// accumulating so the streaming first frame is also correct.
-		sugs = repairIrregularPluralPossessive(s.irregularPluralFix, sugs)
-		accumulated = append(accumulated, sugs...)
+		return repairIrregularPluralPossessive(s.irregularPluralFix, sugs)
+	}
+	results, done := s.runFastConcurrent(ctx, req, repair)
+	var accumulated []Suggestion
+	for i := range results {
+		<-done[i]
+		accumulated = append(accumulated, results[i]...)
 		preview := mergeSuggestions(accumulated)
 		if s.allowlist != nil && len(preview) > 0 {
 			preview = s.dropAllowlisted(req.Text, preview)

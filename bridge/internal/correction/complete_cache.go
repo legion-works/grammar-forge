@@ -3,6 +3,7 @@ package correction
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
@@ -18,7 +19,8 @@ import (
 // calls for an identical prompt (e.g. the user pausing on the same line, or
 // distinct clients completing the same boilerplate).
 type completeCache struct {
-	lru *lru.Cache[string, string]
+	lru          *lru.Cache[string, string]
+	hits, misses uint64
 }
 
 // newCompleteCache builds a cache with the given capacity. size <= 0 returns nil
@@ -47,7 +49,13 @@ func (c *completeCache) get(key string) (string, bool) {
 	if c == nil {
 		return "", false
 	}
-	return c.lru.Get(key)
+	v, ok := c.lru.Get(key)
+	if ok {
+		atomic.AddUint64(&c.hits, 1)
+	} else {
+		atomic.AddUint64(&c.misses, 1)
+	}
+	return v, ok
 }
 
 func (c *completeCache) add(key, continuation string) {
@@ -55,4 +63,12 @@ func (c *completeCache) add(key, continuation string) {
 		return
 	}
 	c.lru.Add(key, continuation)
+}
+
+// stats reports the cumulative hit/miss counts (nil-safe).
+func (c *completeCache) stats() (hits, misses uint64) {
+	if c == nil {
+		return 0, 0
+	}
+	return atomic.LoadUint64(&c.hits), atomic.LoadUint64(&c.misses)
 }

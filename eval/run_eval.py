@@ -14,10 +14,13 @@ results are written next to the cases file as <cases_stem>.results.json
 import argparse
 import json
 import sys
+import time
 import urllib.request
 from collections import defaultdict
 from difflib import SequenceMatcher
 from pathlib import Path
+
+from lib_latency import format_latency_line, summarize_latencies
 
 # Parse known flags before positional args so module-level code works.
 _parser = argparse.ArgumentParser(add_help=True)
@@ -38,6 +41,10 @@ RESULTS_FILE = (
     if len(_rest) <= 1
     else CASES_FILE.with_suffix(".results.json")
 )
+# Latency summary lives next to results.json (kept out of the results list
+# itself so errant_score.py / calibration_eval.py's `for r in results` reader
+# doesn't need to know about it).
+LATENCY_FILE = RESULTS_FILE.with_name(RESULTS_FILE.stem + ".latency.json")
 
 
 def correct(text, source="eval"):
@@ -73,16 +80,20 @@ def main():
     mis = []  # tool changed it but not to gold (over/mis-correction)
     invalid_span = []  # spans that don't apply cleanly (correctness bug)
     errors = []  # request errors / crashes
+    latencies = []  # seconds, one per bridge call (success or failure)
 
     for c in CASES:
+        t0 = time.perf_counter()
         try:
             resp = correct(c["input"])
         except Exception as e:
+            latencies.append(time.perf_counter() - t0)
             errors.append((c["id"], repr(e)))
             results.append({**c, "error": repr(e)})
             overall["fail"] += 1
             by_cat[c["cat"]]["total"] += 1
             continue
+        latencies.append(time.perf_counter() - t0)
 
         sugs = resp.get("suggestions") or []
         # detect invalid spans before applying
@@ -120,10 +131,13 @@ def main():
                 "pass": ok,
                 "similarity": round(sim(got, c["golden"]), 3),
                 "n_suggestions": len(sugs),
+                "latency_ms": round(latencies[-1] * 1000, 2),
             }
         )
 
     RESULTS_FILE.write_text(json.dumps(results, indent=2, ensure_ascii=False))
+    lat_summary = summarize_latencies(latencies)
+    LATENCY_FILE.write_text(json.dumps(lat_summary, indent=2))
 
     # ---- report ----
     n = len(CASES)
@@ -175,6 +189,8 @@ def main():
         print(f"\nMean char similarity to gold: {sum(sims) / len(sims):.3f}")
     else:
         print("\nMean char similarity to gold: N/A (no results with similarity)")
+
+    print(format_latency_line(lat_summary))
 
     if REQUIRE_EXACT and overall["fail"] > 0:
         print(f"\n--require-exact: {overall['fail']} failures → exit 1")

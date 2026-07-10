@@ -32,14 +32,34 @@ const anthropicThinkingHeadroom = 4096
 
 // AnthropicClient talks to an Anthropic-compatible Messages API.
 type AnthropicClient struct {
-	cfg  Config
-	http *http.Client
+	cfg     Config
+	http    *http.Client
+	retry   RetryConfig
+	breaker *circuitBreaker
 }
 
-// NewAnthropic constructs an Anthropic client with a sane timeout.
+// NewAnthropic constructs an Anthropic client with a sane timeout and
+// conservative resilience defaults — mirrors Client.New, see its doc.
 func NewAnthropic(cfg Config) *AnthropicClient {
-	return &AnthropicClient{cfg: cfg, http: &http.Client{Timeout: 30 * time.Second}}
+	return &AnthropicClient{
+		cfg:     cfg,
+		http:    &http.Client{Timeout: 30 * time.Second},
+		retry:   DefaultRetryConfig(),
+		breaker: newCircuitBreaker(DefaultBreakerConfig()),
+	}
 }
+
+// SetRetryConfig overrides the retry policy. Optional; NewAnthropic already
+// applies DefaultRetryConfig().
+func (c *AnthropicClient) SetRetryConfig(cfg RetryConfig) { c.retry = cfg }
+
+// SetBreakerConfig overrides the circuit-breaker policy. Optional;
+// NewAnthropic already applies a breaker with DefaultBreakerConfig().
+func (c *AnthropicClient) SetBreakerConfig(cfg BreakerConfig) { c.breaker = newCircuitBreaker(cfg) }
+
+// BreakerState exposes the breaker's state string for the /stats
+// cache_metrics surface (see correction.CacheMetrics / breakerStater).
+func (c *AnthropicClient) BreakerState() string { return c.breaker.State() }
 
 // Complete renders p to /v1/messages and returns the model's text. System maps
 // to the top-level `system` field; User maps to a single user message.
@@ -56,23 +76,26 @@ func (c *AnthropicClient) Complete(ctx context.Context, p correction.Prompt) (st
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/v1/messages", bytes.NewReader(body))
+
+	// See client.go's Complete for the executeWithResilience contract
+	// (breaker check + bounded transient retry around the HTTP round-trip).
+	resp, err := executeWithResilience(ctx, c.http, c.breaker, c.retry, "anthropic", func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/v1/messages", bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("build request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("anthropic-version", anthropicVersion)
+		if c.cfg.APIKey != "" {
+			req.Header.Set("x-api-key", c.cfg.APIKey)
+		}
+		return req, nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("anthropic-version", anthropicVersion)
-	if c.cfg.APIKey != "" {
-		req.Header.Set("x-api-key", c.cfg.APIKey)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("anthropic request: %w", err)
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("anthropic backend status %d", resp.StatusCode)
-	}
+
 	var parsed struct {
 		Content []struct {
 			Type string `json:"type"`

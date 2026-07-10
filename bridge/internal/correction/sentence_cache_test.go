@@ -42,3 +42,33 @@ func TestSentenceCacheCachesEmptyResults(t *testing.T) {
 	require.True(t, ok, "a clean sentence (no suggestions) is the MOST valuable cache entry")
 	require.Empty(t, got)
 }
+
+func TestSentenceCacheStatsCountsHitsAndMisses(t *testing.T) {
+	c := newSentenceCache(8)
+	hits, misses := c.stats()
+	require.Zero(t, hits)
+	require.Zero(t, misses)
+
+	key := sentenceCacheKey("m", "s", "text", false)
+	_, ok := c.get(key)
+	require.False(t, ok)
+	hits, misses = c.stats()
+	require.EqualValues(t, 0, hits)
+	require.EqualValues(t, 1, misses)
+
+	c.add(key, []Suggestion{{Span: Span{0, 1}, Replacement: "X"}})
+	_, ok = c.get(key)
+	require.True(t, ok)
+	_, ok = c.get(key)
+	require.True(t, ok)
+	hits, misses = c.stats()
+	require.EqualValues(t, 2, hits)
+	require.EqualValues(t, 1, misses)
+}
+
+func TestSentenceCacheStatsNilSafe(t *testing.T) {
+	var c *sentenceCache
+	hits, misses := c.stats()
+	require.Zero(t, hits)
+	require.Zero(t, misses)
+}

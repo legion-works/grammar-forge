@@ -46,6 +46,9 @@ type fakeService struct {
 	completeEnabled bool
 	completeOut     string
 	completeErr     error
+	// cacheMetrics is the canned CacheMetrics return (zero value is the
+	// legitimate "nothing cached yet" response).
+	cacheMetrics correction.CacheMetrics
 }
 
 func (f *fakeService) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
@@ -101,6 +104,8 @@ func (f *fakeService) Complete(_ context.Context, _ string, _ correction.Source,
 	return f.completeOut, f.completeErr
 }
 func (f *fakeService) CompleteEnabled() bool { return f.completeEnabled }
+
+func (f *fakeService) CacheMetrics() correction.CacheMetrics { return f.cacheMetrics }
 
 func serve(svc CorrectionService) http.Handler { return New(Config{}, svc).Handler() }
 
@@ -297,6 +302,49 @@ func TestStatsFreshInstallRendersEmptyRetentionBlock(t *testing.T) {
 	// Sanity: the JSON contains the literal "top_issues":[] so clients
 	// can iterate without a nil check.
 	require.Contains(t, rr.Body.String(), `"top_issues":[]`)
+}
+
+// /stats inlines the Phase 1b cache_metrics block (sentence/tone/complete
+// cache hit/miss counters, singleflight dedup count, LLM breaker state).
+// Always present, never gated — mirrors the retention block's contract.
+func TestStatsSurfacesCacheMetrics(t *testing.T) {
+	svc := &fakeService{
+		cacheMetrics: correction.CacheMetrics{
+			Sentence:          correction.CacheStat{Hits: 10, Misses: 3},
+			Tone:              correction.CacheStat{Hits: 1, Misses: 0},
+			Complete:          correction.CacheStat{Hits: 0, Misses: 2},
+			SingleflightDedup: 4,
+			LLMBreakerState:   "closed",
+		},
+	}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		CacheMetrics correction.CacheMetrics `json:"cache_metrics"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, uint64(10), got.CacheMetrics.Sentence.Hits)
+	require.Equal(t, uint64(3), got.CacheMetrics.Sentence.Misses)
+	require.Equal(t, uint64(1), got.CacheMetrics.Tone.Hits)
+	require.Equal(t, uint64(2), got.CacheMetrics.Complete.Misses)
+	require.Equal(t, uint64(4), got.CacheMetrics.SingleflightDedup)
+	require.Equal(t, "closed", got.CacheMetrics.LLMBreakerState)
+}
+
+// Fresh install: cache_metrics must still be present (all-zero counters,
+// empty breaker state), not omitted.
+func TestStatsFreshInstallRendersEmptyCacheMetrics(t *testing.T) {
+	rr := httptest.NewRecorder()
+	serve(&fakeService{}).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"cache_metrics":`)
+	var got struct {
+		CacheMetrics correction.CacheMetrics `json:"cache_metrics"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Zero(t, got.CacheMetrics.Sentence.Hits)
+	require.Empty(t, got.CacheMetrics.LLMBreakerState)
 }
 
 // The handler MUST pass time.Now() to CountStatsExtended (not a fixed

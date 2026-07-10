@@ -112,13 +112,33 @@ PY
 # then score (the GLEU impl is a faithful Py3 port of Napoles' canonical gleu.py):
 eval/.venv/bin/python eval/jfleg_eval.py http://127.0.0.1:8000        # full 754
 eval/.venv/bin/python eval/jfleg_eval.py http://127.0.0.1:8000 100    # quick: first 100
+eval/.venv/bin/python eval/jfleg_eval.py http://127.0.0.1:8000 --runs 3  # mean+/-stdev across 3 full passes
 ```
+
+**Every run now persists evidence to `eval/jfleg_results.json`** (this was previously
+the one benchmark that never left a committed-friendly artifact — a live run's number
+only ever existed in a terminal scrollback). Each run's entry carries corpus GLEU (mean
++/- reference-choice std, from the canonical multi-reference procedure), a 95%
+**bootstrap CI** (sentence-resampling — the complementary "how much would this vary with
+a different sample of 754 sentences" uncertainty), and latency percentiles (p50/p95/p99).
+`--runs N` repeats the full pass N times and additionally reports cross-run
+mean/stdev/min/max GLEU (LLM sampling is stochastic; a single pass has no error bars).
 
 ## 3. Standard academic benchmarks — comparable F0.5 (`conll14_eval.py`, `bea19_eval.py`)
 
 The golden set and JFLEG are NOT comparable to published GEC numbers. These two are: they
 run the bridge over the standard benchmarks and score with the **canonical scorers**, so the
 F0.5 sits directly beside published SOTA.
+
+> **STALE-NUMBERS WARNING (as of 2026-07-10):** the committed CoNLL-2014 (F0.5 60.86, P
+> 65.0/R 48.5, dated 2026-06-09) and BEA-2019-dev (F0.5 14.53) numbers **predate the
+> over-edit filter** (`internal/correction/overedit.go`, `GF_OVEREDIT_FILTER`) that the
+> golden set's 125/125 now depends on (see §1's history: 123/125 → 125/125 when the filter
+> landed). Neither academic benchmark has been re-run cold since. Both numbers are
+> DIRECTIONALLY informative (precision-leaning shape, the ballpark recall gap) but are
+> **not current** — do not cite them as today's standing without a fresh cold run via
+> `eval/run_all.sh` (§8 below). BEA-2019-dev additionally carries the instrument caveat
+> below, now fixed as of this revision.
 
 ```bash
 bash eval/get_benchmarks.sh                                   # one-time: download data + m2scorer (gitignored)
@@ -136,22 +156,69 @@ non-redistributable) — regenerate with `get_benchmarks.sh`.
   output de-tokenizes punctuation, so `conll14_eval.py` re-tokenizes the hypothesis with
   `nltk.word_tokenize` before m2scorer. **This is the headline, exact-comparable number.**
 - **BEA-2019-dev** is scored by ERRANT (`errant_parallel` → `errant_compare`) on detokenized
-  natural source. **BEA-dev here is APPROXIMATE / directional only:** the official gold m2 was
-  built with `errant==2.0.0` (Python ≤3.6, uninstallable in our 3.13 venv); we run `errant
-  3.0.2`, whose tokenization differs slightly and inflates FP. The slow-path LLM also
-  over-corrects learner text vs the minimal-edit gold. Treat CoNLL-2014 as the headline.
+  natural source.
 
-**Definitive result (FULL sets, 2026-06-09):** CoNLL-2014-test **F0.5 = 60.86** (P 65.00 /
-R 48.50, 1312 sents, ~4 min) — a strong single-model GEC result, ~4–5 F0.5 below published
-GECToR single-model (65.3) and below the ensemble SOTA (76). The shape is **precision-leaning**
-(the cascade is conservative — it doesn't over-correct, good for a writing assistant, but
-recall 48% means it misses over half the aggressive gold edits; the top quality lever is a
-2nd GEC model for majority-vote before LLM escalation). BEA-2019-dev **F0.5 = 14.53**
-(4384 sents, ~12 min) is **directional only** — see the errant-2.0.0-vs-3.0.2 + over-correction
-caveat above; do not read it as our true BEA standing. (A 25-sentence subset gave a rosier
-66.9 — small-sample optimism; the full set is the honest number.) The prior 59.78 was inflated
-by PTB-tokenized-source punctuation false positives (the LLM strips the space around `"risk ?"`),
-now removed by submitting de-tokenized source to the bridge — a real-client-faithful measurement.
+### The BEA-19 instrument fix (2026-07-10)
+
+The prior BEA-dev F0.5 (14.53) scored an errant-3.0.2-annotated hypothesis against the
+OFFICIAL gold m2, which was built upstream with `errant==2.0.0` (Python ≤3.6, uninstallable
+in this 3.13 venv). Comparing edits from two different errant versions isn't a like-for-like
+diff — 2.0.0 and 3.0.2 tokenize/classify some spans differently, so semantically-identical
+edits land in different `(start, end, c_str)` buckets and score as spurious FP/FN. That's
+why 14.53 was flagged an **uncalibrated instrument**, not a real BEA standing.
+
+Three options were evaluated:
+- **(a) Re-annotate both sides with the installed errant.** The gold m2's own edit lines
+  still carry the raw corrections, so the gold CORRECTED TEXT is recoverable by applying
+  them to the tokenized source (`lib_m2.read_m2_annotated`). Re-running `errant_parallel` on
+  `(source, reconstructed-gold-correction)` — the SAME binary/version used for the
+  hypothesis — produces a reference m2 through an IDENTICAL annotation pipeline.
+- **(b) Pin `errant==2.0.0` in a dedicated venv.** Rejected: needs Python ≤3.6, can't coexist
+  with the nltk/spaCy 3.13 venv CoNLL-14 already depends on, and would cost the owner a
+  second interpreter just for one script — not turnkey.
+- **(c) Both behind a flag.** **Implemented.** Regeneration (a) is the default (it's the
+  actual fix); `--legacy-gold` reproduces the OLD cross-version behavior for continuity with
+  the historical 14.53 datapoint, clearly labeled non-comparable in its own output.
+
+```bash
+eval/.venv/bin/python eval/bea19_eval.py http://127.0.0.1:8000                 # regenerated-reference (default, FIXED)
+eval/.venv/bin/python eval/bea19_eval.py http://127.0.0.1:8000 --legacy-gold   # old cross-version behavior (historical only)
+```
+
+Net effect: the default-mode number is now an apples-to-apples ERRANT diff (same annotator
+version both sides) — a TRUSTWORTHY directional/diagnostic number instead of a discredited
+one. It is still not bit-comparable to the published BEA leaderboard (which used errant
+2.0.0 end to end) — CoNLL-2014 (m2scorer) remains the headline, exact-comparable number.
+
+### ERRANT per-error-type breakdown (both benchmarks)
+
+Both `conll14_eval.py` and `bea19_eval.py` now print AND persist a per-error-type P/R/F0.5
+table (ERRANT's own operation+type codes — `M:DET`, `R:VERB:TENSE`, `U:PREP`, ...), sorted
+by gold-edit count. Neither m2scorer nor `errant_compare` breaks this out on their own — this
+is THE diagnostic for "which error types carry CoNLL's 48.5% recall gap" (§ warning above).
+Mirrors `errant_score.py`'s existing per-category (golden-set `cat` tag) structure, bucketing
+by ERRANT type instead; see `lib_errant_types.py`. For CoNLL-14, the gold CORRECTED TEXT is
+reconstructed from the M2's own edit lines the same way as the BEA fix, then re-annotated
+with errant — a secondary diagnostic diff, independent of (and not replacing) the m2scorer
+headline number.
+
+### Latency + persisted results
+
+Every bridge call in both scripts is timed (`time.perf_counter`); p50/p95/p99/mean are
+printed and persisted. Both scripts now write a results file (previously they only printed to
+stdout): `eval/benchmarks/conll14/conll14_results.json` and
+`eval/benchmarks/bea19/bea19_results.json`, each carrying `{p, r, f05, latency,
+by_error_type, ...}`.
+
+**Last known-good FULL-set numbers (2026-06-09, STALE per the warning above):**
+CoNLL-2014-test F0.5 = 60.86 (P 65.00 / R 48.50, 1312 sents, ~4 min) — a strong single-model
+GEC result, ~4–5 F0.5 below published GECToR single-model (65.3) and below the ensemble SOTA
+(76). The shape is **precision-leaning** (the cascade is conservative — it doesn't
+over-correct, good for a writing assistant, but recall 48% means it misses over half the
+aggressive gold edits; the top quality lever is a 2nd GEC model for majority-vote before LLM
+escalation — the new per-type breakdown above is where to look first). BEA-2019-dev F0.5 =
+14.53 (4384 sents, ~12 min) was measured under the OLD cross-version instrument (see fix
+above) — re-run with the fixed default mode before trusting a BEA number again.
 
 ## ERRANT / benchmark venv setup (`.venv`, gitignored)
 
@@ -178,7 +245,15 @@ a no-op; do not "align" the two definitions). Regenerate the corpus with
 Baseline lives in `clean_baseline.json` — gate PRs at (baseline + 2pp) or better.
 Registers: `golden` (golden outputs), `casual`, `technical`, `british`.
 Per-model attribution tells you WHERE the FP came from (`harper`/`gector`/`llm`).
-The baseline was measured with GF_HARPER_DIALECT=british (live config). Golden gates run with american — see the dialect note in the plan; never compare FP numbers across dialect envs.
+The baseline was measured with GF_HARPER_DIALECT=british (live config). Golden gates run with american — see the dialect note in the plan; never compare FP numbers across dialect envs (single-dialect runs, that is — see `dialect_matrix.py` in §8, which runs BOTH dialects in one report instead).
+
+**Variance across runs (`--runs N`):** LLM sampling is stochastic, so a single run's
+fp_rate has no error bars. `--runs N` repeats the full corpus N times and reports mean
++/- stdev and min/max (gating on the MEAN, not a lucky/unlucky single run); every
+individual run is persisted (not just the aggregate) to `--out` (default
+`<corpus_stem>.runs.json`) so an outlier run is inspectable, not just averaged away.
+
+    python3 clean_eval.py http://127.0.0.1:8001 clean_corpus.jsonl --runs 5 --max-fp-rate 12
 
 ## 5. Semantic verifier calibration (Phase C, Task C4)
 
@@ -296,3 +371,75 @@ on `gf-bridge-eval`:
    flag on the live container without first running both gates on
    `gf-bridge-eval`; the operator-action gate exists so a routing change
    never ships without evidence.
+
+## 7. Confidence calibration (`calibration_eval.py`)
+
+Every row `run_eval.py` writes to `results.json` carries a `score` field (0-100, the
+model's own confidence) alongside `pass` (exact-match correctness). `calibration_eval.py`
+buckets rows by score into a **reliability table** (10-pt buckets, mean confidence vs
+empirical pass rate per bucket) and reports **Expected Calibration Error (ECE)** — the
+weighted-average gap between predicted confidence and observed accuracy. This is the ONE
+script in this harness that needs no bridge/LLM call at all — it runs entirely offline
+against an existing `results.json`:
+
+```bash
+python3 eval/calibration_eval.py results.json
+```
+
+Prints the table + ECE and persists both to `eval/calibration_results.json`. **Caveat:**
+the golden set is currently 125/125, so every bucket's empirical accuracy is 1.0 — ECE
+against it only measures "does the model say 100 when it's always actually right," not
+true discrimination between confident-and-wrong vs confident-and-right. A calibration
+study with real diagnostic power needs a mix of passing AND failing rows (e.g. run against
+a harder/adversarial cases file, or a CoNLL/BEA-derived per-sentence score if the bridge
+ever surfaces one there). Read the current ECE as "how far off is the model's stated
+confidence from 100% on a near-saturated set," not as a general trustworthiness verdict.
+
+## 8. Dialect matrix (`dialect_matrix.py`)
+
+Replaces the "never compare FP numbers across dialect envs" footgun (§4) with a script
+that runs golden + clean-text-FP against BOTH an american-configured and a
+british-configured bridge deployment in ONE invocation, reporting them side by side:
+
+```bash
+python3 eval/dialect_matrix.py http://127.0.0.1:8000 http://127.0.0.1:8001 \
+    golden.jsonl clean_corpus.jsonl
+```
+
+(bring up a second bridge container with `-e GF_HARPER_DIALECT=british` on the second
+port first — see §6's `gf-bridge-eval` recipe for the docker pattern.) Prints one table
+with a column per dialect (golden pass-rate, clean FP-rate, per-category golden pass-rate,
+p50 latency) and persists the full detail to `eval/dialect_matrix_results.json`. This
+script cannot be run live in an environment with no bridge — its test suite
+(`test_dialect_matrix.py`) mocks the bridge call to verify the two-dialect wiring and
+report formatting; the actual dialect comparison needs a live run against two bridge
+deployments.
+
+## 9. Turnkey re-run (`run_all.sh`)
+
+A single entrypoint that runs the full documented cold-restart protocol (§1) end to end:
+golden → clean → conll14 → bea19 → jfleg → calibration, in that order, persisting every
+artifact and printing a one-screen summary table.
+
+```bash
+eval/run_all.sh http://127.0.0.1:8000
+```
+
+- Cold-restarts the LLM backend (`docker compose restart llamacpp && sleep 25`) unless
+  `GF_SKIP_RESTART=1` (e.g. the caller already restarted, or the bridge isn't a local
+  docker-compose deployment).
+- Records a timestamp + bridge commit hash (`-dirty` suffixed if `bridge/` has
+  uncommitted changes — worth knowing when reading a number next to a benchmark commit).
+- Each step is best-effort: a missing gitignored corpus (conll14/bea19 need
+  `get_benchmarks.sh`; jfleg needs its manual fetch recipe in §2) is reported as SKIPPED,
+  not fatal, so a quick smoke run without the academic corpora still exercises
+  golden/clean/calibration. Set `GF_SKIP_BENCHMARKS=1` to skip conll14/bea19 on purpose.
+- Prints a per-step status table (`ok` / `fail(rc=N)` / `skipped`) and writes
+  `eval/run_all_summary.json` (timestamp, bridge commit, bridge URL, and the list of
+  per-step artifact files to inspect: `results.json`, `results.latency.json`,
+  `clean_corpus.runs.json`, `benchmarks/conll14/conll14_results.json`,
+  `benchmarks/bea19/bea19_results.json`, `jfleg_results.json`, `calibration_results.json`).
+
+This is orchestration over already-tested scripts (each step's own logic has its own unit
+tests) — `run_all.sh` itself needs a live bridge + docker to verify end to end; it was only
+syntax-checked (`bash -n`) in an environment with no bridge/LLM.

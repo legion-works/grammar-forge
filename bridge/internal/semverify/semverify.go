@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/grammarforge/bridge/internal/correction"
 	"github.com/knights-analytics/hugot"
@@ -17,6 +18,18 @@ import (
 // Verifier embeds text via MiniLM and reports pairwise cosine similarity.
 // One hugot Session is held for the process lifetime. Build with -tags ORT.
 type Verifier struct {
+	// mu serializes calls into the hugot pipeline. hugot's underlying ONNX
+	// Runtime session is NOT documented/verified thread-safe for concurrent
+	// RunPipeline calls on the SAME pipeline (mirrors gector.GECToR.mu — see
+	// internal/gector/gector.go, which locks the identical
+	// hugot.Pipeline.RunPipeline call pattern for the same reason). Without
+	// this lock, the semantic-verifier gate (SetSemanticVerifier) and any
+	// concurrent Similarity caller (e.g. two in-flight /correct requests, or
+	// the new parallel-fast-path + escalation overlap) would race on the
+	// same session/pipeline. Correctness over throughput here: Similarity is
+	// a single small-batch embedding call, not the escalation LLM round-trip,
+	// so serializing it is cheap relative to the win.
+	mu       sync.Mutex
 	session  *hugot.Session
 	pipeline *pipelines.FeatureExtractionPipeline
 }
@@ -58,6 +71,8 @@ func (v *Verifier) Close() error { return v.session.Destroy() }
 // returned vectors already live on the unit sphere and Cosine is the
 // standard normalized dot product.
 func (v *Verifier) Similarity(ctx context.Context, original, corrected string) (float64, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	out, err := v.pipeline.RunPipeline(ctx, []string{original, corrected})
 	if err != nil {
 		return 0, fmt.Errorf("semverify inference: %w", err)

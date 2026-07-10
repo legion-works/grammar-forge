@@ -50,6 +50,12 @@ type CorrectionService interface {
 	// return nil; the handler maps that to [] for the JSON shape.
 	Synonyms(ctx context.Context, word string) ([]string, error)
 	SynonymsEnabled() bool
+	// CacheMetrics exposes the sentence/tone/complete cache hit/miss
+	// counters, the singleflight escalation-dedup count, and (best-effort)
+	// the configured LLM backend's circuit-breaker state, inlined into the
+	// /stats response's cache_metrics block (see correction.CacheMetrics).
+	// Additive, never gated — a fresh install just reports all zeros.
+	CacheMetrics() correction.CacheMetrics
 }
 
 // Config is the subset of settings the REST server needs.

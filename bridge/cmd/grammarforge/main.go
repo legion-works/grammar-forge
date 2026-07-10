@@ -113,10 +113,14 @@ func main() {
 		trustedCategories = nil
 	}
 
+	defaultLLM := llm.New(llm.Config{BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey, Seed: cfg.LLMSeed})
+	defaultLLM.SetRetryConfig(llmRetryConfigFrom(cfg))
+	defaultLLM.SetBreakerConfig(llmBreakerConfigFrom(cfg))
+
 	svc := correction.NewService(
 		pb,
 		fast,
-		llm.New(llm.Config{BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey, Seed: cfg.LLMSeed}),
+		defaultLLM,
 		st,
 		cfg.LLMModel,
 		correction.EscalationPolicy{
@@ -231,11 +235,23 @@ func main() {
 	// never logged (mirrors llm.Config.APIKey).
 	svc.SetRephraseFactory(func(b correction.RephraseBackend) (correction.LLMClient, error) {
 		lcfg := llm.Config{BaseURL: b.BaseURL, Model: b.Model, APIKey: b.APIKey, Seed: cfg.LLMSeed}
+		// Every backend the factory builds (rephrase override, tone
+		// override, dedicated GF_REPHRASE_*/GF_TONE_* backends) gets the
+		// SAME retry/breaker policy as the default LLM client — a flaky or
+		// dead override backend must degrade exactly like the default one
+		// (bounded retry, then fail fast once its own breaker opens)
+		// rather than silently having no resilience at all.
 		switch b.Provider {
 		case "", "openai":
-			return llm.New(lcfg), nil
+			c := llm.New(lcfg)
+			c.SetRetryConfig(llmRetryConfigFrom(cfg))
+			c.SetBreakerConfig(llmBreakerConfigFrom(cfg))
+			return c, nil
 		case "anthropic":
-			return llm.NewAnthropic(lcfg), nil
+			c := llm.NewAnthropic(lcfg)
+			c.SetRetryConfig(llmRetryConfigFrom(cfg))
+			c.SetBreakerConfig(llmBreakerConfigFrom(cfg))
+			return c, nil
 		default:
 			return nil, fmt.Errorf("unknown rephrase provider %q", b.Provider)
 		}
@@ -316,5 +332,30 @@ func parseLevel(s string) slog.Level {
 		return slog.LevelError
 	default:
 		return slog.LevelInfo
+	}
+}
+
+// llmRetryConfigFrom translates config.Config's GF_LLM_RETRY_* fields into
+// an llm.RetryConfig. Every llm.Client/llm.AnthropicClient the bridge
+// constructs is given the SAME retry policy (see the two call sites above).
+func llmRetryConfigFrom(cfg config.Config) llm.RetryConfig {
+	return llm.RetryConfig{
+		Enabled:    cfg.LLMRetryEnabled,
+		MaxRetries: cfg.LLMRetryMaxRetries,
+		BaseDelay:  cfg.LLMRetryBaseDelay,
+		MaxDelay:   cfg.LLMRetryMaxDelay,
+	}
+}
+
+// llmBreakerConfigFrom translates config.Config's GF_LLM_BREAKER_* fields
+// into an llm.BreakerConfig. Every llm.Client/llm.AnthropicClient the
+// bridge constructs gets its OWN breaker instance (SetBreakerConfig
+// replaces the instance) built from this same policy — a dead override
+// backend's breaker never affects the default backend's, and vice versa.
+func llmBreakerConfigFrom(cfg config.Config) llm.BreakerConfig {
+	return llm.BreakerConfig{
+		Enabled:          cfg.LLMBreakerEnabled,
+		FailureThreshold: cfg.LLMBreakerThreshold,
+		Cooldown:         cfg.LLMBreakerCooldown,
 	}
 }

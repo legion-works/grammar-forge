@@ -236,6 +236,13 @@ type statsResponse struct {
 	TopIssues      []correction.CategoryCount `json:"top_issues"`
 	Streak         int                        `json:"streak"`
 	WordsThisWeek  int64                      `json:"words_this_week"`
+	// CacheMetrics is the Phase 1b concurrency/resilience metrics block:
+	// sentence/tone/complete cache hit/miss counters, the singleflight
+	// escalation-dedup count, and the LLM backend's circuit-breaker state.
+	// Always inlined (never gated), mirroring the TopIssues/Streak/
+	// WordsThisWeek retention block above — a fresh install just reports
+	// all-zero counters and an empty breaker state.
+	CacheMetrics correction.CacheMetrics `json:"cache_metrics"`
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -263,6 +270,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		TopIssues:     ex.TopIssues,
 		Streak:        ex.Streak,
 		WordsThisWeek: ex.WordsThisWeek,
+		CacheMetrics:  s.svc.CacheMetrics(),
 	}
 	if signaled := sc.Accepted + sc.Rejected + sc.Ignored; signaled > 0 {
 		rate := float64(sc.Accepted) / float64(signaled)

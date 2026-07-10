@@ -1,0 +1,89 @@
+{
+  "source": "results.json",
+  "n_buckets": 10,
+  "n_rows_scored": 125,
+  "n_rows_total": 125,
+  "reliability_table": [
+    {
+      "lo": 0,
+      "hi": 10,
+      "n": 0,
+      "mean_confidence": null,
+      "empirical_accuracy": null,
+      "gap": null
+    },
+    {
+      "lo": 10,
+      "hi": 20,
+      "n": 0,
+      "mean_confidence": null,
+      "empirical_accuracy": null,
+      "gap": null
+    },
+    {
+      "lo": 20,
+      "hi": 30,
+      "n": 0,
+      "mean_confidence": null,
+      "empirical_accuracy": null,
+      "gap": null
+    },
+    {
+      "lo": 30,
+      "hi": 40,
+      "n": 0,
+      "mean_confidence": null,
+      "empirical_accuracy": null,
+      "gap": null
+    },
+    {
+      "lo": 40,
+      "hi": 50,
+      "n": 0,
+      "mean_confidence": null,
+      "empirical_accuracy": null,
+      "gap": null
+    },
+    {
+      "lo": 50,
+      "hi": 60,
+      "n": 1,
+      "mean_confidence": 0.58,
+      "empirical_accuracy": 1.0,
+      "gap": 0.42
+    },
+    {
+      "lo": 60,
+      "hi": 70,
+      "n": 2,
+      "mean_confidence": 0.645,
+      "empirical_accuracy": 1.0,
+      "gap": 0.355
+    },
+    {
+      "lo": 70,
+      "hi": 80,
+      "n": 3,
+      "mean_confidence": 0.7433,
+      "empirical_accuracy": 1.0,
+      "gap": 0.2567
+    },
+    {
+      "lo": 80,
+      "hi": 90,
+      "n": 16,
+      "mean_confidence": 0.8619,
+      "empirical_accuracy": 1.0,
+      "gap": 0.1381
+    },
+    {
+      "lo": 90,
+      "hi": 100,
+      "n": 103,
+      "mean_confidence": 0.9592,
+      "empirical_accuracy": 1.0,
+      "gap": 0.0408
+    }
+  ],
+  "ece": 0.0665
+}

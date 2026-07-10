@@ -3,6 +3,7 @@ package correction
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
@@ -15,6 +16,12 @@ import (
 // slice — the dominant steady-state hit while typing.
 type sentenceCache struct {
 	lru *lru.Cache[string, []Suggestion]
+	// hits/misses are atomic counters surfaced via Stats() for the /stats
+	// cache_metrics block (see CacheMetrics in service.go). Plain uint64
+	// fields incremented with sync/atomic rather than a mutex: get() is on
+	// the hot request path and a counter bump must not add lock contention
+	// on top of the LRU's own internal locking.
+	hits, misses uint64
 }
 
 // newSentenceCache builds a cache with the given entry capacity. size <= 0
@@ -52,8 +59,10 @@ func (c *sentenceCache) get(key string) ([]Suggestion, bool) {
 	}
 	v, ok := c.lru.Get(key)
 	if !ok {
+		atomic.AddUint64(&c.misses, 1)
 		return nil, false
 	}
+	atomic.AddUint64(&c.hits, 1)
 	out := make([]Suggestion, len(v))
 	copy(out, v) // shallow copy: Replacements backing arrays are read-only
 	return out, true
@@ -66,4 +75,13 @@ func (c *sentenceCache) add(key string, sugs []Suggestion) {
 	stored := make([]Suggestion, len(sugs))
 	copy(stored, sugs)
 	c.lru.Add(key, stored)
+}
+
+// stats reports the cumulative hit/miss counts (nil-safe: a disabled cache
+// reports zero for both).
+func (c *sentenceCache) stats() (hits, misses uint64) {
+	if c == nil {
+		return 0, 0
+	}
+	return atomic.LoadUint64(&c.hits), atomic.LoadUint64(&c.misses)
 }

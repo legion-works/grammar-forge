@@ -173,6 +173,39 @@ func TestLoad_LLMSeedDefaultZero(t *testing.T) {
 	require.Equal(t, 0, cfg.LLMSeed, "LLMSeed must default to 0 when GF_LLM_SEED is unset")
 }
 
+// ---- Phase 1b: LLM retry + circuit breaker knobs ----
+
+func TestLoad_LLMResilienceDefaults(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.True(t, cfg.LLMRetryEnabled, "retry must default ON")
+	require.Equal(t, 1, cfg.LLMRetryMaxRetries)
+	require.Equal(t, 200*time.Millisecond, cfg.LLMRetryBaseDelay)
+	require.Equal(t, 500*time.Millisecond, cfg.LLMRetryMaxDelay)
+	require.True(t, cfg.LLMBreakerEnabled, "breaker must default ON")
+	require.Equal(t, 5, cfg.LLMBreakerThreshold)
+	require.Equal(t, 30*time.Second, cfg.LLMBreakerCooldown)
+}
+
+func TestLoad_LLMResilienceOverrides(t *testing.T) {
+	env := map[string]string{
+		"GF_LLM_RETRY_ENABLED":     "false",
+		"GF_LLM_RETRY_MAX_RETRIES": "3",
+		"GF_LLM_RETRY_BASE_DELAY":  "50ms",
+		"GF_LLM_RETRY_MAX_DELAY":   "1s",
+		"GF_LLM_BREAKER_ENABLED":   "false",
+		"GF_LLM_BREAKER_THRESHOLD": "10",
+		"GF_LLM_BREAKER_COOLDOWN":  "1m",
+	}
+	cfg := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	require.False(t, cfg.LLMRetryEnabled)
+	require.Equal(t, 3, cfg.LLMRetryMaxRetries)
+	require.Equal(t, 50*time.Millisecond, cfg.LLMRetryBaseDelay)
+	require.Equal(t, time.Second, cfg.LLMRetryMaxDelay)
+	require.False(t, cfg.LLMBreakerEnabled)
+	require.Equal(t, 10, cfg.LLMBreakerThreshold)
+	require.Equal(t, time.Minute, cfg.LLMBreakerCooldown)
+}
+
 func TestLoad_LLMSeedOverride(t *testing.T) {
 	env := map[string]string{"GF_LLM_SEED": "123"}
 	cfg := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })

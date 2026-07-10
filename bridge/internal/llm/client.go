@@ -25,14 +25,41 @@ type Config struct {
 
 // Client talks to an OpenAI-compatible server.
 type Client struct {
-	cfg  Config
-	http *http.Client
+	cfg     Config
+	http    *http.Client
+	retry   RetryConfig
+	breaker *circuitBreaker
 }
 
-// New constructs a Client with a sane timeout.
+// New constructs a Client with a sane timeout and conservative resilience
+// defaults (retry on, 1 retry; breaker on, 5-consecutive-failure threshold —
+// see DefaultRetryConfig/DefaultBreakerConfig). Override via SetRetryConfig /
+// SetBreakerConfig (main.go wires these from config.Config's GF_LLM_RETRY_*
+// / GF_LLM_BREAKER_* knobs).
 func New(cfg Config) *Client {
-	return &Client{cfg: cfg, http: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{
+		cfg:     cfg,
+		http:    &http.Client{Timeout: 30 * time.Second},
+		retry:   DefaultRetryConfig(),
+		breaker: newCircuitBreaker(DefaultBreakerConfig()),
+	}
 }
+
+// SetRetryConfig overrides the retry policy. Optional; New already applies
+// DefaultRetryConfig().
+func (c *Client) SetRetryConfig(cfg RetryConfig) { c.retry = cfg }
+
+// SetBreakerConfig overrides the circuit-breaker policy. Optional; New
+// already applies a breaker with DefaultBreakerConfig(). Replaces the
+// breaker instance, so any in-flight failure count from the old policy is
+// discarded (breaker changes are an operator config action, not a
+// per-request toggle).
+func (c *Client) SetBreakerConfig(cfg BreakerConfig) { c.breaker = newCircuitBreaker(cfg) }
+
+// BreakerState exposes the breaker's state string ("closed"|"open"|
+// "half_open") for the /stats cache_metrics surface (see
+// correction.CacheMetrics / correction.breakerStater).
+func (c *Client) BreakerState() string { return c.breaker.State() }
 
 type chatMessage struct {
 	Role    string `json:"role"`
@@ -79,23 +106,27 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+endpoint, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-	}
 
-	resp, err := c.http.Do(req)
+	// executeWithResilience owns the breaker check, the HTTP round-trip, and
+	// the bounded retry-on-transient-failure loop (network error / 429 /
+	// 5xx only — see resilience.go). newReq is called fresh per attempt
+	// since an http.Request body reader is single-use; bytes.NewReader(body)
+	// is cheap to recreate from the already-marshaled bytes.
+	resp, err := executeWithResilience(ctx, c.http, c.breaker, c.retry, "llm", func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("build request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if c.cfg.APIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+		}
+		return req, nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("llm request: %w", err)
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("llm backend status %d", resp.StatusCode)
-	}
 
 	var parsed struct {
 		Choices []struct {

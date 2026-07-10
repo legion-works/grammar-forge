@@ -26,6 +26,22 @@ type Config struct {
 	// pins sampling.
 	LLMSeed   int
 	LLMAPIKey string
+	// LLM retry + circuit breaker (Phase 1b resilience quick-win). Applied to
+	// EVERY llm.Client/llm.AnthropicClient the bridge constructs (default,
+	// rephrase override, tone override) — main.go wires the same
+	// RetryConfig/BreakerConfig into each. Defaults are conservative: retry
+	// on (1 retry, 200-500ms jittered backoff — see llm.DefaultRetryConfig),
+	// breaker on (5 consecutive failures opens it, 30s cooldown before a
+	// half-open probe — see llm.DefaultBreakerConfig). A dead backend then
+	// fails fast (breaker open) instead of every request stacking its own
+	// 30s HTTP timeout one at a time.
+	LLMRetryEnabled     bool          // GF_LLM_RETRY_ENABLED           (default true)
+	LLMRetryMaxRetries  int           // GF_LLM_RETRY_MAX_RETRIES       (default 1)
+	LLMRetryBaseDelay   time.Duration // GF_LLM_RETRY_BASE_DELAY        (default 200ms)
+	LLMRetryMaxDelay    time.Duration // GF_LLM_RETRY_MAX_DELAY         (default 500ms)
+	LLMBreakerEnabled   bool          // GF_LLM_BREAKER_ENABLED         (default true)
+	LLMBreakerThreshold int           // GF_LLM_BREAKER_THRESHOLD       (default 5)
+	LLMBreakerCooldown  time.Duration // GF_LLM_BREAKER_COOLDOWN        (default 30s)
 	// Optional dedicated rephrase backend. When RephraseProvider is empty the
 	// rephrase endpoint uses the default LLM (LLMBaseURL/LLMModel/LLMAPIKey).
 	RephraseProvider string // "" | "openai" | "anthropic"
@@ -328,8 +344,16 @@ func Load(getenv Getenv) Config {
 		LLMFormat:  get("GF_LLM_FORMAT", "chat_instruct"),
 		LLMSeed:    getInt("GF_LLM_SEED", 0),
 		LLMAPIKey:  get("GF_LLM_API_KEY", ""),
-		DBPath:     get("GF_DB_PATH", "/data/corrections.db"),
-		LogLevel:   get("GF_LOG_LEVEL", "info"),
+
+		LLMRetryEnabled:     getBool("GF_LLM_RETRY_ENABLED", true),
+		LLMRetryMaxRetries:  getInt("GF_LLM_RETRY_MAX_RETRIES", 1),
+		LLMRetryBaseDelay:   getDuration("GF_LLM_RETRY_BASE_DELAY", 200*time.Millisecond),
+		LLMRetryMaxDelay:    getDuration("GF_LLM_RETRY_MAX_DELAY", 500*time.Millisecond),
+		LLMBreakerEnabled:   getBool("GF_LLM_BREAKER_ENABLED", true),
+		LLMBreakerThreshold: getInt("GF_LLM_BREAKER_THRESHOLD", 5),
+		LLMBreakerCooldown:  getDuration("GF_LLM_BREAKER_COOLDOWN", 30*time.Second),
+		DBPath:              get("GF_DB_PATH", "/data/corrections.db"),
+		LogLevel:            get("GF_LOG_LEVEL", "info"),
 
 		RephraseProvider: get("GF_REPHRASE_PROVIDER", ""),
 		RephraseBaseURL:  get("GF_REPHRASE_BASE_URL", ""),

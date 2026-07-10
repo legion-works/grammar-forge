@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/grammarforge/bridge/internal/correction"
 	"github.com/stretchr/testify/require"
@@ -226,6 +228,138 @@ func TestCompleteSendsSeedOnBothPaths(t *testing.T) {
 			require.EqualValues(t, 42, seed)
 		})
 	}
+}
+
+// ---- Phase 1b: retry + circuit breaker ----
+
+// fastRetry is a RetryConfig with negligible backoff so retry tests run
+// quickly without weakening the assertion (still exactly 1 retry).
+func fastRetry() RetryConfig {
+	return RetryConfig{Enabled: true, MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: 2 * time.Millisecond}
+}
+
+func TestCompleteRetriesOnTransientThenSucceeds(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"text": "ok"}}})
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	c.SetRetryConfig(fastRetry())
+	out, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.NoError(t, err, "the retry must recover a transient 500")
+	require.Equal(t, "ok", out)
+	require.EqualValues(t, 2, atomic.LoadInt32(&calls), "exactly one retry: 500 then 200")
+}
+
+func TestCompleteDoesNotRetryOn400(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	c.SetRetryConfig(fastRetry())
+	_, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "400")
+	require.EqualValues(t, 1, atomic.LoadInt32(&calls), "a permanent 4xx (non-429) must NOT be retried")
+}
+
+func TestCompleteRetriesOn429(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			http.Error(w, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"text": "ok"}}})
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	c.SetRetryConfig(fastRetry())
+	out, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.NoError(t, err, "429 is transient and must be retried")
+	require.Equal(t, "ok", out)
+	require.EqualValues(t, 2, atomic.LoadInt32(&calls))
+}
+
+func TestCompleteDoesNotRetryTruncatedOutput(t *testing.T) {
+	// A truncated response is a SUCCESSFUL (200) HTTP call, discovered only
+	// after decoding — outside the transport retry loop entirely. Retrying
+	// it would just regenerate the same-shaped truncation.
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_, _ = w.Write([]byte(`{"choices":[{"text":"partial","finish_reason":"length"}]}`))
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	c.SetRetryConfig(fastRetry())
+	_, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "truncated")
+	require.EqualValues(t, 1, atomic.LoadInt32(&calls), "truncation must not trigger a transport-level retry")
+}
+
+func TestBreakerOpensFailsFastThenHalfOpenProbeRecovers(t *testing.T) {
+	var calls int32
+	var failUntil int32 = 2 // the first 2 calls fail; the 3rd (the probe) succeeds
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&calls, 1) <= atomic.LoadInt32(&failUntil) {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"text": "ok"}}})
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	c.SetRetryConfig(RetryConfig{Enabled: false}) // isolate breaker behaviour from retry
+	c.SetBreakerConfig(BreakerConfig{Enabled: true, FailureThreshold: 2, Cooldown: 30 * time.Millisecond})
+	require.Equal(t, "closed", c.BreakerState())
+
+	for i := 0; i < 2; i++ {
+		_, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+		require.Error(t, err)
+	}
+	require.Equal(t, "open", c.BreakerState(), "2 consecutive failures must open the breaker (threshold=2)")
+
+	before := atomic.LoadInt32(&calls)
+	_, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "circuit breaker open")
+	require.Equal(t, before, atomic.LoadInt32(&calls), "an open breaker must fail fast WITHOUT calling the backend")
+
+	time.Sleep(40 * time.Millisecond) // let the cooldown elapse
+	out, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.NoError(t, err, "the half-open probe must reach the now-healthy backend")
+	require.Equal(t, "ok", out)
+	require.Equal(t, before+1, atomic.LoadInt32(&calls), "exactly one probe request must reach the backend")
+	require.Equal(t, "closed", c.BreakerState(), "a successful probe must close the breaker")
+}
+
+func TestBreakerFailedProbeReopens(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError) // always fails
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	c.SetRetryConfig(RetryConfig{Enabled: false})
+	c.SetBreakerConfig(BreakerConfig{Enabled: true, FailureThreshold: 1, Cooldown: 20 * time.Millisecond})
+
+	_, err := c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.Error(t, err)
+	require.Equal(t, "open", c.BreakerState())
+
+	time.Sleep(30 * time.Millisecond)
+	_, err = c.Complete(context.Background(), correction.Prompt{User: "x", Template: correction.TemplateGRMRNative})
+	require.Error(t, err, "the probe hits the still-broken backend and must fail")
+	require.Equal(t, "open", c.BreakerState(), "a failed probe must re-open the breaker, not stay half-open")
 }
 
 func TestCompleteChatSendsCachePrompt(t *testing.T) {
