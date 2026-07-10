@@ -191,7 +191,25 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi; theme
                 Legion --text-muted, theme-selected (P1-4: dark/light via
                 paletteFor) — same dim tone card-spec.ts uses for hints, so
                 the status line never drifts from the card's own dim tone. */}
-            <Show when={statusText()} keyed>
+            {/* BUGFIX: `<Show>` with no `fallback` renders an empty text-node
+                placeholder for its false branch. Under the installed
+                @opentui/solid reconciler that placeholder throws ("Orphan
+                text error: … must have a <text> as a parent") unless its
+                parent is itself a <text> — which a top-level Fragment
+                sibling (this one sits next to the zero-size anchor box and
+                the Portal) never is. That crash is caught per-slot by the
+                host (pluginFailurePlaceholder), so it doesn't take down the
+                whole TUI, but it DOES mean the entire panel — card, ghost,
+                status line — silently fails to (re)render on every mount
+                where the Show starts false (statusText === ""), which is
+                the common case (e.g. every fresh slot re-invoke before a
+                check/pin has produced output). This is very plausibly why
+                the reported regressions felt inconsistent ("confusion half
+                the time"): the jsdom-free vitest suite never renders
+                through the real reconciler, so it can't see this. An
+                explicit zero-size fallback box sidesteps the crash without
+                changing anything visible. */}
+            <Show when={statusText()} keyed fallback={<box width={0} height={0} />}>
                 {(t) => (
                     <box flexDirection="row">
                         <text fg={dimHex}>{t}</text>
@@ -216,7 +234,9 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi; theme
                     c.zIndex = 4000;
                 }}
             >
-                <Show when={localView()} keyed>
+                {/* BUGFIX: see the statusText <Show>'s comment above — same
+                    orphan-text-node crash on the false branch, same fix. */}
+                <Show when={localView()} keyed fallback={<box width={0} height={0} />}>
                     {(current) => {
                         // P1-5: derive the card's actual width from the terminal's
                         // current width instead of always using the fixed 44-col
@@ -346,6 +366,28 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi; theme
                                 {spec.rows.map((row, rowIndex) => (
                                     <box
                                         flexDirection="row"
+                                        // BUGFIX (hints row visually colliding / diff-row
+                                        // wrap corrupting the replacement word — user
+                                        // reports "hints overlapping" + "pinned word
+                                        // vanishes"): a row with MULTIPLE <text> children
+                                        // (card-spec.ts's discrete apply/ignore/cycle hint
+                                        // segments; the diff row's wrapped arrow+text pair)
+                                        // overflows this box's width whenever the segments'
+                                        // combined width exceeds it. Without `overflow`
+                                        // here + `wrapMode`/`flexShrink` on each <text>
+                                        // below, opentui's yoga layout SHRINKS each text
+                                        // child individually and lets it internally
+                                        // re-wrap — different children wrap at different
+                                        // points and their second lines land on the SAME
+                                        // row, jamming into each other (e.g. "x ignore"
+                                        // colliding into "esc close" as "ignoreesc", or the
+                                        // arrow gluing onto the replacement word with its
+                                        // separating space eaten). `overflow="hidden"`
+                                        // clips any excess at the card's edge instead —
+                                        // the same clean truncation the single-segment
+                                        // hints line had before these segments were split
+                                        // out for per-segment mouse clicks.
+                                        overflow="hidden"
                                         onMouseDown={
                                             // §4: "click an alternative in a multi-option
                                             // rephrase → select it" (↑/↓/tab's mouse mirror).
@@ -380,6 +422,17 @@ function PanelComponent(props: { controller: PanelController; api: TuiApi; theme
                                         {row.segments.map((seg) => (
                                             <text
                                                 fg={seg.fg}
+                                                // See the row <box>'s `overflow` comment above:
+                                                // `wrapMode="none"` stops THIS segment from
+                                                // internally re-wrapping when yoga shrinks it
+                                                // to fit, and `flexShrink={0}` stops yoga from
+                                                // shrinking it at all — each segment keeps its
+                                                // full, correct width (so e.g. the arrow's
+                                                // trailing space never gets eaten), and any
+                                                // total overflow is cleanly clipped by the
+                                                // row's `overflow="hidden"` instead of jamming.
+                                                wrapMode="none"
+                                                flexShrink={0}
                                                 onMouseDown={
                                                     // §4/§8: discrete apply/ignore clickable
                                                     // hint spans (only the suggestion card's
@@ -441,7 +494,13 @@ function GhostComponent(props: { api: TuiApi; theme: TerminalTheme }) {
     // re-executes when the signal changes. Same pattern as PanelComponent's
     // <Show when={localView()} keyed> at L170.
     return (
-        <Show when={ghost()} keyed>
+        // BUGFIX: see PanelComponent's statusText <Show> comment — no
+        // `fallback` means the false branch (ghost === null, the common
+        // case) throws an orphan-text-node error under the installed
+        // @opentui/solid reconciler when this Show sits directly under a
+        // non-<text> parent, which is exactly this component's shape (it's
+        // a bare sibling of <PanelComponent/> in the slot fn's fragment).
+        <Show when={ghost()} keyed fallback={<box width={0} height={0} />}>
             {(current) => {
                 const anchor = props.api.prompt?.ref()?.offsetToScreen?.(current.atOffset) ?? null;
                 const dims = dimensions();

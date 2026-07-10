@@ -104,10 +104,10 @@ describe("computeCardWidth (P1-5)", () => {
         expect(computeCardWidth(46)).toBe(44); // 46 - 2 = 44
     });
 
-    it("pathologically narrow terminal: floors at MIN_CARD_W (10), never negative/zero", () => {
+    it("pathologically narrow but REAL terminal: floors at MIN_CARD_W (10)", () => {
+        // 5 is a genuinely tiny but positive, finite screen width — a real
+        // (if absurd) terminal size, not a "dimensions aren't ready" signal.
         expect(computeCardWidth(5)).toBe(10);
-        expect(computeCardWidth(0)).toBe(10);
-        expect(computeCardWidth(-100)).toBe(10);
     });
 
     it("custom maxWidth/margin are honored", () => {
@@ -120,5 +120,44 @@ describe("computeCardWidth (P1-5)", () => {
         const cardW = computeCardWidth(screenW);
         const pos = clampAnchor({ x: 25, y: 10 }, cardW, 5, screenW, 24);
         expect(pos.left + cardW).toBeLessThanOrEqual(screenW);
+    });
+
+    // BUGFIX regression tests (live "new session: prompt much narrower"
+    // report): `useTerminalDimensions()` is backed by the host's
+    // CliRenderer.width, read at component-mount time — on a freshly-
+    // mounted renderer (a new session's slot tree, before its first
+    // native layout pass) this can read `0`, and if the accessor itself
+    // were momentarily undefined on some host version, `screenW - margin`
+    // would be `NaN`. Neither is a REAL terminal size (a live terminal is
+    // never 0 columns wide), so both must fall back to `maxWidth` — the
+    // fixed, known-good pre-P1-5 card width — instead of computing a
+    // degenerate width.
+    it("screenW === 0 (not-yet-sized renderer): falls back to maxWidth, NOT MIN_CARD_W", () => {
+        expect(computeCardWidth(0)).toBe(44);
+        expect(computeCardWidth(0, 60)).toBe(60);
+    });
+
+    it("screenW is NaN: falls back to maxWidth, never returns NaN", () => {
+        expect(computeCardWidth(Number.NaN)).toBe(44);
+        expect(Number.isNaN(computeCardWidth(Number.NaN))).toBe(false);
+    });
+
+    it("screenW is undefined (defensive — a caller passing through an unready accessor): falls back to maxWidth, never NaN", () => {
+        expect(computeCardWidth(undefined as unknown as number)).toBe(44);
+        expect(Number.isNaN(computeCardWidth(undefined as unknown as number))).toBe(false);
+    });
+
+    it("screenW is negative (never physically real): falls back to maxWidth rather than trusting bogus input", () => {
+        expect(computeCardWidth(-100)).toBe(44);
+    });
+
+    it("degenerate screenW never produces a width clampAnchor can turn into NaN", () => {
+        for (const screenW of [0, Number.NaN, -100, undefined as unknown as number]) {
+            const cardW = computeCardWidth(screenW);
+            expect(Number.isFinite(cardW)).toBe(true);
+            const pos = clampAnchor({ x: 5, y: 10 }, cardW, 5, screenW, Number.NaN);
+            expect(Number.isFinite(pos.left)).toBe(true);
+            expect(Number.isFinite(pos.top)).toBe(true);
+        }
     });
 });

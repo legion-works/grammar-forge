@@ -18,6 +18,20 @@
 //      content. This is the orphaned-reactivity bug class guard:
 //      the imperative owner-effect rebuilds on every transition;
 //      a foreign-scope <Show> would not re-fire.
+//   4. REGRESSION GUARD (URGENT fix, see HARNESS.md): every row that
+//      carries MULTIPLE <text> segments (card-spec.ts's discrete
+//      apply/ignore/cycle hint segments; a wrapped diff row's
+//      arrow+first-line pair) renders as a SINGLE line — it never
+//      internally re-wraps and jams adjacent segments into each other
+//      (the "hints overlapping" / "pinned word vanishes" bugs). This
+//      mirrors tui-entry.tsx's actual row/text props exactly
+//      (`overflow="hidden"` on the row, `wrapMode="none"` +
+//      `flexShrink={0}` on each segment) so a future regression here
+//      is caught the same way it slipped through before: this smoke
+//      renders through the REAL renderer/yoga layout, which the
+//      jsdom-free vitest suite (card-spec.test.ts) never does — that
+//      suite only inspects the CardSpec data, never how opentui lays
+//      multiple <text> children out in a row.
 //
 // The vitest unit tests (details-panel-view.test.ts) cover the
 // signal lifecycle + dispose. The card-spec tests cover the spec
@@ -32,13 +46,19 @@ import {
     buildRephraseResultCardSpec,
     type CardSpec,
 } from "../src/card-spec.ts";
+import { makeDisplayWidth, bunSegmentWidth } from "../src/display-width.ts";
+
+const displayWidthOf = makeDisplayWidth(bunSegmentWidth);
 
 interface BoxSurface {
     add: (child: unknown) => number;
     remove: (id: string) => void;
     getChildren: () => unknown[];
     width?: number | `${number}%` | "auto";
-    yogaNode?: { getComputedWidth?: () => number; getComputedHeight?: () => number };
+    yogaNode?: {
+        getComputedWidth?: () => number;
+        getComputedHeight?: () => number;
+    };
 }
 
 interface TextSurface {
@@ -46,6 +66,29 @@ interface TextSurface {
     content: string | { chunks: Array<{ text: string }> };
     fg?: string;
     add: (child: unknown) => number;
+    yogaNode?: { getComputedHeight?: () => number };
+}
+
+/** Build a row <box> + <text> children EXACTLY mirroring tui-entry.tsx's
+ *  props for the fix under test (overflow="hidden" on the row,
+ *  wrapMode="none" + flexShrink=0 on each segment) — see that file's
+ *  matching comment. Any divergence here should be treated as a bug in
+ *  the smoke, not a license to skip the real props. */
+function buildRow(rootCtx: unknown, segments: CardSpec["rows"][number]["segments"]): BoxSurface {
+    const rowBox = new BoxRenderable(rootCtx as never, {
+        flexDirection: "row",
+        overflow: "hidden",
+    }) as unknown as BoxSurface;
+    for (const seg of segments) {
+        const t = new TextRenderable(rootCtx as never, {
+            content: seg.text,
+            fg: seg.fg,
+            wrapMode: "none",
+            flexShrink: 0,
+        }) as unknown as TextSurface;
+        rowBox.add(t);
+    }
+    return rowBox;
 }
 
 function buildCard(rootCtx: unknown, spec: CardSpec): BoxSurface {
@@ -65,19 +108,33 @@ function buildCard(rootCtx: unknown, spec: CardSpec): BoxSurface {
         flexDirection: "column",
     }) as unknown as BoxSurface;
     for (const row of spec.rows) {
-        const rowBox = new BoxRenderable(rootCtx as never, {
-            flexDirection: "row",
-        }) as unknown as BoxSurface;
-        for (const seg of row.segments) {
-            const t = new TextRenderable(rootCtx as never, {
-                content: seg.text,
-                fg: seg.fg,
-            }) as unknown as TextSurface;
-            rowBox.add(t);
-        }
-        box.add(rowBox);
+        box.add(buildRow(rootCtx, row.segments));
     }
     return box;
+}
+
+/** Assert every ROW box in `box` stayed exactly 1 line tall post-layout —
+ *  the regression guard described in the file header. A row with multiple
+ *  segments that internally re-wraps/jams grows to height >= 2. */
+function assertRowsSingleLine(label: string, box: BoxSurface): void {
+    const rows = box.getChildren() as Array<{
+        getChildren: () => unknown[];
+        yogaNode?: { getComputedHeight?: () => number };
+    }>;
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]!;
+        const h = row.yogaNode?.getComputedHeight?.() ?? 1;
+        const segCount = row.getChildren().length;
+        if (h > 1) {
+            console.error(
+                `FAIL[${label}]: row ${i} (${segCount} segments) rendered at height=${h} ` +
+                    `(expected 1) — segments are jamming/overlapping instead of clipping. ` +
+                    `This is the "hints overlapping" / "pinned word vanishes" regression class.`,
+            );
+            process.exit(1);
+        }
+    }
+    console.log(`smoke[${label}]: all ${rows.length} rows stayed single-line ✓`);
 }
 
 async function verify(
@@ -147,6 +204,7 @@ async function verify(
         }
     }
     console.log(`smoke[${label}]: ${textCount} text children populated ✓`);
+    assertRowsSingleLine(label, box);
     return { width, height };
 }
 
@@ -167,16 +225,17 @@ function buildAbsoluteCard(
     spec: CardSpec,
     left: number,
     top: number,
+    width: number = 44,
 ): AbsoluteBoxSurface {
     // Mirror the AbsoluteCard JSX in tui-entry.tsx: position="absolute",
-    // explicit width (CARD_W=44), zIndex=4000, left/top from clampAnchor.
-    const CARD_W = 44;
+    // explicit width (CARD_W=44 by default, or the caller's responsive
+    // computeCardWidth() result), zIndex=4000, left/top from clampAnchor.
     const box = new BoxRenderable(rootCtx as never, {
         position: "absolute",
         zIndex: 4000,
         left,
         top,
-        width: CARD_W,
+        width,
         border: true,
         borderStyle: "single",
         borderColor: spec.borderColor,
@@ -187,17 +246,7 @@ function buildAbsoluteCard(
         flexDirection: "column",
     }) as unknown as AbsoluteBoxSurface;
     for (const row of spec.rows) {
-        const rowBox = new BoxRenderable(rootCtx as never, {
-            flexDirection: "row",
-        }) as unknown as BoxSurface;
-        for (const seg of row.segments) {
-            const t = new TextRenderable(rootCtx as never, {
-                content: seg.text,
-                fg: seg.fg,
-            }) as unknown as TextSurface;
-            rowBox.add(t);
-        }
-        box.add(rowBox);
+        box.add(buildRow(rootCtx, row.segments) as unknown as BoxSurface as never);
     }
     return box;
 }
@@ -262,6 +311,7 @@ async function verifyAbsolute(
         process.exit(1);
     }
     console.log(`smoke[${label}]: absolute card position props OK, ${children.length} rows ✓`);
+    assertRowsSingleLine(label, box as unknown as BoxSurface);
     return { width, height };
 }
 
@@ -269,15 +319,38 @@ async function main() {
     const setup: TestRendererSetup = await createTestRenderer({ width: 80, height: 24 });
     console.log("smoke: test renderer created (80x24)");
 
-    // Spec inspection — same 3 modes as before.
+    // Spec inspection — same 3 modes as before. cycleNextKey/cyclePrevKey
+    // use the real default hotkeys (ctrl+n/ctrl+p) so the hints row is the
+    // REAL length production renders, not an artificially short stub.
     const specNormal = buildCardSpec(
-        buildDetailsViewModel({ category: "grammar", original: "teh", replacement: "the" }, 1, 3),
+        buildDetailsViewModel(
+            { category: "grammar", original: "teh", replacement: "the" },
+            1,
+            3,
+            "ctrl+n",
+            "ctrl+p",
+        ),
+        displayWidthOf,
     );
     const specDeletion = buildCardSpec(
-        buildDetailsViewModel({ category: "spelling", original: "abc", replacement: "" }, 0, 1),
+        buildDetailsViewModel(
+            { category: "spelling", original: "abc", replacement: "" },
+            0,
+            1,
+            "ctrl+n",
+            "ctrl+p",
+        ),
+        displayWidthOf,
     );
     const specInsertion = buildCardSpec(
-        buildDetailsViewModel({ category: "punctuation", original: "", replacement: "the" }, 2, 5),
+        buildDetailsViewModel(
+            { category: "punctuation", original: "", replacement: "the" },
+            2,
+            5,
+            "ctrl+n",
+            "ctrl+p",
+        ),
+        displayWidthOf,
     );
     let total = 0;
     for (const spec of [specNormal, specDeletion, specInsertion]) {
@@ -324,6 +397,31 @@ async function main() {
         `smoke: absolute card dims width=${absoluteDims.width} height=${absoluteDims.height} ✓`,
     );
 
+    // ─── Real-width hints-row smoke (the "B: hints overlapping" repro) ───
+    // At the CARD_W=44 default, the DEFAULT hints text ("⏎ apply · x ignore
+    // · ctrl+n ctrl+p cycle · esc close", 52 display columns) is WIDER than
+    // the card's innerWidth (40) — this is the exact case the user hit, not
+    // an edge case. Render it standalone and print the frame so a human
+    // can eyeball it; assertRowsSingleLine is the automated guard.
+    {
+        const setupNarrowHints: TestRendererSetup = await createTestRenderer({
+            width: 80,
+            height: 24,
+        });
+        const root = (
+            setupNarrowHints.renderer as unknown as {
+                root?: { add: (x: unknown) => number; _ctx?: unknown };
+            }
+        ).root!;
+        const box = buildAbsoluteCard(root._ctx, specNormal, 2, 2, 44);
+        root.add(box as never);
+        await setupNarrowHints.renderOnce();
+        await new Promise((r) => setTimeout(r, 30));
+        console.log("\nsmoke[hints-row @ default CARD_W=44]: rendered frame —");
+        console.log(setupNarrowHints.captureCharFrame());
+        assertRowsSingleLine("hints-row-default-width", box as unknown as BoxSurface);
+    }
+
     // ─── Rephrase card smokes ─────────────────────────────────────────────────
     // Verify rephrase-loading and rephrase-result cards build with non-zero dims
     // and all text segments populated. These are live-only (spinner animation +
@@ -332,7 +430,6 @@ async function main() {
     const verifyRephrase = async (
         label: string,
         spec: CardSpec,
-        expectedRows: number,
         setup: TestRendererSetup,
     ): Promise<{ width: number; height: number }> => {
         const root = (
@@ -371,10 +468,16 @@ async function main() {
             console.error(`FAIL[${label}]: height=${height} (expected > 0)`);
             process.exit(1);
         }
+        // Row count is DERIVED from the spec, not hardcoded — a hardcoded
+        // expectation here is exactly what let this smoke silently break
+        // (and stop running at all) the last time card-spec's row shape
+        // changed (missing displayWidthOf arg after P1-5). Trust the spec;
+        // just verify the renderable tree has the SAME row count as the
+        // spec that built it.
         const children = box.getChildren();
-        if (children.length !== expectedRows) {
+        if (children.length !== spec.rows.length) {
             console.error(
-                `FAIL[${label}]: expected ${expectedRows} row children, got ${children.length}`,
+                `FAIL[${label}]: expected ${spec.rows.length} row children (from spec), got ${children.length}`,
             );
             process.exit(1);
         }
@@ -402,6 +505,7 @@ async function main() {
             }
         }
         console.log(`smoke[${label}]: ${textCount} text children populated ✓`);
+        assertRowsSingleLine(label, box as unknown as BoxSurface);
         return { width, height };
     };
 
@@ -412,36 +516,55 @@ async function main() {
         ["rephrase-loading-frame0", loadingSpec0],
         ["rephrase-loading-frame5", loadingSpec5],
     ] as const) {
-        const dims = await verifyRephrase(label, spec, 1, setup);
+        const dims = await verifyRephrase(label, spec, setup);
         console.log(`smoke[${label}]: dims width=${dims.width} height=${dims.height} ✓`);
     }
 
-    // Rephrase result card.
-    const resultSpec = buildRephraseResultCardSpec({
-        kind: "rephrase-result",
-        original: "Hello world",
-        rephrased: "Hi there world",
+    // Rephrase result card. buildRephraseResultCardSpec's REQUIRED params
+    // are (view, displayWidthOf, theme?, innerWidth?) — displayWidthOf has
+    // NO default (unlike buildCardSpec's optional theme/innerWidth), and
+    // RephraseResultView requires alternatives/altIndex/altTotal/
+    // scrollOffset. Omitting any of these throws at call time (exactly what
+    // happened here before this fix — this smoke crashed on the very next
+    // line and every assertion below it silently never ran).
+    const makeRephraseView = (original: string, rephrased: string) => ({
+        kind: "rephrase-result" as const,
+        original,
+        rephrased,
+        alternatives: [] as string[],
+        altIndex: 0,
+        altTotal: 1,
+        scrollOffset: 0,
         displayStart: 0,
     });
-    const resultDims = await verifyRephrase("rephrase-result", resultSpec, 4, setup);
+    const resultSpec = buildRephraseResultCardSpec(
+        makeRephraseView("Hello world", "Hi there world"),
+        displayWidthOf,
+    );
+    const resultDims = await verifyRephrase("rephrase-result", resultSpec, setup);
     console.log(
         `smoke[rephrase-result]: dims width=${resultDims.width} height=${resultDims.height} ✓`,
     );
 
-    // Rephrase result card with long text (truncation path).
-    const resultSpecLong = buildRephraseResultCardSpec({
-        kind: "rephrase-result",
-        original: "a".repeat(60),
-        rephrased: "b".repeat(60),
-        displayStart: 0,
-    });
-    const resultLongDims = await verifyRephrase("rephrase-result-long", resultSpecLong, 4, setup);
+    // Rephrase result card with long text (wrap path) — this is also the
+    // "A: pinned word vanishes" repro: a long replacement wraps the
+    // arrow+first-line row, and without the innerWidth-minus-arrow-width
+    // fix in card-spec.ts, that row overflowed and jammed (e.g. the arrow
+    // gluing onto the first word, eating its separating space).
+    const resultSpecLong = buildRephraseResultCardSpec(
+        makeRephraseView(
+            "a".repeat(60),
+            "the extraordinarily lengthy and verbose replacement phrase",
+        ),
+        displayWidthOf,
+    );
+    const resultLongDims = await verifyRephrase("rephrase-result-long", resultSpecLong, setup);
     console.log(
         `smoke[rephrase-result-long]: dims width=${resultLongDims.width} height=${resultLongDims.height} ✓`,
     );
 
     console.log(
-        "\nsmoke: PASS — bordered card builds with non-zero dim, all text populated, all 3 modes verified, absolute overlay card verified, rephrase-loading + rephrase-result cards verified",
+        "\nsmoke: PASS — bordered card builds with non-zero dim, all text populated, all 3 modes verified, absolute overlay card verified, rephrase-loading + rephrase-result cards verified, no row overlap/jamming",
     );
     process.exit(0);
 }

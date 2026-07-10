@@ -6,22 +6,38 @@
 // clients/opencode/node_modules.
 //
 // This harness is the verification surface for the slot-render
-// architecture. It does NOT verify the bundled dist (we no longer
-// ship a tui.js bundle — the host loads source directly). It DOES
-// verify:
+// architecture. It verifies:
 //   (1) bun can import the .tsx via the package.json exports
 //   (2) the default export shape matches TuiPluginModule
 //   (3) tui() runs without throwing
 //   (4) api.slots.register is called with both home_prompt_right +
 //       session_prompt_right
+//   (5) URGENT FIX: each slot fn's JSX ACTUALLY MOUNTS through a real
+//       @opentui/solid renderer (via `testRender`) without throwing.
 //
-// The slot fn body itself uses JSX (createElement for opentui
-// elements, Show for visibility) which is a Bun-only construct.
-// Calling the fn in this harness requires the host's renderer
-// context; we don't try. The contract is encoded in the source
-// and the maintainer's live smoke is the final verification.
+// (5) replaces a previous, weaker version of this file that explicitly
+// SKIPPED invoking the slot fns ("would need a mock renderer context —
+// host provides it in production"). That was true for the plain
+// @opentui/core test renderer, but @opentui/solid exports its OWN
+// `testRender(node, config)` which stands up a real RendererContext +
+// solid root — the same reconciler the host uses. Skipping this step is
+// exactly how a real bug slipped past every other check in this repo:
+// `<Show when={...} keyed>` with no `fallback` throws an "Orphan text
+// error" under the installed @opentui/solid reconciler the FIRST time its
+// condition is false (e.g. GhostComponent when no ghost is showing, or the
+// status-line Show before any check has produced text) — the common case
+// on almost every mount. vitest never renders through the real
+// reconciler (card-spec.test.ts et al. only inspect plain data), so this
+// was invisible to `npx vitest run`. The host's per-slot
+// `pluginFailurePlaceholder` catches the throw and keeps the TUI alive,
+// but the panel/ghost/status line then silently fails to render on that
+// mount — plausibly the mechanism behind the "confusion half the time"
+// symptom users reported. See tui-entry.tsx's `fallback={<box .../>}` on
+// every `<Show>` for the fix.
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { testRender } from "@opentui/solid";
+import type { TestRendererSetup } from "@opentui/core/testing";
 
 const _packageDir = resolve(import.meta.dirname, "..");
 const tuiEntry = resolve(import.meta.dirname, "../src/tui-entry.tsx");
@@ -113,14 +129,8 @@ if (!found) {
     console.error("FAIL: no registration has both home_prompt_right + session_prompt_right");
     process.exit(1);
 }
-const firstNames = Object.keys(slotRegistrations[0]!.pluginObject.slots).sort();
-console.log(
-    "smoke: registered slots (first registration):",
-    firstNames,
-    "total registrations:",
-    slotRegistrations.length,
-);
-const _expected = ["home_prompt_right", "session_prompt_right"];
+const firstReg = slotRegistrations[0]!.pluginObject;
+const firstNames = Object.keys(firstReg.slots).sort();
 console.log(
     "smoke: registered slots (first registration):",
     firstNames,
@@ -128,18 +138,38 @@ console.log(
     slotRegistrations.length,
 );
 
-// We do NOT call the slot fns. The slot fn body uses JSX with
-// @opentui/solid, which requires the host's renderer context.
-// Invoking here would throw "No renderer found". The contract is
-// that the slot fn returns the PanelComponent JSX, which bun's
-// runtime JSX transform resolves to opentui's createElement
-// calls; the host's renderer context is provided when the host
-// calls the slot fn in production.
-console.log(
-    "smoke: skipping slot fn invocation — would need a mock renderer context (host provides it in production)",
-);
+// ── Mount each slot fn through a REAL @opentui/solid renderer ──────────
+// This is the step the previous version of this file explicitly skipped.
+// A thrown error here (synchronous, during mount) means the slot silently
+// fails to render in production — see the file header.
+for (const slotName of ["home_prompt_right", "session_prompt_right"] as const) {
+    const slotFn = firstReg.slots[slotName];
+    if (typeof slotFn !== "function") {
+        console.error(`FAIL: slot "${slotName}" is not a function`);
+        process.exit(1);
+    }
+    for (const dims of [
+        { width: 80, height: 24, label: "80x24 (typical)" },
+        { width: 0, height: 0, label: "0x0 (degenerate — new-session-mount race)" },
+    ]) {
+        try {
+            const setup: TestRendererSetup = await testRender(
+                () => slotFn({ theme: {} }) as never,
+                { width: dims.width, height: dims.height },
+            );
+            await setup.renderOnce();
+            console.log(`smoke: slot "${slotName}" mounted OK @ ${dims.label}`);
+        } catch (e) {
+            console.error(
+                `FAIL: slot "${slotName}" threw while mounting/rendering @ ${dims.label}:`,
+                e,
+            );
+            process.exit(1);
+        }
+    }
+}
 
 console.log(
-    "smoke: PASS — tui entry imports via package exports, registers both slots, contract encoded in source",
+    "\nsmoke: PASS — tui entry imports via package exports, registers both slots, and BOTH slot fns mount + render through a real @opentui/solid renderer (typical + degenerate 0x0 dimensions) without throwing",
 );
 process.exit(0);

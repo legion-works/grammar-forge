@@ -195,8 +195,23 @@ export function buildCardSpec(
         // Wrap, don't truncate: left (original) lines first, then the
         // arrow prefixed to the first replacement line, then any
         // continuation replacement lines.
+        //
+        // BUGFIX (regression — the arrow eating the replacement word's
+        // first space, e.g. " →the extraordinarily…" instead of
+        // " → the extraordinarily…", reported as the pinned word visually
+        // "vanishing"/mangling): `rightLines[0]` shares its row with
+        // `vm.diffArrow`, but was wrapped against the FULL `innerWidth`
+        // with no allowance for the arrow's own width — so the arrow +
+        // first line together could exceed the row's real available width,
+        // and the renderer's flex layout would shrink+internally-rewrap
+        // the two segments into each other. Reserve the arrow's width for
+        // every rightLines line (not just the first) so continuation lines
+        // stay consistently narrower rather than the first line alone
+        // silently overflowing.
+        const arrowWidth = displayWidthOf(vm.diffArrow);
+        const rightInnerWidth = Math.max(1, innerWidth - arrowWidth);
         const leftLines = wrapLines(vm.diffLeft, innerWidth, displayWidthOf);
-        const rightLines = wrapLines(vm.diffRight, innerWidth, displayWidthOf);
+        const rightLines = wrapLines(vm.diffRight, rightInnerWidth, displayWidthOf);
         diffRows = [];
         for (const line of leftLines) {
             diffRows.push({ segments: [{ text: line, colorKey: leftColor, fg: leftFg }] });
@@ -237,6 +252,12 @@ export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", 
  *  editorial semantic in CATEGORY_FG) so a rephrase card is never visually
  *  confused with a style-category suggestion card. */
 export const REPHRASE_ACCENT_HEX = "#c099ff"; // --purple-400 (dark)
+
+/** The literal arrow text prefixed onto the first rephrased/replacement
+ *  line — shared by `rephraseContentRowCount` and
+ *  `buildRephraseResultCardSpec` so their wrap-width math (arrow width
+ *  reserved out of `innerWidth`) can never drift out of lockstep. */
+const REPHRASE_ARROW = " → ";
 
 /** P1-5: default inner width (CARD_W=44 − 2 border − 2 pad). Callers on a
  *  narrow terminal pass a smaller `innerWidth` (tui-entry.tsx derives it from
@@ -312,7 +333,11 @@ export function rephraseContentRowCount(
     innerWidth: number = DEFAULT_INNER_WIDTH,
 ): number {
     const origLines = wrapLines(original, innerWidth, displayWidthOf);
-    const replLines = wrapLines(rephrased, innerWidth, displayWidthOf);
+    // BUGFIX: reserve the arrow's width — see buildRephraseResultCardSpec's
+    // matching comment. Must stay in lockstep with that function (this one
+    // exists ONLY to mirror its row count for scrollOffset clamping).
+    const replInnerWidth = Math.max(1, innerWidth - displayWidthOf(REPHRASE_ARROW));
+    const replLines = wrapLines(rephrased, replInnerWidth, displayWidthOf);
     // origLines.length rows for the original + 1 row for "arrow + first
     // rephrased line" + (replLines.length - 1) continuation rows.
     return origLines.length + replLines.length;
@@ -335,7 +360,14 @@ export function buildRephraseResultCardSpec(
 ): CardSpec & { contentRows: number } {
     const palette = paletteFor(theme);
     const origLines = wrapLines(view.original, innerWidth, displayWidthOf);
-    const replLines = wrapLines(view.rephrased, innerWidth, displayWidthOf);
+    // BUGFIX: `replLines[0]` shares its row with the arrow (below) — wrap it
+    // against `innerWidth - arrowWidth`, not the full `innerWidth`, or the
+    // arrow + first line together can exceed the row's real available
+    // width (same class of bug fixed in buildCardSpec's diff-row wrapping:
+    // the renderer would shrink+internally-rewrap the two segments into
+    // each other instead of cleanly fitting/clipping).
+    const replInnerWidth = Math.max(1, innerWidth - displayWidthOf(REPHRASE_ARROW));
+    const replLines = wrapLines(view.rephrased, replInnerWidth, displayWidthOf);
 
     // Build the full content row list (title row is separate).
     const contentRows: CardRow[] = [];
@@ -345,7 +377,7 @@ export function buildRephraseResultCardSpec(
     // Arrow + first rephrased line
     contentRows.push({
         segments: [
-            { text: " → ", colorKey: "dim", fg: palette.dim },
+            { text: REPHRASE_ARROW, colorKey: "dim", fg: palette.dim },
             { text: replLines[0] ?? "", colorKey: "insert", fg: palette.insert },
         ],
     });

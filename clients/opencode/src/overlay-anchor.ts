@@ -40,13 +40,22 @@ export function clampAnchor(
     screenW: number,
     screenH: number,
 ): ClampedPosition {
+    // Defensive: a non-finite screen dimension (e.g. a not-yet-sized
+    // renderer at session mount — see computeCardWidth's docstring above)
+    // must never propagate NaN into `left`/`top`. Math.max/min already turn
+    // a too-small (0 or negative) dimension into a safe 0; NaN alone slips
+    // through arithmetic unclamped, so normalize it to 0 explicitly.
+    const safeScreenW = Number.isFinite(screenW) ? screenW : 0;
+    const safeScreenH = Number.isFinite(screenH) ? screenH : 0;
+
     // Horizontal: clamp so the card doesn't overflow the right edge.
-    const maxLeft = Math.max(0, screenW - cardW);
+    const maxLeft = Math.max(0, safeScreenW - cardW);
     const left = Math.min(Math.max(0, anchor.x), maxLeft);
 
     // Vertical: prefer above, flip below if no room.
     const topAbove = anchor.y - cardH;
-    const top = topAbove >= 0 ? topAbove : Math.min(anchor.y + 1, Math.max(0, screenH - cardH));
+    const top =
+        topAbove >= 0 ? topAbove : Math.min(anchor.y + 1, Math.max(0, safeScreenH - cardH));
 
     return { left, top };
 }
@@ -95,6 +104,25 @@ const MIN_CARD_W = 10;
  * pane, or a genuinely small window) the card still renders at its full
  * fixed width and overflows.
  *
+ * BUGFIX (live regression — see overlay-anchor.test.ts "degenerate screenW"):
+ * `useTerminalDimensions()` (tui-entry.tsx) is backed by the host's
+ * `CliRenderer.width`, read at component-mount time. On a freshly-mounted
+ * renderer (observed on new-session mounts, where the host stands up a new
+ * slot tree before its first native layout/resize pass completes) this can
+ * read `0` — or, if the accessor itself is momentarily `undefined` on some
+ * host versions, propagate as `NaN` through `screenW - margin`. Un-guarded,
+ * that produced `computeCardWidth(0, 44) === 10` (MIN_CARD_W — a nearly
+ * useless card) or `computeCardWidth(undefined, 44) === NaN` (a NaN column
+ * width hits the layout engine and can corrupt that render pass's layout
+ * broadly, not just this one box) — the reported "new session: everything's
+ * narrower/overlapping" symptom. A screen width of 0 or non-finite is never
+ * a REAL terminal size (a live terminal is always >= a handful of columns),
+ * so it's a reliable "dimensions aren't ready yet" signal, not a real
+ * narrow-terminal case. Per INSTRUCTIONS.md's "default to the previous
+ * known-good behavior unless a positive signal says otherwise": fall back
+ * to `maxWidth` (the fixed, pre-P1-5 card width) until `screenW` reports a
+ * real, positive, finite size.
+ *
  * @param screenW   Terminal width in columns (from useTerminalDimensions()).
  * @param maxWidth  The card's preferred/maximum width. Defaults to 44 (the
  *                  fixed CARD_W tui-entry.tsx used before this fix).
@@ -106,5 +134,7 @@ export function computeCardWidth(
     maxWidth: number = 44,
     margin: number = 2,
 ): number {
-    return Math.max(MIN_CARD_W, Math.min(maxWidth, screenW - margin));
+    const haveRealWidth = Number.isFinite(screenW) && screenW > 0;
+    const effectiveScreenW = haveRealWidth ? screenW : maxWidth + margin;
+    return Math.max(MIN_CARD_W, Math.min(maxWidth, effectiveScreenW - margin));
 }

@@ -3,6 +3,7 @@ import {
     buildCardSpec,
     buildRephraseLoadingCardSpec,
     buildRephraseResultCardSpec,
+    rephraseContentRowCount,
     SPINNER_FRAMES,
     REPHRASE_ACCENT_HEX,
     MAX_CONTENT_ROWS,
@@ -293,6 +294,37 @@ describe("buildCardSpec", () => {
         expect(arrowRow!.segments[arrowIdx + 1]!.colorKey).toBe("insert");
     });
 
+    test("BUGFIX: the arrow+first-replacement-line row's COMBINED width fits innerWidth (regression — reported as the pinned word visually mangling/vanishing)", () => {
+        // Before this fix, `rightLines[0]` was wrapped against the FULL
+        // innerWidth with no allowance for the arrow's own width sharing
+        // its row — so arrowWidth + rightLines[0].length could exceed
+        // innerWidth. The renderer's flex layout would then shrink+
+        // internally-rewrap the two segments into each other (observed:
+        // " →the extraordinarily…" — the arrow ate the line's leading
+        // space). The previous test above only checked each segment
+        // INDIVIDUALLY against the width, which is exactly the blind spot
+        // that let this regression through — it never summed the row.
+        const innerWidth = 40;
+        const spec = buildCardSpec(
+            vm({
+                original: "teh",
+                replacement:
+                    "the extraordinarily lengthy and verbose replacement phrase that keeps going",
+            }),
+            (s) => s.length,
+            "dark",
+            innerWidth,
+        );
+        const arrowRow = spec.rows.find((r) => r.segments.some((s) => s.text === " → "));
+        expect(arrowRow).toBeDefined();
+        const rowWidth = arrowRow!.segments.reduce((sum, s) => sum + s.text.length, 0);
+        expect(rowWidth).toBeLessThanOrEqual(innerWidth);
+        // And the arrow itself must never lose its trailing space by being
+        // glued directly onto the replacement text.
+        const arrowIdx = arrowRow!.segments.findIndex((s) => s.text === " → ");
+        expect(arrowRow!.segments[arrowIdx]!.text).toBe(" → ");
+    });
+
     test("P1-5: narrow innerWidth (30) wraps a diff that already wraps at the default 40 into MORE rows", () => {
         const replacement =
             "should have already merged the fix before the release went out the door";
@@ -410,6 +442,41 @@ describe("buildRephraseResultCardSpec", () => {
     test("returns a spec with the rephrase accent border color", () => {
         const spec = buildRephraseResultCardSpec(makeView("hello", "hi there"), stubW);
         expect(spec.borderColor).toBe(REPHRASE_ACCENT_HEX);
+    });
+
+    test("BUGFIX: the arrow+first-rephrased-line row's COMBINED width fits innerWidth (same regression class as buildCardSpec's diff row)", () => {
+        const innerWidth = 40;
+        const view = makeView(
+            "In hindsight we should have merged the fix last week already before anyone noticed",
+            "the extraordinarily lengthy and verbose replacement phrase that keeps going",
+        );
+        const spec = buildRephraseResultCardSpec(view, stubW, "dark", innerWidth);
+        const arrowRow = spec.rows.find((r) => r.segments.some((s) => s.text === " → "));
+        expect(arrowRow).toBeDefined();
+        const rowWidth = arrowRow!.segments.reduce(
+            (sum, s) => sum + s.text.replace(" ↓ more", "").length,
+            0,
+        );
+        expect(rowWidth).toBeLessThanOrEqual(innerWidth);
+        const arrowIdx = arrowRow!.segments.findIndex((s) => s.text === " → ");
+        expect(arrowRow!.segments[arrowIdx]!.text).toBe(" → ");
+    });
+
+    test("BUGFIX: rephraseContentRowCount stays in lockstep with buildRephraseResultCardSpec's row count after the arrow-width fix", () => {
+        const original = "In hindsight we should have merged the fix last week already before anyone noticed";
+        const rephrased = "the extraordinarily lengthy and verbose replacement phrase that keeps going";
+        const innerWidth = 40;
+        const spec = buildRephraseResultCardSpec(
+            makeView(original, rephrased),
+            stubW,
+            "dark",
+            innerWidth,
+        );
+        const count = rephraseContentRowCount(original, rephrased, stubW, innerWidth);
+        // spec.contentRows is WINDOWED (capped at MAX_CONTENT_ROWS); the
+        // unwindowed total must be >= the visible count and match what the
+        // windowing math in orchestrator.ts's rephraseScroll expects.
+        expect(count).toBeGreaterThanOrEqual(spec.contentRows);
     });
 
     test("P1-5: narrow innerWidth (30) wraps rephrase text into MORE rows than the default 40", () => {
