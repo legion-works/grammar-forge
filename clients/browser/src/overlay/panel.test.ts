@@ -488,6 +488,43 @@ describe('showPanel (W2b review panel)', () => {
         expect(root.querySelectorAll('.gf-panel-aside')).toHaveLength(1)
     })
 
+    it('a re-open destroys the PREVIOUS handle, not just its DOM (item 3: no orphaned window listener)', async () => {
+        // ROOT CAUSE: destroyExisting() used to only
+        // querySelectorAll('.gf-panel-aside').remove() — the prior
+        // handle's destroy() (which removes its installOutsideDismiss
+        // window pointerdown listener) never ran. Fixed via a per-root
+        // registry (mirrors popover.ts / rephrase-card.ts) that
+        // destroyExisting() now drains through real destroy() calls.
+        const root = mkRoot()
+        const onClose1 = vi.fn<() => void>()
+        const first = showPanel(root, mkOptions({ onClose: onClose1 }))
+        expect(first.isOpen()).toBe(true)
+        // installOutsideDismiss arms its window pointerdown listener after
+        // a setTimeout(0) — wait a tick so the FIRST panel's listener is
+        // actually installed (the state a real re-open would find).
+        await new Promise<void>((r) => setTimeout(r, 0))
+
+        const removeSpy = vi.spyOn(window, 'removeEventListener')
+        const onClose2 = vi.fn<() => void>()
+        const second = showPanel(root, mkOptions({ onClose: onClose2 }))
+
+        // The first handle must be FULLY torn down, not just its DOM node.
+        expect(first.isOpen()).toBe(false)
+        const removedTypes = removeSpy.mock.calls.map((c) => c[0])
+        expect(removedTypes).toContain('pointerdown')
+        removeSpy.mockRestore()
+
+        // An outside pointerdown fires ONLY the live (second) panel's
+        // onClose — a leaked first-handle listener would double-fire.
+        await new Promise<void>((r) => setTimeout(r, 0))
+        document.body.dispatchEvent(
+            new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
+        )
+        expect(onClose1).not.toHaveBeenCalled()
+        expect(onClose2).toHaveBeenCalledTimes(1)
+        expect(second.isOpen()).toBe(true)
+    })
+
     it('destroy() removes the panel; isOpen() reports false afterwards', () => {
         const root = mkRoot()
         const handle = showPanel(root, mkOptions())

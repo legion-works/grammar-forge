@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     isWordChar,
     offsetFromDblClick,
@@ -266,11 +266,111 @@ describe('showSynonyms (DOM mount)', () => {
         expect(onClose).toHaveBeenCalledOnce()
     })
 
+    it('P1-7: Esc still fires onClose on a host page that stopPropagation()s at window capture', () => {
+        // Same fix as goals.ts: Esc must be registered on window capture
+        // itself (not document bubble) so a host page's own
+        // window-capture + stopPropagation() listener can't starve it.
+        const hostListener = (e: KeyboardEvent): void => e.stopPropagation()
+        window.addEventListener('keydown', hostListener, { capture: true })
+        try {
+            const root = mkRoot()
+            const onClose = vi.fn<() => void>()
+            showSynonyms(root, mkOptions({ onClose }))
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+            expect(onClose).toHaveBeenCalledOnce()
+        } finally {
+            window.removeEventListener('keydown', hostListener, { capture: true })
+        }
+    })
+
+    it('destroy() removes the Esc listener (no leak — a later Esc does not double-fire onClose)', () => {
+        const root = mkRoot()
+        const onClose = vi.fn<() => void>()
+        const handle = showSynonyms(root, mkOptions({ onClose }))
+        handle.destroy()
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        expect(onClose).not.toHaveBeenCalled()
+    })
+
+    describe('P1-5: focus restoration on close', () => {
+        let field: HTMLTextAreaElement
+        beforeEach(() => {
+            field = document.createElement('textarea')
+            document.body.appendChild(field)
+            field.focus()
+        })
+        afterEach(() => {
+            field.remove()
+        })
+
+        it('destroy() (programmatic close) restores focus to the field that had it before the popover opened', () => {
+            const root = mkRoot()
+            expect(document.activeElement).toBe(field)
+            const handle = showSynonyms(root, mkOptions())
+            handle.destroy()
+            expect(document.activeElement).toBe(field)
+        })
+
+        it('Esc restores focus to the field', () => {
+            const root = mkRoot()
+            showSynonyms(root, mkOptions())
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+            expect(document.activeElement).toBe(field)
+        })
+
+        it('does not throw when the previously-focused element was removed from the DOM before close', () => {
+            const root = mkRoot()
+            const handle = showSynonyms(root, mkOptions())
+            field.remove()
+            expect(() => handle.destroy()).not.toThrow()
+        })
+    })
+
     it('a new showSynonyms() dismisses the prior (one popover per root)', () => {
         const root = mkRoot()
         showSynonyms(root, mkOptions())
         showSynonyms(root, mkOptions())
         expect(root.querySelectorAll('.gf-syn')).toHaveLength(1)
+    })
+
+    it('a re-open destroys the PREVIOUS handle, not just its DOM (item 3: no orphaned window listeners)', async () => {
+        // ROOT CAUSE: destroyExisting() used to only
+        // querySelectorAll('.gf-syn').remove() — the prior handle's
+        // destroy() (window pointerdown + keydown listeners, the pending
+        // reposition rAF, and focus-restore) never ran. Synonyms re-opens
+        // on every dblclick, so this leak compounds fast in a real
+        // session. Fixed via a per-root registry (mirrors popover.ts /
+        // rephrase-card.ts) that destroyExisting() now drains through
+        // real destroy() calls.
+        const root = mkRoot()
+        const onClose1 = vi.fn<() => void>()
+        const first = showSynonyms(root, mkOptions({ onClose: onClose1 }))
+        expect(first.isOpen()).toBe(true)
+        // installOutsideDismiss arms its window pointerdown listener after
+        // a setTimeout(0) — wait a tick so the FIRST popover's listener is
+        // actually installed (the state a real re-open would find).
+        await new Promise<void>((r) => setTimeout(r, 0))
+
+        const removeSpy = vi.spyOn(window, 'removeEventListener')
+        const onClose2 = vi.fn<() => void>()
+        const second = showSynonyms(root, mkOptions({ onClose: onClose2 }))
+
+        // The first handle must be FULLY torn down, not just its DOM node.
+        expect(first.isOpen()).toBe(false)
+        const removedTypes = removeSpy.mock.calls.map((c) => c[0])
+        expect(removedTypes).toContain('pointerdown')
+        expect(removedTypes).toContain('keydown')
+        removeSpy.mockRestore()
+
+        // An outside pointerdown fires ONLY the live (second) popover's
+        // onClose — a leaked first-handle listener would double-fire.
+        await new Promise<void>((r) => setTimeout(r, 0))
+        document.body.dispatchEvent(
+            new PointerEvent('pointerdown', { bubbles: true, cancelable: true, composed: true }),
+        )
+        expect(onClose1).not.toHaveBeenCalled()
+        expect(onClose2).toHaveBeenCalledTimes(1)
+        expect(second.isOpen()).toBe(true)
     })
 
     it('destroy() removes the popover; isOpen() reports false afterwards', () => {

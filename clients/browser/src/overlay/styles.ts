@@ -112,54 +112,14 @@ export const OVERLAY_CSS = `
   }
 
   /* ============================================================
-   * Glass panel (popover) — base = near-opaque solid scrim so the
-   * popover reads on any page; @supports upgrades to true glass.
+   * gf-popover-enter — shared transform+opacity entrance keyframe for the
+   * glass popovers/cards below (.gf-rephrase-btn, .gf-rephrase, .gf-goals-pop,
+   * .gf-syn). (The W1 .gf-panel that originally defined this alongside itself
+   * was retired — .gf-card is its re-skin — but the keyframe lives on.)
    * ============================================================ */
-  .gf-panel {
-    position: fixed;
-    pointer-events: auto;
-    z-index: ${Z_OVERLAY};
-    /* When promoted to the top layer via popover=manual + showPopover(), the UA
-       stylesheet applies inset:0 + margin:auto, which CENTERS the panel and
-       overrides our explicit left/top (the popover opened over the pill, not the
-       word). Reset both so our JS positionPanel() left/top wins. */
-    margin: 0;
-    inset: auto;
-    min-width: 280px;
-    max-width: 380px;
-    padding: 12px 14px;
-    border-radius: 14px;
-    isolation: isolate;
-    contain: layout paint;
-    /* default solid scrim (dark on light pages) — text reads either way */
-    background: rgba(28, 28, 30, 0.78);
-    background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.78));
-    color: light-dark(#111, #f5f5f5);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow:
-      inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
-      0 1px 2px rgba(0, 0, 0, 0.12),
-      0 8px 24px rgba(0, 0, 0, 0.20);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-    /* enter animation: transform+opacity only */
-    transform-origin: 50% 100%;
-    animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
   @keyframes gf-popover-enter {
     from { transform: scale(${SCALE_TOOLTIP}); opacity: 0; }
     to   { transform: scale(1);       opacity: 1; }
-  }
-
-  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .gf-panel {
-      background: light-dark(
-        color-mix(in oklab, #f5f5f5 50%, transparent),
-        color-mix(in oklab, #1c1c1e 40%, transparent)
-      );
-      border-color: color-mix(in oklab, white 14%, transparent);
-      -webkit-backdrop-filter: blur(16px) saturate(180%);
-      backdrop-filter: blur(16px) saturate(180%);
-    }
   }
 
   /* ============================================================
@@ -283,213 +243,9 @@ export const OVERLAY_CSS = `
      power glyph in the center; the ring still conveys the score band. The
      whole element just reads quieter (see .gf-orb--disabled above). */
 
-  /* Pill hover panel — corrections list + Apply all (glass like the popover) */
-  .gf-pill-panel {
-    position: fixed;
-    pointer-events: auto;
-    z-index: ${Z_OVERLAY};
-    min-width: 220px;
-    max-width: 360px;
-    padding: 8px;
-    border-radius: 12px;
-    isolation: isolate;
-    contain: layout paint;
-    background: rgba(28, 28, 30, 0.82);
-    background: light-dark(rgba(245, 245, 245, 0.82), rgba(28, 28, 30, 0.82));
-    color: light-dark(#111, #f5f5f5);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow:
-      inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
-      0 1px 2px rgba(0, 0, 0, 0.12),
-      0 8px 24px rgba(0, 0, 0, 0.20);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-    transform-origin: 50% 100%;
-    animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .gf-pill-panel {
-      background: light-dark(
-        color-mix(in oklab, #f5f5f5 50%, transparent),
-        color-mix(in oklab, #1c1c1e 40%, transparent)
-      );
-      border-color: color-mix(in oklab, white 14%, transparent);
-      -webkit-backdrop-filter: blur(16px) saturate(180%);
-      backdrop-filter: blur(16px) saturate(180%);
-    }
-  }
-  .gf-pill-panel__header {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    opacity: 0.8;
-    margin: 2px 4px 6px;
-  }
-  .gf-pill-panel__list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    max-height: 240px;
-    overflow-y: auto;
-  }
-  .gf-pill-panel__row {
-    appearance: none;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    text-align: left;
-    border: none;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    padding: 5px 8px;
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .gf-pill-panel__row:hover {
-    background: rgba(255, 255, 255, 0.10);
-  }
-  .gf-pill-panel__dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    flex: 0 0 auto;
-  }
-  .gf-pill-panel__apply-all {
-    appearance: none;
-    width: 100%;
-    margin-top: 8px;
-    border: 1px solid var(--gf-accent-hover);
-    background: var(--gf-accent);
-    color: var(--gf-accent-ink);
-    font: inherit;
-    font-weight: 600;
-    font-size: 12px;
-    padding: 7px 10px;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: background 120ms ease-out;
-  }
-  .gf-pill-panel__apply-all:hover {
-    background: var(--gf-accent-hover);
-  }
-  .gf-pill-panel__apply-all:focus-visible {
-    outline: 2px solid var(--gf-ring, #86e1fc);
-    outline-offset: 1px;
-  }
-
-  /* Unified pill panel — action row (Apply all · Undo · Recheck · Rephrase ·
-     Power). Glass-like chips, wrapping on narrow widths. */
-  .gf-pill-panel__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    padding: 6px;
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-  }
-  .gf-pill-panel__action {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font: inherit;
-    font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 8px;
-    border: none;
-    background: rgba(255, 255, 255, 0.08);
-    color: inherit;
-    cursor: pointer;
-  }
-  .gf-pill-panel__action:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.18);
-  }
-  .gf-pill-panel__action:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
   /* Paused-site orb: the power-glyph <svg> sits inside .gf-orb__glyph--power
      — the inner <svg> needs to actually paint at full size. */
   .gf-orb__glyph--power svg { display: block; }
-
-  /* ============================================================
-   * Hover tooltip — read-only preview (no buttons). Same glass material
-   * as the pill, pointer-events:none so it never blocks the field.
-   * ============================================================ */
-  .gf-tooltip {
-    position: fixed;
-    pointer-events: none;
-    z-index: ${Z_OVERLAY};
-    max-width: 320px;
-    padding: 4px 8px;
-    border-radius: 10px;
-    isolation: isolate;
-    contain: layout paint;
-    background: rgba(28, 28, 30, 0.82);
-    background: light-dark(rgba(245, 245, 245, 0.82), rgba(28, 28, 30, 0.82));
-    color: light-dark(#111, #f5f5f5);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow:
-      inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
-      0 1px 3px rgba(0, 0, 0, 0.14),
-      0 6px 18px rgba(0, 0, 0, 0.18);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-    transform-origin: 50% 100%;
-    animation: gf-pill-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .gf-tooltip__chip-diff { font-size: 12px; white-space: nowrap; }
-  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .gf-tooltip {
-      background: light-dark(
-        color-mix(in oklab, #f5f5f5 50%, transparent),
-        color-mix(in oklab, #1c1c1e 38%, transparent)
-      );
-      border-color: color-mix(in oklab, white 12%, transparent);
-      -webkit-backdrop-filter: blur(10px) saturate(160%);
-      backdrop-filter: blur(10px) saturate(160%);
-    }
-  }
-  .gf-tooltip__header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 2px;
-  }
-  .gf-tooltip__dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    display: inline-block;
-    flex: 0 0 auto;
-  }
-  .gf-tooltip__label {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .gf-tooltip__message {
-    font-size: 12px;
-    line-height: 1.35;
-    margin: 2px 0;
-  }
-  .gf-tooltip__fix {
-    font-size: 12px;
-    margin: 2px 0;
-  }
-  .gf-tooltip__arrow {
-    opacity: 0.7;
-  }
-  .gf-tooltip__replacement {
-    font-weight: 600;
-  }
-  .gf-tooltip__hint {
-    font-size: 10px;
-    opacity: 0.6;
-    margin-top: 3px;
-  }
 
   /* ============================================================
    * Rephrase flow — entry button (.gf-rephrase-btn) + result card
@@ -520,6 +276,10 @@ export const OVERLAY_CSS = `
       0 4px 12px rgba(0, 0, 0, 0.18);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    /* Static fallback (matches .gf-goals-pop / .gf-syn): a reduced-motion or
+       otherwise non-animating context must never strand the button at the
+       keyframe's opacity:0 starting value. */
+    opacity: 1;
   }
   .gf-rephrase-btn:hover {
     background: rgba(255, 255, 255, 0.12);
@@ -570,6 +330,10 @@ export const OVERLAY_CSS = `
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     transform-origin: 50% 100%;
     animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    /* Static fallback (matches .gf-goals-pop / .gf-syn): a reduced-motion or
+       otherwise non-animating context must never strand the card at the
+       keyframe's opacity:0 starting value. */
+    opacity: 1;
   }
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .gf-rephrase {
@@ -769,9 +533,6 @@ export const OVERLAY_CSS = `
    * (gf-glass-distortion, wired into backdrop-filter above) supplies the
    * refraction; this is the bright rim that sells it.
    * ============================================================ */
-  .gf-panel::after,
-  .gf-pill-panel::after,
-  .gf-tooltip::after,
   .gf-rephrase::after {
     content: "";
     position: absolute;
@@ -943,34 +704,22 @@ export const OVERLAY_CSS = `
     color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
-    animation: gf-pill-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-  .gf-toast__action {
-    appearance: none;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    color: var(--gf-accent, #60a5fa);
-    font: inherit;
-    font-weight: 600;
-    padding: 0;
-  }
-  .gf-toast__action:focus-visible {
-    outline: 2px solid var(--gf-ring, #86e1fc);
-    outline-offset: 1px;
+    /* P1-4(d): was gf-pill-enter, a keyframe that was never defined
+       (silent no-op — the toast simply appeared with no animation at all).
+       gf-toast-in is the real, already-defined transform+opacity entrance
+       for this exact shape (its "to" transform matches the static
+       translateX(-50%) centering above). */
+    animation: gf-toast-in ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
   /* ============================================================
    * Reduced-transparency: drop the glass, bump scrim to ~92% opaque
    * ============================================================ */
   @media (prefers-reduced-transparency: reduce) {
-    .gf-panel,
     .gf-orb,
-    .gf-pill-panel,
-    .gf-tooltip,
     .gf-toast,
     .gf-rephrase-btn,
-    .gf-rephrase-card {
+    .gf-rephrase {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
       background: color-mix(in oklab, #1c1c1e 92%, transparent);
@@ -988,7 +737,7 @@ export const OVERLAY_CSS = `
    * opaque tint).
    * ============================================================ */
   @media (prefers-contrast: more) {
-    .gf-panel, .gf-orb, .gf-tooltip, .gf-pill-panel, .gf-toast, .gf-rephrase-card {
+    .gf-orb, .gf-toast, .gf-rephrase {
       backdrop-filter: none; -webkit-backdrop-filter: none;
     }
   }
@@ -1007,27 +756,23 @@ export const OVERLAY_CSS = `
    * Reduced-motion: kill spring, keep a short opacity fade
    * ============================================================ */
   @media (prefers-reduced-motion: reduce) {
-    .gf-panel {
-      animation-duration: 1ms;
-      animation-name: gf-no-motion;
-    }
-    /* The pill's enter is transform-only; drop it entirely under reduced
-       motion (don't swap to gf-no-motion — that animates opacity and would
-       force the faint idle pill fully opaque). */
-    .gf-orb { animation: none; }
-    .gf-tooltip,
-    .gf-toast {
-      animation-duration: 1ms;
-      animation-name: gf-no-motion;
+    /* All of these are transform(+opacity-fallback) entrances with a static
+       opacity:1 already set outside the animation (.gf-rephrase-btn,
+       .gf-rephrase) or no opacity dependency at all (.gf-orb, .gf-toast) —
+       animation: none matches .gf-orb's existing treatment and never
+       strands a surface invisible. */
+    .gf-orb,
+    .gf-toast,
+    .gf-rephrase-btn,
+    .gf-rephrase {
+      animation: none;
     }
     .gf-u { transition: none; }
     .gf-u--applied { animation: none; }
-    /* Spinner spin is gratuitous motion — kill it. */
-    .gf-rephrase-card__spinner { animation: none; }
-  }
-  @keyframes gf-no-motion {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+    /* Spinner spin is gratuitous motion — kill it. (Was
+       .gf-rephrase-card__spinner, a selector matching no real DOM node —
+       the rephrase pending-state spinner's actual class is .gf-spinner.) */
+    .gf-spinner { animation: none; }
   }
 
   /* ============================================================
@@ -1970,30 +1715,10 @@ export const OVERLAY_CSS = `
   .gf-row-item:hover { background: rgba(127, 127, 140, 0.14); transform: translateX(3px); }
   .gf-row-item:focus-visible { outline: 2px solid var(--gf-ring, #86e1fc); outline-offset: 1px; }
   .gf-row-item__diff { flex: 1; min-width: 0; }
-  .gf-chip-source {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    height: 20px;
-    padding: 0 8px;
-    border-radius: 9999px;
-    background: rgba(127, 127, 140, 0.10);
-    border: 1px solid rgba(127, 127, 140, 0.18);
-    color: inherit;
-    opacity: 0.85;
-    font: 600 10.5px/1 var(--gf-font-ui, system-ui), sans-serif;
-    flex: 0 0 auto;
-  }
-  .gf-chip-source--ai {
-    background: linear-gradient(
-      135deg,
-      color-mix(in oklab, var(--gf-ai-violet, #c099ff) 18%, transparent),
-      color-mix(in oklab, var(--gf-accent, #86e1fc) 18%, transparent)
-    );
-    border-color: color-mix(in oklab, var(--gf-ai-violet, #c099ff) 35%, transparent);
-    color: var(--gf-ai-text, #c4b5fd);
-  }
-  .gf-chip-source__hint { opacity: 0.6; font-weight: 500; }
+  /* .gf-chip-source (+ --ai / __hint) is defined once above (design tokens
+     section) — this was a stale duplicate with hardcoded px values instead
+     of the --gf-sp-*/--gf-r-pill tokens; being SECOND in source order it
+     silently won the cascade over the tokenized definition. Removed. */
   .gf-hidden-note {
     display: flex;
     align-items: center;
@@ -2402,6 +2127,12 @@ export const OVERLAY_CSS = `
       animation-duration: 1ms;
       animation-name: gf-no-motion;
     }
+  }
+  /* Used by .gf-panel-aside / .gf-goals-pop above under reduced-motion: a
+     short (1ms) opacity fade in place of the full spring entrance. */
+  @keyframes gf-no-motion {
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
 
 `

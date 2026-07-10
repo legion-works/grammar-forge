@@ -99,6 +99,49 @@ describe('BridgeClient.signal', () => {
     })
 })
 
+describe('BridgeClient.signalOnUnload (P0-2)', () => {
+    it('prefers navigator.sendBeacon when available, one call per attributable event', () => {
+        const beacon = vi.fn<(url: string, data?: BodyInit) => boolean>().mockReturnValue(true)
+        vi.stubGlobal('navigator', { ...navigator, sendBeacon: beacon })
+        const fetchMock = vi.fn<typeof fetch>()
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', true)
+
+        c.signalOnUnload([
+            { id: 7, action: 'accepted', category: 'grammar', source: 'browser' },
+            { id: 9, action: 'ignored', source: 'browser' },
+            { action: 'accepted', source: 'browser' }, // no id -> unattributable, dropped
+        ])
+
+        expect(beacon).toHaveBeenCalledTimes(2)
+        expect(beacon.mock.calls[0]![0]).toBe('http://localhost:8000/signal')
+        expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('falls back to a keepalive fetch when sendBeacon is unavailable or fails', () => {
+        vi.stubGlobal('navigator', { ...navigator, sendBeacon: undefined })
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
+        vi.stubGlobal('fetch', fetchMock)
+        const c = new BridgeClient('http://localhost:8000', true)
+
+        c.signalOnUnload([{ id: 7, action: 'accepted', source: 'browser' }])
+
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+        const [url, init] = fetchMock.mock.calls[0]!
+        expect(url).toBe('http://localhost:8000/signal')
+        expect(init?.keepalive).toBe(true)
+        expect(JSON.parse(String(init?.body))).toEqual({ id: 7, signal: 'accepted' })
+    })
+
+    it('is a no-op when the bridge URL is not local and remote is not allowed (guard)', () => {
+        const beacon = vi.fn<(url: string, data?: BodyInit) => boolean>().mockReturnValue(true)
+        vi.stubGlobal('navigator', { ...navigator, sendBeacon: beacon })
+        const c = new BridgeClient('http://evil.com', false)
+        expect(() => c.signalOnUnload([{ id: 1, action: 'accepted', source: 'browser' }])).not.toThrow()
+        expect(beacon).not.toHaveBeenCalled()
+    })
+})
+
 describe('BridgeClient.health', () => {
     it('GETs /health, times out, and throws on non-ok', async () => {
         const ok = vi.fn<typeof fetch>().mockResolvedValue(
@@ -597,5 +640,72 @@ describe('BridgeClient.correctStream', () => {
         await expect(
             client.correctStream({ text: 'a b c', source: 'browser' }, () => {}),
         ).rejects.toThrow(/unavailable/)
+    })
+
+    describe('P1-9: cancellation via an external AbortSignal', () => {
+        it('aborts the underlying fetch when the caller aborts, rejecting with AbortError', async () => {
+            let capturedSignal: AbortSignal | undefined
+            const fetchMock = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+                capturedSignal = init?.signal as AbortSignal
+                return new Promise<Response>((_resolve, reject) => {
+                    capturedSignal?.addEventListener('abort', () => {
+                        reject(new DOMException('The operation was aborted', 'AbortError'))
+                    })
+                })
+            })
+            vi.stubGlobal('fetch', fetchMock)
+            const client = new BridgeClient('http://localhost:8000', false)
+            const ctrl = new AbortController()
+
+            const promise = client.correctStream(
+                { text: 'a b c', source: 'browser' },
+                () => {},
+                ctrl.signal,
+            )
+            ctrl.abort()
+
+            await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
+            // capturedSignal is the INTERNAL AbortController's signal passed
+            // to fetch() — the external abort must propagate to it.
+            expect(capturedSignal?.aborted).toBe(true)
+        })
+
+        it('an abort does NOT mark the stream unsupported (a later call still tries /correct/stream)', async () => {
+            const fetchMock = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+                const signal = init?.signal as AbortSignal
+                return new Promise<Response>((_resolve, reject) => {
+                    signal?.addEventListener('abort', () => {
+                        reject(new DOMException('aborted', 'AbortError'))
+                    })
+                })
+            })
+            vi.stubGlobal('fetch', fetchMock)
+            const client = new BridgeClient('http://localhost:8000', false)
+            const ctrl = new AbortController()
+            const aborted = client.correctStream(
+                { text: 'a b c', source: 'browser' },
+                () => {},
+                ctrl.signal,
+            )
+            ctrl.abort()
+            await expect(aborted).rejects.toThrow('aborted')
+
+            fetchMock.mockReset()
+            fetchMock.mockResolvedValue(sseResponse(`event: final\ndata: ${JSON.stringify(FINAL)}\n\n`))
+            await client.correctStream({ text: 'd e f', source: 'browser' }, () => {})
+            expect(String(fetchMock.mock.calls[0]![0])).toContain('/correct/stream')
+        })
+
+        it('rejects immediately with AbortError (no fetch call) when the signal is already aborted', async () => {
+            const fetchMock = vi.fn<typeof fetch>()
+            vi.stubGlobal('fetch', fetchMock)
+            const client = new BridgeClient('http://localhost:8000', false)
+            const ctrl = new AbortController()
+            ctrl.abort()
+            await expect(
+                client.correctStream({ text: 'a b c', source: 'browser' }, () => {}, ctrl.signal),
+            ).rejects.toMatchObject({ name: 'AbortError' })
+            expect(fetchMock).not.toHaveBeenCalled()
+        })
     })
 })

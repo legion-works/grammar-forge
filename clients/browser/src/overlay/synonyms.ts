@@ -201,13 +201,22 @@ const POPOVER_GAP_ABOVE = 14
  * root). The popover sits BELOW the word (the tail points up at the
  * word's baseline) and is viewport-clamped.
  */
-import { installOutsideDismiss, type OutsideDismissHandle } from '@/overlay/dismiss'
+import {
+    installEscapeCapture,
+    installOutsideDismiss,
+    type EscapeCaptureHandle,
+    type OutsideDismissHandle,
+} from '@/overlay/dismiss'
 import { debugLog } from '@/lib/debug-log'
 
 export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): SynonymsHandle {
     destroyExisting(root)
     const doc = root.ownerDocument
     const view = doc.defaultView ?? window
+
+    // P1-5: capture whatever had focus before the popover opened so every
+    // close path can restore it (see popover.ts for the full rationale).
+    const previouslyFocused = doc.activeElement instanceof HTMLElement ? doc.activeElement : null
 
     const pop = doc.createElement('div')
     pop.className = 'gf-syn'
@@ -261,14 +270,10 @@ export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): Synony
         if (pop.isConnected) positionPopover(pop, options.anchorRect, view, options.clearRect)
     })
 
-    // Esc dismiss
-    const onKeydown = (event: KeyboardEvent): void => {
-        if (event.key === 'Escape') {
-            event.stopPropagation()
-            options.onClose()
-        }
-    }
-    doc.addEventListener('keydown', onKeydown)
+    // Esc dismiss — window capture (P1-7), same fix as the outside-click
+    // dismiss below: a document-bubble listener never fires on hosts that
+    // stopPropagation at window capture.
+    const escapeCapture: EscapeCaptureHandle = installEscapeCapture(view, () => options.onClose(), 'synonyms')
 
     // Outside-click (light-dismiss) via the unified dismiss helper.
     // Uses window capture so host-page stopPropagation can't block it.
@@ -279,18 +284,67 @@ export function showSynonyms(root: ShadowRoot, options: SynonymsOptions): Synony
         'synonyms',
     )
 
-    return {
+    const handle: SynonymsHandle = {
         destroy: () => {
             view.cancelAnimationFrame(repositionFrame)
             outsideDismiss.remove()
-            doc.removeEventListener('keydown', onKeydown)
+            escapeCapture.remove()
             if (pop.isConnected) pop.remove()
+            // P1-5: restore focus to whatever had it before this popover
+            // opened, on EVERY close path (destroy() is the single funnel
+            // for Esc, outside-dismiss, and programmatic teardown alike).
+            if (previouslyFocused && previouslyFocused.isConnected) previouslyFocused.focus()
+            unregisterSynonyms(root, handle)
         },
         isOpen: () => pop.isConnected,
     }
+    registerSynonyms(root, handle)
+
+    return handle
+}
+
+// Per-root registry: mirror of popover.ts / rephrase-card.ts's REGISTRY
+// pattern. destroyExisting() used to only querySelectorAll(...).remove()
+// the prior popover's DOM, never calling its destroy() — which left the
+// prior instance's installOutsideDismiss (window-capture pointerdown),
+// installEscapeCapture (window-capture keydown), and pending
+// repositionFrame rAF all orphaned on every re-open (one popover reopens
+// on every dblclick — a chatty surface where this leak compounds fast).
+const REGISTRY = new WeakMap<ShadowRoot, Set<SynonymsHandle>>()
+
+function registerSynonyms(root: ShadowRoot, handle: SynonymsHandle): void {
+    let set = REGISTRY.get(root)
+    if (!set) {
+        set = new Set()
+        REGISTRY.set(root, set)
+    }
+    set.add(handle)
+}
+
+function unregisterSynonyms(root: ShadowRoot, handle: SynonymsHandle): void {
+    const set = REGISTRY.get(root)
+    if (!set) return
+    set.delete(handle)
+    if (set.size === 0) REGISTRY.delete(root)
+}
+
+/** Destroy every Synonyms popover currently mounted in `root` via the real
+ *  `destroy()` (releasing its listeners + pending rAF + restoring focus),
+ *  not just its DOM. Exported for the shadow host's teardown, mirroring
+ *  dismissPopoversIn / dismissRephraseCardsIn. */
+export function dismissSynonymsIn(root: ShadowRoot): void {
+    const set = REGISTRY.get(root)
+    if (!set) return
+    // copy to a fresh array: destroy() mutates the set (unregisters itself)
+    for (const handle of Array.from(set)) handle.destroy()
 }
 
 function destroyExisting(root: ShadowRoot): void {
+    dismissSynonymsIn(root)
+    // Defensive sweep for any .gf-syn node not tracked by the registry
+    // (should not happen — showSynonyms always registers — but avoids a
+    // doubled popover if some future caller ever bypasses the handle
+    // bookkeeping).
     root.querySelectorAll('.gf-syn').forEach((el) => el.remove())
 }
 

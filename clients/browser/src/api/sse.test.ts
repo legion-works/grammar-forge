@@ -56,4 +56,20 @@ describe('parseSSEStream', () => {
         const events = await collect(streamOf('event: ping\n\ndata: real\n\n'))
         expect(events).toEqual([{ event: 'message', data: 'real' }])
     })
+
+    it('P1-6: strips a trailing \\r left by CRLF framing so data is valid JSON', async () => {
+        // CRLF framing: "event: final\r\ndata: {\"a\":1}\r\n\r\n". The
+        // block/blank-line boundary is matched on '\n\n', which leaves a
+        // trailing \r attached to each line ("event: final\r" / 'data: {"a":1}\r').
+        // Un-fixed, the \r used to survive into `data` (only trimStart was
+        // applied) and corrupt JSON.parse.
+        const events = await collect(streamOf('event: final\r\ndata: {"a":1}\r\n\r\n'))
+        expect(events).toEqual([{ event: 'final', data: '{"a":1}' }])
+        expect(() => JSON.parse(events[0]!.data)).not.toThrow()
+    })
+
+    it('P1-6: CRLF framing across multiple data: lines joins clean (no embedded \\r)', async () => {
+        const events = await collect(streamOf('data: line1\r\ndata: line2\r\n\r\n'))
+        expect(events).toEqual([{ event: 'message', data: 'line1\nline2' }])
+    })
 })

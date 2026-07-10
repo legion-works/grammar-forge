@@ -80,7 +80,10 @@ describe('showPopover (W1-3: correction card)', () => {
         const card = root.querySelector('.gf-card')
         expect(card).not.toBeNull()
         expect(card?.getAttribute('role')).toBe('dialog')
-        expect(card?.getAttribute('aria-label')).toBe('Grammar correction')
+        // P2: aria-label includes the category so a screen-reader user
+        // hears WHAT kind of issue this is (not just "a grammar correction"
+        // for every category).
+        expect(card?.getAttribute('aria-label')).toBe('Spelling correction')
         expect(card?.textContent).toContain('Spelling')
         expect(card?.textContent).toContain('Misspelled word')
         expect(card?.textContent).toContain('hello')
@@ -89,6 +92,12 @@ describe('showPopover (W1-3: correction card)', () => {
         expect(chip).not.toBeNull()
         expect(chip?.textContent).toContain('Harper')
         expect(chip?.classList.contains('gf-chip-source--ai')).toBe(false)
+    })
+
+    it('aria-label reflects the actual category (not a hardcoded "Grammar correction")', () => {
+        showPopover(root, mkOptions({ category: 'grammar' }))
+        const card = root.querySelector('.gf-card')
+        expect(card?.getAttribute('aria-label')).toBe('Grammar correction')
     })
 
     it('renders the AI source chip for LLM items', () => {
@@ -329,5 +338,68 @@ describe('showPopover outside-click dismiss', () => {
         const card = root.querySelector('.gf-card') as HTMLElement
         card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
         expect(handle?.isOpen()).toBe(true)
+    })
+})
+
+describe('P1-5: focus restoration on close (every close path)', () => {
+    let root: ShadowRoot
+    let field: HTMLTextAreaElement
+    beforeEach(() => {
+        root = mkRoot()
+        installPopoverStub()
+        vi.useFakeTimers()
+        field = document.createElement('textarea')
+        document.body.appendChild(field)
+        field.focus()
+    })
+    afterEach(() => {
+        vi.useRealTimers()
+        removePopoverStub()
+        field.remove()
+    })
+
+    it('opening the popover moves focus to the primary button (captures the field as "previously focused")', () => {
+        expect(document.activeElement).toBe(field)
+        showPopover(root, mkOptions())
+        // document.activeElement reports the shadow HOST (not the focused
+        // descendant) for an open shadow root; the root's own .activeElement
+        // is the spec-correct way to see the focused element inside it.
+        expect(document.activeElement).not.toBe(field)
+        expect(root.activeElement?.classList.contains('gf-btn-primary')).toBe(true)
+    })
+
+    it('Escape restores focus to the field', () => {
+        showPopover(root, mkOptions())
+        const card = root.querySelector('.gf-card') as HTMLElement
+        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        expect(document.activeElement).toBe(field)
+    })
+
+    it('outside-click dismiss restores focus to the field', () => {
+        showPopover(root, mkOptions())
+        vi.advanceTimersByTime(10)
+        const outsideEl = document.createElement('div')
+        document.body.appendChild(outsideEl)
+        outsideEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
+        expect(document.activeElement).toBe(field)
+    })
+
+    it('the Dismiss button restores focus to the field', () => {
+        showPopover(root, mkOptions())
+        const dismissBtn = root.querySelector<HTMLElement>('[data-action="dismiss"]')!
+        dismissBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(document.activeElement).toBe(field)
+    })
+
+    it('a programmatic hide() restores focus to the field', () => {
+        const handle = showPopover(root, mkOptions())
+        handle.hide()
+        expect(document.activeElement).toBe(field)
+    })
+
+    it('does not throw and leaves focus alone when the previously-focused element was removed from the DOM', () => {
+        const handle = showPopover(root, mkOptions())
+        field.remove()
+        expect(() => handle.hide()).not.toThrow()
     })
 })

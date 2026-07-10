@@ -125,15 +125,25 @@ export class BridgeClient {
      * errors) fall back to plain correct() and are remembered for the
      * session. An in-band `error` event is a REAL pipeline failure and
      * rejects without marking the stream unsupported.
+     *
+     * P1-9: `signal` (optional) lets the caller cancel a still-in-flight
+     * stream — the content-script orchestrator threads one AbortController
+     * per field through rerunFor so a NEW check aborts the PREVIOUS one's
+     * connection instead of leaving it to run to completion server-side
+     * with its result simply discarded by the seq guard.
      */
     async correctStream(
         req: CorrectRequest,
         onFast: (res: CorrectResponse) => void,
+        signal?: AbortSignal,
     ): Promise<CorrectResponse> {
         if (this.streamUnsupported) return this.correct(req)
         this.guard()
+        if (signal?.aborted) throw new DOMException('correctStream aborted before start', 'AbortError')
         const ctrl = new AbortController()
         const t = setTimeout(() => ctrl.abort(), this.timeoutMs)
+        const onExternalAbort = (): void => ctrl.abort()
+        signal?.addEventListener('abort', onExternalAbort)
         try {
             let r: Response
             try {
@@ -145,7 +155,9 @@ export class BridgeClient {
                 })
             } catch (e) {
                 // Network-level failure: correct() would fail identically —
-                // do not mark unsupported, just surface it.
+                // do not mark unsupported, just surface it. (Covers both the
+                // timeout abort and an external cancellation — either way
+                // the caller's seq guard will have already moved on.)
                 throw e instanceof Error ? e : new Error(String(e))
             }
             if (!r.ok || !r.headers.get('content-type')?.includes('text/event-stream') || !r.body) {
@@ -175,6 +187,12 @@ export class BridgeClient {
                 }
             } catch (e) {
                 if (e instanceof BridgeStreamError) throw new Error(e.message)
+                if (ctrl.signal.aborted) {
+                    // Cancelled (superseded check or explicit unmount) — never
+                    // mark the stream unsupported or fall back to a full
+                    // correct() call for a request nobody wants anymore.
+                    throw e instanceof Error ? e : new Error(String(e))
+                }
                 // Malformed stream: fall back and remember.
                 this.streamUnsupported = true
                 return await this.correct(req)
@@ -186,6 +204,7 @@ export class BridgeClient {
             return final
         } finally {
             clearTimeout(t)
+            signal?.removeEventListener('abort', onExternalAbort)
         }
     }
 
@@ -203,6 +222,47 @@ export class BridgeClient {
             attributable.map((e) => this.post('/signal', { id: e.id, signal: e.action })),
         )
         return undefined
+    }
+
+    /**
+     * Fire-and-forget variant of signal() for the page-unload path
+     * (pagehide / visibilitychange->hidden). A plain fetch() started this
+     * late is routinely aborted mid-flight once the page starts tearing
+     * down; `keepalive` (and, where available, `navigator.sendBeacon`) lets
+     * the request survive past unload. Never awaited, never retried — by
+     * design there is no "next flush" once the page is gone.
+     */
+    signalOnUnload(events: SignalEvent[]): void {
+        try {
+            this.guard()
+        } catch {
+            return
+        }
+        const attributable = events.filter(
+            (e): e is SignalEvent & { id: number } => typeof e.id === 'number' && e.id > 0,
+        )
+        for (const e of attributable) {
+            const url = `${this.baseUrl}/signal`
+            const body = JSON.stringify({ id: e.id, signal: e.action })
+            if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+                try {
+                    const blob = new Blob([body], { type: 'application/json' })
+                    if (navigator.sendBeacon(url, blob)) continue
+                } catch {
+                    // fall through to keepalive fetch
+                }
+            }
+            try {
+                void fetch(url, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body,
+                    keepalive: true,
+                }).catch(() => {})
+            } catch {
+                // Best-effort: the page is going away, nothing more we can do.
+            }
+        }
     }
 
     health(): Promise<{ status: string; premium?: boolean }> {

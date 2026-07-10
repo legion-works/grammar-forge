@@ -30,7 +30,7 @@ import {
     type RenderableItem,
 } from '@/lib/pipeline'
 import { applyScopedOverlayClear } from '@/lib/scoped-clear'
-import { isMessage, type GfMessageMap } from '@/messaging/schema'
+import { isMessage, isTrustedSender, type GfMessageMap } from '@/messaging/schema'
 import {
     computeScore,
     highConfidenceItems,
@@ -220,6 +220,15 @@ interface FieldState {
      * never fires against a detached field.
      */
     scanlineRemoveTimer: ReturnType<typeof setTimeout> | null
+    /**
+     * P1-9: AbortController for this field's in-flight correctStream (SSE)
+     * call, or null when none is running. rerunFor aborts the PREVIOUS
+     * controller (if any) before starting a new check, so a superseded
+     * request's connection is actually torn down instead of running to
+     * completion server-side with its result discarded by the checkSeq
+     * guard.
+     */
+    abortController: AbortController | null
 }
 
 interface ActiveSuggestion {
@@ -423,6 +432,7 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         const client = new BridgeClient(s.bridgeBaseUrl, s.allowRemoteBridge)
         const signalQueue: SignalQueue = createSignalQueue({
             send: (events) => client.signal(events),
+            sendFinal: (events) => client.signalOnUnload(events),
         })
         return {
             client,
@@ -587,7 +597,10 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             // client; rebind it).
             const newClient = new BridgeClient(next.bridgeBaseUrl, next.allowRemoteBridge)
             runtime.client = newClient
-            runtime.signalQueue = createSignalQueue({ send: (events) => newClient.signal(events) })
+            runtime.signalQueue = createSignalQueue({
+                send: (events) => newClient.signal(events),
+                sendFinal: (events) => newClient.signalOnUnload(events),
+            })
         }
         // A spellcheck-suppression flip must re-attach fields so the attribute
         // is applied/restored. The cheapest correct path is a full runtime
@@ -609,6 +622,21 @@ async function start(ctx: ContentScriptContext): Promise<void> {
         reconcile(next)
     })
     ctx.onInvalidated(() => unwatchSettings())
+
+    // P0-2: force-flush queued telemetry before the page goes away instead of
+    // silently dropping it. `pagehide` covers navigation/tab-close/entering
+    // bfcache; `visibilitychange` -> hidden additionally covers paths (mobile
+    // app-switch, some tab-close orderings) where pagehide can fire too late
+    // or not at all. flushFinal() (see signal/queue.ts) uses a
+    // keepalive-fetch/sendBeacon sender (BridgeClient.signalOnUnload) so the
+    // request has a chance to land after the page starts tearing down.
+    const flushSignalsOnUnload = (): void => {
+        runtime?.signalQueue.flushFinal()
+    }
+    ctx.addEventListener(window, 'pagehide', flushSignalsOnUnload)
+    ctx.addEventListener(document, 'visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushSignalsOnUnload()
+    })
 
     reconcile(currentSettings)
 
@@ -811,6 +839,13 @@ function wireRuntime(
             // setHandles(new) — which destroys the previous set. Clearing here
             // instead would blink the highlights off for the whole round-trip.
             const seq = ++state.checkSeq
+            // P1-9: a new check supersedes any still-in-flight correctStream
+            // for this field — abort its connection instead of letting it
+            // run to completion server-side with the result simply
+            // discarded by the seq guard below.
+            state.abortController?.abort()
+            const abortController = new AbortController()
+            state.abortController = abortController
             const s = getSettings()
             // Render one frame (fast preview or final). Stale frames are
             // dropped by the same seq guard as before; the fast frame and
@@ -834,9 +869,15 @@ function wireRuntime(
                 const final = await runtime.client.correctStream(
                     { text, picky: s.picky, source: 'browser' },
                     (fast) => renderStage(fast, true),
+                    abortController.signal,
                 )
                 renderStage(final, false)
             } catch (e) {
+                // An abort means THIS check was superseded by a newer one (or
+                // the field/runtime was torn down) — the seq guard below
+                // already no-ops in that case, and the newer check owns the
+                // render; nothing to clear or warn about.
+                if (e instanceof DOMException && e.name === 'AbortError') return
                 // The bridge is unreachable, rejected the URL, or the stream
                 // errored after the preview. Clear any preview underlines so
                 // no un-actionable highlights linger, then surface nothing
@@ -848,6 +889,8 @@ function wireRuntime(
                     updateFocusedCounts(runtime, el)
                 }
                 debugWarn('check', 'correct() failed', e)
+            } finally {
+                if (state.abortController === abortController) state.abortController = null
             }
         }
 
@@ -935,20 +978,16 @@ function wireRuntime(
             // first so it doesn't ghost-anchor over a dropped item. Done
             // unconditionally on any input event (paste / typing / drop).
             if (openPopovers.has(el)) closePopoverFor(el)
-            if (isPasteInput(inputType)) {
-                // Plain field paste (fires inputType='insertFromPaste'): arm the
-                // grace window instead of checking now, then suppress the
-                // immediate debounced check.
-                armPasteGrace(el, state)
-                return false
-            }
-            // Non-paste edit: scoped-clear the stale highlights BEFORE the
-            // debounced check fires (300–700 ms round-trip). Without this
-            // the old underline sits at its old pixel position during the
-            // window (Bug 1: sticky after Enter, newline mis-render,
-            // halfway through the word). Spec §3: editOffset == null →
-            // clear-all (keep returns []); else keep only spans that end
-            // at or before the caret.
+            // Scoped-clear the stale highlights BEFORE the debounced check
+            // fires (300–700 ms round-trip) — run for EVERY edit, paste
+            // included (P0-3: the paste branch used to return early and
+            // skip this, leaving stale highlight rects at pre-paste
+            // positions for the whole grace window). Without this the old
+            // underline sits at its old pixel position during the window
+            // (Bug 1: sticky after Enter, newline mis-render, halfway
+            // through the word). Spec §3: editOffset == null → clear-all
+            // (keep returns []); else keep only spans that end at or
+            // before the caret.
             clearPasteGrace(state)
             const editOffset = getCaretOffset(el)
             const kept = keepHighlightsBeforeEdit(state.items, editOffset)
@@ -958,6 +997,13 @@ function wireRuntime(
                 applyScopedClearToField(state, el, kept)
             }
             state.items = kept
+            if (isPasteInput(inputType)) {
+                // Plain field paste (fires inputType='insertFromPaste'): arm the
+                // grace window instead of checking now, then suppress the
+                // immediate debounced check.
+                armPasteGrace(el, state)
+                return false
+            }
             return true
         }
 
@@ -1121,6 +1167,7 @@ function wireRuntime(
             scanlineHandle: null,
             scanlineMountedAt: null,
             scanlineRemoveTimer: null,
+            abortController: null,
         }
         runtime.fields.set(el, state)
         runtime.fieldCount += 1
@@ -1604,6 +1651,10 @@ function wireRuntime(
         const state = runtime.fields.get(el)
         if (!state) return
         debugLog('field', 'detach', { tag: el.tagName, native: state.useNativeHighlight })
+        // P1-9: abort any in-flight correctStream for this field — its
+        // result would target a field that's leaving the DOM anyway.
+        state.abortController?.abort()
+        state.abortController = null
         // Cancel any pending paste-grace timer first so it can't fire a check
         // against a field that's leaving the DOM.
         clearPasteGrace(state)
@@ -1663,11 +1714,16 @@ function wireRuntime(
     // separate bridge call.
     const messageHandler = (
         raw: unknown,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        _sender: unknown,
+        sender: Browser.runtime.MessageSender,
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         _sendResponse: (r: unknown) => void,
     ): true | undefined => {
+        // P1-8: only trust messages from THIS extension (the background
+        // script forwarding TRIGGER_CHECK/GET_TAB_STATUS/REPHRASE_SELECTION).
+        // Without this guard, any page could dispatch a same-shaped message
+        // into runtime.onMessage and trigger these actions on the field the
+        // user happens to be editing.
+        if (!isTrustedSender(sender, browser.runtime.id)) return undefined
         if (isMessage(raw, 'TRIGGER_CHECK')) {
             void checkFocusedField()
             return undefined

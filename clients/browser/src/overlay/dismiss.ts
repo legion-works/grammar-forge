@@ -93,3 +93,40 @@ export function installOutsideDismiss(
         },
     }
 }
+
+export interface EscapeCaptureHandle {
+    /** Remove the listener immediately (call in destroy()). */
+    remove: () => void
+}
+
+/**
+ * P1-7: Esc-to-dismiss, window-capture variant — the same fix
+ * installOutsideDismiss already applies to outside-click. goals.ts and
+ * synonyms.ts used to attach `doc.addEventListener('keydown', ...)` on the
+ * DOCUMENT bubble phase; a host page that installs its own
+ * `window.addEventListener('keydown', ..., {capture:true})` +
+ * stopPropagation() (the same pattern documented above for pointerdown)
+ * fires BEFORE that document-bubble listener ever sees the event, so Esc
+ * silently does nothing on those hosts. Attaching on `window` in the
+ * capture phase fires FIRST, same as the outside-click fix.
+ *
+ * No arm-delay is needed here (unlike installOutsideDismiss) — there is no
+ * "the keypress that opened the surface" race to guard against.
+ */
+export function installEscapeCapture(
+    view: Window,
+    onEscape: () => void,
+    label: string,
+): EscapeCaptureHandle {
+    const onKeydown = (event: KeyboardEvent): void => {
+        if (event.key !== 'Escape') return
+        debugLog('dismiss', `${label}: escape (window capture)`)
+        event.stopPropagation()
+        onEscape()
+    }
+    // window capture: fires before any page handler can stopPropagation.
+    view.addEventListener('keydown', onKeydown, { capture: true })
+    return {
+        remove: () => view.removeEventListener('keydown', onKeydown, { capture: true }),
+    }
+}

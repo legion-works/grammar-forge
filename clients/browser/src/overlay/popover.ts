@@ -21,7 +21,6 @@ import {
 } from '@/overlay/popover-helpers'
 import type { BridgeSuggestion, Category } from '@/api/types'
 
-const OUTSIDE_CLICK_DELAY_MS = 100
 const PANEL_HEIGHT_ESTIMATE = 220
 const PANEL_WIDTH = 300
 const VIEWPORT_GUTTER = 10
@@ -145,6 +144,15 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
     const doc = root.ownerDocument
     const view = doc.defaultView ?? window
 
+    // P1-5: capture whatever had focus BEFORE we steal it for the primary
+    // action button below, so every close path (Esc, outside-dismiss, the
+    // Dismiss button, or a programmatic hide()/dismissPopoversIn) can put
+    // focus back — including contenteditable fields, which previously never
+    // got focus restored at all (only Accept did, and only for
+    // input/textarea, via a separate el.focus() in the content-script
+    // orchestrator).
+    const previouslyFocused = doc.activeElement instanceof HTMLElement ? doc.activeElement : null
+
     const panel = doc.createElement('div')
     // W1-3: the design-system class is .gf-card (the old .gf-panel
     // stays in styles.ts for the W2 review panel, but the click-card
@@ -152,7 +160,10 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
     // announce it correctly.
     panel.className = 'gf-card'
     panel.setAttribute('role', 'dialog')
-    panel.setAttribute('aria-label', 'Grammar correction')
+    // P2: include the category so a screen-reader user hears WHAT kind of
+    // issue this is, not just "a grammar correction" for every category.
+    const categoryLabel = CATEGORY_META[options.category].label
+    panel.setAttribute('aria-label', `${categoryLabel} correction`)
 
     const usePopoverApi = isPopoverSupported(panel)
     if (usePopoverApi) {
@@ -261,6 +272,11 @@ export function showPopover(root: ShadowRoot, options: PopoverOptions): PopoverH
             }
             if (panel.isConnected) panel.remove()
             unregisterPopover(root, handle)
+            // P1-5: restore focus to whatever had it before the popover
+            // opened (the edited field, in the common case), on EVERY close
+            // path — hide() is the single funnel for Esc, outside-dismiss,
+            // Dismiss, and programmatic teardown alike.
+            if (previouslyFocused && previouslyFocused.isConnected) previouslyFocused.focus()
         },
         isOpen: () => panel.isConnected,
     }

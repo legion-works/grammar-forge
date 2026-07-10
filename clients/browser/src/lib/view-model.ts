@@ -171,10 +171,15 @@ export function confLabel(confidence: number | undefined): ConfidenceLabel {
     if (c >= 0.75) return 'Medium'
     return 'Low'
 }
+// P1-10: canonical values are the design-system tokens in overlay/styles.ts
+// (--gf-conf-high / --gf-conf-medium / --gf-conf-low, dark-theme family —
+// see :host([data-gf-theme="dark"]) in OVERLAY_CSS). Low used to disagree
+// (#64748b here vs #828bb8 in styles.ts); a sync test in view-model.test.ts
+// asserts these stay aligned.
 export const CONF_COLOR: Record<ConfidenceLabel, string> = {
     High: '#16a34a',
     Medium: '#d97706',
-    Low: '#64748b',
+    Low: '#828bb8',
 }
 
 /** Insight numbers for the panel's stat row. The reference DC renders

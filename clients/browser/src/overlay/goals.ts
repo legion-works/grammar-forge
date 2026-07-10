@@ -22,7 +22,12 @@
 //     the pill's top). `transform-origin: 50% 0%`.
 
 import type { Goals } from '@/api/types'
-import { installOutsideDismiss, type OutsideDismissHandle } from '@/overlay/dismiss'
+import {
+    installEscapeCapture,
+    installOutsideDismiss,
+    type EscapeCaptureHandle,
+    type OutsideDismissHandle,
+} from '@/overlay/dismiss'
 
 const VIEWPORT_GUTTER = 8
 const POPOVER_WIDTH = 300
@@ -71,6 +76,10 @@ export function showGoals(root: ShadowRoot, options: GoalsOptions): GoalsHandle 
     const doc = root.ownerDocument
     const view = doc.defaultView ?? window
 
+    // P1-5: capture whatever had focus before the popover opened so every
+    // close path can restore it (see popover.ts for the full rationale).
+    const previouslyFocused = doc.activeElement instanceof HTMLElement ? doc.activeElement : null
+
     const pop = doc.createElement('div')
     pop.className = 'gf-goals-pop'
     pop.setAttribute('role', 'dialog')
@@ -103,14 +112,10 @@ export function showGoals(root: ShadowRoot, options: GoalsOptions): GoalsHandle 
     root.appendChild(pop)
     positionPopover(pop, options.anchorRect, view)
 
-    // Esc dismiss
-    const onKeydown = (event: KeyboardEvent): void => {
-        if (event.key === 'Escape') {
-            event.stopPropagation()
-            options.onClose()
-        }
-    }
-    doc.addEventListener('keydown', onKeydown)
+    // Esc dismiss — window capture (P1-7), same fix as the outside-click
+    // dismiss below: a document-bubble listener never fires on hosts that
+    // stopPropagation at window capture.
+    const escapeCapture: EscapeCaptureHandle = installEscapeCapture(view, () => options.onClose(), 'goals')
 
     // Outside-click (light-dismiss) via the unified dismiss helper.
     // Uses window capture so host-page stopPropagation can't block it.
@@ -121,17 +126,65 @@ export function showGoals(root: ShadowRoot, options: GoalsOptions): GoalsHandle 
         'goals',
     )
 
-    return {
+    const handle: GoalsHandle = {
         destroy: () => {
             outsideDismiss.remove()
-            doc.removeEventListener('keydown', onKeydown)
+            escapeCapture.remove()
             if (pop.isConnected) pop.remove()
+            // P1-5: restore focus to whatever had it before this popover
+            // opened, on EVERY close path (destroy() is the single funnel
+            // for Esc, outside-dismiss, and programmatic teardown alike).
+            if (previouslyFocused && previouslyFocused.isConnected) previouslyFocused.focus()
+            unregisterGoals(root, handle)
         },
         isOpen: () => pop.isConnected,
     }
+    registerGoals(root, handle)
+
+    return handle
+}
+
+// Per-root registry: mirror of popover.ts / rephrase-card.ts's REGISTRY
+// pattern. destroyExisting() used to only querySelectorAll(...).remove()
+// the prior popover's DOM, never calling its destroy() — which left the
+// prior instance's installOutsideDismiss (window-capture pointerdown) and
+// installEscapeCapture (window-capture keydown) listeners, plus its
+// focus-restore, all orphaned on every re-open.
+const REGISTRY = new WeakMap<ShadowRoot, Set<GoalsHandle>>()
+
+function registerGoals(root: ShadowRoot, handle: GoalsHandle): void {
+    let set = REGISTRY.get(root)
+    if (!set) {
+        set = new Set()
+        REGISTRY.set(root, set)
+    }
+    set.add(handle)
+}
+
+function unregisterGoals(root: ShadowRoot, handle: GoalsHandle): void {
+    const set = REGISTRY.get(root)
+    if (!set) return
+    set.delete(handle)
+    if (set.size === 0) REGISTRY.delete(root)
+}
+
+/** Destroy every Goals popover currently mounted in `root` via the real
+ *  `destroy()` (releasing its listeners + restoring focus), not just its
+ *  DOM. Exported for the shadow host's teardown, mirroring
+ *  dismissPopoversIn / dismissRephraseCardsIn. */
+export function dismissGoalsIn(root: ShadowRoot): void {
+    const set = REGISTRY.get(root)
+    if (!set) return
+    // copy to a fresh array: destroy() mutates the set (unregisters itself)
+    for (const handle of Array.from(set)) handle.destroy()
 }
 
 function destroyExisting(root: ShadowRoot): void {
+    dismissGoalsIn(root)
+    // Defensive sweep for any .gf-goals-pop node not tracked by the
+    // registry (should not happen — showGoals always registers — but
+    // avoids a doubled popover if some future caller ever bypasses the
+    // handle bookkeeping).
     root.querySelectorAll('.gf-goals-pop').forEach((el) => el.remove())
 }
 

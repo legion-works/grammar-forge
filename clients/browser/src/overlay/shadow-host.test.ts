@@ -272,12 +272,28 @@ describe('OVERLAY_CSS (Liquid Glass contract)', () => {
     })
 
     it('degrades under prefers-reduced-motion: reduce (no spring/scale)', () => {
-        const block = OVERLAY_CSS.match(
-            /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\s*\}/,
+        // P1-4(d): the fix retargets most surfaces from a "swap to a 1ms
+        // opacity fade" override to `animation: none` (matching .gf-orb) —
+        // gf-no-motion FADES opacity 0->1, which is backwards for a surface
+        // that already renders at a static opacity:1 outside its animation.
+        // Surfaces that have NO static opacity fallback (.gf-panel-aside,
+        // .gf-goals-pop) still use the gf-no-motion 1ms-fade override. Both
+        // are valid ways to kill the spring/scale entrance — assert every
+        // prefers-reduced-motion block uses one or the other.
+        const blocks = Array.from(
+            OVERLAY_CSS.matchAll(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n {2}\}/g),
         )
-        expect(block).not.toBeNull()
-        // no transform is animated in the reduced-motion branch
-        expect(block?.[0]).toMatch(/animation-duration:\s*1ms/)
+        expect(blocks.length).toBeGreaterThan(0)
+        for (const block of blocks) {
+            const body = block[1]!
+            const usesNone = /animation:\s*none/.test(body)
+            const usesNoMotionFade =
+                /animation-duration:\s*1ms/.test(body) && /animation-name:\s*gf-no-motion/.test(body)
+            expect(
+                usesNone || usesNoMotionFade,
+                `reduced-motion block must neutralize the spring animation via "animation: none" or the gf-no-motion fade:\n${body}`,
+            ).toBe(true)
+        }
     })
 
     it('animates only transform + opacity (never backdrop-filter)', () => {

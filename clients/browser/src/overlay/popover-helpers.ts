@@ -19,7 +19,10 @@ export const CONFIDENCE_BAND_CLASS: Record<ConfidenceBand, string> = {
 
 /** Threshold for the medium/low boundary, matching the design tokens in
  *  `handoff/scss/_tokens.scss` ($gf-conf-*). Centralised so the test +
- *  renderer + future SCSS cannot drift. */
+ *  renderer + future SCSS cannot drift. These are UI display cutoffs only —
+ *  unrelated to the bridge's EscalationPolicy.MinConfidence (fast-path→LLM
+ *  escalation threshold, bridge/internal/config/config.go), which is a
+ *  different scale for a different purpose. */
 export const CONFIDENCE_THRESHOLDS = {
     high: 0.9,
     medium: 0.75,

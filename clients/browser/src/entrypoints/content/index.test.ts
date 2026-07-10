@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getCaretOffset, keepHighlightsBeforeEdit } from '@/input/caret-offset'
+import { isPasteInput } from '@/input/paste-guard'
 import { nextCheckSeq } from '@/lib/check-seq'
+import { applyScopedOverlayClear } from '@/lib/scoped-clear'
 import type { RenderableItem } from '@/lib/pipeline'
 
 // Tiny harness: build a real <textarea>, attach a FieldState-shaped object,
@@ -61,5 +63,73 @@ describe('scoped-clear wiring (browser shape)', () => {
         for (let i = 1; i < seqs.length; i++) {
             expect(seqs[i]!).toBeGreaterThan(seqs[i - 1]!)
         }
+    })
+
+    // P0-3 regression: the FIXED onInputEventFor body (content/index.ts) runs
+    // the scoped-clear (keepHighlightsBeforeEdit + the per-item clear) for
+    // EVERY input event — paste included — BEFORE the paste branch arms the
+    // grace window and suppresses the immediate check. The bug returned
+    // early on the paste branch, skipping the clear entirely, so stale
+    // highlight rects sat at pre-paste positions for the whole grace
+    // window. This mirrors the fixed call order (same helpers, same
+    // sequence: clear-then-decide, regardless of inputType) — see the file
+    // header for why this file tests wiring SHAPE rather than driving the
+    // real start().
+    const runFixedOnInputEventFor = (
+        inputType: string,
+        items: RenderableItem[],
+        editOffset: number | null,
+        clearItem: (i: number) => void,
+    ): { scopedClearRan: boolean; kept: RenderableItem[]; suppressedCheck: boolean } => {
+        const kept = keepHighlightsBeforeEdit(items, editOffset)
+        let scopedClearRan = false
+        if (kept.length < items.length) {
+            scopedClearRan = true
+            applyScopedOverlayClear({ clearItem, reconcile: () => {} }, items, kept)
+        }
+        // The paste branch runs AFTER the clear above (not before / instead
+        // of it) — it only decides whether to suppress the debounced check.
+        const suppressedCheck = isPasteInput(inputType)
+        return { scopedClearRan, kept, suppressedCheck }
+    }
+
+    it('paste input (insertFromPaste) still runs the scoped-clear before the grace window suppresses the check', () => {
+        textarea.selectionStart = 4
+        textarea.selectionEnd = 4
+        const items: RenderableItem[] = [
+            stub({ cuStart: 0, cuEnd: 3, hlStart: 0, hlEnd: 3 }),
+            stub({ cuStart: 4, cuEnd: 7, hlStart: 4, hlEnd: 7 }),
+        ]
+        const cleared: number[] = []
+        const { scopedClearRan, kept, suppressedCheck } = runFixedOnInputEventFor(
+            'insertFromPaste',
+            items,
+            getCaretOffset(textarea),
+            (i) => cleared.push(i),
+        )
+        expect(scopedClearRan).toBe(true)
+        expect(cleared).toEqual([1])
+        expect(kept).toEqual([items[0]])
+        expect(suppressedCheck).toBe(true)
+    })
+
+    it('typing (non-paste) also runs the scoped-clear and does NOT suppress the check', () => {
+        textarea.selectionStart = 4
+        textarea.selectionEnd = 4
+        const items: RenderableItem[] = [
+            stub({ cuStart: 0, cuEnd: 3, hlStart: 0, hlEnd: 3 }),
+            stub({ cuStart: 4, cuEnd: 7, hlStart: 4, hlEnd: 7 }),
+        ]
+        const cleared: number[] = []
+        const { scopedClearRan, kept, suppressedCheck } = runFixedOnInputEventFor(
+            'insertText',
+            items,
+            getCaretOffset(textarea),
+            (i) => cleared.push(i),
+        )
+        expect(scopedClearRan).toBe(true)
+        expect(cleared).toEqual([1])
+        expect(kept).toEqual([items[0]])
+        expect(suppressedCheck).toBe(false)
     })
 })

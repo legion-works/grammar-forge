@@ -40,6 +40,45 @@ async function pollForTextChange(el: HTMLElement, before: string): Promise<strin
     }
 }
 
+/** The common-prefix/common-suffix diff between `before` and `after`: the
+ *  minimal "removed" (from before) / "inserted" (from after) middle region.
+ *  Used to check WHAT changed, not just THAT something changed. */
+function diffMiddle(before: string, after: string): { removed: string; inserted: string } {
+    const maxPrefix = Math.min(before.length, after.length)
+    let prefixLen = 0
+    while (prefixLen < maxPrefix && before.charCodeAt(prefixLen) === after.charCodeAt(prefixLen)) {
+        prefixLen++
+    }
+    const maxSuffix = Math.min(before.length, after.length) - prefixLen
+    let suffixLen = 0
+    while (
+        suffixLen < maxSuffix &&
+        before.charCodeAt(before.length - 1 - suffixLen) === after.charCodeAt(after.length - 1 - suffixLen)
+    ) {
+        suffixLen++
+    }
+    return {
+        removed: before.slice(prefixLen, before.length - suffixLen),
+        inserted: after.slice(prefixLen, after.length - suffixLen),
+    }
+}
+
+/** True when `after` reflects the intended replacement having actually
+ *  landed: either an exact match against the fully-expected text, or — when
+ *  the host editor's own normalization introduces incidental differences
+ *  elsewhere in the document — the changed region of the before/after diff
+ *  still contains the replacement text. A text change whose diff does NOT
+ *  contain the replacement (e.g. an unrelated keystroke landing during the
+ *  poll window) is NOT a match — it must be treated as a failed apply, never
+ *  as success. */
+function replacementLanded(before: string, after: string, expected: string, replacement: string): boolean {
+    if (after === expected) return true
+    if (after === before) return false
+    if (replacement.length === 0) return false
+    const { inserted } = diffMiddle(before, after)
+    return inserted.length > 0 && inserted.includes(replacement)
+}
+
 /** Compact node descriptor for trace logs. */
 function describeNode(n: Node): string {
     if (n.nodeType === Node.TEXT_NODE) {
@@ -158,12 +197,25 @@ export async function applySlateFix(
         log('apply: OK exact match after poll')
         return true
     }
-    if (after !== before) {
-        log('apply: OK-ish text changed but != expected', {
+    if (replacementLanded(before, after, expected, replacement)) {
+        log('apply: OK-ish diff contains replacement', {
             after: JSON.stringify(after.slice(0, 60)),
             expected: JSON.stringify(expected.slice(0, 60)),
         })
         return true
+    }
+    if (after !== before) {
+        // The text changed, but not into the replacement — most likely a
+        // user keystroke landing during the poll window. Do NOT fall
+        // through to the legacy selection+execCommand path: the DOM has
+        // moved under us, so a stale Range would apply in the wrong place.
+        // Report failure so the caller never records an inverse-undo edit
+        // or fires an 'accepted' signal for an edit that never happened.
+        log('apply: FAIL unrelated text change during poll (not applying)', {
+            after: JSON.stringify(after.slice(0, 60)),
+            expected: JSON.stringify(expected.slice(0, 60)),
+        })
+        return false
     }
 
     // Poll window expired with NO change: the editor ignored the synthetic
@@ -184,10 +236,12 @@ export async function applySlateFix(
     await wait(0)
     const ok = el.ownerDocument.execCommand('insertText', false, replacement)
     const final = await pollForTextChange(el, before)
+    const landed = replacementLanded(before, final, expected, replacement)
     log('apply: fallback result', {
         execCommandReturned: ok,
         changed: final !== before,
         matchesExpected: final === expected,
+        landed,
     })
-    return true
+    return landed
 }

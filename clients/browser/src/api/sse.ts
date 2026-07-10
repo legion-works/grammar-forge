@@ -40,7 +40,14 @@ export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGe
 function parseEventBlock(block: string): SSEEvent | null {
     let event = 'message'
     const data: string[] = []
-    for (const line of block.split('\n')) {
+    for (const rawLine of block.split('\n')) {
+        // P1-6: CRLF framing. The block/event boundary is matched on '\n\n'
+        // in parseSSEStream, so a "data: {...}\r\n" line followed by the
+        // blank-line "\n" terminator leaves a trailing "\r" attached to
+        // THIS line (the separator match consumes only the two LFs). Strip
+        // it uniformly before parsing so it never leaks into `data` (where
+        // it would corrupt JSON.parse) or `event`.
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
         if (line.startsWith('event:')) event = line.slice('event:'.length).trim()
         else if (line.startsWith('data:')) data.push(line.slice('data:'.length).trimStart())
     }

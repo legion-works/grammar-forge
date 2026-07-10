@@ -271,10 +271,34 @@ describe('confLabel / CONF_COLOR (correction-card conf bar)', () => {
     it('maps confidence < 0.75 to "Low" slate', () => {
         expect(confLabel(0.5)).toBe('Low')
         expect(confLabel(0.7499)).toBe('Low')
-        expect(CONF_COLOR.Low).toBe('#64748b')
+        // P1-10: was #64748b, disagreeing with styles.ts's --gf-conf-low
+        // (#828bb8 dark-theme token) — see the sync test below.
+        expect(CONF_COLOR.Low).toBe('#828bb8')
     })
     it('treats undefined as 0 → "Low"', () => {
         expect(confLabel(undefined)).toBe('Low')
+    })
+})
+
+describe('P1-10: CONF_COLOR / styles.ts --gf-conf-* token sync', () => {
+    // Guards against CONF_COLOR (the JS confidence-bar palette) silently
+    // drifting from the --gf-conf-high/-medium/-low custom properties in
+    // overlay/styles.ts (the design-system canonical source) — the two were
+    // previously out of sync for Low (#64748b vs #828bb8). Pattern mirrors
+    // opencode's category-palette-sync.test.ts (JS constant mirrors the
+    // canonical source, asserted directly rather than eyeballed).
+    it('CONF_COLOR.High/Medium/Low match the dark-theme --gf-conf-* literals in OVERLAY_CSS', async () => {
+        const { OVERLAY_CSS } = await import('../overlay/styles')
+        const darkThemeBlock = /:host\(\[data-gf-theme="dark"\]\)\s*\{([\s\S]*?)\n {2}\}/.exec(OVERLAY_CSS)
+        expect(darkThemeBlock, 'dark-theme :host token block must exist').not.toBeNull()
+        const block = darkThemeBlock![1]!
+        const tokenValue = (name: string): string | null => {
+            const m = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]+)`).exec(block)
+            return m ? m[1]! : null
+        }
+        expect(tokenValue('gf-conf-high')).toBe(CONF_COLOR.High)
+        expect(tokenValue('gf-conf-medium')).toBe(CONF_COLOR.Medium)
+        expect(tokenValue('gf-conf-low')).toBe(CONF_COLOR.Low)
     })
 })
 

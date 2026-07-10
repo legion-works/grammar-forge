@@ -286,13 +286,14 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
     ;(aside as HTMLElement & { _gfSetActiveTabState: (t: 'review' | 'stats') => void })._gfSetActiveTabState =
         (tab: 'review' | 'stats') => { activeTab = tab }
 
-    return {
+    const handle: PanelHandle = {
         destroy: () => {
             outsideDismiss.remove()
             aside.removeEventListener('click', onClick)
             aside.removeEventListener('mousedown', onMouseDown)
             if (aside.isConnected) aside.remove()
             bodyRef = null
+            unregisterPanel(root, handle)
         },
         isOpen: () => aside.isConnected,
         getBodyContainer: () => bodyRef,
@@ -325,9 +326,54 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
             return true
         },
     }
+    registerPanel(root, handle)
+
+    return handle
+}
+
+// Per-root registry: the panel registers/unregisters its own handle so a
+// re-open — or the shadow host's teardown — destroys the PREVIOUS
+// instance properly (releasing its outside-click window listener) instead
+// of just yanking its DOM. Mirror of popover.ts / rephrase-card.ts's
+// REGISTRY pattern. Before this, destroyExisting() only did a
+// querySelectorAll(...).remove() sweep: the prior handle's
+// installOutsideDismiss listener (dismiss.ts, window-capture pointerdown)
+// was never removed, orphaning one listener per re-open.
+const REGISTRY = new WeakMap<ShadowRoot, Set<PanelHandle>>()
+
+function registerPanel(root: ShadowRoot, handle: PanelHandle): void {
+    let set = REGISTRY.get(root)
+    if (!set) {
+        set = new Set()
+        REGISTRY.set(root, set)
+    }
+    set.add(handle)
+}
+
+function unregisterPanel(root: ShadowRoot, handle: PanelHandle): void {
+    const set = REGISTRY.get(root)
+    if (!set) return
+    set.delete(handle)
+    if (set.size === 0) REGISTRY.delete(root)
+}
+
+/** Destroy every review panel currently mounted in `root` — releasing its
+ *  outside-click listener via the real `destroy()`, not just its DOM.
+ *  Exported for the shadow host's teardown, mirroring dismissPopoversIn /
+ *  dismissRephraseCardsIn. */
+export function dismissPanelsIn(root: ShadowRoot): void {
+    const set = REGISTRY.get(root)
+    if (!set) return
+    // copy to a fresh array: destroy() mutates the set (unregisters itself)
+    for (const handle of Array.from(set)) handle.destroy()
 }
 
 function destroyExisting(root: ShadowRoot): void {
+    dismissPanelsIn(root)
+    // Defensive sweep for any .gf-panel-aside node not tracked by the
+    // registry (should not happen — showPanel always registers — but
+    // avoids a doubled panel if some future caller ever bypasses the
+    // handle bookkeeping).
     root.querySelectorAll('.gf-panel-aside').forEach((el) => el.remove())
 }
 

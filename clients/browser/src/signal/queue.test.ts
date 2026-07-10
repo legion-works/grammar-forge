@@ -60,4 +60,83 @@ describe('createSignalQueue', () => {
         await expect(q.flush()).resolves.toBeUndefined()
         expect(warn).toHaveBeenCalled()
     })
+
+    it('P0-2: requeues a failed batch instead of dropping it, so the next flush retries it', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const send = vi
+            .fn<(events: SignalEvent[]) => Promise<unknown>>()
+            .mockRejectedValueOnce(new Error('network down'))
+            .mockResolvedValue(undefined)
+        const q = createSignalQueue({ send, debounceMs: 1000 })
+
+        q.enqueue({ action: 'accepted', category: 'spelling', source: 'browser' })
+        await q.flush()
+        expect(send).toHaveBeenCalledTimes(1)
+
+        // The failed batch must not be lost — it should go out again on the
+        // next flush, ahead of anything enqueued after the failure.
+        q.enqueue({ action: 'rejected', category: 'grammar', source: 'browser' })
+        await q.flush()
+
+        expect(send).toHaveBeenCalledTimes(2)
+        expect(send.mock.calls[1]![0]).toEqual([
+            { action: 'accepted', category: 'spelling', source: 'browser' },
+            { action: 'rejected', category: 'grammar', source: 'browser' },
+        ])
+    })
+
+    it('P0-2: caps the requeue buffer and drops the OLDEST events first', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const send = vi
+            .fn<(events: SignalEvent[]) => Promise<unknown>>()
+            .mockRejectedValueOnce(new Error('network down'))
+            .mockResolvedValue(undefined)
+        const q = createSignalQueue({ send, debounceMs: 1000, maxBufferSize: 2 })
+
+        q.enqueue({ id: 1, action: 'accepted', source: 'browser' })
+        q.enqueue({ id: 2, action: 'accepted', source: 'browser' })
+        q.enqueue({ id: 3, action: 'accepted', source: 'browser' })
+        await q.flush()
+        expect(send).toHaveBeenCalledTimes(1)
+
+        await q.flush()
+        expect(send).toHaveBeenCalledTimes(2)
+        // Cap is 2 — the oldest (id 1) was dropped, ids 2 and 3 survive.
+        expect(send.mock.calls[1]![0]).toEqual([
+            { id: 2, action: 'accepted', source: 'browser' },
+            { id: 3, action: 'accepted', source: 'browser' },
+        ])
+    })
+
+    it('P0-2: flushFinal() drains the buffer synchronously through sendFinal (for pagehide)', () => {
+        const send = vi
+            .fn<(events: SignalEvent[]) => Promise<unknown>>()
+            .mockResolvedValue(undefined)
+        const sendFinal = vi.fn<(events: SignalEvent[]) => void>()
+        const q = createSignalQueue({ send, sendFinal, debounceMs: 1000 })
+
+        q.enqueue({ action: 'accepted', source: 'browser' })
+        q.flushFinal()
+
+        expect(sendFinal).toHaveBeenCalledTimes(1)
+        expect(sendFinal.mock.calls[0]![0]).toEqual([{ action: 'accepted', source: 'browser' }])
+        expect(send).not.toHaveBeenCalled()
+
+        // Buffer is drained — a second flushFinal with nothing queued is a no-op.
+        q.flushFinal()
+        expect(sendFinal).toHaveBeenCalledTimes(1)
+    })
+
+    it('P0-2: flushFinal() falls back to fire-and-forget `send` when no sendFinal is provided', () => {
+        const send = vi
+            .fn<(events: SignalEvent[]) => Promise<unknown>>()
+            .mockResolvedValue(undefined)
+        const q = createSignalQueue({ send, debounceMs: 1000 })
+
+        q.enqueue({ action: 'accepted', source: 'browser' })
+        expect(() => q.flushFinal()).not.toThrow()
+
+        expect(send).toHaveBeenCalledTimes(1)
+        expect(send.mock.calls[0]![0]).toEqual([{ action: 'accepted', source: 'browser' }])
+    })
 })

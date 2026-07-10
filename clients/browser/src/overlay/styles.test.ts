@@ -222,4 +222,96 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
             expect(rule, '.gf-tip must be position:fixed z-index:2147483647').not.toBeNull()
         })
     })
+
+    describe('P1-4: animation/spec-violation cleanup', () => {
+        it('.gf-rephrase-btn and .gf-rephrase have a static opacity:1 fallback (match .gf-goals-pop)', () => {
+            // (a) Both rely on the gf-popover-enter keyframe (from { opacity: 0 }).
+            // Without a static opacity:1 outside the animation, a reduced-motion
+            // or otherwise non-animating context strands the surface invisible.
+            const btn = /\.gf-rephrase-btn\s*\{[^}]*opacity:\s*1/s.exec(OVERLAY_CSS)
+            expect(btn, '.gf-rephrase-btn must set a static opacity: 1 fallback').not.toBeNull()
+            const card = /\.gf-rephrase\s*\{[^}]*opacity:\s*1/s.exec(OVERLAY_CSS)
+            expect(card, '.gf-rephrase must set a static opacity: 1 fallback').not.toBeNull()
+        })
+
+        it('every animation: reference points at a keyframe that is actually defined', () => {
+            // (d) gf-pill-enter was referenced by .gf-tooltip / .gf-toast but
+            // never defined anywhere — a silent no-op. Guard against any
+            // dangling `animation: <name>` reference regressing back in.
+            const stripped = OVERLAY_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+            const definedNames = new Set(
+                Array.from(stripped.matchAll(/@keyframes\s+([\w-]+)/g)).map((m) => m[1]),
+            )
+            const referencedNames = new Set(
+                Array.from(stripped.matchAll(/animation(?:-name)?:\s*([\w-]+)/g))
+                    .map((m) => m[1])
+                    .filter((name) => name !== 'none'),
+            )
+            for (const name of referencedNames) {
+                expect(definedNames.has(name), `@keyframes ${name} must be defined (referenced by animation)`).toBe(
+                    true,
+                )
+            }
+            expect(referencedNames.has('gf-pill-enter')).toBe(false)
+        })
+
+        it('.gf-toast uses a real, defined entrance keyframe (not the historical gf-pill-enter no-op)', () => {
+            const rule = /\.gf-toast\s*\{[^}]*animation:\s*([\w-]+)/s.exec(OVERLAY_CSS)
+            expect(rule, '.gf-toast must declare an animation').not.toBeNull()
+            expect(rule![1]).not.toBe('gf-pill-enter')
+            expect(new RegExp(`@keyframes\\s+${rule![1]}\\b`).test(OVERLAY_CSS)).toBe(true)
+        })
+
+        it('reduced-motion kills .gf-rephrase / .gf-rephrase-btn / .gf-toast animation outright (no backwards opacity-fade swap)', () => {
+            // (c)+(d): gf-no-motion fades opacity 0 -> 1, which is backwards for
+            // a reduced-motion override on a surface that already renders at
+            // opacity:1 (or has no opacity dependency) — match .gf-orb's
+            // existing `animation: none` treatment instead.
+            const reducedMotionBlock = /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n  \}/.exec(
+                OVERLAY_CSS,
+            )
+            expect(reducedMotionBlock, 'prefers-reduced-motion block must exist').not.toBeNull()
+            const block = reducedMotionBlock![1]!
+            for (const cls of ['.gf-rephrase-btn', '.gf-rephrase', '.gf-toast']) {
+                expect(block.includes(cls), `reduced-motion block must cover ${cls}`).toBe(true)
+            }
+            expect(/gf-no-motion/.test(block), 'reduced-motion block must not swap in gf-no-motion').toBe(false)
+        })
+
+        it('deletes dead legacy W1 selectors (.gf-panel, .gf-pill-panel, legacy .gf-tooltip, .gf-rephrase-card, .gf-toast__action)', () => {
+            // (e) Each of these was verified unreferenced by any browser/vencord
+            // JS (the live DOM classes are .gf-card, .gf-panel-aside, .gf-tip,
+            // .gf-rephrase, .gf-btn-soft respectively). Strip comments first —
+            // the classes are legitimately still named in explanatory prose
+            // (e.g. "DOM class is .gf-rephrase, NOT .gf-rephrase-card").
+            const stripped = OVERLAY_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+            expect(/\.gf-panel\s*\{/.test(stripped)).toBe(false)
+            expect(/\.gf-pill-panel\b/.test(stripped)).toBe(false)
+            expect(/\.gf-tooltip\b/.test(stripped)).toBe(false)
+            expect(/\.gf-rephrase-card\b/.test(stripped)).toBe(false)
+            expect(/\.gf-toast__action\b/.test(stripped)).toBe(false)
+        })
+
+        it('.gf-chip-source is defined exactly once (the stale hardcoded-px duplicate is gone)', () => {
+            const matches = OVERLAY_CSS.match(/\.gf-chip-source\s*\{/g) ?? []
+            expect(matches.length, '.gf-chip-source must be defined exactly once').toBe(1)
+        })
+
+        it('prefers-contrast/prefers-reduced-transparency blocks target the live .gf-rephrase class, not dead selectors', () => {
+            const transparencyBlock = /@media \(prefers-reduced-transparency: reduce\)\s*\{([\s\S]*?)\n  \}/.exec(
+                OVERLAY_CSS,
+            )
+            expect(transparencyBlock).not.toBeNull()
+            expect(transparencyBlock![1]).toMatch(/\.gf-rephrase\b/)
+            expect(transparencyBlock![1]).not.toMatch(/\.gf-rephrase-card/)
+
+            const contrastBlocks = Array.from(
+                OVERLAY_CSS.matchAll(/@media \(prefers-contrast: more\)\s*\{([\s\S]*?)\n  \}/g),
+            )
+            const hasRephrase = contrastBlocks.some((m) => /\.gf-rephrase\b/.test(m[1]!))
+            const hasDeadRephraseCard = contrastBlocks.some((m) => /\.gf-rephrase-card/.test(m[1]!))
+            expect(hasRephrase).toBe(true)
+            expect(hasDeadRephraseCard).toBe(false)
+        })
+    })
 })

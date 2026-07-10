@@ -44,6 +44,22 @@ export function isMessage<K extends GfMessageType>(msg: unknown, type: K): msg i
 }
 
 /**
+ * P1-8: true when a `runtime.onMessage` sender is THIS extension (not a web
+ * page, not another extension). `runtime.onMessage` fires for any sender the
+ * platform allows to reach it (including, per manifest config, other
+ * extensions via `externally_connectable`) — a same-shaped payload from an
+ * untrusted sender must never be allowed to trigger TRIGGER_CHECK /
+ * GET_TAB_STATUS / REPHRASE_SELECTION handling. Every listener that acts on
+ * a GfMessage MUST check this before dispatching on `type`.
+ */
+export function isTrustedSender(
+    sender: { id?: string } | null | undefined,
+    expectedExtensionId: string,
+): boolean {
+    return sender?.id === expectedExtensionId
+}
+
+/**
  * Build a typed sender for a specific message variant. The return type is
  * `(extra?) => GfMessageMap[K]` — callers don't need to write the
  * `{ type: '...' }` literal at every call site. The background, in turn,

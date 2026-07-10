@@ -5,7 +5,13 @@
 //      script owns the truth (focused field, current counts) and replies
 //      with TAB_STATUS. We don't synthesise the reply here.
 // We keep a tiny explicit router so every flow is greppable.
-import { isMessage, messageSender, type GfMessage, type GfMessageMap } from '@/messaging/schema'
+import {
+    isMessage,
+    isTrustedSender,
+    messageSender,
+    type GfMessage,
+    type GfMessageMap,
+} from '@/messaging/schema'
 
 export default defineBackground(() => {
     // (1) Browser commands: on-demand check.
@@ -19,7 +25,9 @@ export default defineBackground(() => {
     // returns a Promise<unknown>; we forward it back to the popup as the
     // message reply. Returning `true` (or a Promise) from the listener is
     // how WebExtensions keeps the response channel open.
-    browser.runtime.onMessage.addListener((raw: unknown) => {
+    browser.runtime.onMessage.addListener((raw: unknown, sender: Browser.runtime.MessageSender) => {
+        // P1-8: only trust messages from THIS extension.
+        if (!isTrustedSender(sender, browser.runtime.id)) return undefined
         if (!isMessage(raw, 'GET_TAB_STATUS')) return undefined
         return forwardGetTabStatusToActiveTab()
     })
