@@ -40,7 +40,18 @@ vi.mock('@/api/client', () => ({
     BridgeClient: class {
         correctStream = correctStreamMock
         signal = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
-        stats = vi.fn<() => Promise<unknown>>().mockResolvedValue({})
+        // A well-shaped default (not `{}`) — stats-view.ts's buildBars
+        // reads `top_issues[cat]` unconditionally and throws on an
+        // undefined `top_issues` (surfaced by the P1-6c Stats-tab test,
+        // which is the first test in this file to actually mount the
+        // real Stats view instead of stubbing onOpenStats).
+        stats = vi.fn<() => Promise<unknown>>().mockResolvedValue({
+            words_this_week: 0,
+            edits_total: 0,
+            acceptance_rate: 0,
+            streak: 0,
+            top_issues: {},
+        })
         dictionaryList = vi.fn<() => Promise<{ words: string[] }>>().mockResolvedValue({ words: [] })
         dictionaryRemove = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
         dictionaryAdd = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
@@ -424,7 +435,7 @@ describe('vencord orchestrator — panel refreshes when check resolves with new 
             return { original: 'I has a aple', suggestions: [], score: 75 } as CorrectResponse
         })
 
-        api = startOrchestrator(() => cfg)
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
 
         const composer = document.createElement('div')
         composer.setAttribute('role', 'textbox')
@@ -470,7 +481,7 @@ describe('vencord orchestrator — panel refreshes when check resolves with new 
             return { original: 'I has a aple', suggestions: [], score: 75 } as CorrectResponse
         })
 
-        api = startOrchestrator(() => cfg)
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
 
         const composer = document.createElement('div')
         composer.setAttribute('role', 'textbox')
@@ -743,7 +754,7 @@ describe('vencord orchestrator — churn-tolerant panel refresh (round 15)', () 
             })
         }
 
-        api = startOrchestrator(() => cfg)
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
 
         // First composer.
         const wrapper1 = document.createElement('div')
@@ -836,7 +847,7 @@ describe('vencord orchestrator — detach removes the live scan-line (W3-3 leak 
     })
 
     it('removes the scan-line wrapper when a field with a live scan-line is detached', async () => {
-        api = startOrchestrator(() => cfg)
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
 
         // A fake Discord composer that isDiscordComposer() accepts
         // (role=textbox, contenteditable=true, ancestor class stem
@@ -906,7 +917,7 @@ describe('vencord orchestrator — detach removes the live scan-line (W3-3 leak 
         // also tear down the scan-line. Drives the same fast-frame
         // setup, then blurs the composer (without removing it) and
         // asserts the scan-line is gone.
-        api = startOrchestrator(() => cfg)
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
 
         const composer = document.createElement('div')
         composer.setAttribute('role', 'textbox')
@@ -941,5 +952,443 @@ describe('vencord orchestrator — detach removes the live scan-line (W3-3 leak 
 
         const after = host?.shadowRoot?.querySelector('[data-grammarforge-scanline]')
         expect(after).toBeNull()
+    })
+})
+
+describe('vencord orchestrator — goals persist through setGoals (P0-1)', () => {
+    // ROOT CAUSE: the Goals popover's onChange used to do
+    // `getConfig().goals = next`. In production getConfig is
+    // `() => resolveConfig(settings.store)` (index.ts), and resolveConfig
+    // (settings.ts) allocates a BRAND NEW GrammarForgeConfig object on
+    // every call — so the mutation lands on a throwaway object and the
+    // very next getConfig() call re-derives goals from the untouched
+    // settings store. Fix: startOrchestrator now takes a `setGoals`
+    // callback that writes through to the real store (index.ts wires it
+    // to `settings.store.goals = next`); the onChange calls setGoals
+    // instead of mutating getConfig()'s return value.
+    //
+    // This test models the "new object per call" behaviour with a plain
+    // function (mirroring resolveConfig) instead of `() => cfg`, so a
+    // regression (reverting to the getConfig()-mutation bug) would make
+    // this test fail exactly like production would.
+    let api: OrchestratorApi
+    let store: GrammarForgeConfig = {
+        bridgeUrl: 'http://localhost',
+        realtimeDelayMs: 150,
+        acceptHotkey: 'ctrl+.',
+        rephraseHotkey: 'ctrl+/',
+        checkPastedText: false,
+        allowRemoteBridge: false,
+        debugLogging: false,
+        goals: { audience: 'general', formality: 'neutral' },
+    }
+    // Mirrors resolveConfig(settings.store): a NEW object every call.
+    const getConfig = (): GrammarForgeConfig => ({ ...store, goals: { ...store.goals } })
+    const setGoals = (next: GrammarForgeConfig['goals']): void => {
+        store = { ...store, goals: next }
+    }
+
+    beforeEach(() => {
+        correctStreamMock.mockClear()
+    })
+    afterEach(() => {
+        api?.stop()
+        document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
+    })
+
+    it('a goals change made via the panel Goals popover is visible on the next getConfig() call', async () => {
+        api = startOrchestrator(getConfig, setGoals)
+
+        const composer = document.createElement('div')
+        composer.setAttribute('role', 'textbox')
+        composer.setAttribute('contenteditable', 'true')
+        composer.textContent = 'hello world'
+        const wrapper = document.createElement('div')
+        wrapper.className = 'channelTextArea_inner'
+        wrapper.appendChild(composer)
+        document.body.appendChild(wrapper)
+
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        // Open the review panel (the chatbar-button/pill entry point).
+        // activeComposer() falls back to lastActiveField (set on attach),
+        // so no real focus/layout is required in jsdom.
+        api.togglePanel(new DOMRect(0, 0, 100, 40))
+
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        const root = host?.shadowRoot
+        expect(root).toBeTruthy()
+        const panel = root?.querySelector('.gf-panel-aside')
+        expect(panel).not.toBeNull()
+
+        // Click the panel's Goals pill → onOpenGoals → showGoals mounts
+        // the real Goals popover (overlay/goals.ts) into the same root.
+        const goalsPill = panel?.querySelector<HTMLElement>('[data-action="open-goals"]')
+        expect(goalsPill).not.toBeNull()
+        goalsPill?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+
+        const goalsPop = root?.querySelector('.gf-goals-pop')
+        expect(goalsPop).not.toBeNull()
+
+        // Pick "Formal" in the Formality segmented group (the real
+        // overlay/goals.ts DOM — see the button labels in showGoals).
+        const formalBtn = Array.from(
+            goalsPop?.querySelectorAll<HTMLButtonElement>('.gf-seg') ?? [],
+        ).find((b) => b.textContent === 'Formal')
+        expect(formalBtn).not.toBeUndefined()
+        formalBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+
+        // The regression this guards: BEFORE the fix, `getConfig().goals`
+        // would still read `neutral` here because the onChange mutated a
+        // throwaway resolveConfig()-shaped object. After the fix, setGoals
+        // writes through to `store`, so the next getConfig() reflects it.
+        expect(getConfig().goals.formality).toBe('formal')
+
+        composer.remove()
+        wrapper.remove()
+    })
+})
+
+describe('vencord orchestrator — stop() closes live surfaces (P0-2)', () => {
+    // ROOT CAUSE: stop() never called closeReviewPanel() (or closeSynonyms()
+    // for a synonyms popover opened outside the panel), so the review panel
+    // / Goals popover / Stats view / Synonyms popover's own destroy() never
+    // ran. Each of those installs a window-capture pointerdown (outside-
+    // dismiss) + keydown (Esc) listener via clients/browser/src/overlay/
+    // dismiss.ts — disabling the plugin with a surface open left those
+    // listeners bound to closures over a torn-down overlay host.
+    let api: OrchestratorApi
+    const cfg: GrammarForgeConfig = {
+        bridgeUrl: 'http://localhost',
+        realtimeDelayMs: 150,
+        acceptHotkey: 'ctrl+.',
+        rephraseHotkey: 'ctrl+/',
+        checkPastedText: false,
+        allowRemoteBridge: false,
+        debugLogging: false,
+        goals: { audience: 'general', formality: 'neutral' },
+    }
+
+    beforeEach(() => {
+        correctStreamMock.mockClear()
+    })
+    afterEach(() => {
+        document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
+    })
+
+    it('stop() removes the review panel AND the Goals popover it spawned', async () => {
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+
+        const composer = document.createElement('div')
+        composer.setAttribute('role', 'textbox')
+        composer.setAttribute('contenteditable', 'true')
+        composer.textContent = 'hello world'
+        const wrapper = document.createElement('div')
+        wrapper.className = 'channelTextArea_inner'
+        wrapper.appendChild(composer)
+        document.body.appendChild(wrapper)
+
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        api.togglePanel(new DOMRect(0, 0, 100, 40))
+
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        const root = host?.shadowRoot
+        expect(root?.querySelector('.gf-panel-aside')).not.toBeNull()
+
+        const goalsPill = root
+            ?.querySelector('.gf-panel-aside')
+            ?.querySelector<HTMLElement>('[data-action="open-goals"]')
+        goalsPill?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        expect(root?.querySelector('.gf-goals-pop')).not.toBeNull()
+
+        // installOutsideDismiss arms its window pointerdown listener after
+        // a setTimeout(0) (so the click that opened the surface doesn't
+        // immediately dismiss it) — wait a tick so both the panel's and
+        // the goals popover's listeners are actually installed before we
+        // assert their removal below.
+        await new Promise<void>((r) => setTimeout(r, 10))
+
+        // Spy on the window's removeEventListener so we can assert the
+        // dismiss listeners the panel/goals popover installed (window-
+        // capture pointerdown + keydown; see overlay/dismiss.ts) are torn
+        // down by stop() — not left dangling on a detached host.
+        const removeSpy = vi.spyOn(window, 'removeEventListener')
+
+        api.stop()
+
+        // Both surfaces must be gone from the DOM after stop().
+        expect(root?.querySelector('.gf-panel-aside')).toBeNull()
+        expect(root?.querySelector('.gf-goals-pop')).toBeNull()
+        // installOutsideDismiss/installEscapeCapture both register on
+        // 'pointerdown' (capture) and 'keydown' (capture) at window scope
+        // (overlay/dismiss.ts) — stop() must have removed at least one of
+        // each while tearing down the panel + goals popover.
+        const removedTypes = removeSpy.mock.calls.map((c) => c[0])
+        expect(removedTypes).toContain('pointerdown')
+        expect(removedTypes).toContain('keydown')
+
+        removeSpy.mockRestore()
+        composer.remove()
+        wrapper.remove()
+        document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
+    })
+})
+
+describe('vencord orchestrator — Stats tab switch wiring (P1-6c)', () => {
+    // ROOT CAUSE (gap, not a bug per se): no test exercised the panel's
+    // Review/Stats tab click -> onOpenStats/onOpenReview -> setActiveTab +
+    // mountStatsView wiring in buildReviewPanelOptions (orchestrator.ts).
+    // This drives it end-to-end through the real panel.ts tab buttons.
+    let api: OrchestratorApi
+    const cfg: GrammarForgeConfig = {
+        bridgeUrl: 'http://localhost',
+        realtimeDelayMs: 150,
+        acceptHotkey: 'ctrl+.',
+        rephraseHotkey: 'ctrl+shift+/',
+        checkPastedText: false,
+        allowRemoteBridge: false,
+        debugLogging: false,
+        goals: { audience: 'general', formality: 'neutral' },
+    }
+
+    beforeEach(() => {
+        correctStreamMock.mockClear()
+        correctStreamMock.mockImplementation(async (_req, onFast) => {
+            onFast({ original: '', suggestions: [], score: 100 })
+            return neverResolving
+        })
+    })
+    afterEach(() => {
+        api?.stop()
+        document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
+    })
+
+    it('clicking the Stats tab mounts the Stats view and marks it active; Review restores the review body', async () => {
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+
+        const composer = document.createElement('div')
+        composer.setAttribute('role', 'textbox')
+        composer.setAttribute('contenteditable', 'true')
+        composer.textContent = 'hello world'
+        const wrapper = document.createElement('div')
+        wrapper.className = 'channelTextArea_inner'
+        wrapper.appendChild(composer)
+        document.body.appendChild(wrapper)
+
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        api.togglePanel(new DOMRect(0, 0, 100, 40))
+
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        const root = host?.shadowRoot
+        const panel = root?.querySelector('.gf-panel-aside')
+        expect(panel).not.toBeNull()
+
+        // Before switching: Review tab active, no Stats view mounted.
+        const reviewTab = panel?.querySelector<HTMLElement>('[data-action="open-review"]')
+        const statsTab = panel?.querySelector<HTMLElement>('[data-action="open-stats"]')
+        expect(reviewTab?.getAttribute('aria-selected')).toBe('true')
+        expect(statsTab?.getAttribute('aria-selected')).toBe('false')
+        expect(panel?.querySelector('.gf-stats')).toBeNull()
+
+        // Click Stats: onOpenStats -> setActiveTab('stats') + mountStatsView.
+        statsTab?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        // mountStatsView kicks off async loadStats()/loadDict() (mocked
+        // BridgeClient resolves immediately) — flush a microtask turn.
+        await new Promise<void>((r) => setTimeout(r, 0))
+
+        expect(statsTab?.getAttribute('aria-selected')).toBe('true')
+        expect(reviewTab?.getAttribute('aria-selected')).toBe('false')
+        expect(panel?.querySelector('.gf-stats')).not.toBeNull()
+
+        // Click Review: onOpenReview -> setActiveTab('review') + restores
+        // the review body in place (no panel rebuild).
+        reviewTab?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+
+        expect(reviewTab?.getAttribute('aria-selected')).toBe('true')
+        expect(statsTab?.getAttribute('aria-selected')).toBe('false')
+        expect(panel?.querySelector('.gf-stats')).toBeNull()
+
+        composer.remove()
+        wrapper.remove()
+    })
+})
+
+describe('vencord orchestrator — applyAllForHighConf end-to-end (P1-6d)', () => {
+    // ROOT CAUSE (gap): applyAllForHighConf (wired to the panel's
+    // "Accept N high-confidence only" button, data-action="accept-high")
+    // had no end-to-end test — only the pure highConfidenceItems() filter
+    // (view-model.ts) was covered. This drives the full chain: check
+    // resolves with a mixed-confidence pair of suggestions -> open panel
+    // -> click accept-high -> only the >=0.90 item is actually applied to
+    // the composer's text (the low-confidence one is left untouched) ->
+    // the field re-checks and only the untouched suggestion remains.
+    let api: OrchestratorApi
+    const cfg: GrammarForgeConfig = {
+        bridgeUrl: 'http://localhost',
+        realtimeDelayMs: 150,
+        acceptHotkey: 'ctrl+.',
+        rephraseHotkey: 'ctrl+shift+/',
+        checkPastedText: false,
+        allowRemoteBridge: false,
+        debugLogging: false,
+        goals: { audience: 'general', formality: 'neutral' },
+    }
+
+    beforeEach(() => {
+        correctStreamMock.mockClear()
+    })
+    afterEach(() => {
+        api?.stop()
+        document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
+    })
+
+    it('accept-high applies only the >=0.90 suggestion and leaves the low-confidence one open', async () => {
+        // "teh word bad" — a high-confidence spelling fix ("teh"->"the",
+        // 0.95) and a low-confidence style nudge ("bad"->"good", 0.5).
+        // Byte offsets == code-unit offsets here (ASCII only).
+        const TEXT = 'teh word bad'
+        // Steady-state response for every call AFTER the initial one: only
+        // the still-open low-confidence item, at its position in "the word
+        // bad" (post-apply text). Set as the BASE implementation (not a
+        // "Once") because applySlateFix's own synthetic
+        // "insertReplacementText" beforeinput bubbles to the field's normal
+        // attachment listener and schedules an ADDITIONAL debounced
+        // recheck (same as it would on real Discord) beyond the
+        // orchestrator's own deliberate post-apply rerunFor call — every
+        // call from here on should see the same converged state.
+        correctStreamMock.mockImplementation(async (_req, onFast) => {
+            onFast({ original: 'the word bad', suggestions: [], score: 80 })
+            return {
+                original: 'the word bad',
+                score: 80,
+                suggestions: [
+                    {
+                        id: 2,
+                        span: { start: 9, end: 12 },
+                        replacement: 'good',
+                        model: 'llm',
+                        confidence: 0.5,
+                        category: 'style',
+                    },
+                ],
+            } as CorrectResponse
+        })
+        // The INITIAL check only: both suggestions, before anything is
+        // applied.
+        correctStreamMock.mockImplementationOnce(async (_req, onFast) => {
+            onFast({ original: TEXT, suggestions: [], score: 60 })
+            return {
+                original: TEXT,
+                score: 60,
+                suggestions: [
+                    {
+                        id: 1,
+                        span: { start: 0, end: 3 },
+                        replacement: 'the',
+                        model: 'harper',
+                        confidence: 0.95,
+                        category: 'spelling',
+                    },
+                    {
+                        id: 2,
+                        span: { start: 9, end: 12 },
+                        replacement: 'good',
+                        model: 'llm',
+                        confidence: 0.5,
+                        category: 'style',
+                    },
+                ],
+            } as CorrectResponse
+        })
+
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+
+        const composer = document.createElement('div')
+        composer.setAttribute('role', 'textbox')
+        composer.setAttribute('contenteditable', 'true')
+        composer.textContent = TEXT
+        const wrapper = document.createElement('div')
+        wrapper.className = 'channelTextArea_inner'
+        wrapper.appendChild(composer)
+        document.body.appendChild(wrapper)
+
+        // applySlateFix's primary path is a synthetic beforeinput with
+        // inputType "insertReplacementText" + getTargetRanges(); jsdom
+        // doesn't run a real rich-text editor to consume it, so — mirroring
+        // the "editor commits the exact expected text" scenario in
+        // rich-editor-apply.test.ts — apply the replacement synchronously
+        // in a listener so pollForTextChange sees it on its very first
+        // check (no timer/fake-timer choreography needed).
+        composer.addEventListener('beforeinput', (e) => {
+            const ie = e as InputEvent
+            if (ie.inputType !== 'insertReplacementText') return
+            const range = ie.getTargetRanges?.()[0]
+            if (!range) return
+            const node = range.startContainer
+            if (node.nodeType !== Node.TEXT_NODE) return
+            const text = node.textContent ?? ''
+            node.textContent =
+                text.slice(0, range.startOffset) + (ie.data ?? '') + text.slice(range.endOffset)
+        })
+
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        // Focus the composer — the realistic state while the user is
+        // typing (and the state activeComposer() resolves via
+        // focusedTrackedField() first). Without this, the fast frame's
+        // 0-item render (renderField's items===0 branch) nulls out
+        // lastActiveField because `document.activeElement !== el`, and
+        // togglePanel's `activeComposer()` fallback then has nothing to
+        // resolve to even after the final frame lands with 2 items.
+        composer.focus()
+
+        // Trigger the initial check.
+        composer.dispatchEvent(
+            new InputEvent('beforeinput', {
+                inputType: 'insertText',
+                bubbles: true,
+                cancelable: true,
+                data: 'a',
+            }),
+        )
+        await new Promise<void>((r) => setTimeout(r, 200))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        api.togglePanel(new DOMRect(0, 0, 100, 40))
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        const root = host?.shadowRoot
+        const panel = root?.querySelector('.gf-panel-aside')
+        expect(panel).not.toBeNull()
+
+        // showHighConfButton requires 0 < highConfCount < visible.length —
+        // with one 0.95 item and one 0.5 item out of two, it must render.
+        const acceptHighBtn = panel?.querySelector<HTMLButtonElement>('[data-action="accept-high"]')
+        expect(acceptHighBtn).not.toBeNull()
+        expect(acceptHighBtn?.textContent).toContain('1')
+
+        acceptHighBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        // applyBatchFor yields a requestAnimationFrame between edits, then
+        // calls rerunFor — drain both.
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => setTimeout(r, 200))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        // The high-confidence fix landed in the live DOM; the low-
+        // confidence suggestion's text ("bad") was left untouched.
+        expect(composer.textContent).toBe('the word bad')
+        // Only the high-confidence item's id was signalled as accepted.
+        // (getSummary().count reads visibleItems for the current field —
+        // after the recheck mock above, only the untouched style item
+        // remains open.)
+        expect(api.getSummary().count).toBe(1)
+
+        composer.remove()
+        wrapper.remove()
     })
 })

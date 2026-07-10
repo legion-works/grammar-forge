@@ -8,6 +8,13 @@ import { ChatBarButton } from '@api/ChatButtons'
 import { React } from '@webpack/common'
 import type { OrchestratorApi } from './orchestrator'
 import { tooltipFor } from './chatbar-tooltip'
+import { badgeStateFor } from './chatbar-badge'
+import {
+    LEGION_ACCENT,
+    LEGION_ACCENT_INK,
+    LEGION_PURPLE,
+    LEGION_SUCCESS,
+} from './legion-palette'
 
 const HIDE_PILL_DELAY_MS = 300
 
@@ -33,17 +40,13 @@ const MARK_BASELINE_TICKS: ReadonlyArray<[number, number]> = [
 const POWER_ICON_PATH =
     'M12 4 L12 12 M7.5 6.5 A7 7 0 1 0 16.5 6.5'
 
-// Legion Works dark-theme values (LOGO.md / handoff/scss/_tokens.scss).
-// The chatbar button renders in Discord's own React tree, OUTSIDE the
-// GrammarForge overlay shadow root — the `--gf-*` custom properties the
-// shared overlay CSS defines are scoped to that shadow host and do not
-// cascade here, so the Legion values are inlined directly. Vencord's GF
-// root is always dark (orchestrator.ts pins data-gf-theme="dark"), so only
-// the dark-theme values are needed.
-const LEGION_ACCENT = '#86e1fc' // --accent (dark)
-const LEGION_ACCENT_INK = '#0c1622' // --accent-ink — dark ink text ON cyan, never white
-const LEGION_PURPLE = '#c099ff' // --purple-400 (Geth Purple, AI refining pip)
-const LEGION_SUCCESS = '#c3e88d' // --success (Tokyo green, all-clear)
+// Legion Works dark-theme literals (LEGION_ACCENT / _ACCENT_INK / _PURPLE /
+// _SUCCESS) live in ./legion-palette (imported above) — a React/Vencord-
+// import-free file so chatbar-palette-sync.test.ts (P1-7) can assert them
+// against the canonical --gf-* tokens in
+// clients/browser/src/overlay/styles.ts under vitest, without pulling in
+// this file's unresolvable `@api/ChatButtons` / `@webpack/common` ambient
+// imports (those only exist at Vencord's own build time).
 
 const CHATBAR_STYLE_ID = 'grammarforge-chatbar-style'
 // One-time, idempotent keyframe injection for the AI-refining pip's pulse.
@@ -125,13 +128,10 @@ function ChatBarButtonRoot(props: ChatBarButtonRootProps) {
     // pip; zero suggestions once settled → the green all-clear check.
     // Paused hides the badge entirely — the icon's power glyph is the
     // single "this is off" affordance (no redundant second signal).
-    const badgeState: 'count' | 'pip' | 'clean' | null = summary.paused
-        ? null
-        : summary.count > 0
-          ? 'count'
-          : summary.phase === 'fast'
-            ? 'pip'
-            : 'clean'
+    // Extracted to ./chatbar-badge (pure, no React/Vencord imports) so
+    // chatbar.test.ts (P1-6b) can unit-test the pip/clean/paused-hidden
+    // states without needing a React renderer.
+    const badgeState = badgeStateFor(summary)
 
     const cancelHide = (): void => {
         if (hideTimerRef.current != null) {

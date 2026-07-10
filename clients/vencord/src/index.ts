@@ -14,7 +14,29 @@ import { resolveConfig } from './settings'
  *  core registers our entry AFTER start() returns (PluginManager calls
  *  p.start() first, addChatBarButton a few lines later), so the reorder is
  *  deferred a tick. Re-inserting the other entries preserves their relative
- *  order. */
+ *  order.
+ *
+ *  P2-8 CAUTION — this reorder is a hack, not a documented Vencord API:
+ *  it clear()s + reinserts Vencord-core's own `ChatBarButtonMap`
+ *  (@api/ChatButtons), relying on undocumented, currently-observed core
+ *  behaviour (core registers a plugin's chatBarButton via addChatBarButton
+ *  strictly AFTER that plugin's start() returns, and the map iterates in
+ *  insertion order). Neither of those is a stated contract. Two ways this
+ *  can silently break:
+ *    1. Another plugin does the exact same clear()+reinsert trick in its
+ *       own start() — whichever plugin's setTimeout(0) callback runs LAST
+ *       wins the front slot, and the "winner" can flip release to release
+ *       depending on plugin load order (a race, not a guarantee).
+ *    2. A future Vencord core version changes WHEN addChatBarButton runs
+ *       relative to start() (e.g. moves it before start(), or batches
+ *       registration), or changes ChatBarButtonMap to a structure that
+ *       doesn't preserve insertion order — this function would then either
+ *       no-op (own() lookup finds nothing yet) or silently stop reordering
+ *       anything, with no error surfaced.
+ *  No behavior change here — this is a caution comment only. If the chat-
+ *  bar button's position starts drifting after a Vencord update or another
+ *  plugin installs, THIS function's assumptions are the first place to
+ *  check. */
 function moveChatBarButtonFirst(pluginName: string): void {
     setTimeout(() => {
         const own = ChatBarButtonMap.get(pluginName)
@@ -51,8 +73,10 @@ const settings = definePluginSettings({
     rephraseHotkey: {
         type: OptionType.STRING,
         description:
-            "Hotkey that rephrases the focused composer's selection (or the whole composer if nothing is selected)",
-        default: 'ctrl+/',
+            "Hotkey that rephrases the focused composer's selection (or the whole composer if nothing is selected). " +
+            'Default is ctrl+shift+/ — plain ctrl+/ collides with Discord’s built-in keyboard-shortcuts overlay ' +
+            '(this plugin’s capture-phase handler would swallow it before Discord sees the chord).',
+        default: 'ctrl+shift+/',
     },
     checkPastedText: {
         type: OptionType.BOOLEAN,
@@ -86,7 +110,18 @@ export default definePlugin({
     // a zero-count idle state.
     chatBarButton: makeChatBarButton(() => orchestrator),
     start() {
-        orchestrator = startOrchestrator(() => resolveConfig(settings.store))
+        orchestrator = startOrchestrator(
+            () => resolveConfig(settings.store),
+            (next) => {
+                // P0-1: resolveConfig(settings.store) returns a brand-new
+                // GrammarForgeConfig object on every call (settings.ts) —
+                // mutating `getConfig().goals` is a no-op that silently
+                // discarded the user's goals change. Write through to the
+                // actual persisted settings store instead so every later
+                // resolveConfig() call picks it up.
+                settings.store.goals = next
+            },
+        )
         moveChatBarButtonFirst('GrammarForge')
     },
     stop() {

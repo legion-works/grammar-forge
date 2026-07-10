@@ -48,7 +48,7 @@ import {
     highConfidenceItems,
     defaultToneFromGoals,
 } from '@/lib/view-model'
-import type { Phase, Category } from '@/api/types'
+import type { Phase, Category, Goals } from '@/api/types'
 import { dismissRephraseCardsIn } from '@/overlay/rephrase-card'
 import { shouldAcceptHotkey } from '@/hotkeys/accept'
 import { shouldRephraseHotkey } from '@/hotkeys/rephrase-target'
@@ -223,7 +223,10 @@ function hitTest(
     return null
 }
 
-export function startOrchestrator(getConfig: () => GrammarForgeConfig): OrchestratorApi {
+export function startOrchestrator(
+    getConfig: () => GrammarForgeConfig,
+    setGoals: (goals: Goals) => void,
+): OrchestratorApi {
     // Debug logger gated on the plugin's debugLogging setting (read live).
     // localStorage does NOT exist in the Discord renderer, so the browser
     // client's gfDebug toggle is unusable here — the setting is the switch.
@@ -1169,12 +1172,20 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                     anchorRect: goalsRect,
                     goals: current,
                     onChange: (next) => {
-                        // Persist + re-render. The panel re-renders from
-                        // a fresh model on next open; the in-flight panel
+                        // Persist + re-render. resolveConfig(settings.store)
+                        // builds a NEW GrammarForgeConfig object on every
+                        // call (settings.ts), so mutating the object
+                        // returned by getConfig() here is thrown away —
+                        // the next getConfig() call re-derives from the
+                        // untouched underlying store. setGoals writes
+                        // through to the actual persisted store (index.ts
+                        // wires it to `settings.store.goals = ...`) so the
+                        // change survives. The panel re-renders from a
+                        // fresh model on next open; the in-flight panel
                         // keeps its old model until the user re-opens.
                         // A live update would require an update() on
                         // panel.ts — not in the W2b scope.
-                        getConfig().goals = next
+                        setGoals(next)
                         debugLog('goals change', next)
                     },
                     onClose: () => {
@@ -2087,6 +2098,19 @@ export function startOrchestrator(getConfig: () => GrammarForgeConfig): Orchestr
                 }
             }
             cleanups.length = 0
+            // P0-2: close any live surfaces (review panel + the Goals /
+            // Stats / Synonyms child surfaces it can spawn) BEFORE the
+            // overlay is torn down. closeReviewPanel() destroys reviewPanel,
+            // goalsHandle, statsHandle AND synonymsHandle — each installs
+            // its own window-capture pointerdown (installOutsideDismiss)
+            // and keydown listeners, so leaving them mounted across stop()
+            // orphans those listeners bound to a torn-down overlay.
+            closeReviewPanel()
+            // closeReviewPanel only clears synonymsHandle if it was set;
+            // closeSynonyms is idempotent, call defensively for the case a
+            // synonyms popover was opened OUTSIDE the review panel (the
+            // dblclick path — synonymsHandle can be live with no panel open).
+            closeSynonyms()
             // Tear down the pill BEFORE the overlay so its destroy runs in
             // a live root.
             cancelPillHide()

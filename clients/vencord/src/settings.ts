@@ -48,7 +48,15 @@ export function resolveConfig(raw: Record<string, unknown>): GrammarForgeConfig 
         rephraseHotkey:
             typeof raw.rephraseHotkey === 'string' && raw.rephraseHotkey.trim() !== ''
                 ? raw.rephraseHotkey.trim().toLowerCase()
-                : 'ctrl+/',
+                // P1-4: 'ctrl+/' collides with Discord's own built-in
+                // keyboard-shortcuts overlay (Ctrl+/), and our capture-
+                // phase keydown handler calls preventDefault() before
+                // Discord's handler ever sees the chord — the shortcuts
+                // overlay silently stops opening. 'ctrl+shift+/' avoids
+                // the collision. User-overridden values above are left
+                // exactly as configured; this only changes the fallback
+                // used when the setting is unset/blank.
+                : 'ctrl+shift+/',
         checkPastedText: raw.checkPastedText === true,
         allowRemoteBridge: common.allowRemoteBridge,
         debugLogging: raw.debugLogging === true,
