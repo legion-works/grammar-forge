@@ -142,6 +142,25 @@ const VIEWPORT_GUTTER = 8
 const PANEL_WIDTH = 344
 const PANEL_HEIGHT_FALLBACK = 480
 
+/** Per-panel active-tab state, keyed by the panel's `<aside>` element.
+ *  `renderChrome()` builds the tab click-handling closure and needs to
+ *  notify `showPanel()`'s `activeTab` tracking variable when the user
+ *  switches tabs — but `renderChrome` runs BEFORE that variable exists in
+ *  `showPanel`'s scope (the chrome mounts first; the handle/activeTab
+ *  bookkeeping is built from its return value). A `WeakMap<HTMLElement,
+ *  PanelTabState>` keyed by the (already-created) `aside` node closes that
+ *  loop without smuggling a callback through an `as HTMLElement & {...}`
+ *  cast on the DOM node itself: `showPanel` registers the setter once
+ *  `activeTab` exists, `renderChrome`'s click handler looks it up by
+ *  `aside` at call time (always after registration, since tab clicks only
+ *  fire after `showPanel` has returned the handle to its caller). Entries
+ *  are released automatically when the `aside` element is garbage
+ *  collected (no explicit cleanup needed). */
+interface PanelTabState {
+    set: (tab: 'review' | 'stats') => void
+}
+const TAB_STATE = new WeakMap<HTMLElement, PanelTabState>()
+
 /**
  * Mount the review panel in the supplied shadow root, anchored to the
  * orb's rect. Replaces any prior review panel (only one at a time per
@@ -302,8 +321,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
     let activeTab: 'review' | 'stats' = 'review'
     // Wire the tab-state updater back into renderChrome's setActiveTab so
     // clicking a tab updates both the DOM indicator AND this closure's state.
-    ;(aside as HTMLElement & { _gfSetActiveTabState: (t: 'review' | 'stats') => void })._gfSetActiveTabState =
-        (tab: 'review' | 'stats') => { activeTab = tab }
+    TAB_STATE.set(aside, { set: (tab) => { activeTab = tab } })
 
     const handle: PanelHandle = {
         destroy: () => {
@@ -312,6 +330,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
             aside.removeEventListener('mousedown', onMouseDown)
             if (aside.isConnected) aside.remove()
             bodyRef = null
+            TAB_STATE.delete(aside)
             unregisterPanel(root, handle)
         },
         isOpen: () => aside.isConnected,
@@ -496,10 +515,8 @@ function renderChrome(
             reviewTab.setAttribute('aria-selected', String(isReview))
             statsTab.classList.toggle('is-active', !isReview)
             statsTab.setAttribute('aria-selected', String(!isReview))
-            // Update the handle's activeTab via the shared ref injected below.
-            if ((aside as HTMLElement & { _gfSetActiveTabState?: (t: 'review' | 'stats') => void })._gfSetActiveTabState) {
-                (aside as HTMLElement & { _gfSetActiveTabState: (t: 'review' | 'stats') => void })._gfSetActiveTabState(tab)
-            }
+            // Update the handle's activeTab via the shared TAB_STATE registry.
+            TAB_STATE.get(aside)?.set(tab)
         }
 
     // Body slot

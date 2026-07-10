@@ -12,7 +12,15 @@
 // these under vitest without pulling in chatbar.ts's unresolvable
 // `@api/ChatButtons` / `@webpack/common` ambient-module imports (those
 // only exist at Vencord's own build time).
-export const LEGION_ACCENT = '#86e1fc' // --gf-accent (dark)
-export const LEGION_ACCENT_INK = '#0c1622' // --gf-accent-ink — dark ink text ON cyan, never white
-export const LEGION_PURPLE = '#c099ff' // --gf-ai-violet (Geth Purple, AI refining pip)
-export const LEGION_SUCCESS = '#c3e88d' // --gf-success (Tokyo green, all-clear)
+//
+// Re-exported (not hand-copied) from the browser client's
+// clients/browser/src/lib/legion-tokens.ts — the single source of truth
+// for these Legion Works color constants. This file keeps its own
+// (dark-only) names for chatbar.ts's existing call sites, but the VALUES
+// now come from one place instead of being duplicated hex literals.
+import { LEGION } from '@/lib/legion-tokens'
+
+export const LEGION_ACCENT = LEGION.dark.accent // --gf-accent (dark)
+export const LEGION_ACCENT_INK = LEGION.dark.accentInk // --gf-accent-ink — dark ink text ON cyan, never white
+export const LEGION_PURPLE = LEGION.dark.purple // --gf-ai-violet (Geth Purple, AI refining pip)
+export const LEGION_SUCCESS = LEGION.dark.success // --gf-success (Tokyo green, all-clear)

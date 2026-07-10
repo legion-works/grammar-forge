@@ -37,19 +37,6 @@ const CATEGORY_ORDER: readonly Category[] = [
     'unknown',
 ] as const
 
-/** Per-category dot color — same palette the underlines + popover already
- *  use. Kept here as a string fallback (the design-system tokens resolve
- *  via CSS variables; this is the inline-style default that renders before
- *  CSS variables are scoped). */
-const CATEGORY_DOT: Record<Category, string> = {
-    spelling: '#ef4444',
-    grammar: '#eab308',
-    punctuation: '#06b6d4',
-    style: '#8b5cf6',
-    typography: '#6b7280',
-    unknown: '#9ca3af',
-}
-
 const RING_RADIUS = 24.5
 const RING_CIRCUMFERENCE = 153.9
 
@@ -141,10 +128,10 @@ export function groupItemsByCategory(items: readonly RenderableItem[]): PanelGro
         groups.push({
             category: cat,
             label: meta.label,
-            dot: CATEGORY_DOT[cat],
+            dot: meta.badge,
             items: bucket.map((it) => ({
                 item: it,
-                dot: CATEGORY_DOT[it.category],
+                dot: CATEGORY_META[it.category].badge,
                 chipLabel: sourceChipLabelFor(it),
             })),
         })

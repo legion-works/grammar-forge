@@ -27,7 +27,7 @@
   --gf-radius-pill: 9999px;
   --gf-blur: blur(16px) saturate(180%);
   --gf-blur-pill: blur(10px) saturate(160%);
-  --gf-font: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --gf-font: 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   /* Shared design tokens (mirrors clients/browser/src/overlay/styles.ts
      -> :host([data-gf-theme]). Kept in sync with the in-page OVERLAY_CSS
      so popup swatches + legend dots + status dots agree with the
@@ -46,8 +46,8 @@
   --gf-band-good: #0891b2;
   --gf-band-fair: #d97706;
   --gf-band-needswork: #dc2626;
-  --gf-font-display: "Space Grotesk", "Geist", ui-sans-serif, system-ui, sans-serif;
-  --gf-font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --gf-font-display: "Space Grotesk", "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --gf-font-ui: "Geist Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --gf-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 

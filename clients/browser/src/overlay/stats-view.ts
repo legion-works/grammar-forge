@@ -108,18 +108,6 @@ export function buildStatsViewModel(
     }
 }
 
-/** Category → CATEGORY_META lookup, augmented with the inline dot color
- *  (kept here for parity with panel-model's CATEGORY_DOT — the design
- *  tokens resolve via CSS vars; this is the inline-style default). */
-const CATEGORY_DOT: Record<Category, string> = {
-    spelling: '#ef4444',
-    grammar: '#eab308',
-    punctuation: '#06b6d4',
-    style: '#8b5cf6',
-    typography: '#6b7280',
-    unknown: '#9ca3af',
-}
-
 const CATEGORY_ORDER: readonly Category[] = [
     'spelling',
     'grammar',
@@ -156,7 +144,7 @@ function buildBars(
         label: CATEGORY_META[e.category]?.label ?? e.category,
         count: e.count,
         widthPct: max > 0 ? Math.max(2, (e.count / max) * 100) : 0,
-        color: CATEGORY_DOT[e.category],
+        color: CATEGORY_META[e.category]?.badge ?? '#9ca3af',
     }))
 }
 
@@ -196,6 +184,13 @@ export function mountStatsView(
     root.className = 'gf-stats'
     root.setAttribute('role', 'region')
     root.setAttribute('aria-label', 'Stats')
+    // The loading -> data/error swap below (renderLoading / renderLoaded /
+    // renderError, all called via root.textContent = '' + rebuild) must be
+    // announced to screen readers — without aria-live the content change is
+    // silent to AT users, who'd see no indication the Stats tab ever
+    // finished loading. Matches the streaming-banner pattern in panel.ts
+    // (renderReviewBodyContent's .gf-banner) and toast.ts's aria-live pill.
+    root.setAttribute('aria-live', 'polite')
     // Initial placeholder (loading) — rendered off-DOM first, then
     // swapped in atomically so there's no intermediate empty flash.
     renderLoading(root)

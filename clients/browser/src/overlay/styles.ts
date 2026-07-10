@@ -1,3 +1,5 @@
+import { BAND_COLOR, CATEGORY_COLOR, CONF_COLOR, CONF_LOW_LIGHT, LEGION } from '@/lib/legion-tokens'
+
 // Adapted from codextde/textchecker @ 7b66d78e74379f9fc909f6d4a2d984cb50a5d088 (MIT)
 // Shadow-root CSS for the overlay. Implements the "Liquid Glass" material
 // described in spec §7.1 + the Liquid Glass CSS research:
@@ -896,37 +898,37 @@ export const OVERLAY_CSS = `
    * enough that WHITE text reads on it — --gf-accent-ink is #fff here.
    * (Dark theme's brighter cyan needs the opposite: dark ink.) */
   :host([data-gf-theme="light"]) {
-    --gf-accent: #2f7d9c;
-    --gf-accent-hover: #245f78;
-    --gf-accent-ink: #ffffff;
-    --gf-accent-soft: color-mix(in oklab, #2f7d9c 15%, transparent);
+    --gf-accent: ${LEGION.light.accent};
+    --gf-accent-hover: ${LEGION.light.accentHover};
+    --gf-accent-ink: ${LEGION.light.accentInk};
+    --gf-accent-soft: color-mix(in oklab, ${LEGION.light.accent} 15%, transparent);
     --gf-link: #3760bf;
-    --gf-ring: color-mix(in oklab, #2f7d9c 52%, transparent);
+    --gf-ring: color-mix(in oklab, ${LEGION.light.accent} 52%, transparent);
     --gf-warm: #e0744c;
-    --gf-cat-spelling: #ef4444;
-    --gf-cat-grammar: #eab308;
-    --gf-cat-punctuation: #06b6d4;
-    --gf-cat-style: #8b5cf6;
-    --gf-cat-typography: #6b7280;
-    --gf-band-excellent: #16a34a;
-    --gf-band-good: #0891b2;
-    --gf-band-fair: #d97706;
-    --gf-band-needswork: #dc2626;
-    --gf-conf-high: #16a34a;
-    --gf-conf-medium: #d97706;
-    --gf-conf-low: #565f89;
+    --gf-cat-spelling: ${CATEGORY_COLOR.spelling.badge};
+    --gf-cat-grammar: ${CATEGORY_COLOR.grammar.badge};
+    --gf-cat-punctuation: ${CATEGORY_COLOR.punctuation.badge};
+    --gf-cat-style: ${CATEGORY_COLOR.style.badge};
+    --gf-cat-typography: ${CATEGORY_COLOR.typography.badge};
+    --gf-band-excellent: ${BAND_COLOR.excellent};
+    --gf-band-good: ${BAND_COLOR.good};
+    --gf-band-fair: ${BAND_COLOR.fair};
+    --gf-band-needswork: ${BAND_COLOR['needs-work']};
+    --gf-conf-high: ${CONF_COLOR.high};
+    --gf-conf-medium: ${CONF_COLOR.medium};
+    --gf-conf-low: ${CONF_LOW_LIGHT};
     --gf-diff-old: #dc2626;
     --gf-diff-new: #16a34a;
-    --gf-ai-violet: #a87ff0;
-    --gf-ai-violet-soft: #8347d9;
+    --gf-ai-violet: ${LEGION.light.purple};
+    --gf-ai-violet-soft: ${LEGION.light.purpleSoft};
     --gf-ai-text: #7c4fc9;
-    --gf-success: #a8d472;
+    --gf-success: ${LEGION.light.success};
     --gf-ui: #1a1b26;
     --gf-muted: #565f89;
     --gf-faint: #737a8c;
     --gf-ink: #2c3044;
-    --gf-font-display: "Space Grotesk", "Geist", ui-sans-serif, system-ui, sans-serif;
-    --gf-font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --gf-font-display: "Space Grotesk", "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+    --gf-font-ui: "Geist Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
     --gf-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
     --gf-r-pill: 9999px;
     --gf-r-panel: 20px;
@@ -947,37 +949,37 @@ export const OVERLAY_CSS = `
    * Legion Cyan is bright here (#86E1FC) — DARK ink (#0C1622), never
    * white, on any accent-filled surface. This is the #1 rule. */
   :host([data-gf-theme="dark"]) {
-    --gf-accent: #86e1fc;
-    --gf-accent-hover: #a9ebff;
-    --gf-accent-ink: #0c1622;
-    --gf-accent-soft: color-mix(in oklab, #86e1fc 18%, transparent);
+    --gf-accent: ${LEGION.dark.accent};
+    --gf-accent-hover: ${LEGION.dark.accentHover};
+    --gf-accent-ink: ${LEGION.dark.accentInk};
+    --gf-accent-soft: color-mix(in oklab, ${LEGION.dark.accent} 18%, transparent);
     --gf-link: #82aaff;
-    --gf-ring: color-mix(in oklab, #86e1fc 58%, transparent);
+    --gf-ring: color-mix(in oklab, ${LEGION.dark.accent} 58%, transparent);
     --gf-warm: #ff966c;
-    --gf-cat-spelling: #ef4444;
-    --gf-cat-grammar: #eab308;
-    --gf-cat-punctuation: #06b6d4;
-    --gf-cat-style: #8b5cf6;
-    --gf-cat-typography: #6b7280;
-    --gf-band-excellent: #16a34a;
-    --gf-band-good: #0891b2;
-    --gf-band-fair: #d97706;
-    --gf-band-needswork: #dc2626;
-    --gf-conf-high: #16a34a;
-    --gf-conf-medium: #d97706;
-    --gf-conf-low: #828bb8;
+    --gf-cat-spelling: ${CATEGORY_COLOR.spelling.badge};
+    --gf-cat-grammar: ${CATEGORY_COLOR.grammar.badge};
+    --gf-cat-punctuation: ${CATEGORY_COLOR.punctuation.badge};
+    --gf-cat-style: ${CATEGORY_COLOR.style.badge};
+    --gf-cat-typography: ${CATEGORY_COLOR.typography.badge};
+    --gf-band-excellent: ${BAND_COLOR.excellent};
+    --gf-band-good: ${BAND_COLOR.good};
+    --gf-band-fair: ${BAND_COLOR.fair};
+    --gf-band-needswork: ${BAND_COLOR['needs-work']};
+    --gf-conf-high: ${CONF_COLOR.high};
+    --gf-conf-medium: ${CONF_COLOR.medium};
+    --gf-conf-low: ${CONF_COLOR.low};
     --gf-diff-old: #ff757f;
     --gf-diff-new: #c3e88d;
-    --gf-ai-violet: #c099ff;
-    --gf-ai-violet-soft: #a87ff0;
+    --gf-ai-violet: ${LEGION.dark.purple};
+    --gf-ai-violet-soft: ${LEGION.dark.purpleSoft};
     --gf-ai-text: #d3c1ff;
-    --gf-success: #c3e88d;
+    --gf-success: ${LEGION.dark.success};
     --gf-ui: #c8d3f5;
     --gf-muted: #828bb8;
     --gf-faint: #737aa2;
     --gf-ink: #a9b1d6;
-    --gf-font-display: "Space Grotesk", "Geist", ui-sans-serif, system-ui, sans-serif;
-    --gf-font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --gf-font-display: "Space Grotesk", "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+    --gf-font-ui: "Geist Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
     --gf-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
     --gf-r-pill: 9999px;
     --gf-r-panel: 20px;

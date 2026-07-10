@@ -22,6 +22,9 @@
     "check": "oxfmt --check && oxlint && wxt prepare && tsc --noEmit && vitest run && wxt build"
   },
   "dependencies": {
+    "@fontsource/geist-sans": "^5.2.5",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/space-grotesk": "^5.2.8",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

@@ -9,6 +9,7 @@
 // math, band colours, or ring geometry used at render time.
 
 import type { Band, Goals, Phase } from '@/api/types'
+import { BAND_COLOR as LEGION_BAND_COLOR, CONF_COLOR as LEGION_CONF_COLOR } from '@/lib/legion-tokens'
 import type { RenderableItem } from '@/lib/pipeline'
 
 /** Penalty deducted from the 100-point score per open issue, by category.
@@ -67,14 +68,11 @@ export function arcOffset(score: number): number {
 }
 
 /** Stroke colour per band — matches the reference DC score ring palette
- *  (line 486). Distinct from the SCSS `$gf-band-*` tokens, which are
- *  decorative only — the math here drives what users see on the orb. */
-export const BAND_COLOR: Record<Band, string> = {
-    excellent: '#16a34a',
-    good: '#0891b2',
-    fair: '#d97706',
-    'needs-work': '#dc2626',
-}
+ *  (line 486), which is also the canonical `lib/legion-tokens.ts`
+ *  `BAND_COLOR` / the SCSS `$gf-band-*` / `--gf-band-*` tokens (they were
+ *  independently-defined-but-identical before consolidation — this
+ *  re-export is now the only definition). */
+export const BAND_COLOR: Record<Band, string> = LEGION_BAND_COLOR
 
 /** Pure derivation of what the per-field score orb should render, given the
  *  current streaming phase + visible count + (optional) score. CONSUMED by
@@ -171,15 +169,17 @@ export function confLabel(confidence: number | undefined): ConfidenceLabel {
     if (c >= 0.75) return 'Medium'
     return 'Low'
 }
-// P1-10: canonical values are the design-system tokens in overlay/styles.ts
-// (--gf-conf-high / --gf-conf-medium / --gf-conf-low, dark-theme family —
-// see :host([data-gf-theme="dark"]) in OVERLAY_CSS). Low used to disagree
-// (#64748b here vs #828bb8 in styles.ts); a sync test in view-model.test.ts
-// asserts these stay aligned.
+// P1-10: canonical values live in lib/legion-tokens.ts's CONF_COLOR, which
+// is what overlay/styles.ts's --gf-conf-high / --gf-conf-medium /
+// --gf-conf-low (dark-theme family — see :host([data-gf-theme="dark"]) in
+// OVERLAY_CSS) is interpolated from. Low used to disagree (#64748b here vs
+// #828bb8 in styles.ts); the dark-theme value won and is now the only
+// place it's written down. A sync test in view-model.test.ts still asserts
+// the generated OVERLAY_CSS text stays aligned.
 export const CONF_COLOR: Record<ConfidenceLabel, string> = {
-    High: '#16a34a',
-    Medium: '#d97706',
-    Low: '#828bb8',
+    High: LEGION_CONF_COLOR.high,
+    Medium: LEGION_CONF_COLOR.medium,
+    Low: LEGION_CONF_COLOR.low,
 }
 
 /** Insight numbers for the panel's stat row. The reference DC renders
