@@ -14,6 +14,7 @@ import { getSpanRectsBatch } from '@/overlay/rect'
 import { getText } from '@/input/text'
 import { selectionToCodeUnitSpan } from './index'
 import { showRephraseButton, type RephraseButtonHandle } from '@/overlay/rephrase-button'
+import { isSingleCleanWordSelection, type FlaggedRange, type ResolvedWord } from '@/overlay/synonyms'
 import {
     dismissRephraseCardsIn,
     showRephraseCard,
@@ -110,6 +111,25 @@ export interface RephraseDeps {
      *  used `rephraseTone` only); when absent we fall back to the
      *  `rephraseTone` setting. */
     getGoals?: () => Goals | null
+    /**
+     * Feature 2 (interaction redesign): the ranges of currently-open
+     * correction items on `el`, in code-unit `cuStart`/`cuEnd` form (the
+     * shape already on `RenderableItem`). Used to gate the split control's
+     * Synonyms segment — reused via `isSingleCleanWordSelection` from
+     * @/overlay/synonyms, the same "clean word" predicate the removed
+     * dblclick auto-open used. Optional; omitting it treats the field as
+     * having no open corrections (Synonyms enablement then depends only on
+     * the selection being a single word).
+     */
+    getFlaggedRanges?: (el: HTMLElement) => ReadonlyArray<FlaggedRange>
+    /**
+     * Open the Synonyms popover for a resolved word (fetch + measure +
+     * show — mirrors the removed dblclick auto-open). Called when the user
+     * clicks the split control's Synonyms segment. Optional; when omitted
+     * the Synonyms segment renders but is inert (defensive — every real
+     * wiring supplies this).
+     */
+    openSynonyms?: (el: HTMLElement, resolved: ResolvedWord) => void
 }
 
 export interface RephraseFlow {
@@ -236,12 +256,31 @@ export function mountRephraseFlow(deps: RephraseDeps): RephraseFlow {
                 hideRephraseButton()
                 return
             }
+            // Feature 2b: gate the split control's Synonyms segment on the
+            // selection being a single "clean" word — same predicate the
+            // removed dblclick auto-open used, now driven off the current
+            // selection instead of a click point. A double-click selects
+            // its word natively, so this selectionchange path also covers
+            // the old dblclick-to-synonyms gesture (Feature 2c).
+            const fullText = getText(found.el)
+            const flagged = deps.getFlaggedRanges?.(found.el) ?? []
+            const cleanWord = isSingleCleanWordSelection(fullText, found.span, flagged)
             rephraseButtonHandle = showRephraseButton(deps.overlayRoot, {
                 anchorRect: found.rect,
                 onClick: () => {
                     hideRephraseButton()
                     void openRephraseFor(found.el, found.text, found.span)
                 },
+                synonymsEnabled: cleanWord !== null,
+                synonymsDisabledReason: cleanWord
+                    ? undefined
+                    : 'Select a single word without an active correction to see synonyms',
+                onSynonymsClick: cleanWord
+                    ? () => {
+                          hideRephraseButton()
+                          deps.openSynonyms?.(found.el, cleanWord)
+                      }
+                    : undefined,
             })
         }, 150)
     }

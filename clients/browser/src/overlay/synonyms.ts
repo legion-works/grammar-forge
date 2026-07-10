@@ -148,6 +148,69 @@ export function resolveWordFromDblClick(
     return resolveWordAtPoint(text, offset)
 }
 
+/** A half-open code-unit range an open correction underline covers. Shape
+ *  mirrors the `cuStart`/`cuEnd` fields already on `RenderableItem`
+ *  (@/lib/pipeline) in both clients — callers pass their live items
+ *  straight through with no reshaping. */
+export interface FlaggedRange {
+    cuStart: number
+    cuEnd: number
+}
+
+/**
+ * PURE — the "clean word" predicate shared by the double-click-to-select
+ * word path (superseded — see below) and the split rephrase/synonyms
+ * control's Synonyms segment gate (Feature 2b). Given the FULL field text
+ * and a selection span (absolute code-unit offsets, e.g. from
+ * `selectionStart`/`selectionEnd` or `Range` resolution), returns the
+ * `ResolvedWord` when the selection is EXACTLY one word with no active
+ * correction on it, else `null`.
+ *
+ * "Exactly one word" means:
+ *   - the span is non-empty and every code point in it is a word character
+ *     (`isWordChar`)
+ *   - the character immediately before `start` (if any) and immediately at
+ *     `end` (if any) are NOT word characters — the selection boundary must
+ *     land on the word's natural edges, not mid-word (a selection of just
+ *     "orge" inside "GrammarForge" is not a clean word) and not span past it
+ *     into an adjacent word.
+ *
+ * "No active correction" means no entry in `flagged` overlaps `[start, end)`
+ * — mirrors the dblclick handlers' pre-Feature-2 hit-test against open
+ * correction items in both clients (browser: itemRects; vencord: s.items),
+ * just expressed against the item's code-unit range instead of a rendered
+ * rect so it works identically for a selection that never involved a mouse
+ * click.
+ */
+export function isSingleCleanWordSelection(
+    text: string,
+    span: { start: number; end: number },
+    flagged: ReadonlyArray<FlaggedRange>,
+): ResolvedWord | null {
+    const { start, end } = span
+    if (
+        typeof text !== 'string' ||
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        start < 0 ||
+        end > text.length ||
+        end <= start
+    ) {
+        return null
+    }
+    const slice = text.slice(start, end)
+    for (let i = start; i < end; i++) {
+        if (!isWordChar(text[i] ?? '')) return null
+    }
+    const before = start > 0 ? (text[start - 1] ?? '') : ''
+    if (before && isWordChar(before)) return null
+    const after = end < text.length ? (text[end] ?? '') : ''
+    if (after && isWordChar(after)) return null
+    const isFlagged = flagged.some((f) => start < f.cuEnd && end > f.cuStart)
+    if (isFlagged) return null
+    return { word: slice, start, end }
+}
+
 export interface SynonymsOptions {
     /** Viewport rect the popover anchors to (the word's bounding rect,
      *  caller-measured). */

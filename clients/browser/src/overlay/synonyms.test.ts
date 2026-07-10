@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+    isSingleCleanWordSelection,
     isWordChar,
     offsetFromDblClick,
     resolveWordAtPoint,
@@ -129,6 +130,74 @@ describe('resolveWordFromDblClick (DOM glue — wraps the pure resolver)', () =>
         const field = document.createElement('div')
         const event = new MouseEvent('dblclick', { clientX: 10, clientY: 10 })
         expect(() => resolveWordFromDblClick(event, 'x', field)).not.toThrow()
+    })
+})
+
+describe('isSingleCleanWordSelection (Feature 2b: split control Synonyms-segment gate)', () => {
+    const TEXT = 'The quick brown fox jumps.'
+    // 'quick' = indices 4..9
+
+    it('returns the resolved word for a selection matching exactly one word', () => {
+        const r = isSingleCleanWordSelection(TEXT, { start: 4, end: 9 }, [])
+        expect(r).toEqual({ word: 'quick', start: 4, end: 9 })
+    })
+
+    it('returns null for a multi-word selection', () => {
+        expect(isSingleCleanWordSelection(TEXT, { start: 4, end: 15 }, [])).toBeNull()
+    })
+
+    it('returns null for a partial-word selection (boundary lands mid-word)', () => {
+        // "uic" inside "quick" — selecting past neither edge.
+        expect(isSingleCleanWordSelection(TEXT, { start: 5, end: 8 }, [])).toBeNull()
+    })
+
+    it('returns null when the selection is empty (collapsed)', () => {
+        expect(isSingleCleanWordSelection(TEXT, { start: 4, end: 4 }, [])).toBeNull()
+    })
+
+    it('returns null when the selection is only punctuation/whitespace', () => {
+        expect(isSingleCleanWordSelection(TEXT, { start: 3, end: 4 }, [])).toBeNull()
+    })
+
+    it('returns null when the word overlaps an open correction (flagged range)', () => {
+        const flagged = [{ cuStart: 4, cuEnd: 9 }]
+        expect(isSingleCleanWordSelection(TEXT, { start: 4, end: 9 }, flagged)).toBeNull()
+    })
+
+    it('returns null when the flagged range only PARTIALLY overlaps the word', () => {
+        const flagged = [{ cuStart: 0, cuEnd: 6 }] // overlaps "qu" of "quick"
+        expect(isSingleCleanWordSelection(TEXT, { start: 4, end: 9 }, flagged)).toBeNull()
+    })
+
+    it('ignores flagged ranges that do not overlap the selection', () => {
+        const flagged = [{ cuStart: 16, cuEnd: 19 }] // "fox"
+        expect(isSingleCleanWordSelection(TEXT, { start: 4, end: 9 }, flagged)).toEqual({
+            word: 'quick',
+            start: 4,
+            end: 9,
+        })
+    })
+
+    it('accepts a word at the very start of the text', () => {
+        expect(isSingleCleanWordSelection(TEXT, { start: 0, end: 3 }, [])).toEqual({
+            word: 'The',
+            start: 0,
+            end: 3,
+        })
+    })
+
+    it('accepts a word at the very end of the text (before trailing punctuation)', () => {
+        // "jumps" = indices 20..25 (the "." is not part of the word).
+        expect(isSingleCleanWordSelection(TEXT, { start: 20, end: 25 }, [])).toEqual({
+            word: 'jumps',
+            start: 20,
+            end: 25,
+        })
+    })
+
+    it('returns null for an out-of-range span', () => {
+        expect(isSingleCleanWordSelection(TEXT, { start: -1, end: 5 }, [])).toBeNull()
+        expect(isSingleCleanWordSelection(TEXT, { start: 0, end: TEXT.length + 5 }, [])).toBeNull()
     })
 })
 

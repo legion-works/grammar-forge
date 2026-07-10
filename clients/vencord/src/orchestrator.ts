@@ -39,7 +39,17 @@ import {
 import { showPanel, type PanelHandle, type PanelOptions } from '@/overlay/panel'
 import { showGoals, type GoalsHandle } from '@/overlay/goals'
 import { mountStatsView, type StatsViewHandle, type StatsViewDeps } from '@/overlay/stats-view'
-import { resolveWordFromDblClick, showSynonyms, type SynonymsHandle } from '@/overlay/synonyms'
+import {
+    isSingleCleanWordSelection,
+    showSynonyms,
+    type ResolvedWord,
+    type SynonymsHandle,
+} from '@/overlay/synonyms'
+import {
+    dismissRephraseButtonsIn,
+    showRephraseButton,
+    type RephraseButtonHandle,
+} from '@/overlay/rephrase-button'
 import { showToast } from '@/overlay/toast'
 import {
     computeScore,
@@ -330,6 +340,11 @@ export function startOrchestrator(
     let goalsHandle: GoalsHandle | null = null
     let statsHandle: StatsViewHandle | null = null
     let synonymsHandle: SynonymsHandle | null = null
+    // Feature 2 (interaction redesign): the floating Rephrase/Synonyms split
+    // control, vencord parity with the browser client's mountRephraseFlow.
+    // One at a time (a new one dismisses the prior); mounted/hidden by the
+    // selectionchange-driven code below rephraseFor.
+    let rephraseButtonHandle: RephraseButtonHandle | null = null
     let lastActiveField: HTMLElement | null = null
     // Single hover tooltip (one per overlay, mirrors browser client).
     // Shared across all fields; a new showTooltip call dismisses the prior.
@@ -780,6 +795,81 @@ export function startOrchestrator(
         void rerunFor(el)(getText(el))
     }
 
+    /** Open the Synonyms popover for a resolved word: measure \u2192 show
+     *  (loading) \u2192 fetch \u2192 show (loaded/empty/error). Extracted
+     *  (byte-equivalent minus the flagged-word hit-test, which the caller
+     *  already ran via `isSingleCleanWordSelection`) from the former
+     *  dblclick auto-open handler \u2014 Feature 2c removes that trigger; this
+     *  is now called ONLY from the split control's Synonyms segment (see
+     *  the selectionchange-driven mount below `rephraseFor`). */
+    const openSynonymsForWord = (el: HTMLElement, resolved: ResolvedWord): void => {
+        if (paused) return
+        const text = getText(el)
+        const wordRect = measureWordRect(el, text, resolved.start, resolved.end)
+        if (!wordRect) return
+        // The word sits INSIDE the composer, so clearing the word alone
+        // still lets the popover overlap the composer chrome (overlap
+        // reported live 2026-07). Discord ALSO anchors a floating selection
+        // formatting toolbar (B/I/U/\u2026) above ANY selection (not just a
+        // dblclick) \u2014 clear a fixed band above the composer that covers it.
+        const composerRect = el.getBoundingClientRect()
+        const clearRect = new DOMRect(
+            composerRect.x,
+            composerRect.y - SELECTION_TOOLBAR_CLEARANCE_PX,
+            composerRect.width,
+            composerRect.height + SELECTION_TOOLBAR_CLEARANCE_PX,
+        )
+        hideTooltipNow()
+        closeSynonyms()
+        synonymsHandle = showSynonyms(overlay.root, {
+            anchorRect: wordRect,
+            clearRect,
+            word: resolved.word,
+            synonyms: [],
+            loading: true,
+            onPick: (synonym) => void applySynonym(el, resolved, synonym),
+            onClose: () => {
+                synonymsHandle?.destroy()
+                synonymsHandle = null
+            },
+        })
+        refreshClient()
+            .synonyms(resolved.word)
+            .then((res) => {
+                if (!synonymsHandle) return
+                synonymsHandle.destroy()
+                synonymsHandle = showSynonyms(overlay.root, {
+                    anchorRect: wordRect,
+                    clearRect,
+                    word: resolved.word,
+                    synonyms: res.synonyms,
+                    loading: false,
+                    onPick: (synonym) => void applySynonym(el, resolved, synonym),
+                    onClose: () => {
+                        synonymsHandle?.destroy()
+                        synonymsHandle = null
+                    },
+                })
+            })
+            .catch((err) => {
+                debugLog('synonyms fetch failed', err)
+                if (!synonymsHandle) return
+                synonymsHandle.destroy()
+                synonymsHandle = showSynonyms(overlay.root, {
+                    anchorRect: wordRect,
+                    clearRect,
+                    word: resolved.word,
+                    synonyms: [],
+                    loading: false,
+                    onPick: (synonym) => void applySynonym(el, resolved, synonym),
+                    onClose: () => {
+                        synonymsHandle?.destroy()
+                        synonymsHandle = null
+                    },
+                })
+            })
+    }
+
     const openPopoverFor = (el: HTMLElement, item: RenderableItem, anchorRect: DOMRect): void => {
         debugLog('popover open', {
             original: item.diffOriginal,
@@ -892,6 +982,11 @@ export function startOrchestrator(
         el: HTMLElement
         text: string
         span: { start: number; end: number }
+        /** Viewport rect of the selection — used to anchor the split
+         *  rephrase/synonyms control (Feature 2). Not needed by the
+         *  pre-existing rephraseFor caller, which only reads el/text/span,
+         *  but adding it here is harmless (extra field on the object). */
+        rect: DOMRect
     } | null => {
         const el = focusedTrackedField()
         if (!el) return null
@@ -907,7 +1002,9 @@ export function startOrchestrator(
         // compares like with like on multi-line selections.
         const text = getText(el).slice(span.start, span.end)
         if (!text.trim()) return null
-        return { el, text, span }
+        const r = range.getBoundingClientRect()
+        const rect = r.width || r.height ? r : el.getBoundingClientRect()
+        return { el, text, span, rect }
     }
 
     const focusedTrackedField = (): HTMLElement | null => {
@@ -936,6 +1033,64 @@ export function startOrchestrator(
             void rerunFor(el)(getText(el))
         })
     }
+
+    // ---- Floating split control (Rephrase + Synonyms), Feature 2 ----
+    // Vencord parity with the browser client's mountRephraseFlow: the
+    // browser shows this split control on document `selectionchange`
+    // (debounced 150ms); Discord's composer selection behaves the same way
+    // (dblclick selects a word, drag selects a range), so the identical
+    // debounced-selectionchange approach surfaces the control here too. The
+    // control's primary segment reuses `rephraseFor`; the Synonyms segment
+    // is enabled only for a single "clean" word (no active correction on
+    // it) via `isSingleCleanWordSelection` — the same predicate the removed
+    // dblclick auto-open used, now driven off the current selection instead
+    // of a click point.
+    const hideRephraseButton = (): void => {
+        rephraseButtonHandle?.hide()
+        rephraseButtonHandle = null
+    }
+    let rephraseButtonDebounce: ReturnType<typeof setTimeout> | null = null
+    const onSelectionChangeForRephraseButton = (): void => {
+        if (rephraseButtonDebounce) clearTimeout(rephraseButtonDebounce)
+        rephraseButtonDebounce = setTimeout(() => {
+            rephraseButtonDebounce = null
+            const found = resolveSelection()
+            if (!found) {
+                hideRephraseButton()
+                return
+            }
+            const st = fields.get(found.el)
+            const flagged = (st?.items ?? []).map((it) => ({
+                cuStart: it.cuStart,
+                cuEnd: it.cuEnd,
+            }))
+            const fullText = getText(found.el)
+            const cleanWord = isSingleCleanWordSelection(fullText, found.span, flagged)
+            rephraseButtonHandle = showRephraseButton(overlay.root, {
+                anchorRect: found.rect,
+                onClick: () => {
+                    hideRephraseButton()
+                    rephraseFor(found.el)
+                },
+                synonymsEnabled: cleanWord !== null,
+                synonymsDisabledReason: cleanWord
+                    ? undefined
+                    : 'Select a single word without an active correction to see synonyms',
+                onSynonymsClick: cleanWord
+                    ? () => {
+                          hideRephraseButton()
+                          openSynonymsForWord(found.el, cleanWord)
+                      }
+                    : undefined,
+            })
+        }, 150)
+    }
+    document.addEventListener('selectionchange', onSelectionChangeForRephraseButton)
+    cleanups.push(() => {
+        document.removeEventListener('selectionchange', onSelectionChangeForRephraseButton)
+        if (rephraseButtonDebounce) clearTimeout(rephraseButtonDebounce)
+        hideRephraseButton()
+    })
 
     // ---- Pill surface ----
     // Mount/update/teardown the status pill anchored to the active composer.
@@ -1626,112 +1781,13 @@ export function startOrchestrator(
         el.addEventListener('click', onFieldClick)
         cleanups.push(() => el.removeEventListener('click', onFieldClick))
 
-        // W3-3: double-click on a NON-flagged word → synonyms popover.
-        // Mirror of the browser's dblclick handler in
-        // clients/browser/src/entrypoints/content/index.ts. The browser
-        // resolves the word via caretPositionFromPoint + resolveWordAtPoint
-        // and fetches /synonyms; we reuse both via the shared `@/overlay/
-        // synonyms` module. The apply is via applySlateFix (NEVER innerHTML)
-        // + an Undo toast + an 'accepted' signal. Pasted text is excluded
-        // from checks; we don't add the same exclusion to synonyms — the
-        // user explicitly chose to dblclick.
-        const onFieldDblClick = (e: MouseEvent): void => {
-            if (paused) return
-            const text = getText(el)
-            if (!text) return
-            const resolved = resolveWordFromDblClick(e, text, el)
-            if (!resolved) return
-            const s = fields.get(el)
-            if (!s) return
-            // Skip dblclicks that land on a flagged word (the existing
-            // single-click popover owns those; a synonyms popover would
-            // overlap visually).
-            const flaggedAt = s.items.find(
-                (it) => resolved.start < it.cuEnd && resolved.end > it.cuStart,
-            )
-            if (flaggedAt) return
-            // Show the popover immediately in the loading state, then
-            // swap the body with the loaded synonyms (or empty). The
-            // shared showSynonyms owns the loading spinner + the
-            // pick-list render.
-            const wordRect = measureWordRect(el, text, resolved.start, resolved.end)
-            if (!wordRect) return
-            // The word sits INSIDE the composer, so clearing the word
-            // alone still lets the popover overlap the composer chrome
-            // (overlap reported live 2026-07). Discord ALSO anchors a
-            // floating selection formatting toolbar (B/I/U/…) above the
-            // selection the dblclick just made — it renders ~48px above
-            // the composer top, and its class names are hashed (measuring
-            // it is churn-fragile), so clear a fixed band above the
-            // composer that covers it (second overlap reported live
-            // 2026-07-04).
-            const composerRect = el.getBoundingClientRect()
-            const clearRect = new DOMRect(
-                composerRect.x,
-                composerRect.y - SELECTION_TOOLBAR_CLEARANCE_PX,
-                composerRect.width,
-                composerRect.height + SELECTION_TOOLBAR_CLEARANCE_PX,
-            )
-            hideTooltipNow()
-            closeSynonyms()
-            synonymsHandle = showSynonyms(overlay.root, {
-                anchorRect: wordRect,
-                clearRect: clearRect,
-                word: resolved.word,
-                synonyms: [],
-                loading: true,
-                onPick: (synonym) => {
-                    void applySynonym(el, resolved, synonym)
-                },
-                onClose: () => {
-                    synonymsHandle?.destroy()
-                    synonymsHandle = null
-                },
-            })
-            // Fetch in the background; the surface re-mounts on resolve
-            // so the loading state is replaced with the loaded list.
-            refreshClient()
-                .synonyms(resolved.word)
-                .then((res) => {
-                    if (!synonymsHandle) return
-                    synonymsHandle.destroy()
-                    synonymsHandle = showSynonyms(overlay.root, {
-                        anchorRect: wordRect,
-                        clearRect: clearRect,
-                        word: resolved.word,
-                        synonyms: res.synonyms,
-                        loading: false,
-                        onPick: (synonym) => {
-                            void applySynonym(el, resolved, synonym)
-                        },
-                        onClose: () => {
-                            synonymsHandle?.destroy()
-                            synonymsHandle = null
-                        },
-                    })
-                })
-                .catch((err) => {
-                    debugLog('synonyms fetch failed', err)
-                    if (!synonymsHandle) return
-                    synonymsHandle.destroy()
-                    synonymsHandle = showSynonyms(overlay.root, {
-                        anchorRect: wordRect,
-                        clearRect: clearRect,
-                        word: resolved.word,
-                        synonyms: [],
-                        loading: false,
-                        onPick: (synonym) => {
-                            void applySynonym(el, resolved, synonym)
-                        },
-                        onClose: () => {
-                            synonymsHandle?.destroy()
-                            synonymsHandle = null
-                        },
-                    })
-                })
-        }
-        el.addEventListener('dblclick', onFieldDblClick)
-        cleanups.push(() => el.removeEventListener('dblclick', onFieldDblClick))
+        // Feature 2c (interaction redesign): the dblclick-auto-opens-
+        // Synonyms trigger that used to live here is REMOVED. A double-
+        // click still selects the word natively (Discord's Slate editor
+        // honors the browser default), which fires `selectionchange` — the
+        // split rephrase/synonyms control (mounted by
+        // onSelectionChangeForRephraseButton above) is now the only entry
+        // point to the Synonyms popover; see `openSynonymsForWord`.
 
         // Hover preview: mousemove hit-tests the pointer against itemRects and
         // shows a lightweight tooltip chip (diff only, no buttons). Only updates
@@ -2122,6 +2178,7 @@ export function startOrchestrator(
             panelOpen = false
             dismissPopoversIn(overlay.root)
             dismissRephraseCardsIn(overlay.root)
+            dismissRephraseButtonsIn(overlay.root)
             overlay.destroy()
             subscribers.clear()
             void signalQueue.flush()

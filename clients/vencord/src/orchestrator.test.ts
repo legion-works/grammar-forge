@@ -1392,3 +1392,150 @@ describe('vencord orchestrator — applyAllForHighConf end-to-end (P1-6d)', () =
         wrapper.remove()
     })
 })
+
+// Feature 2 (interaction redesign) — vencord parity: the floating Rephrase
+// button becomes a split control (Rephrase + Synonyms), mounted on the same
+// debounced document `selectionchange` the browser client's
+// mountRephraseFlow uses. The dblclick-auto-opens-Synonyms trigger that used
+// to live in attach() is removed — Synonyms is reached ONLY via the split
+// control's secondary segment now.
+describe('Feature 2: split rephrase/synonyms control (vencord parity)', () => {
+    // jsdom does not implement Range.prototype.getBoundingClientRect OR
+    // Range.prototype.getClientRects (no layout engine — see @/overlay/rect's
+    // own header comment on this exact limitation). resolveSelection()'s
+    // rect computation needs the former to anchor the split control, and
+    // getSpanRectsBatch's contenteditable path (measureWordRect) needs the
+    // latter to measure the Synonyms word. Polyfill both with stub rects for
+    // this describe block only; every real browser (and Discord's own DOM)
+    // supports both APIs natively.
+    const originalGetBoundingClientRect = Range.prototype.getBoundingClientRect
+    const originalGetClientRects = Range.prototype.getClientRects
+    beforeEach(() => {
+        Range.prototype.getBoundingClientRect = function (): DOMRect {
+            return new DOMRect(0, 0, 10, 10)
+        }
+        Range.prototype.getClientRects = function (): DOMRectList {
+            return [new DOMRect(0, 0, 10, 10)] as unknown as DOMRectList
+        }
+    })
+    afterEach(() => {
+        Range.prototype.getBoundingClientRect = originalGetBoundingClientRect
+        Range.prototype.getClientRects = originalGetClientRects
+    })
+
+    let api: OrchestratorApi
+    const cfg: GrammarForgeConfig = {
+        bridgeUrl: 'http://localhost',
+        realtimeDelayMs: 150,
+        acceptHotkey: 'ctrl+.',
+        rephraseHotkey: 'ctrl+/',
+        checkPastedText: false,
+        allowRemoteBridge: false,
+        debugLogging: false,
+        goals: { audience: 'general', formality: 'neutral' },
+    }
+
+    afterEach(() => {
+        api?.stop()
+        document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
+        document.querySelectorAll('.channelTextArea_inner').forEach((el) => el.remove())
+    })
+
+    async function mountComposer(text: string): Promise<HTMLElement> {
+        const composer = document.createElement('div')
+        composer.setAttribute('role', 'textbox')
+        composer.setAttribute('contenteditable', 'true')
+        composer.textContent = text
+        const wrapper = document.createElement('div')
+        wrapper.className = 'channelTextArea_inner'
+        wrapper.appendChild(composer)
+        document.body.appendChild(wrapper)
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        composer.focus()
+        return composer
+    }
+
+    function selectRange(composer: HTMLElement, start: number, end: number): void {
+        const sel = document.getSelection()!
+        const range = document.createRange()
+        range.setStart(composer.firstChild!, start)
+        range.setEnd(composer.firstChild!, end)
+        sel.removeAllRanges()
+        sel.addRange(range)
+    }
+
+    it('renders the split control (two real <button> segments + a divider) on a single-word selection', async () => {
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        const composer = await mountComposer('hello world')
+        selectRange(composer, 0, 5) // "hello"
+        document.dispatchEvent(new Event('selectionchange'))
+        await new Promise<void>((r) => setTimeout(r, 200))
+
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        const root = host?.shadowRoot
+        const container = root?.querySelector('.gf-rephrase-btn')
+        const primary = root?.querySelector('.gf-rephrase-btn__primary')
+        const synonyms = root?.querySelector(
+            '.gf-rephrase-btn__synonyms',
+        ) as HTMLButtonElement | null
+        expect(container).not.toBeNull()
+        expect(root?.querySelector('.gf-rephrase-btn__divider')).not.toBeNull()
+        expect(primary?.tagName).toBe('BUTTON')
+        expect(synonyms?.tagName).toBe('BUTTON')
+        // Single clean word, no open corrections — Synonyms is enabled.
+        expect(synonyms?.disabled).toBe(false)
+    })
+
+    it('disables the Synonyms segment for a multi-word selection', async () => {
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        const composer = await mountComposer('hello world')
+        selectRange(composer, 0, 11) // "hello world"
+        document.dispatchEvent(new Event('selectionchange'))
+        await new Promise<void>((r) => setTimeout(r, 200))
+
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        const synonyms = host?.shadowRoot?.querySelector(
+            '.gf-rephrase-btn__synonyms',
+        ) as HTMLButtonElement | null
+        expect(synonyms?.disabled).toBe(true)
+    })
+
+    it('clicking the Synonyms segment opens the synonyms popover for the selected word', async () => {
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        const composer = await mountComposer('hello world')
+        selectRange(composer, 0, 5) // "hello"
+        document.dispatchEvent(new Event('selectionchange'))
+        await new Promise<void>((r) => setTimeout(r, 200))
+
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        const root = host?.shadowRoot
+        const synonyms = root?.querySelector(
+            '.gf-rephrase-btn__synonyms',
+        ) as HTMLButtonElement | null
+        expect(synonyms?.disabled).toBe(false)
+        synonyms?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+        // The click mounts the popover in the loading state synchronously,
+        // then the mocked bridge `synonyms()` call resolves on a microtask.
+        await new Promise<void>((r) => setTimeout(r, 0))
+        expect(root?.querySelector('.gf-syn')).not.toBeNull()
+    })
+
+    it('a dblclick no longer auto-opens the synonyms popover (Feature 2c)', async () => {
+        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        const composer = await mountComposer('hello world')
+
+        composer.dispatchEvent(
+            new MouseEvent('dblclick', {
+                bubbles: true,
+                cancelable: true,
+                clientX: 1,
+                clientY: 1,
+            }),
+        )
+        await new Promise<void>((r) => setTimeout(r, 200))
+
+        const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
+        expect(host?.shadowRoot?.querySelector('.gf-syn')).toBeNull()
+    })
+})

@@ -8,8 +8,17 @@
 
 import { isEditableElement } from '@/input/detector'
 
-/** The attributes that can flip a non-editable element into an editable one. */
-const EDITABLE_ATTRS: ReadonlyArray<string> = ['contenteditable', 'role', 'g_editable']
+/** The attributes that can flip a non-editable element into an editable one
+ *  — or, since Feature 1 (sensitive-field exclusion), flip an already-
+ *  editable one OUT of eligibility. `type` covers the "show password"
+ *  toggle case: a site may flip `<input type="password">` to
+ *  `type="text"` (reveal) and back to `type="password"` (hide); the
+ *  reveal direction must not attach (the sensitive gate re-checks and
+ *  still may reject on autocomplete), and the re-hide direction MUST
+ *  detach an already-attached field immediately — the whole point of the
+ *  exclusion is that a password never has underlines/orb/checking, even
+ *  transiently while flipped to text and back. */
+const EDITABLE_ATTRS: ReadonlyArray<string> = ['contenteditable', 'role', 'g_editable', 'type']
 
 export interface FieldObserverOptions {
     root: ParentNode
@@ -168,7 +177,34 @@ export function createFieldObserver(opts: FieldObserverOptions): () => void {
                     }
                 }
             } else if (m.type === 'attributes' && m.target instanceof Element) {
-                consider(m.target)
+                const el = m.target
+                if (reported.has(el)) {
+                    // Already announced via onFieldDiscovered. Most attribute
+                    // flips leave it eligible (no-op here — `consider` would
+                    // no-op anyway since `seen` already has it). But some
+                    // flips make it INELIGIBLE (the password-reveal-toggle
+                    // case: `type` flips text→password, or `contenteditable`
+                    // flips to "false"): the field must detach immediately,
+                    // not linger until it happens to leave the DOM. Mirrors
+                    // the removedNodes handling below — drop it from
+                    // seen/reported and queue the detach callback.
+                    if (!isEditable(el)) {
+                        seen.delete(el)
+                        reported.delete(el)
+                        detachPending.add(el)
+                    }
+                } else if (seen.has(el)) {
+                    // Discovered this frame but not yet announced (still in
+                    // `pending`): if the flip made it ineligible before we
+                    // ever reported it, cancel the pending discovery instead
+                    // of announcing a field that's already unfit.
+                    if (!isEditable(el)) {
+                        seen.delete(el)
+                        pending.delete(el)
+                    }
+                } else {
+                    consider(el)
+                }
             }
         }
         if (pending.size || detachPending.size) requestDrain()

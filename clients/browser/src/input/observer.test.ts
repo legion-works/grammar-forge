@@ -315,3 +315,64 @@ describe('createFieldObserver (detached fields on SPA churn)', () => {
         stop()
     })
 })
+
+describe('createFieldObserver (Feature 1: sensitive-field type mutation)', () => {
+    afterEach(() => {
+        document.body.innerHTML = ''
+    })
+
+    it('never reports an <input type="password"> present at start', async () => {
+        const pw = document.createElement('input')
+        pw.type = 'password'
+        document.body.appendChild(pw)
+        const disc = vi.fn<() => void>()
+        const { observe, flush } = make(disc)
+        const stop = observe()
+        await flush()
+        expect(disc).not.toHaveBeenCalled()
+        stop()
+    })
+
+    it('detaches an already-attached field when its type flips to "password" at runtime (show-password toggle)', async () => {
+        const input = document.createElement('input')
+        input.type = 'text'
+        document.body.appendChild(input)
+        const disc = vi.fn<() => void>()
+        const det = vi.fn<() => void>()
+        const { observe, flush } = make(disc, det)
+        const stop = observe()
+        await flush()
+        expect(disc).toHaveBeenCalledTimes(1)
+        expect(det).not.toHaveBeenCalled()
+
+        // Flip to password (e.g. a "hide password" toggle flipping back).
+        input.type = 'password'
+        await flush()
+        expect(det).toHaveBeenCalledTimes(1)
+        expect(det).toHaveBeenCalledWith(input)
+        stop()
+    })
+
+    it('does not re-discover a field that flips password → text → password within one drain', async () => {
+        const input = document.createElement('input')
+        input.type = 'password'
+        document.body.appendChild(input)
+        const disc = vi.fn<() => void>()
+        const det = vi.fn<() => void>()
+        const { observe, flush } = make(disc, det)
+        const stop = observe()
+        await flush()
+        expect(disc).not.toHaveBeenCalled()
+
+        // Reveal (password -> text): becomes eligible, should be discovered.
+        input.type = 'text'
+        await flush()
+        expect(disc).toHaveBeenCalledTimes(1)
+
+        // Hide again (text -> password): must detach.
+        input.type = 'password'
+        await flush()
+        expect(det).toHaveBeenCalledTimes(1)
+        stop()
+    })
+})

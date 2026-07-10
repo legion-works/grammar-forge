@@ -55,11 +55,7 @@ import {
 import { showPanel, type PanelHandle, type PanelOptions } from '@/overlay/panel'
 import { showGoals, type GoalsHandle } from '@/overlay/goals'
 import { mountStatsView, type StatsViewHandle } from '@/overlay/stats-view'
-import {
-    resolveWordFromDblClick,
-    showSynonyms,
-    type SynonymsHandle,
-} from '@/overlay/synonyms'
+import { showSynonyms, type ResolvedWord, type SynonymsHandle } from '@/overlay/synonyms'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
 import {
@@ -1442,147 +1438,23 @@ function wireRuntime(
             hideTooltipNow()
             openPopoverFor(el, hit.item, hit.rect)
         }
-        // W3-1: dblclick on a NON-flagged word → open the Synonyms
-        // popover. The native browser dblclick selects the clicked word
-        // (range across the word's boundaries) — we use Selection.toString
-        // via the synonyms' resolveWordFromDblClick helper to map the
-        // click into a code-unit span into the field's flat text. If
-        // the click hits a flagged word (inside an item rect), the
-        // popover opens instead — single-click on flagged words already
-        // opens it, but a dblclick would otherwise feel dead. We
-        // distinguish by hit-testing the itemRects first.
-        const onFieldDblClick = (e: MouseEvent): void => {
-            // If the dblclick hit a flagged word, let the click handler
-            // chain handle the card (it'll already have opened one
-            // popover, so we don't fight it).
-            const flagged = hitTest(state.itemRects, e.clientX, e.clientY)
-            if (flagged) return
-            // Resolve the clicked word.
-            const text = getText(el)
-            const resolved = resolveWordFromDblClick(e, text, el)
-            if (!resolved) return
-            // Don't open synonyms on a word the popover would have
-            // flagged (defensive — the flagged check above should catch
-            // this, but a hit-test between the rects and the word
-            // boundary is racy).
-            const wordInsideItem = state.itemRects.some(({ rects }) =>
-                rects.some(
-                    (r) =>
-                        r.left <= e.clientX &&
-                        r.right >= e.clientX &&
-                        r.top <= e.clientY &&
-                        r.bottom >= e.clientY,
-                ),
-            )
-            if (wordInsideItem) return
-            // Get a word rect by measuring the span via getSpanRectsBatch
-            // (mirror of how the orchestrator's hit-test rects are built).
-            // MEASURE FIRST (the W3 gotcha): we capture the word's rect
-            // BEFORE mounting showSynonyms. The synonyms popover's
-            // anchorRect is caller-measured; a detached node's rect is
-            // all zeros and the popover would fly off-screen.
-            const wordRects = getSpanRectsBatch(el, [
-                { start: resolved.start, end: resolved.end },
-            ])
-            const anchorRect = wordRects[0]?.[0] ?? el.getBoundingClientRect()
-            // Dismiss any prior synonyms popover (one at a time).
-            runtime.synonymsHandle?.destroy()
-            // Show the popover in the LOADING state immediately (per
-            // spec: "loading state shows a small spinner + Finding
-            // synonyms…"; the synonyms surface itself handles the
-            // empty / loaded states). Then fire the bridge call and
-            // re-mount with the result.
-            runtime.synonymsHandle = showSynonyms(overlay.root, {
-                anchorRect,
-                word: resolved.word,
-                synonyms: [],
-                loading: true,
-                onPick: () => {
-                    /* replaced on the loaded re-mount */
-                },
-                onClose: () => {
-                    runtime.synonymsHandle?.destroy()
-                    runtime.synonymsHandle = null
-                },
-            })
-            void runtime.client
-                .synonyms(resolved.word)
-                .then((res) => {
-                    if (!ctx.isValid) return
-                    // The popover may have been closed (Escape, focus
-                    // loss) while the bridge call was in flight; bail
-                    // in that case.
-                    if (runtime.synonymsHandle == null) return
-                    // Re-measure the word's rect on the live DOM (the
-                    // popover mount above detached nothing but the
-                    // field could have scrolled). Bail if the rect is
-                    // degenerate.
-                    const liveRects = getSpanRectsBatch(el, [
-                        { start: resolved.start, end: resolved.end },
-                    ])
-                    const liveAnchor = liveRects[0]?.[0] ?? anchorRect
-                    runtime.synonymsHandle.destroy()
-                    runtime.synonymsHandle = showSynonyms(overlay.root, {
-                        anchorRect: liveAnchor,
-                        word: resolved.word,
-                        synonyms: res.synonyms,
-                        loading: false,
-                        onPick: (synonym: string) => {
-                            // Close the popover immediately on pick —
-                            // the user has made their choice.
-                            runtime.synonymsHandle?.destroy()
-                            runtime.synonymsHandle = null
-                            // In-place swap at the resolved span. We
-                            // measure the field's text inside the
-                            // apply closure to stale-guard.
-                            void applyEdit(
-                                el,
-                                { start: resolved.start, end: resolved.end },
-                                synonym,
-                            ).then(() => {
-                                const stInner = runtime.fields.get(el)
-                                if (stInner) {
-                                    stInner.lastApplied = appendInverseEdit([], {
-                                        start: resolved.start,
-                                        end: resolved.end,
-                                        replacement: synonym,
-                                        original: text.slice(
-                                            resolved.start,
-                                            resolved.end,
-                                        ),
-                                    })
-                                }
-                                showToast(overlay.root, {
-                                    message: `Replaced with "${synonym}"`,
-                                    subText: 'Press Undo to revert',
-                                    actionLabel: 'Undo',
-                                    onUndo: () => void undoFor(el),
-                                })
-                                // No accepted signal — synonyms aren't
-                                // bridge-tracked corrections.
-                                void rerunFor(el)(getText(el))
-                            })
-                        },
-                        onClose: () => {
-                            runtime.synonymsHandle?.destroy()
-                            runtime.synonymsHandle = null
-                        },
-                    })
-                })
-                .catch((e) => {
-                    debugWarn('synonyms', 'fetch failed', e)
-                    runtime.synonymsHandle?.destroy()
-                    runtime.synonymsHandle = null
-                })
-        }
+        // Feature 2c (interaction redesign): the dblclick-auto-opens-
+        // Synonyms trigger that used to live here is REMOVED. A double-click
+        // still selects the word natively (browser default), which fires
+        // `selectionchange` — the split rephrase/synonyms control (mounted
+        // by mountRephraseFlow in response to that same selectionchange) is
+        // now the only entry point to the Synonyms popover; see
+        // `openSynonymsForSelection` + the `getFlaggedRanges`/`openSynonyms`
+        // deps passed to `mountRephraseFlow` below.
+        //
         // Close the synonyms popover when the selection moves away from the
-        // double-clicked word (selectionchange) or the field text changes
+        // word it was opened for (selectionchange) or the field text changes
         // (input). The popover is anchored to a specific word span; if the
         // selection moves or the text changes, the anchor is stale.
         // selectionchange fires on the document (not the field), so we use
         // the field's ownerDocument. We only close when THIS field's synonyms
-        // popover is open (runtime.synonymsHandle is set by the dblclick
-        // handler above and cleared by onClose).
+        // popover is open (runtime.synonymsHandle is set by
+        // openSynonymsForSelection and cleared by onClose).
         const onSynonymsStale = (): void => {
             if (runtime.synonymsHandle && runtime.hoverField !== el) {
                 // Only close if the synonyms were opened for this field.
@@ -1609,14 +1481,12 @@ function wireRuntime(
         el.addEventListener('mousemove', onFieldMouseMove)
         el.addEventListener('mouseleave', onFieldMouseLeave)
         el.addEventListener('click', onFieldClick)
-        el.addEventListener('dblclick', onFieldDblClick)
         runtime.cleanups.push(() => {
             el.removeEventListener('input', onSynonymsStale)
             fieldDoc.removeEventListener('selectionchange', onSelectionChange)
             el.removeEventListener('mousemove', onFieldMouseMove)
             el.removeEventListener('mouseleave', onFieldMouseLeave)
             el.removeEventListener('click', onFieldClick)
-            el.removeEventListener('dblclick', onFieldDblClick)
         })
 
         // Re-measure rects + reconcile highlights + re-anchor the pill when the
@@ -1813,6 +1683,104 @@ function wireRuntime(
         return null
     }
 
+    // ---- Synonyms (Feature 2 — reached ONLY via the split control's
+    // Synonyms segment; see rephrase.ts's mountRephraseFlow deps below) ----
+    // Extracted (byte-equivalent) from the former dblclick auto-open handler
+    // that used to live in the per-field attach() closure above. `resolved`
+    // is already known to be a single clean word (isSingleCleanWordSelection
+    // ran in mountRephraseFlow's selectionchange handler before this is
+    // called), so this function owns only the measure → show(loading) →
+    // fetch → show(loaded)/show(error) sequence + the apply/Undo wiring.
+    const openSynonymsForSelection = (el: HTMLElement, resolved: ResolvedWord): void => {
+        const text = getText(el)
+        // MEASURE FIRST (the W3 gotcha): capture the word's rect BEFORE
+        // mounting showSynonyms. The synonyms popover's anchorRect is
+        // caller-measured; a detached node's rect is all zeros and the
+        // popover would fly off-screen.
+        const wordRects = getSpanRectsBatch(el, [{ start: resolved.start, end: resolved.end }])
+        const anchorRect = wordRects[0]?.[0] ?? el.getBoundingClientRect()
+        // Dismiss any prior synonyms popover (one at a time).
+        runtime.synonymsHandle?.destroy()
+        // Show the popover in the LOADING state immediately (per spec: "a
+        // small spinner + Finding synonyms…"; the synonyms surface itself
+        // handles the empty / loaded states). Then fire the bridge call and
+        // re-mount with the result.
+        runtime.synonymsHandle = showSynonyms(overlay.root, {
+            anchorRect,
+            word: resolved.word,
+            synonyms: [],
+            loading: true,
+            onPick: () => {
+                /* replaced on the loaded re-mount */
+            },
+            onClose: () => {
+                runtime.synonymsHandle?.destroy()
+                runtime.synonymsHandle = null
+            },
+        })
+        void runtime.client
+            .synonyms(resolved.word)
+            .then((res) => {
+                if (!ctx.isValid) return
+                // The popover may have been closed (Escape, focus loss)
+                // while the bridge call was in flight; bail in that case.
+                if (runtime.synonymsHandle == null) return
+                // Re-measure the word's rect on the live DOM (the popover
+                // mount above detached nothing but the field could have
+                // scrolled). Bail if the rect is degenerate.
+                const liveRects = getSpanRectsBatch(el, [
+                    { start: resolved.start, end: resolved.end },
+                ])
+                const liveAnchor = liveRects[0]?.[0] ?? anchorRect
+                runtime.synonymsHandle.destroy()
+                runtime.synonymsHandle = showSynonyms(overlay.root, {
+                    anchorRect: liveAnchor,
+                    word: resolved.word,
+                    synonyms: res.synonyms,
+                    loading: false,
+                    onPick: (synonym: string) => {
+                        // Close the popover immediately on pick — the user
+                        // has made their choice.
+                        runtime.synonymsHandle?.destroy()
+                        runtime.synonymsHandle = null
+                        // In-place swap at the resolved span. We measure the
+                        // field's text inside the apply closure to stale-guard.
+                        void applyEdit(el, { start: resolved.start, end: resolved.end }, synonym).then(
+                            () => {
+                                const stInner = runtime.fields.get(el)
+                                if (stInner) {
+                                    stInner.lastApplied = appendInverseEdit([], {
+                                        start: resolved.start,
+                                        end: resolved.end,
+                                        replacement: synonym,
+                                        original: text.slice(resolved.start, resolved.end),
+                                    })
+                                }
+                                showToast(overlay.root, {
+                                    message: `Replaced with "${synonym}"`,
+                                    subText: 'Press Undo to revert',
+                                    actionLabel: 'Undo',
+                                    onUndo: () => void undoFor(el),
+                                })
+                                // No accepted signal — synonyms aren't
+                                // bridge-tracked corrections.
+                                void rerunFor(el)(getText(el))
+                            },
+                        )
+                    },
+                    onClose: () => {
+                        runtime.synonymsHandle?.destroy()
+                        runtime.synonymsHandle = null
+                    },
+                })
+            })
+            .catch((e) => {
+                debugWarn('synonyms', 'fetch failed', e)
+                runtime.synonymsHandle?.destroy()
+                runtime.synonymsHandle = null
+            })
+    }
+
     // ---- Rephrase selection (slow LLM path) ----
     // Extracted to ./rephrase.ts (Task 4b-1). The orchestrator passes the
     // active-field resolver as a dep; the module owns the selection
@@ -1854,6 +1822,15 @@ function wireRuntime(
             }
             return null
         },
+        // Feature 2b: the split control's Synonyms segment gate — the
+        // ranges of currently-open correction items on the field, and the
+        // fetch+show flow to run when the user clicks the segment.
+        getFlaggedRanges: (el) =>
+            (runtime.fields.get(el)?.items ?? []).map((it) => ({
+                cuStart: it.cuStart,
+                cuEnd: it.cuEnd,
+            })),
+        openSynonyms: openSynonymsForSelection,
     })
     runtime.cleanups.push(rephraseFlow.stop)
 

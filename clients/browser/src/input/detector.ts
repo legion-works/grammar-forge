@@ -19,10 +19,67 @@ const CE_ANCESTOR_SELECTOR =
 const EDITABLE_TEXT_INPUT_TYPES: ReadonlySet<string> = new Set([
     'text',
     'search',
-    'email',
     'url',
     'tel',
 ])
+
+// ---- Sensitive-field exclusion (product decision, unconditional) ----
+//
+// The extension must NEVER activate on a field that plausibly holds a
+// password / credential / one-time code / payment number — no underlines, no
+// orb, no rephrase button, no checking traffic at all. This is enforced HERE,
+// the single choke point every attach path (observer.ts's initial sweep +
+// attribute-mutation re-evaluation) runs through, so there is no secondary
+// gate to bypass and no settings flag that can re-enable it.
+//
+// `<input type="password">` is excluded unconditionally by the type check
+// below (EDITABLE_TEXT_INPUT_TYPES simply omits it — same mechanism that
+// already excluded checkbox/submit/etc). `<input type="email">` is EXCLUDED
+// here too (product decision: email addresses are sensitive-adjacent PII and
+// often double as a login identifier) even though it's a normal editable text
+// type per HTML.
+//
+// Defense-in-depth: autocomplete hints. A field can be `type="text"` (or
+// unset) yet still be a password manager's overlay input, an OTP box, or a
+// credit-card field — autocomplete is the standard signal for these. We
+// check the element's OWN autocomplete first, then fall back to the
+// containing <form>'s autocomplete (a form-level hint like
+// autocomplete="off" wrapping per-field hints, or a field that omits its own
+// autocomplete but inherits the form's).
+const SENSITIVE_AUTOCOMPLETE_EXACT: ReadonlySet<string> = new Set([
+    'current-password',
+    'new-password',
+    'one-time-code',
+])
+
+/** True when `token` (already lower-cased) is a sensitive autocomplete hint:
+ *  an exact match against the password/OTP set, or any `cc-*` (payment card)
+ *  token, e.g. `cc-number`, `cc-exp`, `cc-csc`. */
+function isSensitiveAutocompleteToken(token: string): boolean {
+    if (SENSITIVE_AUTOCOMPLETE_EXACT.has(token)) return true
+    return token.startsWith('cc-')
+}
+
+/** autocomplete is a space-separated token list (e.g. "billing cc-number");
+ *  per spec any token can carry the semantic hint, so check all of them. */
+function hasSensitiveAutocomplete(raw: string | null): boolean {
+    if (!raw) return false
+    const tokens = raw.toLowerCase().trim().split(/\s+/)
+    return tokens.some(isSensitiveAutocompleteToken)
+}
+
+/** Is `el` (or its containing <form>) marked with a sensitive autocomplete
+ *  hint? Checks the element's own `autocomplete` attribute first, then the
+ *  owning form's — a field can omit its own hint and rely on the form's, or
+ *  a form can carry the hint for a field that doesn't expose one itself. */
+function isSensitiveField(el: HTMLElement): boolean {
+    if (hasSensitiveAutocomplete(el.getAttribute('autocomplete'))) return true
+    const form = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+        ? el.form
+        : el.closest('form')
+    if (form && hasSensitiveAutocomplete(form.getAttribute('autocomplete'))) return true
+    return false
+}
 
 /**
  * Is the `contenteditable` attribute set to a value that means "editable"?
@@ -54,9 +111,11 @@ function hasEditableAncestor(el: Element): boolean {
  * Is `el` an editable text field we should monitor?
  *
  *   <textarea>                                      yes
- *   <input type="text|search|email|url|tel">       yes (not readonly, not disabled)
- *   <input type="password|checkbox|submit|...">    no
+ *   <input type="text|search|url|tel">              yes (not readonly, not disabled)
+ *   <input type="password|email|checkbox|submit|...">  no
  *   <input> (no type attr → defaults to text)      yes
+ *   <input autocomplete="current-password|new-password|one-time-code|cc-*">
+ *                                                    no (own OR containing <form>'s autocomplete)
  *   <x contenteditable="true" | "">                yes
  *   <x contenteditable="plaintext-only">            yes
  *   <x contenteditable="false" | "FALSE">          no
@@ -66,11 +125,26 @@ function hasEditableAncestor(el: Element): boolean {
  *   [data-grammarforge-ignore]                      no (opt-out, wins)
  *   null / non-Element                              no
  *   contenteditable nested inside another CE        no (only the outer host)
+ *
+ * Sensitive-field exclusion (password / email / autocomplete hints) is
+ * UNCONDITIONAL — there is no settings flag that overrides it, and it is
+ * checked before every other branch so it wins regardless of tag/role.
  */
 export function isEditableElement(el: Element | HTMLElement | null | undefined): boolean {
     if (!el || !(el instanceof HTMLElement)) return false
 
     if (el.hasAttribute('data-grammarforge-ignore')) return false
+
+    // Sensitive-field gate — unconditional, checked first, wins over every
+    // other branch. `<input type="password">` is excluded by the type
+    // allowlist below (password is simply not in EDITABLE_TEXT_INPUT_TYPES),
+    // repeated here as an explicit fast-path so the intent reads plainly and
+    // so a future change to EDITABLE_TEXT_INPUT_TYPES can't accidentally
+    // re-admit it.
+    if (el instanceof HTMLInputElement && (el.type || 'text').toLowerCase() === 'password') {
+        return false
+    }
+    if (isSensitiveField(el)) return false
 
     if (el instanceof HTMLTextAreaElement) {
         return !el.readOnly && !el.disabled

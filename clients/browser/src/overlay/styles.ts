@@ -248,45 +248,85 @@ export const OVERLAY_CSS = `
   .gf-orb__glyph--power svg { display: block; }
 
   /* ============================================================
-   * Rephrase flow — entry button (.gf-rephrase-btn) + result card
-   * (.gf-rephrase). The card DOM uses .gf-rephrase (outer) and
-   * .gf-rephrase__* (inner). The CSS must match these class names.
-   * Glass surface consistent with .gf-card / .gf-panel-aside.
+   * Rephrase flow — entry control (.gf-rephrase-btn) + result card
+   * (.gf-rephrase). Feature 2 (interaction redesign): the entry control is
+   * now a SPLIT BUTTON — one glass container, two real <button> segments
+   * (.gf-rephrase-btn__primary "✨ Rephrase" / .gf-rephrase-btn__synonyms
+   * "Synonyms") separated by a hairline divider. The container keeps the
+   * exact glass/position/animation treatment the single button used to
+   * carry (selector unchanged — only its CONTENTS changed shape), so the
+   * opacity:1 / reduced-motion / reduced-transparency rules below still
+   * apply without modification.
+   * The card DOM uses .gf-rephrase (outer) and .gf-rephrase__* (inner). The
+   * CSS must match these class names. Glass surface consistent with
+   * .gf-card / .gf-panel-aside.
    * ============================================================ */
   .gf-rephrase-btn {
     position: fixed;
     display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    align-items: stretch;
     pointer-events: auto;
-    cursor: pointer;
     z-index: ${Z_OVERLAY};
-    padding: 6px 12px;
     border-radius: 9999px;
     isolation: isolate;
     contain: layout paint;
-    font: 600 12px/1.2 var(--gf-font-ui, system-ui), -apple-system, "Segoe UI", Roboto, sans-serif;
     background: rgba(28, 28, 30, 0.82);
     background: light-dark(rgba(245, 245, 245, 0.85), rgba(28, 28, 30, 0.82));
-    color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow:
       inset 0 1px 0 0 rgba(255, 255, 255, 0.20),
       0 1px 3px rgba(0, 0, 0, 0.14),
       0 4px 12px rgba(0, 0, 0, 0.18);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     animation: gf-popover-enter ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
     /* Static fallback (matches .gf-goals-pop / .gf-syn): a reduced-motion or
        otherwise non-animating context must never strand the button at the
        keyframe's opacity:0 starting value. */
     opacity: 1;
   }
-  .gf-rephrase-btn:hover {
+  .gf-rephrase-btn__primary,
+  .gf-rephrase-btn__synonyms {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    padding: 6px 12px;
+    font: 600 12px/1.2 var(--gf-font-ui, system-ui), -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: light-dark(#111, #f5f5f5);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  }
+  .gf-rephrase-btn__primary {
+    border-radius: 9999px 0 0 9999px;
+    /* Purple accent (Geth Purple / --gf-ai-violet, #c099ff) — same token
+       used for the AI chip + fast-refining banner, marking this as the
+       AI-rephrase entry point. */
+    color: var(--gf-ai-violet, #c099ff);
+  }
+  .gf-rephrase-btn__synonyms {
+    border-radius: 0 9999px 9999px 0;
+  }
+  .gf-rephrase-btn__primary:hover {
     background: rgba(255, 255, 255, 0.12);
   }
-  .gf-rephrase-btn:focus-visible {
+  .gf-rephrase-btn__synonyms:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .gf-rephrase-btn__primary:focus-visible,
+  .gf-rephrase-btn__synonyms:focus-visible {
     outline: 2px solid var(--gf-ring, #86e1fc);
-    outline-offset: 1px;
+    outline-offset: -2px;
+  }
+  .gf-rephrase-btn__synonyms:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+  .gf-rephrase-btn__divider {
+    align-self: center;
+    width: 1px;
+    height: 16px;
+    flex-shrink: 0;
+    background: rgba(127, 127, 140, 0.30);
   }
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .gf-rephrase-btn {

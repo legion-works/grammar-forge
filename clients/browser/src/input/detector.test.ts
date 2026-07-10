@@ -25,15 +25,94 @@ describe('isEditableElement', () => {
         expect(isEditableElement(el)).toBe(true)
     })
 
-    it('accepts <input type="search"> and "email", "url", "tel"', () => {
+    it('accepts <input type="search">, "url", "tel"', () => {
         expect(isEditableElement(mk('input', { type: 'search' }))).toBe(true)
-        expect(isEditableElement(mk('input', { type: 'email' }))).toBe(true)
         expect(isEditableElement(mk('input', { type: 'url' }))).toBe(true)
         expect(isEditableElement(mk('input', { type: 'tel' }))).toBe(true)
     })
 
-    it('rejects <input type="password">', () => {
+    it('rejects <input type="password"> (unconditional — sensitive field)', () => {
         expect(isEditableElement(mk('input', { type: 'password' }))).toBe(false)
+    })
+
+    it('rejects <input type="email"> (sensitive field, product decision)', () => {
+        expect(isEditableElement(mk('input', { type: 'email' }))).toBe(false)
+    })
+
+    it('rejects password/email even with a settings-like ignore attribute absent (no override exists)', () => {
+        // There is no settings flag threaded into isEditableElement at all —
+        // the exclusion is structurally unconditional, not merely "on by
+        // default". This test documents that invariant: no combination of
+        // attributes re-admits a password/email field.
+        const pw = mk('input', { type: 'password' })
+        pw.removeAttribute('data-grammarforge-ignore')
+        expect(isEditableElement(pw)).toBe(false)
+    })
+
+    it('rejects <input type="text" autocomplete="current-password">', () => {
+        expect(
+            isEditableElement(mk('input', { type: 'text', autocomplete: 'current-password' })),
+        ).toBe(false)
+    })
+
+    it('rejects <input type="text" autocomplete="new-password">', () => {
+        expect(
+            isEditableElement(mk('input', { type: 'text', autocomplete: 'new-password' })),
+        ).toBe(false)
+    })
+
+    it('rejects <input type="text" autocomplete="one-time-code">', () => {
+        expect(
+            isEditableElement(mk('input', { type: 'text', autocomplete: 'one-time-code' })),
+        ).toBe(false)
+    })
+
+    it('rejects <input type="text" autocomplete="cc-number"> (and other cc-* payment tokens)', () => {
+        expect(isEditableElement(mk('input', { type: 'text', autocomplete: 'cc-number' }))).toBe(
+            false,
+        )
+        expect(isEditableElement(mk('input', { type: 'text', autocomplete: 'cc-exp' }))).toBe(
+            false,
+        )
+        expect(isEditableElement(mk('input', { type: 'text', autocomplete: 'cc-csc' }))).toBe(
+            false,
+        )
+    })
+
+    it('rejects a multi-token autocomplete value containing a sensitive token', () => {
+        expect(
+            isEditableElement(
+                mk('input', { type: 'text', autocomplete: 'billing cc-number' }),
+            ),
+        ).toBe(false)
+    })
+
+    it('rejects a <textarea autocomplete="one-time-code">', () => {
+        expect(isEditableElement(mk('textarea', { autocomplete: 'one-time-code' }))).toBe(false)
+    })
+
+    it('accepts autocomplete values that are NOT sensitive (e.g. "email", "name")', () => {
+        expect(isEditableElement(mk('input', { type: 'text', autocomplete: 'name' }))).toBe(true)
+    })
+
+    it('rejects a field whose autocomplete is clean but whose containing <form> carries the sensitive hint', () => {
+        const form = document.createElement('form')
+        form.setAttribute('autocomplete', 'new-password')
+        document.body.appendChild(form)
+        const input = document.createElement('input')
+        input.type = 'text'
+        form.appendChild(input)
+        expect(isEditableElement(input)).toBe(false)
+    })
+
+    it('accepts a field in a form with a non-sensitive autocomplete', () => {
+        const form = document.createElement('form')
+        form.setAttribute('autocomplete', 'on')
+        document.body.appendChild(form)
+        const input = document.createElement('input')
+        input.type = 'text'
+        form.appendChild(input)
+        expect(isEditableElement(input)).toBe(true)
     })
 
     it('rejects <input type="checkbox"> and "submit"', () => {
