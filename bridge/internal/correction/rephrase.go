@@ -22,8 +22,11 @@ type RephraseRequest struct {
 	Source       Source
 }
 
-// RephraseResult is what the rephrase endpoint returns. Alternatives is
-// reserved for a future "give me N variants" feature; always empty today.
+// RephraseResult is what the rephrase endpoint returns. Alternatives holds
+// the extra de-duped LLM variants beyond Rephrased, up to
+// min(RephraseRequest.Alternatives, 5)-1 of them (see Service.Rephrase);
+// empty when Alternatives<=1 was requested or the backend is deterministic.
+// All three clients consume it.
 type RephraseResult struct {
 	Original     string
 	Rephrased    string

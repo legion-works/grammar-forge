@@ -111,4 +111,4 @@ eval/benchmarks/**
 
 # Internal design docs + handoff pack -- kept local, not published
 .opencode/
-GrammarForge.zip
+GrammarForge*.zip

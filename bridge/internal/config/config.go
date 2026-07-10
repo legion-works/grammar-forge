@@ -94,10 +94,17 @@ type Config struct {
 	// /data/user-dict.txt (always present, may be empty) so the bridge's
 	// user-dictionary feature is on by default. Holds user text: keep it
 	// under data/ (gitignored).
-	HarperUserDictPath     string
-	EscalateMinConfidence  float64 // escalate to LLM if best GECToR confidence < this
-	EscalateMaxSentenceLen int     // escalate if input longer than this (chars)
-	EscalateMinWords       int     // escalate empty-fast-path input with >= this many words
+	HarperUserDictPath string
+	// EscalateMinConfidence is the fast-path→LLM escalation threshold
+	// (correction.EscalationPolicy.MinConfidence): escalate to the LLM if the
+	// best GECToR confidence is below this. Unrelated to the client-side
+	// "high-confidence" UI cutoffs (e.g. clients/browser/src/overlay/popover-helpers.ts
+	// CONFIDENCE_THRESHOLDS) — different scale, different purpose.
+	EscalateMinConfidence float64
+	// EscalateMaxSentenceLen escalates if input is longer than this (chars).
+	EscalateMaxSentenceLen int
+	// EscalateMinWords escalates empty-fast-path input with >= this many words.
+	EscalateMinWords int
 	// EscalateOnFastEdit forces escalation whenever the fast path produced any
 	// edit (see correction.EscalationPolicy.EscalateOnFastEdit). Defaults true;
 	// the spike showed Harper's fixed 0.95 confidence was letting

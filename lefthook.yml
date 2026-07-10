@@ -10,3 +10,27 @@ pre-commit:
       root: bridge/
       glob: "*.go"
       run: golangci-lint run
+    browser-lint:
+      root: clients/browser/
+      glob: "*.{ts,tsx}"
+      run: pnpm run lint
+    browser-typecheck:
+      root: clients/browser/
+      glob: "*.{ts,tsx}"
+      run: pnpm run typecheck
+    vencord-lint:
+      root: clients/vencord/
+      glob: "*.{ts,tsx}"
+      run: pnpm run lint
+    vencord-typecheck:
+      root: clients/vencord/
+      glob: "*.{ts,tsx}"
+      run: pnpm run typecheck
+    opencode-lint:
+      root: clients/opencode/
+      glob: "*.{ts,tsx}"
+      run: pnpm run lint
+    opencode-typecheck:
+      root: clients/opencode/
+      glob: "*.{ts,tsx}"
+      run: pnpm run typecheck
