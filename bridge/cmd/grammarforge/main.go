@@ -172,7 +172,7 @@ func main() {
 	// LLM grammar output before diffing. Default on; GF_OVEREDIT_FILTER=false
 	// restores legacy behaviour.
 	if cfg.OverEditFilterEnabled {
-		rules := correction.DefaultOverEditRules()
+		rules := correction.DefaultNamedOverEditRules()
 		// Phase-E dialect spelling guard: append a deterministic
 		// US->GB revert (correction.NewDialectSpellingRepair over the
 		// embedded VarCon lexicon) so the user's British spelling
@@ -187,8 +187,10 @@ func main() {
 		// golden 125/125 + clean-text FP at or below Phase-A baseline
 		// for the british register). See plans/2026-07-04-bridge-quality-quartet.md.
 		if cfg.DialectSpellingGuard && cfg.HarperDialect == "british" {
-			rules = append(rules,
-				correction.NewDialectSpellingRepair(correction.BritishLexicon()))
+			rules = append(rules, correction.NamedOverEditRule{
+				ID:     correction.DialectSpellingRevertRuleID,
+				Repair: correction.NewDialectSpellingRepair(correction.BritishLexicon()),
+			})
 		}
 		svc.SetOverEditRules(rules)
 	}

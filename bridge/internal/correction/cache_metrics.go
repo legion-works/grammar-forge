@@ -31,6 +31,13 @@ type CacheMetrics struct {
 	// configured LLMClient exposes breaker state, "" otherwise (e.g. no LLM
 	// configured, or a test fake).
 	LLMBreakerState string `json:"llm_breaker_state,omitempty"`
+	// OverEditFirings maps each named over-edit rule's ID (see
+	// NamedOverEditRule / DefaultNamedOverEditRules in overedit.go) to how
+	// many times it has changed LLM output text since the process started.
+	// Rules that have never fired are OMITTED (not zero-valued) so a fresh
+	// install or an all-zero run serializes no "overedit_firings" key at
+	// all — nil/empty map + omitempty covers both.
+	OverEditFirings map[string]uint64 `json:"overedit_firings,omitempty"`
 }
 
 // breakerStater is implemented by llm.Client and llm.AnthropicClient (see
@@ -55,6 +62,16 @@ func (s *Service) CacheMetrics() CacheMetrics {
 	m.Complete.Hits, m.Complete.Misses = s.completeCache.stats()
 	if bs, ok := s.llm.(breakerStater); ok {
 		m.LLMBreakerState = bs.BreakerState()
+	}
+	for i, rule := range s.overEditRules {
+		count := atomic.LoadUint64(&s.overEditFirings[i])
+		if count == 0 {
+			continue
+		}
+		if m.OverEditFirings == nil {
+			m.OverEditFirings = make(map[string]uint64, len(s.overEditRules))
+		}
+		m.OverEditFirings[rule.ID] = count
 	}
 	return m
 }

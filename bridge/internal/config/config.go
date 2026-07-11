@@ -193,7 +193,7 @@ type Config struct {
 	// bare sentence being checked.
 	LLMSentenceContext bool
 	// OverEditFilterEnabled wires the LLM over-edit repair chain
-	// (correction.DefaultOverEditRules) that deterministically reverts
+	// (correction.DefaultNamedOverEditRules) that deterministically reverts
 	// measured LLM over-edit classes — nor/or proximity-agreement flips and
 	// proper-noun comma restructures (golden cases 118/91) — on the LLM
 	// output before diffing. Default true; opt out with

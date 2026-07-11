@@ -126,7 +126,7 @@ The **Bridge runs two listeners**, which is easy to miss:
   TEXT before diffing — text-level on purpose: the diff fuses wanted+unwanted
   edits into single suggestions, so suggestion-level filtering is lossy.
   `GF_OVEREDIT_FILTER` (default true). New rules: add to
-  `DefaultOverEditRules`, gate on the FULL cold golden eval.
+  `DefaultNamedOverEditRules`, gate on the FULL cold golden eval.
 
 ## Ports (host→container differ — don't guess)
 

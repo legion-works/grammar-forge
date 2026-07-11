@@ -905,16 +905,26 @@ func RepairModalPerfectAddition(original, corrected string) string {
 	return out
 }
 
-// DefaultOverEditRules returns the over-edit repair chain wired by main when
-// GF_OVEREDIT_FILTER is enabled (the default). Rules are registered
-// explicitly — one entry per measured over-edit class.
-func DefaultOverEditRules() []OverEditRule {
-	return []OverEditRule{
-		RepairProximityAgreementFlip,
-		RepairProperNounCommaRestructure,
-		RepairMidWordCaseFlip,
-		RepairContractionExpansion,
-		RepairSingularThey,
-		RepairModalPerfectAddition,
+// NamedOverEditRule pairs a stable identifier with a repair function. The ID
+// keys firing counters and the per-rule verifier study; never rename an ID
+// once it has shipped (persisted study artifacts reference it).
+type NamedOverEditRule struct {
+	ID     string
+	Repair OverEditRule
+}
+
+// DefaultNamedOverEditRules returns the over-edit repair chain wired by main
+// when GF_OVEREDIT_FILTER is enabled (the default). Rules are registered
+// explicitly — one entry per measured over-edit class, in the fixed order
+// they compose (order is behavior: earlier rules see the text as reverted by
+// later application of the whole chain, see Service.repairOverEdits).
+func DefaultNamedOverEditRules() []NamedOverEditRule {
+	return []NamedOverEditRule{
+		{ID: "proximity_agreement_flip", Repair: RepairProximityAgreementFlip},
+		{ID: "proper_noun_comma_restructure", Repair: RepairProperNounCommaRestructure},
+		{ID: "mid_word_case_flip", Repair: RepairMidWordCaseFlip},
+		{ID: "contraction_expansion", Repair: RepairContractionExpansion},
+		{ID: "singular_they", Repair: RepairSingularThey},
+		{ID: "modal_perfect_addition", Repair: RepairModalPerfectAddition},
 	}
 }

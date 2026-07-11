@@ -6,6 +6,14 @@ import (
 	"unicode"
 )
 
+// DialectSpellingRevertRuleID is the stable NamedOverEditRule.ID for the
+// rule built by NewDialectSpellingRepair (wired by main.go, not part of
+// DefaultNamedOverEditRules — it is appended separately, gated on
+// GF_DIALECT_SPELLING_GUARD + a british HarperDialect). Defined here,
+// beside the rule it names, so the ID and the rule it identifies cannot
+// drift apart; never rename once shipped (see NamedOverEditRule doc).
+const DialectSpellingRevertRuleID = "dialect_spelling_revert"
+
 // NewDialectSpellingRepair builds an OverEditRule that reverts an LLM
 // dialect flip — when the user's input is British and the LLM output
 // Americanized a word, restore the user's spelling BEFORE the diff is

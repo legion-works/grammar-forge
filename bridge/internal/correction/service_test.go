@@ -2,6 +2,7 @@ package correction
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1529,7 +1530,7 @@ func TestCorrectLLMOnlyAppliesOverEditRules(t *testing.T) {
 	svc := NewService(fakePB{}, nil,
 		fakeLLM{out: "Neither the manager nor the employees was aware of the change."},
 		st, "m", fastPolicy())
-	svc.SetOverEditRules(DefaultOverEditRules())
+	svc.SetOverEditRules(DefaultNamedOverEditRules())
 	got, err := svc.Correct(context.Background(),
 		Request{Text: "Neither the manager nor the employees were aware of the change."})
 	require.NoError(t, err)
@@ -1550,13 +1551,57 @@ func TestCorrectEscalationAppliesOverEditRules(t *testing.T) {
 	svc := NewService(fakePB{}, []Corrector{fc},
 		fakeLLM{out: "We flew to Paris, France, last April."},
 		st, "m", fastPolicy())
-	svc.SetOverEditRules(DefaultOverEditRules())
+	svc.SetOverEditRules(DefaultNamedOverEditRules())
 	got, err := svc.Correct(context.Background(),
 		Request{Text: "we flew to paris in france last april."})
 	require.NoError(t, err)
 	require.Equal(t, "We flew to Paris in France last April.", st.lastEvent.Suggestion,
 		"caps kept, comma restructure reverted")
 	require.NotEmpty(t, got.Suggestions)
+}
+
+// TestRepairOverEditsCountsFiringsOnlyOnActualChange pins the firing-counter
+// contract directly against Service.repairOverEdits: a rule that leaves the
+// text unchanged must not increment its counter, a rule that changes the
+// text must, and the counters accumulate across calls (cumulative process
+// counters, not per-call).
+func TestRepairOverEditsCountsFiringsOnlyOnActualChange(t *testing.T) {
+	svc := &Service{}
+	svc.SetOverEditRules([]NamedOverEditRule{
+		{ID: "never_fires", Repair: func(_, corrected string) string { return corrected }},
+		{ID: "always_fires", Repair: func(_, corrected string) string { return corrected + "!" }},
+	})
+
+	out := svc.repairOverEdits("orig", "corrected")
+	require.Equal(t, "corrected!", out)
+	require.EqualValues(t, 0, atomic.LoadUint64(&svc.overEditFirings[0]), "non-matching rule must not fire")
+	require.EqualValues(t, 1, atomic.LoadUint64(&svc.overEditFirings[1]), "matching rule must fire once")
+
+	svc.repairOverEdits("orig", "corrected")
+	require.EqualValues(t, 0, atomic.LoadUint64(&svc.overEditFirings[0]))
+	require.EqualValues(t, 2, atomic.LoadUint64(&svc.overEditFirings[1]), "counters accumulate across calls")
+}
+
+// TestCorrectOverEditFiringVisibleInCacheMetrics runs a real correction
+// through the LLM-only path whose output triggers the proximity-agreement
+// rule (same shape as TestCorrectLLMOnlyAppliesOverEditRules) and asserts
+// the firing is surfaced by name on CacheMetrics().OverEditFirings, while
+// rules that never matched stay absent from the map.
+func TestCorrectOverEditFiringVisibleInCacheMetrics(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil,
+		fakeLLM{out: "Neither the manager nor the employees was aware of the change."},
+		st, "m", fastPolicy())
+	svc.SetOverEditRules(DefaultNamedOverEditRules())
+	_, err := svc.Correct(context.Background(),
+		Request{Text: "Neither the manager nor the employees were aware of the change."})
+	require.NoError(t, err)
+
+	m := svc.CacheMetrics()
+	require.GreaterOrEqual(t, m.OverEditFirings["proximity_agreement_flip"], uint64(1),
+		"the fired rule must be keyed by its ID with count >= 1")
+	_, ok := m.OverEditFirings["singular_they"]
+	require.False(t, ok, "a rule that never fired must be absent from the map")
 }
 
 func TestCorrectWithoutOverEditRulesIsUnchanged(t *testing.T) {
@@ -2600,4 +2645,42 @@ func TestCacheMetricsCountsHitsMissesAndDedup(t *testing.T) {
 	// No LLM backend implements breakerStater here (fakeLLM is a plain
 	// stub), so the metrics block must stay empty rather than panicking.
 	require.Empty(t, m.LLMBreakerState)
+}
+
+// TestCacheMetricsOverEditFiringsJSONShape pins the wire contract: an
+// all-zero/nil OverEditFirings map must produce NO "overedit_firings" key at
+// all (additive-only wire change for old clients), while a populated map
+// serializes normally.
+func TestCacheMetricsOverEditFiringsJSONShape(t *testing.T) {
+	zero := CacheMetrics{}
+	b, err := json.Marshal(zero)
+	require.NoError(t, err)
+	require.NotContains(t, string(b), "overedit_firings",
+		"a nil/empty OverEditFirings map must be omitted entirely")
+
+	nonzero := CacheMetrics{OverEditFirings: map[string]uint64{"proximity_agreement_flip": 3}}
+	b, err = json.Marshal(nonzero)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"sentence_cache":{"hits":0,"misses":0},"tone_cache":{"hits":0,"misses":0},`+
+		`"complete_cache":{"hits":0,"misses":0},"singleflight_dedup":0,`+
+		`"overedit_firings":{"proximity_agreement_flip":3}}`, string(b))
+}
+
+// TestCacheMetricsOverEditFiringsAllZeroCountersOmitKey exercises the real
+// Service read path (not just the struct literal above): a Service wired
+// with over-edit rules that never fire during the request must report a
+// nil/empty OverEditFirings map, so the JSON key stays absent end to end.
+func TestCacheMetricsOverEditFiringsAllZeroCountersOmitKey(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, fakeLLM{out: "clean text, no over-edit shape here."},
+		st, "m", fastPolicy())
+	svc.SetOverEditRules(DefaultNamedOverEditRules())
+	_, err := svc.Correct(context.Background(), Request{Text: "clean text, no over-edit shape here."})
+	require.NoError(t, err)
+
+	m := svc.CacheMetrics()
+	require.Empty(t, m.OverEditFirings, "no rule fired -> map must be nil/empty")
+	b, err := json.Marshal(m)
+	require.NoError(t, err)
+	require.NotContains(t, string(b), "overedit_firings")
 }

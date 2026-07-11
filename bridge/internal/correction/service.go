@@ -47,7 +47,13 @@ type Service struct {
 	// fuse wanted and unwanted edits into one suggestion. nil = no repair
 	// (byte-identical legacy behaviour). NOT applied to the style pass or
 	// rephrase (intentional rewrites).
-	overEditRules []OverEditRule
+	overEditRules []NamedOverEditRule
+	// overEditFirings counts, per rule, how many times repairOverEdits
+	// observed that rule actually change the text (a "firing"). Indexed
+	// positionally with overEditRules — allocated once in SetOverEditRules
+	// so the hot path (repairOverEdits) never allocates or touches a map;
+	// see cache_metrics.go for how the counts are read out keyed by rule ID.
+	overEditFirings []uint64
 	// mergeFastEditsMode selects the escalation result composition
 	// (GF_MERGE_FAST_EDITS spike). "" (default) = legacy REPLACE semantics:
 	// the LLM diff is the whole result and fast-path edits are advisory
@@ -282,7 +288,12 @@ func (s *Service) SetWordAllowlist(a WordAllowlist) { s.allowlist = a }
 
 // SetOverEditRules injects the LLM over-edit repair chain applied to LLM
 // grammar output before diffing (see overedit.go). Optional; nil = no repair.
-func (s *Service) SetOverEditRules(rules []OverEditRule) { s.overEditRules = rules }
+// Allocates the firing-counter slice sized to len(rules) so repairOverEdits
+// never allocates on the hot path.
+func (s *Service) SetOverEditRules(rules []NamedOverEditRule) {
+	s.overEditRules = rules
+	s.overEditFirings = make([]uint64, len(rules))
+}
 
 // SetArticleFix enables or disables the deterministic a/an article repair
 // (GF_ARTICLE_FIX). When enabled, applyArticleFixes is applied to the LLM
@@ -1514,10 +1525,15 @@ func applyAll(text string, sugs []Suggestion) string {
 
 // repairOverEdits runs the over-edit rule chain over the LLM output. Pure
 // string repair: each rule reverts its over-edit class toward the original
-// or returns the text unchanged.
+// or returns the text unchanged. Each rule that actually changes the text
+// increments its firing counter (see overEditFirings / CacheMetrics).
 func (s *Service) repairOverEdits(original, corrected string) string {
-	for _, rule := range s.overEditRules {
-		corrected = rule(original, corrected)
+	for i, rule := range s.overEditRules {
+		before := corrected
+		corrected = rule.Repair(original, corrected)
+		if corrected != before {
+			atomic.AddUint64(&s.overEditFirings[i], 1)
+		}
 	}
 	return corrected
 }

@@ -552,16 +552,35 @@ func TestRepairModalPerfectAdditionIdempotent(t *testing.T) {
 
 // ---- framework ----
 
-func TestDefaultOverEditRulesContainsAllMeasuredRules(t *testing.T) {
-	chain := DefaultOverEditRules()
+func TestDefaultNamedOverEditRulesContainsAllMeasuredRules(t *testing.T) {
+	chain := DefaultNamedOverEditRules()
 	require.Len(t, chain, 6)
+}
+
+// TestDefaultNamedOverEditRulesIDsInOrder pins the six rule IDs and their
+// order: order is behavior (rules compose), and the IDs key firing counters
+// and the per-rule verifier study — never rename an ID once it has shipped.
+func TestDefaultNamedOverEditRulesIDsInOrder(t *testing.T) {
+	chain := DefaultNamedOverEditRules()
+	wantIDs := []string{
+		"proximity_agreement_flip",
+		"proper_noun_comma_restructure",
+		"mid_word_case_flip",
+		"contraction_expansion",
+		"singular_they",
+		"modal_perfect_addition",
+	}
+	require.Len(t, chain, len(wantIDs))
+	for i, id := range wantIDs {
+		require.Equal(t, id, chain[i].ID, "rule %d ID", i)
+	}
 }
 
 func TestOverEditRuleChainComposesAndIsIdempotent(t *testing.T) {
 	// Each rule class tested in isolation for idempotence via the chain.
 	apply := func(orig, corr string) string {
-		for _, rule := range DefaultOverEditRules() {
-			corr = rule(orig, corr)
+		for _, rule := range DefaultNamedOverEditRules() {
+			corr = rule.Repair(orig, corr)
 		}
 		return corr
 	}
