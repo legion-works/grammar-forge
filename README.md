@@ -56,17 +56,15 @@ Rephrase with alternatives, tone tags, offline synonyms (Moby Thesaurus), inline
 Requires Docker and an NVIDIA GPU host for the default llama.cpp backend (CPU-only works — point the bridge at any OpenAI-compatible server).
 
 ```bash
-# 0. Provision model assets (slow-path GGUF, native libs, GECToR support files).
-#    Fetches what it can and prints the one manual step (GECToR ONNX export):
+# 0. Provision model assets (~4.2 GB GGUF, GECToR INT8 ONNX, MiniLM ONNX,
+#    native libs). All plain downloads — no custom export or quantize step.
 ./scripts/fetch-models.sh
 
 # 1. Local env (edit if you want a non-default LLM endpoint)
 cp .env.example .env
 
 # 2. Bring up the stack: bridge + llama.cpp
-#    Pre-built bridge image (models fetched separately, bind-mounted):
-#    docker pull ghcr.io/legion-works/grammar-forge-bridge:latest
-docker compose up -d --build
+docker compose up -d
 
 # 3. Check it
 curl http://localhost:8000/health
@@ -74,6 +72,29 @@ curl -s -X POST http://localhost:8000/v2/check -d "text=I has three cats" -d "la
 ```
 
 To use a different backend, set `GF_LLM_BASE_URL` / `GF_LLM_MODEL` / `GF_LLM_FORMAT` — see the commented BYO blocks in `docker-compose.yml`.
+
+### CPU-only
+
+No GPU? Swap the LLM backend to CPU. Two options:
+
+**Option A — CPU llama.cpp** (simplest, keeps the same stack):
+
+```yaml
+# docker-compose.override.yml
+services:
+  llamacpp:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    deploy: {}  # remove the GPU reservation
+```
+
+**Option B — point at any OpenAI-compatible endpoint** (e.g. Ollama). Set in `.env`:
+
+```ini
+GF_LLM_BASE_URL=http://host.docker.internal:11434/v1
+GF_LLM_MODEL=gemma2:9b
+```
+
+Latency: the fast path (Harper + GECToR, ~35 ms) is unaffected. The slow-path LLM goes from ~300–800 ms (GPU) to seconds on CPU. Sentence caching avoids repeated calls; most text clears on the fast path alone.
 
 ### Ports
 
@@ -91,6 +112,34 @@ To use a different backend, set `GF_LLM_BASE_URL` / `GF_LLM_MODEL` / `GF_LLM_FOR
 ```
 
 Builds the stack, waits for health, and asserts corrections surface through both `/v2/check` and `/correct`. Not run in CI (no GPU there).
+
+## Install the clients
+
+Each release ships browser and Vencord packages. The bridge must be running first (Quickstart above).
+
+### Browser (Chrome / Firefox)
+
+Download the latest release from [GitHub Releases](https://github.com/legion-works/grammar-forge/releases).
+
+| Browser | Asset | Install |
+|---|---|---|
+| Chrome | `grammarforge-browser-<version>-chrome.zip` | `chrome://extensions` → Developer mode → drag the zip (or Load unpacked on the extracted dir). |
+| Firefox | `grammarforge-browser-<version>-firefox.zip` | `about:debugging#/runtime/this-firefox` → Load Temporary Add-on → select the zip. Unsigned; permanent install requires AMO signing (not yet set up). |
+
+### Vencord (Discord / Vesktop)
+
+Requires a from-source Vencord install ([docs](https://docs.vencord.dev/installing/custom-plugins/)).
+
+```bash
+# Download grammarforge-vencord-<version>.zip from the latest release
+unzip grammarforge-vencord-<version>.zip -d Vencord/src/userplugins/grammarForge/
+cd Vencord && pnpm build
+# Restart Discord/Vesktop, enable in Settings → Plugins → GrammarForge
+```
+
+### OpenCode
+
+Ships in-tree (`clients/opencode/`). Requires a patched OpenCode core (upstream PR pending). See [clients/opencode/README.md](clients/opencode/README.md).
 
 ## Documentation
 
