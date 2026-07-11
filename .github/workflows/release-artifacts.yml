@@ -92,7 +92,9 @@ jobs:
 
       # --- Browser (Firefox) ---
       - name: Build + package Firefox extension
-        run: pnpm run zip:firefox
+        # Invoke wxt directly (not the zip:firefox script) so workflow_dispatch
+        # builds of tags that predate the script still work.
+        run: pnpm exec wxt zip -b firefox
         working-directory: clients/browser
 
       # --- Vencord ---
