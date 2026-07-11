@@ -14,8 +14,19 @@ permissions:
   contents: write
 
 jobs:
+  # Build each platform on a native runner — no QEMU emulation.
+  # The per-leg images are pushed by digest only (no tags); a
+  # downstream merge job assembles the multi-arch manifest list.
   publish-bridge-image:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -32,31 +43,70 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: bridge/
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=ghcr.io/legion-works/grammar-forge-bridge,push-by-digest=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.platform }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  # Merge per-platform digests into a single multi-arch manifest list
+  # and push with the release version + latest tags.
+  merge-bridge-manifest:
+    needs: [publish-bridge-image]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
       - name: Resolve version
         id: ver
         env:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: echo "version=${TAG#grammar-forge-v}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ghcr.io/legion-works/grammar-forge-bridge
-          tags: |
-            type=raw,value=${{ steps.ver.outputs.version }}
-            type=raw,value=latest
+      - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/login-action@v3
         with:
-          context: bridge/
-          platforms: linux/amd64
-          push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          labels: ${{ steps.meta.outputs.labels }}
-          tags: ${{ steps.meta.outputs.tags }}
-          annotations: |
-            org.opencontainers.image.source=https://github.com/legion-works/grammar-forge
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Create manifest list and push
+        env:
+          IMAGE: ghcr.io/legion-works/grammar-forge-bridge
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          refs=()
+          for f in /tmp/digests/*; do
+            refs+=("${IMAGE}@sha256:$(basename "$f")")
+          done
+          docker buildx imagetools create \
+            -t "${IMAGE}:${VERSION}" \
+            -t "${IMAGE}:latest" \
+            "${refs[@]}"
 
   build-artifacts:
     runs-on: ubuntu-latest
