@@ -77,3 +77,16 @@ jobs:
           gh release upload ${{ github.event.release.tag_name }} \
             clients/browser/.output/*-chrome.zip \
             --clobber
+
+  # master is the release-only mirror — fast-forward to the published tag
+  sync-master:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fast-forward master to the release tag
+        run: |
+          git push origin "refs/tags/${{ github.event.release.tag_name }}^{commit}:refs/heads/master"
