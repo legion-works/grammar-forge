@@ -111,6 +111,7 @@ func (f *fakeStore) CountCorrections(context.Context) (int64, error) {
 	defer f.mu.Unlock()
 	return f.count, nil
 }
+
 func (f *fakeStore) CountSignals(context.Context) (SignalCounts, error) {
 	return SignalCounts{}, nil
 }

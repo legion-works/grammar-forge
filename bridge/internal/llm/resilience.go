@@ -196,13 +196,13 @@ func isTransientStatus(code int) bool {
 	return code >= 500 && code < 600
 }
 
-// jitterSleep sleeps a uniform-random duration in [base, max] (or exactly
-// base if max <= base), honoring context cancellation. Returns ctx.Err() if
-// the context is done before or during the sleep.
-func jitterSleep(ctx context.Context, base, max time.Duration) error {
+// jitterSleep sleeps a uniform-random duration in [base, maxDelay] (or
+// exactly base if maxDelay <= base), honoring context cancellation. Returns
+// ctx.Err() if the context is done before or during the sleep.
+func jitterSleep(ctx context.Context, base, maxDelay time.Duration) error {
 	d := base
-	if max > base {
-		d = base + time.Duration(rand.Int63n(int64(max-base+1))) //nolint:gosec // jittered backoff, not security-sensitive
+	if maxDelay > base {
+		d = base + time.Duration(rand.Int63n(int64(maxDelay-base+1))) //nolint:gosec // jittered backoff, not security-sensitive
 	}
 	select {
 	case <-ctx.Done():
