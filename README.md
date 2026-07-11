@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/legion-works/grammar-forge/actions/workflows/ci.yml"><img src="https://github.com/legion-works/grammar-forge/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/legion-works/grammar-forge/actions/workflows/ci.yml?branch=dev"><img src="https://github.com/legion-works/grammar-forge/actions/workflows/ci.yml/badge.svg?branch=dev" alt="CI"></a>
   <img src="https://img.shields.io/badge/go-1.26%2B-00ADD8" alt="Go 1.26+">
   <img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0">
   <img src="https://img.shields.io/badge/platform-self--hosted%20%C2%B7%20Docker-informational" alt="Self-hosted">
