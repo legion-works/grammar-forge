@@ -6,7 +6,13 @@
       "release-type": "simple",
       "package-name": "grammar-forge",
       "changelog-path": "CHANGELOG.md",
-      "initial-version": "0.1.0"
+      "initial-version": "0.1.0",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "docker-compose.yml"
+        }
+      ]
     }
   }
 }

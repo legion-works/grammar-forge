@@ -12,7 +12,7 @@ name: grammarforge
 
 services:
   bridge:
-    image: ghcr.io/legion-works/grammar-forge-bridge:latest
+    image: ghcr.io/legion-works/grammar-forge-bridge:0.1.0 # x-release-please-version
     build: ./bridge
     depends_on: [llamacpp]
     volumes:
@@ -40,7 +40,6 @@ services:
   # per-rule isPremium. Run real LT only if you want its native Java rules
   # merged in via the gRPC RemoteRule (its /v2/check then proxies the union).
   languagetool:
-    profiles: ["languagetool"]
     image: erikvl87/languagetool:6.7
     depends_on: [bridge]
     volumes:
@@ -53,6 +52,7 @@ services:
     ports:
       - "127.0.0.1:8081:8010"
     restart: unless-stopped
+    profiles: ["languagetool"]
 
   # Default LLM backend: llama.cpp (llama-server, OpenAI-compatible). Serves the
   # Gemma-4-E4B QAT-Q4_K_XL GGUF text-only (no vision tower) => ~3.3 GiB VRAM.
