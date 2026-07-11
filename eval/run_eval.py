@@ -20,31 +20,15 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from lib_edit_match import edit_is_correct, golden_edit_spans
 from lib_latency import format_latency_line, summarize_latencies
 
-# Parse known flags before positional args so module-level code works.
-_parser = argparse.ArgumentParser(add_help=True)
-_parser.add_argument("--require-exact", action="store_true", default=False)
-_known, _rest = _parser.parse_known_args()
-REQUIRE_EXACT = _known.require_exact
-
-BRIDGE = (_rest[0] if len(_rest) > 0 else "http://127.0.0.1:8000").rstrip("/")
+# NOTE: argv/cases-file parsing below only runs when this module is executed
+# as a script (guarded at the bottom, alongside `sys.exit(main())`), NOT at
+# import time — that keeps `import run_eval` (e.g. from tests that just want
+# the pure build_suggestion_detail helper) side-effect-free: no argv parsing
+# against the *caller's* argv (pytest's, not ours) and no golden.jsonl read.
 HERE = Path(__file__).parent
-CASES_FILE = Path(_rest[1]) if len(_rest) > 1 else (HERE / "golden.jsonl")
-CASES = [
-    json.loads(line) for line in CASES_FILE.read_text().splitlines() if line.strip()
-]
-# Default golden run writes results.json (errant_score.py reads that); a custom
-# cases file writes <stem>.results.json so multiple sets coexist.
-RESULTS_FILE = (
-    (HERE / "results.json")
-    if len(_rest) <= 1
-    else CASES_FILE.with_suffix(".results.json")
-)
-# Latency summary lives next to results.json (kept out of the results list
-# itself so errant_score.py / calibration_eval.py's `for r in results` reader
-# doesn't need to know about it).
-LATENCY_FILE = RESULTS_FILE.with_name(RESULTS_FILE.stem + ".latency.json")
 
 
 def correct(text, source="eval"):
@@ -69,6 +53,25 @@ def apply_suggestions(text, suggestions):
 
 def sim(a, b):
     return SequenceMatcher(None, a, b).ratio()
+
+
+def build_suggestion_detail(case_input, case_golden, response_suggestions):
+    """Pure helper (no bridge call) that turns one case's raw bridge
+    `suggestions` list into the two additive per-case result fields:
+    per-suggestion confidence/correctness detail, and the diagnostic
+    golden-edit-spans list. `sugg["category"]` may be absent (grammar
+    suggestions omit it) -> recorded as "" ."""
+    suggestions = [
+        {
+            "model": s.get("model"),
+            "category": s.get("category", ""),
+            "confidence": s.get("confidence"),
+            "correct": edit_is_correct(case_input, case_golden, s),
+        }
+        for s in response_suggestions
+    ]
+    golden_spans = golden_edit_spans(case_input, case_golden)
+    return suggestions, golden_spans
 
 
 def main():
@@ -104,6 +107,9 @@ def main():
                 invalid_span.append((c["id"], sp, ilen))
         got = apply_suggestions(c["input"], sugs)
         models = sorted({s.get("model", "?") for s in sugs})
+        suggestion_detail, golden_spans = build_suggestion_detail(
+            c["input"], c["golden"], sugs
+        )
 
         ok = got == c["golden"]
         by_cat[c["cat"]]["total"] += 1
@@ -132,6 +138,8 @@ def main():
                 "similarity": round(sim(got, c["golden"]), 3),
                 "n_suggestions": len(sugs),
                 "latency_ms": round(latencies[-1] * 1000, 2),
+                "suggestions": suggestion_detail,
+                "golden_spans": golden_spans,
             }
         )
 
@@ -199,4 +207,27 @@ def main():
 
 
 if __name__ == "__main__":
+    # Parse known flags before positional args so module-level code works.
+    _parser = argparse.ArgumentParser(add_help=True)
+    _parser.add_argument("--require-exact", action="store_true", default=False)
+    _known, _rest = _parser.parse_known_args()
+    REQUIRE_EXACT = _known.require_exact
+
+    BRIDGE = (_rest[0] if len(_rest) > 0 else "http://127.0.0.1:8000").rstrip("/")
+    CASES_FILE = Path(_rest[1]) if len(_rest) > 1 else (HERE / "golden.jsonl")
+    CASES = [
+        json.loads(line) for line in CASES_FILE.read_text().splitlines() if line.strip()
+    ]
+    # Default golden run writes results.json (errant_score.py reads that); a
+    # custom cases file writes <stem>.results.json so multiple sets coexist.
+    RESULTS_FILE = (
+        (HERE / "results.json")
+        if len(_rest) <= 1
+        else CASES_FILE.with_suffix(".results.json")
+    )
+    # Latency summary lives next to results.json (kept out of the results
+    # list itself so errant_score.py / calibration_eval.py's `for r in
+    # results` reader doesn't need to know about it).
+    LATENCY_FILE = RESULTS_FILE.with_name(RESULTS_FILE.stem + ".latency.json")
+
     sys.exit(main())
