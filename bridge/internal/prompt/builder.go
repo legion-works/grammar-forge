@@ -376,10 +376,29 @@ func NewWithPersonalizer(format string, p Personalizer) *Builder {
 	return b
 }
 
+// contextSystemSentence is appended to the chat system prompt ONLY when the
+// request carries a non-empty Context (Task 6, GF_LLM_SENTENCE_CONTEXT —
+// see Request.Context / Service.SetSentenceContext). It tells the model the
+// Context block is reference-only, not text to correct or repeat. Appended
+// LAST (after dialect/vocabulary/personalisation) so req.Context == "" — the
+// flag-off default, the whole-text-fallback path, and every request predating
+// this feature — leaves the system prompt BYTE-IDENTICAL to before this
+// change.
+const contextSystemSentence = " When a Context block is present, use it only to resolve references, tense, and pronouns; return ONLY the corrected version of the text after 'Correct this text:'."
+
 // Build renders the request into a Prompt. GRMR-V3 takes NO system prompt and
 // uses its native completion format; generic instruct models use chat+system.
 // On the chat path, a non-empty personaliser Block is appended to the base
 // system prompt so the LLM sees the few-shot examples.
+//
+// Task 6 (GF_LLM_SENTENCE_CONTEXT), chat path only: when req.Context is
+// non-empty, the User field becomes a reference-only envelope wrapping both
+// the neighbor context and the text to correct (see the exact wording
+// below), and the system prompt gains one extra sentence
+// (contextSystemSentence) instructing the model to treat the Context block
+// as reference-only. req.Context == "" (the default; also true for every
+// GRMR-native request and the whole-text-fallback path) leaves BOTH System
+// and User byte-identical to the pre-Task-6 build.
 func (b *Builder) Build(req correction.Request) correction.Prompt {
 	if b.chat {
 		// Dialect instruction goes BEFORE the vocabulary/personalisation blocks
@@ -391,12 +410,22 @@ func (b *Builder) Build(req correction.Request) correction.Prompt {
 				sys += block.String()
 			}
 		}
+		user := req.Text
+		if req.Context != "" {
+			sys += contextSystemSentence
+			user = "Context (reference only — do NOT correct or repeat it):\n" + req.Context +
+				"\n\nCorrect this text:\n" + req.Text
+		}
 		return correction.Prompt{
 			System:   sys,
-			User:     req.Text,
+			User:     user,
 			Template: correction.TemplateChatInstruct,
 		}
 	}
+	// GRMR-native has no system/instruction slot and no envelope support for
+	// a reference-only block, so req.Context is deliberately IGNORED here —
+	// Task 6 is a chat_instruct-only feature (see the interface doc on
+	// correction.PromptBuilder.Build and Request.Context).
 	return correction.Prompt{
 		User:     "<|text_start|>\n" + req.Text + "<|text_end|>\n<|corrected_start|>\n",
 		Stop:     []string{"<|corrected_end|>", "<|text_start|>"},

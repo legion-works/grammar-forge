@@ -37,6 +37,54 @@ func TestChatSystemPromptForbidsAccentAndAgreementOvercorrection(t *testing.T) {
 	require.Contains(t, p.System, "agreement")
 }
 
+// Task 6 (GF_LLM_SENTENCE_CONTEXT): req.Context == "" (the default, and the
+// only value ever produced by the flag-off / whole-text-fallback / GRMR-
+// native paths) must leave the chat build BYTE-IDENTICAL to the pre-Task-6
+// prompt — captured here as a literal so a future change to systemPrompt
+// cannot silently also change the context-envelope behaviour undetected.
+func TestBuildContextAbsentIsByteIdenticalToBaseline(t *testing.T) {
+	b := New("chat_instruct")
+	p := b.Build(correction.Request{Text: "I has a cat"})
+	require.Equal(t, systemPrompt, p.System,
+		"System must be the bare systemPrompt with no context sentence appended")
+	require.Equal(t, "I has a cat", p.User,
+		"User must be the bare text — no envelope wrapping")
+	require.Equal(t, correction.TemplateChatInstruct, p.Template)
+}
+
+// Task 6: req.Context != "" on the chat path renders the EXACT envelope
+// wording from the plan, and appends the context-only instruction sentence
+// to System — asserted as the full literal strings, not substring checks,
+// since the wire payload's exact bytes are the contract.
+func TestBuildContextPresentRendersExactEnvelope(t *testing.T) {
+	b := New("chat_instruct")
+	p := b.Build(correction.Request{
+		Text:    "She go to school.",
+		Context: "He left early.\nThey arrived late.",
+	})
+	wantUser := "Context (reference only — do NOT correct or repeat it):\n" +
+		"He left early.\nThey arrived late." +
+		"\n\nCorrect this text:\n" +
+		"She go to school."
+	require.Equal(t, wantUser, p.User, "the envelope must match the plan's exact wording")
+	wantSystem := systemPrompt +
+		" When a Context block is present, use it only to resolve references, tense, and pronouns; " +
+		"return ONLY the corrected version of the text after 'Correct this text:'."
+	require.Equal(t, wantSystem, p.System, "the context-only instruction sentence must be appended verbatim")
+	require.Equal(t, correction.TemplateChatInstruct, p.Template)
+}
+
+// GRMR-native takes no system prompt and has no envelope support — Context
+// must be silently ignored, leaving the native build byte-identical to a
+// Context-less request.
+func TestBuildContextIgnoredOnGRMRNative(t *testing.T) {
+	b := New("grmr_native")
+	withCtx := b.Build(correction.Request{Text: "I has a cat", Context: "Prior sentence."})
+	without := b.Build(correction.Request{Text: "I has a cat"})
+	require.Equal(t, without, withCtx, "GRMR-native must ignore Context entirely")
+	require.Empty(t, withCtx.System, "GRMR-native never has a system prompt")
+}
+
 // Rephrase uses a SEPARATE system prompt from the strict minimal-edit
 // correction prompt: rephrase is intentionally about clarity/restyle, while
 // grammar correction is intentionally minimal. Sharing the prompt would

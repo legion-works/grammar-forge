@@ -198,6 +198,14 @@ func main() {
 	// switch.
 	svc.SetFastHintsEnabled(cfg.FastHintsEnabled)
 
+	// Task 6 (GF_LLM_SENTENCE_CONTEXT, default off): when on, the per-sentence
+	// pipeline sends each sentence's ±1 neighbor sentence alongside it as
+	// reference-only context, so the LLM can resolve cross-sentence
+	// references/tense/pronouns. Unconditional call (SetSentenceContext with
+	// false is a no-op), mirroring SetFastHintsEnabled above — only takes
+	// effect together with the sentence pipeline (GF_SENTENCE_CACHE_SIZE > 0).
+	svc.SetSentenceContext(cfg.LLMSentenceContext)
+
 	// Phase-C semantic verifier (GF_SEMANTIC_VERIFIER, default off): when
 	// on, LLM rewrites whose MiniLM cosine similarity to the original
 	// falls below the threshold are discarded before being diffed into

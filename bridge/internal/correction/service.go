@@ -82,6 +82,16 @@ type Service struct {
 	// whole-text path; populated by SetSentenceCache to enable the sentence
 	// pipeline (segment + per-sentence cache lookup + span reassembly).
 	sentenceCache *sentenceCache
+	// sentenceContext gates Task 6 (GF_LLM_SENTENCE_CONTEXT): when true, the
+	// per-sentence loop in Correct populates each segment's Request.Context
+	// with its ±1 sentence neighbor text (see neighborContext), which the
+	// chat-path prompt builder renders as a reference-only envelope (see
+	// prompt.Builder.Build). Default false (zero value) — a disabled flag
+	// leaves every Request.Context "" and the wire payload byte-identical to
+	// pre-Task-6 behaviour. The whole-text fallback path (len(segs) < 2)
+	// never populates Context regardless of this flag — there are no
+	// neighbor segments to draw from.
+	sentenceContext bool
 	// tone analysis (mirrors the rephrase backend resolution; reuses
 	// rephraseFactory). toneDefaultBackend is the GF_TONE_* backend (nil =>
 	// fall back to the rephrase default, then s.llm). toneCache memoizes tags
@@ -241,6 +251,15 @@ func (s *Service) SetRephraseDefaultBackend(b *RephraseBackend) { s.rephraseDefa
 // sentence entries. Disabled (whole-text behaviour, unchanged) when never
 // called or size <= 0.
 func (s *Service) SetSentenceCache(size int) { s.sentenceCache = newSentenceCache(size) }
+
+// SetSentenceContext enables or disables Task 6 (GF_LLM_SENTENCE_CONTEXT):
+// when true, the per-sentence loop in Correct populates each segment's
+// Request.Context with its ±1 sentence neighbor text before it reaches the
+// prompt builder / LLM / sentence cache. Default false (zero value, never
+// calling this setter); byte-identical to pre-Task-6 behaviour. Only
+// affects the multi-segment sentence-loop path — the whole-text fallback
+// (len(segs) < 2) has no neighbor segments and never populates Context.
+func (s *Service) SetSentenceContext(enabled bool) { s.sentenceContext = enabled }
 
 // SetWordAllowlist injects the user-dictionary allowlist consulted at
 // finalize time to drop LLM re-flags of words the user has added. Optional;
@@ -492,7 +511,12 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 		// underlying slice back, so it is copied before finalize (finalize
 		// tags IDs into the slice in place — sharing it across callers would
 		// race and cross-contaminate their edit IDs).
-		key := sentenceCacheKey(s.baseModel, s.pb.Build(req).System, req.Text, req.Picky)
+		// Context is whatever the caller's req arrived with — always "" for
+		// every current caller (REST/gRPC never set it; only the segment loop
+		// below populates it, on a PER-SEGMENT sreq copy, never on this req).
+		// Task 6, GF_LLM_SENTENCE_CONTEXT: pinned by
+		// TestServiceSentenceContextWholeTextPathStaysEmpty.
+		key := sentenceCacheKey(s.baseModel, s.pb.Build(req).System, req.Text, req.Context, req.Picky)
 		v, err, shared := s.sf.Do(key, func() (any, error) {
 			return s.correctOnce(ctx, req)
 		})
@@ -516,10 +540,16 @@ func (s *Service) Correct(ctx context.Context, req Request) (Correction, error) 
 	var all []Suggestion
 	failures := 0
 	var lastErr error
-	for _, seg := range segs {
+	for i, seg := range segs {
 		sentence := req.Text[seg.Start:seg.End]
 		sreq := Request{Text: sentence, Source: req.Source, Picky: req.Picky}
-		key := sentenceCacheKey(s.baseModel, s.pb.Build(sreq).System, sentence, req.Picky)
+		// Task 6 (GF_LLM_SENTENCE_CONTEXT): populate the NEW sreq copy only —
+		// req (the caller's Request) is never mutated. Off (the default)
+		// leaves sreq.Context "" exactly as before this change.
+		if s.sentenceContext {
+			sreq.Context = neighborContext(req.Text, segs, i)
+		}
+		key := sentenceCacheKey(s.baseModel, s.pb.Build(sreq).System, sentence, sreq.Context, req.Picky)
 		sugs, hit := s.sentenceCache.get(key)
 		if !hit {
 			// Singleflight-dedup: concurrent requests racing on the SAME
@@ -609,7 +639,19 @@ func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, e
 			// The over-edit repair chain runs FIRST (text-level, see
 			// overedit.go) so a fused wanted+unwanted edit is fixed before
 			// the diff splits it into suggestions.
-			repaired := s.repairOverEdits(req.Text, strings.TrimSpace(llmText))
+			corrected := strings.TrimSpace(llmText)
+			if req.Context != "" {
+				// Task 6 echo defense: a non-compliant chat model can echo the
+				// Context envelope's "Correct this text:" marker line (and
+				// everything before it) instead of returning only the
+				// corrected sentence. Only relevant when THIS request actually
+				// carried a Context block — stripContextEcho is a no-op
+				// (byte-identical) on ordinary output, but skipping the call
+				// entirely when Context == "" keeps the legacy path from
+				// paying for a scan it can never need.
+				corrected = stripContextEcho(corrected)
+			}
+			repaired := s.repairOverEdits(req.Text, corrected)
 			// Deterministic a/an article fix: applied after over-edit repair
 			// and before diffing so silent-h corrections ("a honest"→"an
 			// honest") are emitted even when the LLM misses them. Text-level
@@ -734,6 +776,10 @@ func (s *Service) llmOnlySuggestions(ctx context.Context, req Request) ([]Sugges
 		return nil, fmt.Errorf("llm output suspiciously short (%d bytes for %d-byte input); discarding",
 			len(corrected), len(req.Text))
 	}
+	if req.Context != "" {
+		// Task 6 echo defense — see the mirroring comment in correctOnce.
+		corrected = stripContextEcho(corrected)
+	}
 	corrected = s.repairOverEdits(req.Text, corrected)
 	// Semantic-verifier gate: on the LLM-only branch there is no fast-path
 	// set to fall back on, so rejection yields an empty grammar result
@@ -760,6 +806,40 @@ const minOriginalLenForTruncationGuard = 200
 // deletion suggestion).
 func suspiciouslyTruncated(original, corrected string) bool {
 	return len(original) >= minOriginalLenForTruncationGuard && len(corrected) < len(original)/2
+}
+
+// contextEchoMarker is the exact line prompt.Builder.Build's Context envelope
+// puts immediately before the text to correct (see its "Correct this text:"
+// line). A non-compliant chat model can echo this line — and everything
+// before it, i.e. the whole Context block — instead of returning only the
+// corrected sentence; stripContextEcho (below) defends against that.
+const contextEchoMarker = "Correct this text:"
+
+// stripContextEcho defends against an LLM echoing the Context envelope's
+// marker line (see contextEchoMarker) instead of returning ONLY the
+// corrected sentence. Only called when the originating request carried a
+// non-empty Context (see correctOnce / llmOnlySuggestions) — ordinary
+// (context-less) output never reaches this function.
+//
+// FULL-LINE anchored: a line matches only when its ENTIRE trimmed content
+// equals the marker. A legitimate sentence that merely CONTAINS the phrase
+// mid-line (e.g. quoted inside prose) must NOT trigger a strip — that text
+// is content, not an echoed envelope line. When one or more marker lines are
+// found, everything AFTER the LAST one is returned, trimmed (an LLM that
+// echoes the marker more than once still leaves the actual correction after
+// the final occurrence). No marker line -> output returned unchanged.
+func stripContextEcho(output string) string {
+	lines := strings.Split(output, "\n")
+	lastMarker := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == contextEchoMarker {
+			lastMarker = i
+		}
+	}
+	if lastMarker < 0 {
+		return output
+	}
+	return strings.TrimSpace(strings.Join(lines[lastMarker+1:], "\n"))
 }
 
 // finalize logs the combined correction (best-effort) and tags every

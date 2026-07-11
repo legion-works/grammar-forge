@@ -164,6 +164,18 @@ type Config struct {
 	// re-enabling gates on the full cold eval. See
 	// .opencode/specs/2026-06-10-fast-hint-spike.md.
 	FastHintsEnabled bool
+	// LLMSentenceContext (Task 6, GF_LLM_SENTENCE_CONTEXT) enables the ±1
+	// sentence neighbor context sent alongside each sentence on the LLM
+	// escalation prompt (see correction.Service.SetSentenceContext /
+	// prompt.Builder.Build). Default false — a disabled flag leaves the
+	// wire payload byte-identical to before this feature existed. Only
+	// takes effect on the per-sentence pipeline (GF_SENTENCE_CACHE_SIZE >
+	// 0 and multi-sentence input); the whole-text fallback never has a
+	// neighbor sentence to send. PRIVACY: when enabled, each LLM request
+	// also carries the neighboring sentences; with a REMOTE
+	// GF_LLM_BASE_URL this sends more of a user's text off-host than the
+	// bare sentence being checked.
+	LLMSentenceContext bool
 	// OverEditFilterEnabled wires the LLM over-edit repair chain
 	// (correction.DefaultOverEditRules) that deterministically reverts
 	// measured LLM over-edit classes — nor/or proximity-agreement flips and
@@ -436,6 +448,7 @@ func Load(getenv Getenv) Config {
 		IrregularPluralFixEnabled: getBool("GF_IRREGULAR_PLURAL_FIX", true),
 		CapitalizationFixEnabled:  getBool("GF_CAPITALIZATION_FIX", true),
 		FastHintsEnabled:          getBool("GF_FAST_HINTS", false),
+		LLMSentenceContext:        getBool("GF_LLM_SENTENCE_CONTEXT", false),
 
 		PersonalizationEnabled: getBool("GF_PERSONALIZATION_ENABLED", true),
 		PersonalizationTTL:     getDuration("GF_PERSONALIZATION_TTL", 5*time.Minute),

@@ -11,9 +11,10 @@ import (
 // sentenceCache memoizes per-sentence suggestion sets (sentence-relative
 // spans, NO ids — finalize tags ids per request). Content-addressed: the key
 // covers everything that can change the answer (model, full system prompt —
-// which embeds the personalization block — the sentence text, and picky), so
-// there is no TTL/invalidation machinery. A clean sentence caches an empty
-// slice — the dominant steady-state hit while typing.
+// which embeds the personalization block — the sentence text, the ±1
+// sentence neighbor context (Task 6), and picky), so there is no
+// TTL/invalidation machinery. A clean sentence caches an empty slice — the
+// dominant steady-state hit while typing.
 type sentenceCache struct {
 	lru *lru.Cache[string, []Suggestion]
 	// hits/misses are atomic counters surfaced via Stats() for the /stats
@@ -39,13 +40,27 @@ func newSentenceCache(size int) *sentenceCache {
 
 // sentenceCacheKey derives the content-addressed key. \x00 separators prevent
 // ambiguous concatenations ("ab"+"c" vs "a"+"bc").
-func sentenceCacheKey(baseModel, system, sentence string, picky bool) string {
+//
+// context (Task 6, GF_LLM_SENTENCE_CONTEXT) is the ±1 sentence neighbor
+// context (see neighborContext), hashed UNCONDITIONALLY and separately from
+// system: the rendered System prompt gains only a FIXED sentence when
+// context != "" (see prompt.Builder.Build), so two requests with the SAME
+// sentence/system/picky but DIFFERENT neighbor text would otherwise collide
+// on one key even though the LLM sees different User content. Hashing raw
+// context (not its presence/absence) keeps different neighbor text from
+// sharing a cache entry or singleflight flight. This changes the key layout
+// unconditionally (both call sites in service.go pass context — "" on the
+// whole-text path, sreq.Context on the segment-loop path), so the in-memory
+// LRU and singleflight groups simply repopulate on restart; no migration.
+func sentenceCacheKey(baseModel, system, sentence, context string, picky bool) string {
 	h := sha256.New()
 	h.Write([]byte(baseModel))
 	h.Write([]byte{0})
 	h.Write([]byte(system))
 	h.Write([]byte{0})
 	h.Write([]byte(sentence))
+	h.Write([]byte{0})
+	h.Write([]byte(context))
 	h.Write([]byte{0})
 	if picky {
 		h.Write([]byte{1})

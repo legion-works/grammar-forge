@@ -153,6 +153,47 @@ func appendLineSegments(segs []SentenceSegment, line string, lineStart int, tok 
 	return segs
 }
 
+// neighborContext returns the ±1 sentence context for the LLM (Task 6,
+// GF_LLM_SENTENCE_CONTEXT): the text of the sentence segment immediately
+// before segs[i] and the one immediately after, for use as reference-only
+// context in the correction prompt. segs must be the SAME slice (and text
+// the same source string) that produced index i — callers own that
+// invariant; this function does no bounds validation beyond the neighbor
+// existence checks below.
+//
+// Join semantics (deliberately NOT a bare strings.Join, which would leave a
+// stray leading/trailing "\n" when only one neighbor exists):
+//   - both prev and next exist -> prev + "\n" + next
+//   - only prev exists         -> prev
+//   - only next exists         -> next
+//   - neither exists (segs has exactly one segment, i.e. i is both the
+//     first and last index)    -> ""
+//
+// A real sentence segment (per SegmentSentences) is never empty, so "prev
+// exists" and "prev != \"\"" are equivalent here — the switch below is safe
+// to key off simple emptiness.
+func neighborContext(text string, segs []SentenceSegment, i int) string {
+	var prev, next string
+	if i > 0 {
+		p := segs[i-1]
+		prev = text[p.Start:p.End]
+	}
+	if i < len(segs)-1 {
+		n := segs[i+1]
+		next = text[n.Start:n.End]
+	}
+	switch {
+	case prev != "" && next != "":
+		return prev + "\n" + next
+	case prev != "":
+		return prev
+	case next != "":
+		return next
+	default:
+		return ""
+	}
+}
+
 // segmentLinesWithoutTokenizer is the no-punkt fallback: yield one segment
 // per non-empty line (after stripping a trailing '\r' for CRLF). Preserves
 // the '\n'-as-hard-boundary invariant and the half-open byte-range contract.

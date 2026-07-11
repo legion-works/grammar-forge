@@ -249,6 +249,32 @@ func TestSegmentLinesWithoutTokenizerCRLFStripsCarriageReturn(t *testing.T) {
 	}
 }
 
+// Task 6 (GF_LLM_SENTENCE_CONTEXT): neighborContext join semantics.
+func TestNeighborContext(t *testing.T) {
+	text := "First. Second. Third."
+	segs := SegmentSentences(text)
+	require.Len(t, segs, 3, "fixture must segment into exactly 3 sentences")
+
+	t.Run("middle segment joins both neighbors with a newline", func(t *testing.T) {
+		got := neighborContext(text, segs, 1)
+		require.Equal(t, "First.\nThird.", got)
+	})
+	t.Run("first segment has only a next neighbor", func(t *testing.T) {
+		got := neighborContext(text, segs, 0)
+		require.Equal(t, "Second.", got, "no prev neighbor -> just next, no stray newline")
+	})
+	t.Run("last segment has only a prev neighbor", func(t *testing.T) {
+		got := neighborContext(text, segs, 2)
+		require.Equal(t, "Second.", got, "no next neighbor -> just prev, no stray newline")
+	})
+	t.Run("sole segment has no neighbors", func(t *testing.T) {
+		solo := SegmentSentences("Only one sentence here.")
+		require.Len(t, solo, 1)
+		got := neighborContext("Only one sentence here.", solo, 0)
+		require.Empty(t, got, "a single segment has neither a prev nor a next neighbor")
+	})
+}
+
 func TestSegmentLinesWithoutTokenizerBlankLineProducesNoEmptySegment(t *testing.T) {
 	// "a\n\nb" must yield exactly two non-empty segments; the blank line
 	// in the middle produces no segment at all.

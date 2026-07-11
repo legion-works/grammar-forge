@@ -364,6 +364,32 @@ func TestFastHintsDefaultsOffAndReadsEnv(t *testing.T) {
 		"GF_FAST_HINTS=false must explicitly disable, not fall through to the default")
 }
 
+// GF_LLM_SENTENCE_CONTEXT (Task 6, default off): default false leaves the
+// LLM wire payload byte-identical to before this feature; the env value must
+// round-trip both ways (an explicit "false" must not fall through to some
+// other default).
+func TestLLMSentenceContextDefaultsOffAndReadsEnv(t *testing.T) {
+	empty := func(string) (string, bool) { return "", false }
+	require.False(t, Load(empty).LLMSentenceContext, "default must be off")
+
+	on := func(k string) (string, bool) {
+		if k == "GF_LLM_SENTENCE_CONTEXT" {
+			return "true", true
+		}
+		return "", false
+	}
+	require.True(t, Load(on).LLMSentenceContext)
+
+	off := func(k string) (string, bool) {
+		if k == "GF_LLM_SENTENCE_CONTEXT" {
+			return "false", true
+		}
+		return "", false
+	}
+	require.False(t, Load(off).LLMSentenceContext,
+		"GF_LLM_SENTENCE_CONTEXT=false must explicitly disable, not fall through to the default")
+}
+
 func TestLoadCompleteConfig(t *testing.T) {
 	// defaults: off
 	c := Load(func(string) (string, bool) { return "", false })

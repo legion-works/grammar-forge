@@ -457,6 +457,228 @@ func TestServiceEscalationFeedsOriginalText(t *testing.T) {
 		"final suggestions apply once against the original (no double edit)")
 }
 
+// --- Task 6 (GF_LLM_SENTENCE_CONTEXT): ±1 sentence LLM context ---
+
+// stripContextEcho unit tests: FULL-LINE anchored echo defense.
+
+func TestStripContextEchoFullLineMatchStripsToAfterLastMarker(t *testing.T) {
+	out := "Context (reference only — do NOT correct or repeat it):\n" +
+		"He left early.\n\nCorrect this text:\nShe goes to school."
+	require.Equal(t, "She goes to school.", stripContextEcho(out))
+}
+
+func TestStripContextEchoMidLinePhraseDoesNotStrip(t *testing.T) {
+	// The phrase appears INSIDE a line (quoted), not as a whole line by
+	// itself — must NOT trigger the strip.
+	out := `She said, "Correct this text: right now," and left.`
+	require.Equal(t, out, stripContextEcho(out),
+		"a mid-line occurrence of the marker phrase must not trigger a strip")
+}
+
+func TestStripContextEchoNoMarkerReturnsUnchanged(t *testing.T) {
+	out := "She goes to school."
+	require.Equal(t, out, stripContextEcho(out))
+}
+
+func TestStripContextEchoMultipleMarkersLastWins(t *testing.T) {
+	out := "Correct this text:\nfirst wrong attempt\nCorrect this text:\nShe goes to school."
+	require.Equal(t, "She goes to school.", stripContextEcho(out),
+		"everything after the LAST marker line wins, not the first")
+}
+
+func TestStripContextEchoMarkerWithSurroundingWhitespaceOnItsLineStillMatches(t *testing.T) {
+	// The FULL-LINE match is on the TRIMMED line content, so incidental
+	// leading/trailing whitespace on the marker's own line still matches.
+	out := "prev context\n  Correct this text:  \nShe goes to school."
+	require.Equal(t, "She goes to school.", stripContextEcho(out))
+}
+
+// ctxAwarePB is a minimal chat-style PromptBuilder for the service-level
+// Task 6 tests below. Its Build method mirrors prompt.Builder's REAL Context
+// envelope rendering (see prompt.Builder.Build) — envelope wrapping only
+// when req.Context != "", byte-identical User/System otherwise — so these
+// tests assert on the ACTUAL text the LLM would receive, not a simplified
+// stand-in. Every other method is a minimal chat-shaped stub; none of these
+// tests exercise style/rephrase/tone/complete/hints.
+type ctxAwarePB struct{}
+
+func (ctxAwarePB) Build(req Request) Prompt {
+	if req.Context == "" {
+		return Prompt{User: req.Text, System: "grammar", Template: TemplateChatInstruct}
+	}
+	return Prompt{
+		User: "Context (reference only — do NOT correct or repeat it):\n" + req.Context +
+			"\n\nCorrect this text:\n" + req.Text,
+		System:   "grammar with-context",
+		Template: TemplateChatInstruct,
+	}
+}
+
+func (ctxAwarePB) BuildRephrase(req RephraseRequest) Prompt {
+	return Prompt{User: req.Text, System: "rephrase", Template: TemplateChatInstruct}
+}
+
+func (ctxAwarePB) BuildStyle(req Request) Prompt {
+	return Prompt{User: req.Text, System: "style", Template: TemplateChatInstruct}
+}
+
+func (p ctxAwarePB) BuildWithSpellingHints(req Request, _ []Suggestion) Prompt {
+	return p.Build(req)
+}
+
+func (ctxAwarePB) BuildTone(req ToneRequest) Prompt {
+	return Prompt{User: req.Text, System: "tone", Template: TemplateChatInstruct}
+}
+
+func (ctxAwarePB) BuildComplete(text string, _ Source) Prompt {
+	return Prompt{System: "continue", User: text, Template: TemplateChatInstruct}
+}
+
+// Flag ON: the per-sentence loop populates each segment's Context with its
+// ±1 neighbor sentence(s), and that Context reaches the LLM through the
+// prompt builder's envelope. The LLM echoes p.User back verbatim, which
+// exercises the stripContextEcho round-trip too: the echoed envelope must
+// reduce back to exactly the original sentence, producing NO suggestions.
+func TestServiceSentenceContextFlagOnIncludesNeighborsInPrompt(t *testing.T) {
+	st := &fakeStore{}
+	var prompts []Prompt
+	llm := llmFunc(func(_ context.Context, p Prompt) (string, error) {
+		prompts = append(prompts, p)
+		return p.User, nil
+	})
+	svc := NewService(ctxAwarePB{}, nil, llm, st, "m", fastPolicy())
+	svc.SetSentenceContext(true)
+
+	text := "He left early. She go to school. They arrived late."
+	got, err := svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+	require.Empty(t, got.Suggestions,
+		"the echoed envelope must round-trip through stripContextEcho back to the original sentence")
+
+	require.Len(t, prompts, 3, "one LLM call per sentence")
+	// FIRST sentence: no prev neighbor, but it DOES have a next neighbor
+	// ("She go to school.") — neighborContext returns "just next" in that
+	// case, so this prompt still carries an envelope.
+	require.Contains(t, prompts[0].User, "She go to school.",
+		"the FIRST sentence's prompt must carry its next neighbor (no prev exists)")
+	require.Contains(t, prompts[0].User, "He left early.",
+		"the FIRST sentence's prompt must still carry the sentence itself")
+	require.Contains(t, prompts[1].User, "He left early.",
+		"the MIDDLE sentence's prompt must carry the prev neighbor")
+	require.Contains(t, prompts[1].User, "They arrived late.",
+		"the MIDDLE sentence's prompt must carry the next neighbor")
+	require.Contains(t, prompts[1].User, "She go to school.",
+		"the MIDDLE sentence's prompt must still carry the sentence itself")
+	// LAST sentence: no next neighbor, but it DOES have a prev neighbor
+	// ("She go to school.") — "just prev" case.
+	require.Contains(t, prompts[2].User, "She go to school.",
+		"the LAST sentence's prompt must carry its prev neighbor (no next exists)")
+	require.Contains(t, prompts[2].User, "They arrived late.",
+		"the LAST sentence's prompt must still carry the sentence itself")
+}
+
+// Flag OFF (never calling SetSentenceContext, i.e. the default): the exact
+// same multi-sentence input must produce BYTE-IDENTICAL per-sentence prompts
+// to what the pre-Task-6 pipeline sent — no envelope, ever.
+func TestServiceSentenceContextFlagOffPromptByteIdentical(t *testing.T) {
+	st := &fakeStore{}
+	var prompts []Prompt
+	llm := llmFunc(func(_ context.Context, p Prompt) (string, error) {
+		prompts = append(prompts, p)
+		return p.User, nil
+	})
+	svc := NewService(ctxAwarePB{}, nil, llm, st, "m", fastPolicy())
+	// SetSentenceContext is deliberately never called.
+
+	text := "He left early. She go to school. They arrived late."
+	_, err := svc.Correct(context.Background(), Request{Text: text})
+	require.NoError(t, err)
+
+	require.Len(t, prompts, 3)
+	require.Equal(t, "He left early.", prompts[0].User)
+	require.Equal(t, "She go to school.", prompts[1].User,
+		"flag off: no context envelope on any sentence, including the middle one")
+	require.Equal(t, "They arrived late.", prompts[2].User)
+}
+
+// Whole-text fallback (single segment, len(segs) < 2): Context must stay ""
+// even with the flag on — there is no neighbor segment to draw from, and
+// Correct's whole-text branch never calls neighborContext at all.
+func TestServiceSentenceContextWholeTextPathStaysEmpty(t *testing.T) {
+	st := &fakeStore{}
+	var prompts []Prompt
+	llm := llmFunc(func(_ context.Context, p Prompt) (string, error) {
+		prompts = append(prompts, p)
+		return p.User, nil
+	})
+	svc := NewService(ctxAwarePB{}, nil, llm, st, "m", fastPolicy())
+	svc.SetSentenceContext(true)
+
+	_, err := svc.Correct(context.Background(), Request{Text: "Just one sentence here"})
+	require.NoError(t, err)
+	require.Len(t, prompts, 1)
+	require.Equal(t, "Just one sentence here", prompts[0].User,
+		"the whole-text fallback path must never populate Context, even with the flag on")
+}
+
+// llmOnlySuggestions branch (no fast correctors): stripContextEcho must run
+// ONLY when the request actually carried a non-empty Context. Context absent
+// -> the LLM's raw echo (including the marker line) reaches the diff
+// verbatim. Context present -> stripped down to just the corrected text
+// before diffing.
+func TestLLMOnlyStripsContextEchoOnlyWhenContextPresent(t *testing.T) {
+	echoOut := "Context (reference only — do NOT correct or repeat it):\n" +
+		"prev sentence.\n\nCorrect this text:\nfixed text"
+
+	svcNoCtx := NewService(fakePB{}, nil, fakeLLM{out: echoOut}, &fakeStore{}, "m", fastPolicy())
+	got, err := svcNoCtx.Correct(context.Background(), Request{Text: "original text"})
+	require.NoError(t, err)
+	require.Equal(t, echoOut, applyAll("original text", got.Suggestions),
+		"context-less output must reach the diff RAW — no echo stripping")
+
+	svcCtx := NewService(fakePB{}, nil, fakeLLM{out: echoOut}, &fakeStore{}, "m", fastPolicy())
+	got2, err := svcCtx.Correct(context.Background(), Request{Text: "original text", Context: "prev sentence."})
+	require.NoError(t, err)
+	require.Equal(t, "fixed text", applyAll("original text", got2.Suggestions),
+		"context-present output must be stripped of the echoed envelope before diffing")
+}
+
+// Fast+escalate branch (fast correctors configured, low confidence forces
+// escalation): mirrors the llmOnlySuggestions test above but for the OTHER
+// call site inside correctOnce (the inline escalation branch).
+func TestEscalationStripsContextEchoOnlyWhenContextPresent(t *testing.T) {
+	echoOut := "Context (reference only — do NOT correct or repeat it):\n" +
+		"prev sentence.\n\nCorrect this text:\nfixed text"
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.3}},
+	}
+
+	svcNoCtx := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: echoOut}, &fakeStore{}, "m", fastPolicy())
+	got, err := svcNoCtx.Correct(context.Background(), Request{Text: "original text"})
+	require.NoError(t, err)
+	require.Equal(t, echoOut, applyAll("original text", got.Suggestions),
+		"context-less escalation output must reach the diff RAW — no echo stripping")
+
+	svcCtx := NewService(fakePB{}, []Corrector{fc}, fakeLLM{out: echoOut}, &fakeStore{}, "m", fastPolicy())
+	got2, err := svcCtx.Correct(context.Background(), Request{Text: "original text", Context: "prev sentence."})
+	require.NoError(t, err)
+	require.Equal(t, "fixed text", applyAll("original text", got2.Suggestions),
+		"context-present escalation output must be stripped of the echoed envelope before diffing")
+}
+
+// SetSentenceContext default: never calling it leaves the field false, so
+// Correct's segment loop never populates Context — a direct pin of the zero
+// value alongside the behavioural tests above.
+func TestSetSentenceContextDefaultOff(t *testing.T) {
+	svc := NewService(fakePB{}, nil, fakeLLM{}, &fakeStore{}, "m", fastPolicy())
+	require.False(t, svc.sentenceContext, "sentenceContext must default false")
+	svc.SetSentenceContext(true)
+	require.True(t, svc.sentenceContext)
+	svc.SetSentenceContext(false)
+	require.False(t, svc.sentenceContext)
+}
+
 func TestApplyAllAndDominantModel(t *testing.T) {
 	// applyAll applies last-to-first. Same-length replacements so earlier
 	// byte offsets stay valid through the apply.

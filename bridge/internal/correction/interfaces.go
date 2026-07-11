@@ -17,6 +17,17 @@ type Request struct {
 	// suggestions are authoritative: any style edit that overlaps a grammar
 	// edit is dropped. Picky defaults to false; clients opt in.
 	Picky bool
+	// Context carries the ±1 sentence neighbor context for the LLM (Task 6,
+	// GF_LLM_SENTENCE_CONTEXT): prev + "\n" + next (see neighborContext in
+	// segment.go for the exact join semantics), or "" when the feature is
+	// off or no neighbor exists. INTERNAL ONLY — this is NOT part of the
+	// REST /correct request JSON; the REST DTO (restserver.correctRequest)
+	// has no matching field, so a client can never set it directly. It is
+	// populated server-side, exclusively by Service.Correct's per-sentence
+	// loop when the service's sentenceContext flag is enabled (see
+	// Service.SetSentenceContext). The whole-text fallback path (len(segs)
+	// < 2) never populates it, so Context is always "" there.
+	Context string
 }
 
 // Corrector is a fast-path engine (Harper, GECToR). Implementations live in
