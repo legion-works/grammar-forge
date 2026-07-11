@@ -11,6 +11,11 @@
         {
           "type": "generic",
           "path": "docker-compose.yml"
+        },
+        {
+          "type": "json",
+          "path": "clients/browser/package.json",
+          "jsonpath": "$.version"
         }
       ]
     }
