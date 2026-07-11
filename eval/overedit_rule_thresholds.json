@@ -1,0 +1,49 @@
+{
+  "generated": "2026-07-11T11:12:38.863735+00:00",
+  "probe": "semverify-probe",
+  "rules": {
+    "proximity_agreement_flip": {
+      "verdict": "not_needed",
+      "threshold": null,
+      "margin": null,
+      "positives": 3,
+      "fired_golden": 0
+    },
+    "proper_noun_comma_restructure": {
+      "verdict": "not_needed",
+      "threshold": null,
+      "margin": null,
+      "positives": 2,
+      "fired_golden": 0
+    },
+    "mid_word_case_flip": {
+      "verdict": "not_needed",
+      "threshold": null,
+      "margin": null,
+      "positives": 3,
+      "fired_golden": 0
+    },
+    "contraction_expansion": {
+      "verdict": "not_needed",
+      "threshold": null,
+      "margin": null,
+      "positives": 12,
+      "fired_golden": 0
+    },
+    "singular_they": {
+      "verdict": "not_needed",
+      "threshold": null,
+      "margin": null,
+      "positives": 5,
+      "fired_golden": 0
+    },
+    "modal_perfect_addition": {
+      "verdict": "not_needed",
+      "threshold": null,
+      "margin": null,
+      "positives": 9,
+      "fired_golden": 0
+    }
+  },
+  "unknown_fixtures": 0
+}

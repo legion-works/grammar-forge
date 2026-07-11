@@ -572,8 +572,79 @@ golden regression.
 
 ## 10. Per-rule over-edit study
 
-(Verdict recording home for the Phase-4 per-rule fired-pair-conditioned
-threshold study — populated by `overedit_rule_study.py`.)
+Follow-up to §5's REFUTED global verifier study: instead of one universal
+cosine threshold over ALL golden/over-edit pairs, this studies a **per-rule**
+gate ("revert only when `cos(original, corrected) >= t_R`"), conditioned on
+the pairs each rule actually **fires** on — its own 34 tagged
+`overedit_fixtures.jsonl` positives (the over-edit it exists to revert; high
+cosine expected) versus the golden `(input, golden)` pairs it would ALSO
+fire on per `bridge/cmd/overedit-fired` (cases where reverting would mangle
+a legitimate correction; low cosine expected, this is the pattern's false
+positive risk). The deterministic pick is `t_R = min(eligible)` over
+positives at least 0.05 above the worst fired-golden cosine (never a
+midpoint — see `overedit_rule_study.py`'s `decide_threshold` docstring for
+why a midpoint silently breaks the margin invariant).
+
+**Real-data verdict (2026-07-11, golden.jsonl x 6 rules):**
+
+```
+rule                             verdict     threshold   margin positives fired_golden
+--------------------------------------------------------------------------------------
+proximity_agreement_flip         not_needed          -        -         3            0
+proper_noun_comma_restructure    not_needed          -        -         2            0
+mid_word_case_flip               not_needed          -        -         3            0
+contraction_expansion            not_needed          -        -        12            0
+singular_they                    not_needed          -        -         5            0
+modal_perfect_addition           not_needed          -        -         9            0
+
+unknown_fixtures (excluded from grouping): 0
+```
+
+`bridge/cmd/overedit-fired ../eval/golden.jsonl` found **zero** (rule, case)
+pairs across all 125 golden cases and all six rules: none of the six
+repair functions' existing string-level safety discriminators (the "Guard
+A/B", clause-final, verbatim-in-original checks documented in
+`overedit.go`) ever fire on a legitimate golden correction. Per the study's
+decision rule, zero fired-golden pairs means the pattern alone is already
+precise on every measured case — a cosine gate has nothing to add, so all
+six rules verdict `not_needed` rather than `usable`/`refuted`.
+
+This is the **un-refuted PER-RULE variant** of the §5 global study — §5's
+refutation (no single universal threshold separates over-edits from golden
+corrections) still stands; per-rule conditioning doesn't overturn it, it
+sidesteps it: the six rules' own text-level guards are precise enough
+on the current 125-case golden set that no verifier-cosine gate is needed
+on top of them.
+
+**Artifacts (committed):**
+- `overedit_fixtures.jsonl` — the same 34 fixture pairs from §5, now each
+  tagged `"rule": "<id>"` (traced to source in `overedit_test.go`; 0 rows
+  tagged `"unknown"`).
+- `overedit_fired.tsv` — `bridge/cmd/overedit-fired`'s output: `caseID<TAB>ruleID`
+  for every (rule, golden case) pair where the rule fires on the LEGITIMATE
+  correction (currently empty — 0 bytes).
+- `overedit_rule_thresholds.json` — the full per-rule verdict object
+  (`overedit_rule_study.py`'s output): `{generated, probe, rules: {<id>:
+  {verdict, threshold, margin, positives, fired_golden}}, unknown_fixtures}`.
+
+**Verdict meanings:**
+- `usable` — a safe per-rule cosine gate exists (`threshold`/`margin` set);
+  could back `GF_OVEREDIT_LEARNED_GATE` (Task 11) if a rule ever needs one.
+- `not_needed` — the rule's own text-level discriminator never fires on a
+  legitimate correction in the measured set; a cosine gate would add
+  complexity with no safety benefit. **All six rules currently verdict
+  this.**
+- `refuted` — the rule fires on legitimate corrections AND no cosine
+  threshold separates them cleanly (too few eligible positives clear the
+  0.05 margin above the worst fired-golden case) — the rule's text-level
+  guards would need tightening; a cosine gate cannot safely paper over it.
+
+Reproduce:
+
+```bash
+. /tmp/tools/env.sh && cd bridge && CGO_ENABLED=0 go run ./cmd/overedit-fired ../eval/golden.jsonl > ../eval/overedit_fired.tsv
+cd eval && /tmp/tools/eval-venv/bin/python overedit_rule_study.py
+```
 
 ## 11. Confidence calibration (`calibration_eval.py`)
 
