@@ -16,6 +16,9 @@
 #                       (default: repo root, one level up from eval/)
 #   GF_SKIP_BENCHMARKS=1  skip conll14/bea19 (their gitignored corpora are
 #                       often not fetched in a quick smoke run)
+#   GF_GATE=1           exit nonzero if ANY step's gate is "fail" or "error"
+#                       ("skipped" alone never fails — skips are declared,
+#                       errors are not). Default: report-only, exit 0.
 #
 # Every step is best-effort: a missing corpus (conll14/bea19/jfleg data is
 # gitignored, jfleg needs a manual fetch, get_benchmarks.sh needs a one-time
@@ -34,6 +37,11 @@ if [ ! -x "$PY" ]; then
        "(see README's ERRANT/benchmark venv setup)" >&2
   PY="python3"
 fi
+
+# Per-step stdout+stderr captures — lib_summary.py parses THESE files (never
+# the live terminal) to extract headline metrics + gate states.
+LOGDIR="$HERE/logs/run_all"
+mkdir -p "$LOGDIR"
 
 TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BRIDGE_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -58,7 +66,7 @@ echo "======================================================================"
 if [ "${GF_SKIP_RESTART:-0}" != "1" ]; then
   COMPOSE_DIR="${GF_COMPOSE_DIR:-$REPO_ROOT}"
   echo "--- cold-restarting the LLM backend (docker compose restart llamacpp) ---"
-  if (cd "$COMPOSE_DIR" && docker compose restart llamacpp) 2>&1; then
+  if (cd "$COMPOSE_DIR" && docker compose restart llamacpp) 2>&1 | tee "$LOGDIR/restart.out"; then
     echo "waiting 25s for warmup..."
     sleep 25
     record restart ok ""
@@ -75,7 +83,9 @@ run_step() { # run_step <name> <cmd...>
   local name="$1"; shift
   echo
   echo "--- $name ---"
-  if "$@"; then
+  # tee stdout+stderr to $LOGDIR/<name>.out; `set -o pipefail` (top of file)
+  # makes the if-condition the command's own exit status, not tee's.
+  if "$@" 2>&1 | tee "$LOGDIR/$name.out"; then
     record "$name" ok ""
   else
     local rc=$?
@@ -84,11 +94,21 @@ run_step() { # run_step <name> <cmd...>
   fi
 }
 
+# Clean-FP ceiling: baseline fp_rate (PERCENT, one decimal) + 2pp — currently
+# 11.6 + 2 = 13.6. Derived from eval/clean_baseline.json so the gate follows
+# a re-baselined corpus without editing this script.
+MAX_FP_RATE="$(python3 -c '
+import json, sys
+j = json.load(open(sys.argv[1]))
+print(f"{round(j[\"fp_rate\"] * 100, 1) + 2:.1f}")
+' "$HERE/clean_baseline.json" 2>/dev/null || echo 13.6)"
+
 # ---- Step 1: golden ----
-run_step golden "$PY" "$HERE/run_eval.py" "$BRIDGE"
+run_step golden "$PY" "$HERE/run_eval.py" "$BRIDGE" --require-exact
 
 # ---- Step 2: clean ----
-run_step clean "$PY" "$HERE/clean_eval.py" "$BRIDGE" "$HERE/clean_corpus.jsonl"
+run_step clean "$PY" "$HERE/clean_eval.py" "$BRIDGE" "$HERE/clean_corpus.jsonl" \
+  --max-fp-rate "$MAX_FP_RATE"
 
 if [ "${GF_SKIP_BENCHMARKS:-0}" != "1" ]; then
   # ---- Step 3: CoNLL-2014 ----
@@ -139,31 +159,31 @@ for step in restart golden clean conll14 bea19 jfleg calibration; do
 done
 echo "======================================================================"
 
-python3 - "$SUMMARY_FILE" "$TIMESTAMP" "$BRIDGE_COMMIT" "$BRIDGE" <<'PYEOF'
-import json, sys
-summary_file, timestamp, bridge_commit, bridge_url = sys.argv[1:5]
-# Steps + statuses are threaded through env in the shell; re-derive here from
-# the already-printed STATUS assoc array isn't possible from a subshell, so
-# this trailer just records the run metadata — per-step detail lives in each
-# step's own persisted results file (results.json, clean*.runs.json,
-# conll14_results.json, bea19_results.json, jfleg_results.json,
-# calibration_results.json).
-json.dump(
-    {
-        "timestamp": timestamp,
-        "bridge_commit": bridge_commit,
-        "bridge_url": bridge_url,
-        "artifacts": [
-            "results.json", "results.latency.json", "clean_corpus.runs.json",
-            "benchmarks/conll14/conll14_results.json",
-            "benchmarks/bea19/bea19_results.json",
-            "jfleg_results.json", "calibration_results.json",
-        ],
-    },
-    open(summary_file, "w"),
-    indent=2,
-)
-PYEOF
+# Hand the per-step statuses + tee'd logs to lib_summary.py: it extracts the
+# headline metrics, derives each step's gate (pass|fail|skipped|error), and
+# writes run_all_summary.json. With GF_GATE=1 its --gate mode exits nonzero
+# on any "fail"/"error" step and we propagate that exit code.
+STATUS_TSV="$LOGDIR/steps.tsv"
+: > "$STATUS_TSV"
+for step in restart golden clean conll14 bea19 jfleg calibration; do
+  [ -n "${STATUS[$step]:-}" ] || continue
+  printf '%s\t%s\t%s\n' "$step" "${STATUS[$step]}" "${DETAIL[$step]:-}" >> "$STATUS_TSV"
+done
+
+GATE_ARGS=()
+if [ "${GF_GATE:-0}" = "1" ]; then
+  GATE_ARGS=(--gate)
+fi
+summary_rc=0
+python3 "$HERE/lib_summary.py" "${GATE_ARGS[@]}" "$STATUS_TSV" "$LOGDIR" \
+  "$SUMMARY_FILE" "$TIMESTAMP" "$BRIDGE_COMMIT" "$BRIDGE" || summary_rc=$?
+if [ "$summary_rc" -ne 0 ]; then
+  if [ "${GF_GATE:-0}" = "1" ]; then
+    echo "GF_GATE=1: gate failed — see $SUMMARY_FILE" >&2
+    exit "$summary_rc"
+  fi
+  echo "WARN: summary build exited $summary_rc" >&2
+fi
 
 echo "Run metadata written to $SUMMARY_FILE"
 echo "Per-step artifacts: results.json, results.latency.json, clean_corpus.runs.json,"

@@ -372,7 +372,58 @@ on `gf-bridge-eval`:
    `gf-bridge-eval`; the operator-action gate exists so a routing change
    never ships without evidence.
 
-## 7. Confidence calibration (`calibration_eval.py`)
+## 7. Operator enable protocol — calibrated escalation
+
+(Placeholder — content lands with the `GF_ESCALATION_CALIBRATED` task in the
+SOTA roadmap P2-P4 plan.)
+
+## 8. Gated turnkey runs (`GF_GATE=1`)
+
+`run_all.sh` is report-only by default (exit 0 regardless of step outcomes).
+Two additions make it machine-enforceable:
+
+- The golden step runs with `--require-exact`; the clean step runs with
+  `--max-fp-rate` derived from `clean_baseline.json` (`fp_rate`×100 rounded
+  to one decimal + 2pp — currently 11.6% + 2pp = 13.6, PERCENT units).
+- Every step's stdout+stderr is tee'd to `eval/logs/run_all/<step>.out`
+  (gitignored). `lib_summary.py` parses THOSE files — never the live
+  terminal — into `eval/run_all_summary.json`, which now carries per-step
+  headline metric values (golden `passed/total`, conll14/bea19 `p/r/f05`,
+  jfleg `gleu`, clean `fp_count/total/rate`, calibration `ece`) plus a
+  `"gate"` field with FOUR states:
+  - `"pass"` — ran, exit 0, metrics parsed
+  - `"fail"` — ran, its own threshold said no (`--require-exact` failures,
+    FP rate over `--max-fp-rate`)
+  - `"skipped"` — never launched: a DECLARED precondition (missing
+    corpus/venv, `GF_SKIP_BENCHMARKS=1`, `GF_SKIP_RESTART=1`) failed
+    BEFORE the run
+  - `"error"` — the step RAN but exited nonzero without a threshold
+    verdict, or its metrics could not be parsed from its log. A
+    missing/unparseable metric on a step that ran is `"error"`, NEVER
+    `"skipped"`.
+
+With `GF_GATE=1`, `run_all.sh` exits nonzero if ANY step's gate is `"fail"`
+OR `"error"`; `"skipped"` alone never fails (skips are declared, errors are
+not). Default behavior is unchanged: report-only, exit 0.
+
+```bash
+GF_GATE=1 eval/run_all.sh http://127.0.0.1:8001
+```
+
+Gate logic lives in `eval/lib_summary.py` (`build_summary` /
+`overall_gate`), unit-tested in `eval/test_run_all_summary.py`.
+
+## 9. Recall measurement matrix
+
+(Verdict recording home for the Phase-3 recall flags — populated when the
+measurement matrix runs.)
+
+## 10. Per-rule over-edit study
+
+(Verdict recording home for the Phase-4 per-rule fired-pair-conditioned
+threshold study — populated by `overedit_rule_study.py`.)
+
+## 11. Confidence calibration (`calibration_eval.py`)
 
 Every row `run_eval.py` writes to `results.json` carries a `score` field (0-100, the
 model's own confidence) alongside `pass` (exact-match correctness). `calibration_eval.py`
@@ -395,7 +446,7 @@ a harder/adversarial cases file, or a CoNLL/BEA-derived per-sentence score if th
 ever surfaces one there). Read the current ECE as "how far off is the model's stated
 confidence from 100% on a near-saturated set," not as a general trustworthiness verdict.
 
-## 8. Dialect matrix (`dialect_matrix.py`)
+## 12. Dialect matrix (`dialect_matrix.py`)
 
 Replaces the "never compare FP numbers across dialect envs" footgun (§4) with a script
 that runs golden + clean-text-FP against BOTH an american-configured and a
@@ -415,7 +466,7 @@ script cannot be run live in an environment with no bridge — its test suite
 report formatting; the actual dialect comparison needs a live run against two bridge
 deployments.
 
-## 9. Turnkey re-run (`run_all.sh`)
+## 13. Turnkey re-run (`run_all.sh`)
 
 A single entrypoint that runs the full documented cold-restart protocol (§1) end to end:
 golden → clean → conll14 → bea19 → jfleg → calibration, in that order, persisting every
@@ -435,10 +486,12 @@ eval/run_all.sh http://127.0.0.1:8000
   not fatal, so a quick smoke run without the academic corpora still exercises
   golden/clean/calibration. Set `GF_SKIP_BENCHMARKS=1` to skip conll14/bea19 on purpose.
 - Prints a per-step status table (`ok` / `fail(rc=N)` / `skipped`) and writes
-  `eval/run_all_summary.json` (timestamp, bridge commit, bridge URL, and the list of
-  per-step artifact files to inspect: `results.json`, `results.latency.json`,
-  `clean_corpus.runs.json`, `benchmarks/conll14/conll14_results.json`,
-  `benchmarks/bea19/bea19_results.json`, `jfleg_results.json`, `calibration_results.json`).
+  `eval/run_all_summary.json` (timestamp, bridge commit, bridge URL, per-step headline
+  metrics + gate state — see §8 — and the list of per-step artifact files to inspect:
+  `results.json`, `results.latency.json`, `clean_corpus.runs.json`,
+  `benchmarks/conll14/conll14_results.json`, `benchmarks/bea19/bea19_results.json`,
+  `jfleg_results.json`, `calibration_results.json`).
+- Set `GF_GATE=1` to turn the report into an enforced gate (§8).
 
 This is orchestration over already-tested scripts (each step's own logic has its own unit
 tests) — `run_all.sh` itself needs a live bridge + docker to verify end to end; it was only

@@ -72,6 +72,8 @@ env/
 *.jsonl
 # sentence-transformers downloads (Phase C, Task C4 calibration study).
 eval/.huggingface_cache/
+# run_all.sh per-step stdout/stderr captures (parsed by lib_summary.py).
+eval/logs/
 
 # --- Node / TypeScript (vencord plugin, browser extension fork) ---
 node_modules/
