@@ -171,6 +171,12 @@ interface FieldState {
     itemRects: Array<{ item: RenderableItem; rects: DOMRect[] }>
     checkSeq: number
     pasteGraceTimer: ReturnType<typeof setTimeout> | null
+    /** Enter-send settle timer. Discord's Slate composer clears text on
+     *  send PROGRAMMATICALLY (React Transforms) which fires no DOM input
+     *  event, so the per-field state stays stale. A capture-phase keydown
+     *  listener on Enter arms this 150ms timer; on fire, if the composer
+     *  is empty, the field state is cleared. null = no timer pending. */
+    sendSettleTimer: ReturnType<typeof setTimeout> | null
     highlightLayer: HighlightLayer | null
     /** Index of the item the pointer is currently hovering (parallel to
      *  items), or null when nothing is hovered. Drives the per-word
@@ -1789,6 +1795,7 @@ export function startOrchestrator(
             // produced. Mirrors the browser fix; see @/lib/check-seq.
             checkSeq: nextCheckSeq(),
             pasteGraceTimer: null,
+            sendSettleTimer: null,
             highlightLayer: null,
             hoverItemIndex: null,
             lastApplied: null,
@@ -2061,12 +2068,57 @@ export function startOrchestrator(
         }
         el.addEventListener('paste', onFieldPaste, { capture: true })
         cleanups.push(() => el.removeEventListener('paste', onFieldPaste, { capture: true }))
+
+        // Slate's programmatic send-clear (React Transforms) fires no DOM
+        // input event, so the input pipeline never sees the composer empty.
+        // A capture-phase keydown on plain Enter arms a 150ms settle timer;
+        // on fire, if the composer is empty, the field state is cleared
+        // (items, phase, highlights, popover, badge all flip to clean).
+        // Gated: plain Enter only (Shift+Enter = newline, isComposing = IME).
+        const onFieldKeydown = (e: KeyboardEvent): void => {
+            if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
+            const s = fields.get(el)
+            if (!s) return
+            // Clear any prior settle timer before arming a new one (rapid
+            // sends should not stack timers).
+            if (s.sendSettleTimer != null) {
+                clearTimeout(s.sendSettleTimer)
+            }
+            s.sendSettleTimer = setTimeout(() => {
+                const settleSt = fields.get(el)
+                if (!settleSt) return
+                settleSt.sendSettleTimer = null
+                if (!el.isConnected) return
+                const text = getText(el)
+                if (text.trim().length > 0) return
+                // Composer emptied by send. Invalidate any in-flight check
+                // (seq guard drops its late result) and kill the pending
+                // debounced check for the pre-send text so it can't land
+                // afterward and re-render stale items.
+                settleSt.checkSeq++
+                attachment.cancelPending()
+                clearPasteGrace(settleSt)
+                closePopoverFor(el)
+                settleSt.items = []
+                settleSt.phase = 'done'
+                debugLog('send settle: composer emptied — clearing state', {
+                    seq: settleSt.checkSeq,
+                })
+                renderField(el, settleSt)
+            }, 150)
+        }
+        el.addEventListener('keydown', onFieldKeydown, { capture: true })
+        cleanups.push(() => el.removeEventListener('keydown', onFieldKeydown, { capture: true }))
     }
 
     const detach = (el: HTMLElement): void => {
         const st = fields.get(el)
         if (!st) return
         clearPasteGrace(st)
+        if (st.sendSettleTimer != null) {
+            clearTimeout(st.sendSettleTimer)
+            st.sendSettleTimer = null
+        }
         // Hide the hover tooltip if it was anchored to this field (mirrors
         // browser client's hideTooltipNow call in detach).
         if (activeTooltipItem && st.items.includes(activeTooltipItem)) {

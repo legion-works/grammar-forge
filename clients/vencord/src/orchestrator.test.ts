@@ -52,7 +52,9 @@ vi.mock('@/api/client', () => ({
             streak: 0,
             top_issues: {},
         })
-        dictionaryList = vi.fn<() => Promise<{ words: string[] }>>().mockResolvedValue({ words: [] })
+        dictionaryList = vi
+            .fn<() => Promise<{ words: string[] }>>()
+            .mockResolvedValue({ words: [] })
         dictionaryRemove = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
         dictionaryAdd = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
         rephrase = vi.fn<() => Promise<unknown>>().mockResolvedValue({ suggestions: [] })
@@ -435,7 +437,12 @@ describe('vencord orchestrator — panel refreshes when check resolves with new 
             return { original: 'I has a aple', suggestions: [], score: 75 } as CorrectResponse
         })
 
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
 
         const composer = document.createElement('div')
         composer.setAttribute('role', 'textbox')
@@ -481,7 +488,12 @@ describe('vencord orchestrator — panel refreshes when check resolves with new 
             return { original: 'I has a aple', suggestions: [], score: 75 } as CorrectResponse
         })
 
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
 
         const composer = document.createElement('div')
         composer.setAttribute('role', 'textbox')
@@ -578,11 +590,22 @@ describe('vencord orchestrator — rephrase button in panel (round 18)', () => {
         const onRephrase = vi.fn<() => void>()
         const neutralGoals = { audience: 'general' as const, formality: 'neutral' as const }
         const item = {
-            id: 1, cuStart: 0, cuEnd: 3, hlStart: 0, hlEnd: 3,
-            category: 'spelling' as const, message: '', replacements: ['the'],
-            original: 'teh', diffOriginal: 'teh', diffCorrected: 'the',
-            diffIsDeletion: false, byteSpan: { start: 0, end: 3 },
-            model: 'harper' as const, confidence: 0.95, status: 'open' as const,
+            id: 1,
+            cuStart: 0,
+            cuEnd: 3,
+            hlStart: 0,
+            hlEnd: 3,
+            category: 'spelling' as const,
+            message: '',
+            replacements: ['the'],
+            original: 'teh',
+            diffOriginal: 'teh',
+            diffCorrected: 'the',
+            diffIsDeletion: false,
+            byteSpan: { start: 0, end: 3 },
+            model: 'harper' as const,
+            confidence: 0.95,
+            status: 'open' as const,
         }
         showPanel(root, {
             anchorRect: new DOMRect(0, 0, 400, 200),
@@ -754,7 +777,12 @@ describe('vencord orchestrator — churn-tolerant panel refresh (round 15)', () 
             })
         }
 
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
 
         // First composer.
         const wrapper1 = document.createElement('div')
@@ -771,7 +799,12 @@ describe('vencord orchestrator — churn-tolerant panel refresh (round 15)', () 
 
         // Trigger a check on composer1.
         composer1.dispatchEvent(
-            new InputEvent('beforeinput', { inputType: 'insertText', bubbles: true, cancelable: true, data: 'a' }),
+            new InputEvent('beforeinput', {
+                inputType: 'insertText',
+                bubbles: true,
+                cancelable: true,
+                data: 'a',
+            }),
         )
         await new Promise<void>((r) => setTimeout(r, 200))
         await new Promise<void>((r) => requestAnimationFrame(() => r()))
@@ -798,7 +831,12 @@ describe('vencord orchestrator — churn-tolerant panel refresh (round 15)', () 
 
         // Trigger a check on composer2.
         composer2.dispatchEvent(
-            new InputEvent('beforeinput', { inputType: 'insertText', bubbles: true, cancelable: true, data: 'a' }),
+            new InputEvent('beforeinput', {
+                inputType: 'insertText',
+                bubbles: true,
+                cancelable: true,
+                data: 'a',
+            }),
         )
         await new Promise<void>((r) => setTimeout(r, 200))
         await new Promise<void>((r) => requestAnimationFrame(() => r()))
@@ -841,13 +879,16 @@ describe('vencord orchestrator — detach removes the live scan-line (W3-3 leak 
     afterEach(() => {
         api?.stop()
         document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
-        document
-            .querySelectorAll('[data-grammarforge-scanline]')
-            .forEach((el) => el.remove())
+        document.querySelectorAll('[data-grammarforge-scanline]').forEach((el) => el.remove())
     })
 
     it('removes the scan-line wrapper when a field with a live scan-line is detached', async () => {
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
 
         // A fake Discord composer that isDiscordComposer() accepts
         // (role=textbox, contenteditable=true, ancestor class stem
@@ -917,7 +958,12 @@ describe('vencord orchestrator — detach removes the live scan-line (W3-3 leak 
         // also tear down the scan-line. Drives the same fast-frame
         // setup, then blurs the composer (without removing it) and
         // asserts the scan-line is gone.
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
 
         const composer = document.createElement('div')
         composer.setAttribute('role', 'textbox')
@@ -1078,7 +1124,12 @@ describe('vencord orchestrator — stop() closes live surfaces (P0-2)', () => {
     })
 
     it('stop() removes the review panel AND the Goals popover it spawned', async () => {
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
 
         const composer = document.createElement('div')
         composer.setAttribute('role', 'textbox')
@@ -1167,7 +1218,12 @@ describe('vencord orchestrator — Stats tab switch wiring (P1-6c)', () => {
     })
 
     it('clicking the Stats tab mounts the Stats view and marks it active; Review restores the review body', async () => {
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
 
         const composer = document.createElement('div')
         composer.setAttribute('role', 'textbox')
@@ -1306,7 +1362,12 @@ describe('vencord orchestrator — applyAllForHighConf end-to-end (P1-6d)', () =
             } as CorrectResponse
         })
 
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
 
         const composer = document.createElement('div')
         composer.setAttribute('role', 'textbox')
@@ -1466,7 +1527,12 @@ describe('Feature 2: split rephrase/synonyms control (vencord parity)', () => {
     }
 
     it('renders the split control (two real <button> segments + a divider) on a single-word selection', async () => {
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
         const composer = await mountComposer('hello world')
         selectRange(composer, 0, 5) // "hello"
         document.dispatchEvent(new Event('selectionchange'))
@@ -1488,7 +1554,12 @@ describe('Feature 2: split rephrase/synonyms control (vencord parity)', () => {
     })
 
     it('disables the Synonyms segment for a multi-word selection', async () => {
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
         const composer = await mountComposer('hello world')
         selectRange(composer, 0, 11) // "hello world"
         document.dispatchEvent(new Event('selectionchange'))
@@ -1502,7 +1573,12 @@ describe('Feature 2: split rephrase/synonyms control (vencord parity)', () => {
     })
 
     it('clicking the Synonyms segment opens the synonyms popover for the selected word', async () => {
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
         const composer = await mountComposer('hello world')
         selectRange(composer, 0, 5) // "hello"
         document.dispatchEvent(new Event('selectionchange'))
@@ -1522,7 +1598,12 @@ describe('Feature 2: split rephrase/synonyms control (vencord parity)', () => {
     })
 
     it('a dblclick no longer auto-opens the synonyms popover (Feature 2c)', async () => {
-        api = startOrchestrator(() => cfg, (next) => { cfg.goals = next })
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
         const composer = await mountComposer('hello world')
 
         composer.dispatchEvent(
@@ -1537,5 +1618,137 @@ describe('Feature 2: split rephrase/synonyms control (vencord parity)', () => {
 
         const host = document.querySelector<HTMLElement>('[data-grammarforge-overlay]')
         expect(host?.shadowRoot?.querySelector('.gf-syn')).toBeNull()
+    })
+})
+
+describe('vencord orchestrator — send-clears-state (Enter send path)', () => {
+    // Slate's programmatic send-clear fires no DOM input event, so the
+    // input pipeline never sees the composer empty. A capture-phase
+    // keydown listener on Enter arms a 150ms settle timer; when the
+    // composer is empty after settle, the field state is cleared.
+    let api: OrchestratorApi
+    const cfg: GrammarForgeConfig = {
+        bridgeUrl: 'http://localhost',
+        realtimeDelayMs: 150,
+        acceptHotkey: 'ctrl+.',
+        rephraseHotkey: 'ctrl+/',
+        checkPastedText: false,
+        allowRemoteBridge: false,
+        debugLogging: false,
+        goals: { audience: 'general', formality: 'neutral' },
+    }
+
+    beforeEach(() => {
+        correctStreamMock.mockClear()
+    })
+    afterEach(() => {
+        api?.stop()
+        document.querySelectorAll('[data-grammarforge-overlay]').forEach((el) => el.remove())
+        document.querySelectorAll('[data-grammarforge-scanline]').forEach((el) => el.remove())
+        document.querySelectorAll('.channelTextArea_inner').forEach((el) => el.remove())
+    })
+
+    async function mountWithItems(): Promise<{ composer: HTMLElement; wrapper: HTMLElement }> {
+        correctStreamMock.mockImplementationOnce(async (_req, onFast) => {
+            onFast({
+                original: 'teh quick fox',
+                suggestions: [
+                    {
+                        span: { start: 0, end: 3 },
+                        replacement: 'the',
+                        model: 'harper',
+                        category: 'spelling',
+                    },
+                ],
+                score: 60,
+            })
+            return neverResolving
+        })
+
+        api = startOrchestrator(
+            () => cfg,
+            (next) => {
+                cfg.goals = next
+            },
+        )
+
+        const composer = document.createElement('div')
+        composer.setAttribute('role', 'textbox')
+        composer.setAttribute('contenteditable', 'true')
+        composer.textContent = 'teh quick fox'
+        const wrapper = document.createElement('div')
+        wrapper.className = 'channelTextArea_inner'
+        wrapper.appendChild(composer)
+        document.body.appendChild(wrapper)
+
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        // Trigger a debounced check so items populate.
+        composer.dispatchEvent(
+            new InputEvent('beforeinput', {
+                inputType: 'insertText',
+                bubbles: true,
+                cancelable: true,
+                data: 'a',
+            }),
+        )
+        await new Promise<void>((r) => setTimeout(r, 200))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        expect(api.getSummary().count).toBeGreaterThan(0)
+        return { composer, wrapper }
+    }
+
+    it('clears state when composer is emptied after Enter (the bug)', async () => {
+        const { composer, wrapper } = await mountWithItems()
+
+        // Simulate Slate's programmatic clear after Enter send.
+        composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+        composer.textContent = ''
+
+        // Wait for the 150ms settle timer.
+        await new Promise<void>((r) => setTimeout(r, 200))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        expect(api.getSummary().count).toBe(0)
+
+        composer.remove()
+        wrapper.remove()
+    })
+
+    it('does not clear items when composer still has text after Enter (autocomplete guard)', async () => {
+        const { composer, wrapper } = await mountWithItems()
+        const before = api.getSummary().count
+
+        // Enter with text still present (e.g. selecting an autocomplete mention).
+        // Do NOT clear textContent — the Enter selected a mention, not sent.
+        composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+        await new Promise<void>((r) => setTimeout(r, 200))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        expect(api.getSummary().count).toBe(before)
+
+        composer.remove()
+        wrapper.remove()
+    })
+
+    it('does not arm a settle timer on Shift+Enter (newline, not send)', async () => {
+        const { composer, wrapper } = await mountWithItems()
+        const before = api.getSummary().count
+
+        // Shift+Enter inserts a newline; the gate must not match.
+        composer.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
+        )
+        composer.textContent = ''
+        await new Promise<void>((r) => setTimeout(r, 200))
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
+
+        // Items should NOT be cleared — no settle timer was armed.
+        expect(api.getSummary().count).toBe(before)
+
+        composer.remove()
+        wrapper.remove()
     })
 })
