@@ -205,6 +205,20 @@ type Service struct {
 	// display-only, routing-only, and both-on are all independently
 	// selectable operator states.
 	escalationCalibrator *ConfidenceCalibrator
+	// nbestN is the Task 8 N-best candidate count (GF_LLM_NBEST). >= 2
+	// enables the feature at both LLM call sites (see SetNBest,
+	// tryNBestEscalation, tryNBestLLMOnly); the zero value (SetNBest never
+	// called) behaves identically to 1 — both fail the `< 2` gate, so the
+	// legacy single-candidate Complete path runs byte-identical to before
+	// this feature existed.
+	nbestN int
+	// nbestTemperature is the sampling temperature applied ONLY to N-best
+	// candidate prompts (see SetNBest). The legacy single-candidate path's
+	// Prompt.Temperature (0 for correction: greedy, golden-eval stable) is
+	// never touched by this — each tryNBest* helper builds its OWN Prompt
+	// copy for the N-best call, leaving the prompt builder's original value
+	// intact for any fallback Complete call.
+	nbestTemperature float64
 }
 
 // MergeFastEditsMode values for Service.mergeFastEditsMode
@@ -362,6 +376,25 @@ func (s *Service) semanticVerifierApproves(ctx context.Context, original, repair
 		return false
 	}
 	return true
+}
+
+// SetNBest enables Task 8 N-best LLM sampling (GF_LLM_NBEST): n is the
+// number of candidate completions requested per escalation/LLM-only call
+// (only takes effect at >= 2 — see tryNBestEscalation / tryNBestLLMOnly's
+// gate), temperature is the sampling temperature used for those N-best
+// candidate prompts only (the legacy single-candidate path's prompt
+// temperature is never touched).
+//
+// main.go calls this only when cfg.LLMNBest >= 2 AND the configured LLM
+// client implements NBestLLMClient (checked once at wiring time, logging a
+// Warn on failure instead of calling this). Calling it unconditionally
+// would still be safe: every call site re-checks both `nbestN >= 2` and the
+// NBestLLMClient type assertion per request, so an n < 2 or a
+// non-NBestLLMClient configuration is a harmless no-op that falls through
+// to the legacy path.
+func (s *Service) SetNBest(n int, temperature float64) {
+	s.nbestN = n
+	s.nbestTemperature = temperature
 }
 
 // SetMergeFastEditsMode selects the escalation result composition (see the
@@ -621,57 +654,67 @@ func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, e
 		// output against the ORIGINAL, so fast-path suggestions are advisory
 		// only on escalation. Safe for both model families (chat + GRMR-native
 		// both correct raw text).
-		llmText, err := s.llm.Complete(ctx, s.escalationPrompt(req, fast))
-		switch {
-		case err != nil:
-			s.log.Warn("llm escalation failed; using fast path", "err", err)
-		case suspiciouslyTruncated(req.Text, strings.TrimSpace(llmText)):
-			// Defense-in-depth behind the client-level finish_reason check:
-			// a backend that doesn't report truncation (or any failure mode
-			// returning a fraction of the input) must not reach the diff,
-			// which would convert the missing tail into mass deletions.
-			s.log.Warn("llm output suspiciously short; using fast path",
-				"original_bytes", len(req.Text), "llm_bytes", len(strings.TrimSpace(llmText)))
-		default:
-			// Diff the LLM output, then re-attach Harper's spelling/punctuation
-			// categories onto overlapping edits (the diff is otherwise all
-			// CategoryGrammar). Display-only; does not change applied text.
-			// The over-edit repair chain runs FIRST (text-level, see
-			// overedit.go) so a fused wanted+unwanted edit is fixed before
-			// the diff splits it into suggestions.
-			corrected := strings.TrimSpace(llmText)
-			if req.Context != "" {
-				// Task 6 echo defense: a non-compliant chat model can echo the
-				// Context envelope's "Correct this text:" marker line (and
-				// everything before it) instead of returning only the
-				// corrected sentence. Only relevant when THIS request actually
-				// carried a Context block — stripContextEcho is a no-op
-				// (byte-identical) on ordinary output, but skipping the call
-				// entirely when Context == "" keeps the legacy path from
-				// paying for a scan it can never need.
-				corrected = stripContextEcho(corrected)
-			}
-			repaired := s.repairOverEdits(req.Text, corrected)
-			// Deterministic a/an article fix: applied after over-edit repair
-			// and before diffing so silent-h corrections ("a honest"→"an
-			// honest") are emitted even when the LLM misses them. Text-level
-			// on purpose — mirrors the overedit chain pattern. Gated on
-			// GF_ARTICLE_FIX (default true; see article.go).
-			if s.articleFix {
-				repaired = applyArticleFixes(repaired)
-			}
-			// Semantic-verifier gate: a verified low-similarity rewrite is a
-			// catastrophic failure mode (rare but observed — the LLM returns
-			// an unrelated sentence on edge inputs). On rejection the fast-
-			// path suggestion set is preserved (all stays at `fast`) and
-			// execution falls through to the picky style pass below — the
-			// rejection never short-circuits the request.
-			if s.semanticVerifierApproves(ctx, req.Text, repaired) {
-				all = propagateFastCategories(diffToSuggestions(req.Text, repaired), fast)
-				// Merge-not-replace spike (GF_MERGE_FAST_EDITS): append fast
-				// edits the LLM did not contradict. Off by default — replace
-				// semantics above are the measured baseline.
-				all = s.mergeNonConflictingFastEdits(req.Text, all, fast)
+		if merged, ok := s.tryNBestEscalation(ctx, req, fast); ok {
+			// Task 8 (GF_LLM_NBEST): a genuine N-best majority vote (or a
+			// verifier-rejected one — mirrors the single-candidate rejection
+			// by returning `fast` unchanged) replaces the whole single-
+			// candidate arm below. See tryNBestEscalation's doc for the
+			// short-subset condition that makes ok=false instead, falling
+			// through to the legacy single-candidate call below.
+			all = merged
+		} else {
+			llmText, err := s.llm.Complete(ctx, s.escalationPrompt(req, fast))
+			switch {
+			case err != nil:
+				s.log.Warn("llm escalation failed; using fast path", "err", err)
+			case suspiciouslyTruncated(req.Text, strings.TrimSpace(llmText)):
+				// Defense-in-depth behind the client-level finish_reason check:
+				// a backend that doesn't report truncation (or any failure mode
+				// returning a fraction of the input) must not reach the diff,
+				// which would convert the missing tail into mass deletions.
+				s.log.Warn("llm output suspiciously short; using fast path",
+					"original_bytes", len(req.Text), "llm_bytes", len(strings.TrimSpace(llmText)))
+			default:
+				// Diff the LLM output, then re-attach Harper's spelling/punctuation
+				// categories onto overlapping edits (the diff is otherwise all
+				// CategoryGrammar). Display-only; does not change applied text.
+				// The over-edit repair chain runs FIRST (text-level, see
+				// overedit.go) so a fused wanted+unwanted edit is fixed before
+				// the diff splits it into suggestions.
+				corrected := strings.TrimSpace(llmText)
+				if req.Context != "" {
+					// Task 6 echo defense: a non-compliant chat model can echo the
+					// Context envelope's "Correct this text:" marker line (and
+					// everything before it) instead of returning only the
+					// corrected sentence. Only relevant when THIS request actually
+					// carried a Context block — stripContextEcho is a no-op
+					// (byte-identical) on ordinary output, but skipping the call
+					// entirely when Context == "" keeps the legacy path from
+					// paying for a scan it can never need.
+					corrected = stripContextEcho(corrected)
+				}
+				repaired := s.repairOverEdits(req.Text, corrected)
+				// Deterministic a/an article fix: applied after over-edit repair
+				// and before diffing so silent-h corrections ("a honest"→"an
+				// honest") are emitted even when the LLM misses them. Text-level
+				// on purpose — mirrors the overedit chain pattern. Gated on
+				// GF_ARTICLE_FIX (default true; see article.go).
+				if s.articleFix {
+					repaired = applyArticleFixes(repaired)
+				}
+				// Semantic-verifier gate: a verified low-similarity rewrite is a
+				// catastrophic failure mode (rare but observed — the LLM returns
+				// an unrelated sentence on edge inputs). On rejection the fast-
+				// path suggestion set is preserved (all stays at `fast`) and
+				// execution falls through to the picky style pass below — the
+				// rejection never short-circuits the request.
+				if s.semanticVerifierApproves(ctx, req.Text, repaired) {
+					all = propagateFastCategories(diffToSuggestions(req.Text, repaired), fast)
+					// Merge-not-replace spike (GF_MERGE_FAST_EDITS): append fast
+					// edits the LLM did not contradict. Off by default — replace
+					// semantics above are the measured baseline.
+					all = s.mergeNonConflictingFastEdits(req.Text, all, fast)
+				}
 			}
 		}
 	}
@@ -765,6 +808,15 @@ func (s *Service) appendStyleSuggestions(ctx context.Context, req Request, gramm
 // (grammar + optional style), so /signal can reference style suggestions
 // and the logged Event.Suggestion reflects the full rewrite.
 func (s *Service) llmOnlySuggestions(ctx context.Context, req Request) ([]Suggestion, error) {
+	if merged, ok := s.tryNBestLLMOnly(ctx, req); ok {
+		// Task 8 (GF_LLM_NBEST): a genuine N-best majority vote — or a
+		// verifier-rejected one, which mirrors the single-candidate
+		// rejection by returning nil — replaces the whole single-candidate
+		// call below. See tryNBestLLMOnly's doc for the short-subset
+		// condition that makes ok=false instead, falling through to the
+		// legacy single-candidate call.
+		return merged, nil
+	}
 	corrected, err := s.llm.Complete(ctx, s.pb.Build(req))
 	if err != nil {
 		return nil, fmt.Errorf("llm complete: %w", err)
@@ -840,6 +892,132 @@ func stripContextEcho(output string) string {
 		return output
 	}
 	return strings.TrimSpace(strings.Join(lines[lastMarker+1:], "\n"))
+}
+
+// repairLLMCandidate applies the FULL text-level repair chain to ONE raw
+// N-best LLM candidate, mirroring the single-candidate path step for step:
+// trim -> truncation guard (reject) -> stripContextEcho (only when
+// req.Context != "") -> repairOverEdits -> optional applyArticleFixes.
+// articleFix selects whether the caller's path applies the article fix
+// (true only for the correctOnce escalation arm — llmOnlySuggestions never
+// calls applyArticleFixes on its single-candidate path either, see that
+// function's body). Returns ("", false) when the candidate fails the
+// truncation guard; the caller drops it from the vote (and, transitively,
+// from the short-subset count).
+func (s *Service) repairLLMCandidate(req Request, raw string, articleFix bool) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if suspiciouslyTruncated(req.Text, trimmed) {
+		return "", false
+	}
+	corrected := trimmed
+	if req.Context != "" {
+		// Task 6 echo defense — see the mirroring comment in correctOnce.
+		corrected = stripContextEcho(corrected)
+	}
+	repaired := s.repairOverEdits(req.Text, corrected)
+	if articleFix && s.articleFix {
+		repaired = applyArticleFixes(repaired)
+	}
+	return repaired, true
+}
+
+// nbestSemanticVerifierApproves mirrors semanticVerifierApproves for a
+// merged N-best suggestion set: the verifier compares two whole texts, not
+// a suggestion list, so this reconstructs the highest-vote text by applying
+// every kept edit to the original (Suggestion.Apply, last-to-first by span
+// — same order applyAll uses, so earlier byte offsets stay valid as later
+// spans are replaced) and scores THAT single reconstruction. An empty merge
+// (every candidate agreed no edit was needed) reduces to original==original,
+// which semanticVerifierApproves already fast-paths to true.
+func (s *Service) nbestSemanticVerifierApproves(ctx context.Context, original string, merged []Suggestion) bool {
+	return s.semanticVerifierApproves(ctx, original, applyAll(original, merged))
+}
+
+// tryNBestEscalation is the correctOnce escalation arm's Task 8 (GF_LLM_NBEST)
+// gate. Returns (nil, false) whenever N-best is not in play for this call —
+// s.nbestN < 2, the configured LLM does not implement NBestLLMClient, or the
+// SHORT-SUBSET FALLBACK below fires — in every such case the caller falls
+// through to the legacy single-candidate Complete call unchanged. Returns
+// (suggestions, true) once N-best has fully handled the request: either a
+// genuine majority-vote merge (propagated through the same fast-category
+// attachment and merge-not-replace step the single-candidate path applies),
+// or `fast` unchanged when the semantic-verifier gate rejects the merged
+// reconstruction (mirroring the single-candidate rejection exactly).
+//
+// SHORT-SUBSET FALLBACK (load-bearing): when fewer than s.nbestN candidates
+// survive CompleteN + the per-candidate repair chain's truncation guard,
+// voting over the shrunken set would silently degrade to an overconfident
+// single high-temperature sample instead of a genuine majority — so this
+// spends ONE more request at temperature 0 (the ordinary deterministic
+// path) rather than trusting a vote that never reached quorum-worthy
+// participation. A CompleteN transport error is the extreme case (0
+// candidates) and falls into the exact same branch.
+func (s *Service) tryNBestEscalation(ctx context.Context, req Request, fast []Suggestion) ([]Suggestion, bool) {
+	client, ok := s.llm.(NBestLLMClient)
+	if s.nbestN < 2 || !ok {
+		return nil, false
+	}
+	p := s.escalationPrompt(req, fast)
+	p.Temperature = s.nbestTemperature
+	raw, err := client.CompleteN(ctx, p, s.nbestN)
+	if err != nil {
+		s.log.Warn("llm n-best escalation completion failed; falling back to a single temperature-0 call", "err", err)
+		raw = nil
+	}
+	repaired := make([]string, 0, len(raw))
+	for _, cand := range raw {
+		fixed, kept := s.repairLLMCandidate(req, cand, true /* articleFix: escalation arm applies it */)
+		if kept {
+			repaired = append(repaired, fixed)
+		}
+	}
+	if len(repaired) < s.nbestN {
+		return nil, false
+	}
+	merged := MajorityEdits(req.Text, repaired, diffToSuggestions)
+	if !s.nbestSemanticVerifierApproves(ctx, req.Text, merged) {
+		return fast, true // mirrors the single-candidate rejection: all stays at `fast`
+	}
+	all := propagateFastCategories(merged, fast)
+	all = s.mergeNonConflictingFastEdits(req.Text, all, fast)
+	return all, true
+}
+
+// tryNBestLLMOnly is llmOnlySuggestions's Task 8 (GF_LLM_NBEST) gate —
+// mirrors tryNBestEscalation exactly, minus the fast-category propagation
+// and merge-not-replace step (the LLM-only branch has no fast-path set to
+// propagate categories from or merge with). articleFix is always false
+// here: llmOnlySuggestions's single-candidate path never calls
+// applyArticleFixes either (see its body), so the N-best path stays
+// consistent with it. See tryNBestEscalation's doc for the full gate/
+// short-subset-fallback contract, which applies identically here.
+func (s *Service) tryNBestLLMOnly(ctx context.Context, req Request) ([]Suggestion, bool) {
+	client, ok := s.llm.(NBestLLMClient)
+	if s.nbestN < 2 || !ok {
+		return nil, false
+	}
+	p := s.pb.Build(req)
+	p.Temperature = s.nbestTemperature
+	raw, err := client.CompleteN(ctx, p, s.nbestN)
+	if err != nil {
+		s.log.Warn("llm n-best completion failed; falling back to a single temperature-0 call", "err", err)
+		raw = nil
+	}
+	repaired := make([]string, 0, len(raw))
+	for _, cand := range raw {
+		fixed, kept := s.repairLLMCandidate(req, cand, false /* articleFix: NOT applied on the llm-only path */)
+		if kept {
+			repaired = append(repaired, fixed)
+		}
+	}
+	if len(repaired) < s.nbestN {
+		return nil, false
+	}
+	merged := MajorityEdits(req.Text, repaired, diffToSuggestions)
+	if !s.nbestSemanticVerifierApproves(ctx, req.Text, merged) {
+		return nil, true // mirrors llmOnlySuggestions's rejection: nil suggestions, no error
+	}
+	return merged, true
 }
 
 // finalize logs the combined correction (best-effort) and tags every

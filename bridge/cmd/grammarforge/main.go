@@ -114,7 +114,14 @@ func main() {
 		trustedCategories = nil
 	}
 
-	defaultLLM := llm.New(llm.Config{BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey, Seed: cfg.LLMSeed})
+	defaultLLM := llm.New(llm.Config{
+		BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey, Seed: cfg.LLMSeed,
+		// Task 8 (GF_LLM_NBEST_WIRE, default "sequential"): only consulted by
+		// CompleteN, which is only ever called once SetNBest has been wired
+		// below — copying it unconditionally here mirrors the Seed pattern
+		// and keeps llm.Config construction in one place.
+		NBestWire: cfg.LLMNBestWire,
+	})
 	defaultLLM.SetRetryConfig(llmRetryConfigFrom(cfg))
 	defaultLLM.SetBreakerConfig(llmBreakerConfigFrom(cfg))
 
@@ -135,6 +142,25 @@ func main() {
 	)
 	if cfg.SentenceCacheSize > 0 {
 		svc.SetSentenceCache(cfg.SentenceCacheSize)
+	}
+	// Task 8 (GF_LLM_NBEST, default 1 = off): N-best LLM sampling with
+	// majority-vote merge (correction.MajorityEdits). Only takes effect when
+	// cfg.LLMNBest >= 2 AND the configured default LLM client implements
+	// correction.NBestLLMClient (llm.Client does, via CompleteN — see
+	// internal/llm/client.go); *llm.Client is the only concrete type ever
+	// wired to defaultLLM, so the assertion always succeeds in practice, but
+	// the check stays defensive rather than assuming it. A failed assertion
+	// logs ONE Warn HERE at wiring time (never per request, unlike the
+	// GF_ESCALATION_TRUSTED_CATEGORIES rejection above which is also
+	// startup-time-only) and leaves SetNBest uncalled, so every request
+	// falls through to the legacy single-candidate path untouched.
+	if cfg.LLMNBest >= 2 {
+		if _, ok := correction.LLMClient(defaultLLM).(correction.NBestLLMClient); ok {
+			svc.SetNBest(cfg.LLMNBest, cfg.LLMNBestTemperature)
+		} else {
+			slog.Warn("GF_LLM_NBEST >= 2 but the configured LLM client does not implement N-best (CompleteN); using the legacy single-candidate path",
+				"llm_nbest", cfg.LLMNBest)
+		}
 	}
 	// LLM re-flag suppression: the *dictionary.Store satisfies
 	// correction.WordAllowlist (Contains) directly — no adapter needed.

@@ -353,6 +353,37 @@ type Config struct {
 	// enabling is an eval-gated operator action — see the operator enable
 	// protocol in eval/README.md.
 	EscalationCalibrated bool // GF_ESCALATION_CALIBRATED (default false)
+
+	// Task 8: N-best LLM sampling with majority-vote merge (GF_LLM_NBEST).
+	// LLMNBest is the number of candidate completions requested per
+	// escalation/LLM-only call; default 1 = off = byte-identical legacy
+	// single-candidate behaviour. >= 2 enables N-best (correction.Service.
+	// SetNBest), and requires the configured LLM client to implement
+	// correction.NBestLLMClient — main.go type-asserts once at wiring time
+	// and logs a Warn (not per request) if the assertion fails, leaving the
+	// legacy single-candidate path in place.
+	LLMNBest int // GF_LLM_NBEST (default 1)
+	// LLMNBestTemperature is the sampling temperature used for N-best
+	// candidate generation (both wire strategies below). Only takes effect
+	// when LLMNBest >= 2; the legacy single-candidate path always keeps
+	// Prompt.Temperature at its existing value (0 for correction — greedy,
+	// golden-eval stable) untouched.
+	LLMNBestTemperature float64 // GF_LLM_NBEST_TEMPERATURE (default 0.3)
+	// LLMNBestWire selects the N-best transport strategy:
+	//   - "sequential" (default): N separate requests, request i (0-based)
+	//     using seed LLMSeed+i and the same prompt. Portable — works against
+	//     any OpenAI-compatible BYO backend regardless of whether it honors
+	//     the "n" parameter.
+	//   - "n_param": ONE request with "n": N added to the payload. Only
+	//     honored by backends implementing OpenAI's n parameter — verified
+	//     live against llama.cpp build b9828-ebd048fc5, which DOES honor it,
+	//     but a generic BYO backend may silently ignore it and return 1
+	//     choice (llm.Client.CompleteN's short-subset handling covers that).
+	// Invalid values fall back to "sequential" with a Warn (see
+	// validateNBestWire) — mirroring clampGECToRPasses's posture: an
+	// out-of-range/typo'd knob degrades to the safe default rather than
+	// silently disabling the whole feature or panicking.
+	LLMNBestWire string // GF_LLM_NBEST_WIRE (default "sequential")
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -493,6 +524,25 @@ func Load(getenv Getenv) Config {
 		CalibrationMinSamples: getInt("GF_CALIBRATION_MIN_SAMPLES", 10),
 
 		EscalationCalibrated: getBool("GF_ESCALATION_CALIBRATED", false),
+
+		LLMNBest:            getInt("GF_LLM_NBEST", 1),
+		LLMNBestTemperature: getFloat("GF_LLM_NBEST_TEMPERATURE", 0.3),
+		LLMNBestWire:        validateNBestWire(get("GF_LLM_NBEST_WIRE", "sequential")),
+	}
+}
+
+// validateNBestWire validates GF_LLM_NBEST_WIRE against the two known
+// strategies ("sequential" | "n_param"), falling back to "sequential" (the
+// portable BYO-safe default) with a Warn on any other value. Mirrors
+// clampGECToRPasses's "log only when the input actually needed correcting"
+// posture — the zero-value/default-returned "sequential" never logs.
+func validateNBestWire(v string) string {
+	switch v {
+	case "sequential", "n_param":
+		return v
+	default:
+		slog.Warn("GF_LLM_NBEST_WIRE invalid; falling back to sequential", "requested", v)
+		return "sequential"
 	}
 }
 

@@ -45,6 +45,18 @@ type LLMClient interface {
 	Complete(ctx context.Context, p Prompt) (string, error)
 }
 
+// NBestLLMClient is an optional capability interface (Task 8, GF_LLM_NBEST):
+// implementations return up to n candidate completions for one prompt.
+// Discovered via type assertion on the configured LLMClient — the same
+// optional-capability pattern as breakerStater (cache_metrics.go): a client
+// that does not implement it (e.g. the Anthropic client, or a bare test
+// fake) simply cannot serve N-best, and the caller falls back to the legacy
+// single-candidate Complete path. See llm.Client.CompleteN for the two wire
+// strategies (sequential requests vs a single request with "n").
+type NBestLLMClient interface {
+	CompleteN(ctx context.Context, p Prompt, n int) ([]string, error)
+}
+
 // SemanticVerifier scores how much meaning two texts share (0..1). Used to
 // discard catastrophic LLM rewrites before diffing — a verified low-score
 // rewrite is discarded entirely rather than diffed into suggestions. The

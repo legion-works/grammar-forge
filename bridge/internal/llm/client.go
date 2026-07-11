@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -21,6 +22,15 @@ type Config struct {
 	Model   string
 	APIKey  string
 	Seed    int // sampling seed for reproducible output (sent on every request)
+	// NBestWire selects the Task 8 N-best transport strategy for CompleteN:
+	// "sequential" (default/zero value — N separate requests using seeds
+	// Seed, Seed+1, ..., portable to any OpenAI-compatible BYO backend) or
+	// "n_param" (ONE request with "n": N — only honored by backends that
+	// implement OpenAI's n parameter; verified live against llama.cpp build
+	// b9828-ebd048fc5). Set from config.Config.LLMNBestWire in main, mirroring
+	// the Seed copy pattern. Never affects Complete (the legacy single-
+	// candidate path never sends "n").
+	NBestWire string
 }
 
 // Client talks to an OpenAI-compatible server.
@@ -66,11 +76,28 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
-// Complete renders p to the correct endpoint and returns the model's text.
-func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, error) {
+// llmChoice is the dual-shape choice element every OpenAI-compatible
+// response returns: the completions path populates Text, the chat path
+// populates Message.Content. Shared by Complete and CompleteN so both parse
+// choices identically.
+type llmChoice struct {
+	Text         string `json:"text"`
+	FinishReason string `json:"finish_reason"`
+	Message      struct {
+		Content string `json:"content"`
+	} `json:"message"`
+}
+
+// requestPayload renders p to its endpoint + JSON-able payload. seed
+// overrides c.cfg.Seed (CompleteN's sequential strategy varies it per
+// request; Complete and CompleteN's n_param strategy always pass
+// c.cfg.Seed). n > 0 adds the OpenAI "n" parameter (n_param strategy only);
+// n <= 0 omits the key entirely, so the legacy Complete payload shape never
+// changes regardless of NBestWire.
+func (c *Client) requestPayload(p correction.Prompt, seed, n int) (string, map[string]any) {
 	maxTokens := completionBudget(p.User)
 	var endpoint string
-	var payload any
+	var payload map[string]any
 	if p.Template == correction.TemplateChatInstruct {
 		endpoint = "/chat/completions"
 		msgs := make([]chatMessage, 0, 2)
@@ -81,8 +108,8 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 		payload = map[string]any{
 			"model": c.cfg.Model, "messages": msgs,
 			// p.Temperature is 0 for correction/rephrase/tone (greedy, golden-eval
-			// stable) and non-zero only for completion (varied continuations).
-			"temperature": p.Temperature, "seed": c.cfg.Seed, "max_tokens": maxTokens,
+			// stable) and non-zero only for completion and Task 8 N-best.
+			"temperature": p.Temperature, "seed": seed, "max_tokens": maxTokens,
 			// Reasoning-capable instruct models (Gemma-4, Qwen3-thinking) otherwise
 			// emit chain-of-thought that consumes the token budget and leaves
 			// message.content empty for a single-shot grammar correction. This
@@ -98,20 +125,27 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 		endpoint = "/completions"
 		payload = map[string]any{
 			"model": c.cfg.Model, "prompt": p.User,
-			"temperature": p.Temperature, "seed": c.cfg.Seed, "max_tokens": maxTokens, "stop": p.Stop,
+			"temperature": p.Temperature, "seed": seed, "max_tokens": maxTokens, "stop": p.Stop,
 		}
 	}
+	if n > 0 {
+		payload["n"] = n
+	}
+	return endpoint, payload
+}
 
+// doRequest marshals payload, executes it via executeWithResilience (breaker
+// + bounded retry — see resilience.go), and returns the decoded choices.
+// Shared by Complete and both CompleteN strategies.
+func (c *Client) doRequest(ctx context.Context, endpoint string, payload map[string]any) ([]llmChoice, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// executeWithResilience owns the breaker check, the HTTP round-trip, and
-	// the bounded retry-on-transient-failure loop (network error / 429 /
-	// 5xx only — see resilience.go). newReq is called fresh per attempt
-	// since an http.Request body reader is single-use; bytes.NewReader(body)
-	// is cheap to recreate from the already-marshaled bytes.
+	// newReq is called fresh per attempt since an http.Request body reader
+	// is single-use; bytes.NewReader(body) is cheap to recreate from the
+	// already-marshaled bytes.
 	resp, err := executeWithResilience(ctx, c.http, c.breaker, c.retry, "llm", func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+endpoint, bytes.NewReader(body))
 		if err != nil {
@@ -124,31 +158,31 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 		return req, nil
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	var parsed struct {
-		Choices []struct {
-			Text         string `json:"text"`
-			FinishReason string `json:"finish_reason"`
-			Message      struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
+		Choices []llmChoice `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return "", fmt.Errorf("decode llm response: %w", err)
+		return nil, fmt.Errorf("decode llm response: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("llm returned no choices")
+		return nil, fmt.Errorf("llm returned no choices")
 	}
-	ch := parsed.Choices[0]
-	// finish_reason "length" means the backend hit max_tokens and the output
-	// is TRUNCATED mid-text. Returning the partial text is a data-loss hazard:
-	// the correction diff converts the missing tail into mass-deletion
-	// suggestions (verified live 2026-06-10: a 6.5KB input produced a
-	// 3,591-byte deletion). Surface it as an error so callers fall back / fail.
+	return parsed.Choices, nil
+}
+
+// extractChoiceText mirrors Complete's original dual-shape parsing: the
+// completions path reads Text, the chat path reads Message.Content — trying
+// Text first works for either shape since exactly one of the two is
+// populated per wire format. finish_reason "length" means the backend hit
+// max_tokens and the output is TRUNCATED mid-text; returning the partial
+// text is a data-loss hazard (the correction diff converts the missing tail
+// into mass-deletion suggestions — verified live 2026-06-10: a 6.5KB input
+// produced a 3,591-byte deletion), so it is surfaced as an error instead.
+func extractChoiceText(ch llmChoice) (string, error) {
 	if ch.FinishReason == "length" {
 		return "", fmt.Errorf("llm output truncated at max_tokens (finish_reason=length)")
 	}
@@ -156,6 +190,99 @@ func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, err
 		return strings.TrimSpace(ch.Text), nil
 	}
 	return strings.TrimSpace(ch.Message.Content), nil
+}
+
+// Complete renders p to the correct endpoint and returns the model's text.
+// Single-candidate legacy path: byte-identical wire payload regardless of
+// GF_LLM_NBEST_WIRE (requestPayload never adds "n" here).
+func (c *Client) Complete(ctx context.Context, p correction.Prompt) (string, error) {
+	endpoint, payload := c.requestPayload(p, c.cfg.Seed, 0)
+	choices, err := c.doRequest(ctx, endpoint, payload)
+	if err != nil {
+		return "", err
+	}
+	return extractChoiceText(choices[0])
+}
+
+// CompleteN requests up to n candidate completions for p (Task 8,
+// GF_LLM_NBEST — implements correction.NBestLLMClient). Strategy selected by
+// c.cfg.NBestWire ("" and "sequential" both mean sequential — the portable
+// BYO-safe default; only the literal "n_param" selects the single-request
+// strategy). Both strategies sample at p.Temperature (the correction package
+// sets a non-zero N-best temperature on the Prompt it passes here; the
+// legacy Complete path above is never touched by this).
+func (c *Client) CompleteN(ctx context.Context, p correction.Prompt, n int) ([]string, error) {
+	if c.cfg.NBestWire == "n_param" {
+		return c.completeNParam(ctx, p, n)
+	}
+	return c.completeNSequential(ctx, p, n)
+}
+
+// completeNParam issues ONE request carrying "n": n and extracts every
+// valid candidate from the returned choices. A choice that is truncated
+// (finish_reason=="length") or decodes to empty text is REJECTED — dropped
+// from the result, not surfaced as a partial string. Returning fewer valid
+// candidates than requested is not an error; the correction package's
+// short-subset fallback handles that case. An error is returned only when
+// the transport itself fails or EVERY choice is invalid.
+func (c *Client) completeNParam(ctx context.Context, p correction.Prompt, n int) ([]string, error) {
+	endpoint, payload := c.requestPayload(p, c.cfg.Seed, n)
+	choices, err := c.doRequest(ctx, endpoint, payload)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(choices))
+	for _, ch := range choices {
+		text, err := extractChoiceText(ch)
+		if err != nil || text == "" {
+			continue
+		}
+		out = append(out, text)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("llm n_param: no valid candidates in %d returned choices", len(choices))
+	}
+	return out, nil
+}
+
+// completeNSequential issues n separate requests, request i (0-based) using
+// seed c.cfg.Seed+i and the same prompt otherwise. A per-request transport
+// failure, or a truncated/empty single-choice response, drops that
+// candidate (logged at Warn per dropped candidate is too noisy for n
+// requests; one summary Warn covers the whole batch when the subset is
+// short). Zero successes returns the last observed error; 1..n-1 successes
+// logs a Warn and returns the subset — the correction package's
+// short-subset fallback is the one that decides whether a shrunken set is
+// usable, not this transport layer.
+func (c *Client) completeNSequential(ctx context.Context, p correction.Prompt, n int) ([]string, error) {
+	out := make([]string, 0, n)
+	var lastErr error
+	for i := range n {
+		endpoint, payload := c.requestPayload(p, c.cfg.Seed+i, 0)
+		choices, err := c.doRequest(ctx, endpoint, payload)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		text, err := extractChoiceText(choices[0])
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if text == "" {
+			lastErr = fmt.Errorf("llm sequential candidate %d: empty content", i)
+			continue
+		}
+		out = append(out, text)
+	}
+	if len(out) == 0 {
+		return nil, lastErr
+	}
+	if len(out) < n {
+		slog.Warn("llm CompleteN sequential: fewer candidates than requested",
+			"requested", n, "succeeded", len(out), "last_err", lastErr)
+	}
+	return out, nil
 }
 
 // completionBudget sizes max_tokens to the input: ~2.5 tokens/word, clamped.

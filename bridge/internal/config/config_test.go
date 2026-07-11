@@ -707,3 +707,47 @@ func TestClampGECToRPasses(t *testing.T) {
 	require.Equal(t, 3, clampGECToRPasses(4))
 	require.Equal(t, 1, clampGECToRPasses(-5))
 }
+
+// Task 8: N-best LLM sampling (GF_LLM_NBEST). Default 1 = off = byte-identical
+// legacy single-candidate behaviour.
+func TestLoad_NBestDefaults(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, 1, cfg.LLMNBest, "GF_LLM_NBEST must default to 1 (off)")
+	require.InDelta(t, 0.3, cfg.LLMNBestTemperature, 1e-9)
+	require.Equal(t, "sequential", cfg.LLMNBestWire, "sequential is the portable BYO-safe default")
+}
+
+func TestLoad_NBestOverrides(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		switch k {
+		case "GF_LLM_NBEST":
+			return "3", true
+		case "GF_LLM_NBEST_TEMPERATURE":
+			return "0.7", true
+		case "GF_LLM_NBEST_WIRE":
+			return "n_param", true
+		}
+		return "", false
+	})
+	require.Equal(t, 3, cfg.LLMNBest)
+	require.InDelta(t, 0.7, cfg.LLMNBestTemperature, 1e-9)
+	require.Equal(t, "n_param", cfg.LLMNBestWire)
+}
+
+func TestLoad_NBestWireInvalidValueFallsBackToSequential(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_LLM_NBEST_WIRE" {
+			return "bogus", true
+		}
+		return "", false
+	})
+	require.Equal(t, "sequential", cfg.LLMNBestWire,
+		"an invalid GF_LLM_NBEST_WIRE must fall back to the portable default, not silently no-op the whole feature")
+}
+
+func TestValidateNBestWire(t *testing.T) {
+	require.Equal(t, "sequential", validateNBestWire("sequential"))
+	require.Equal(t, "n_param", validateNBestWire("n_param"))
+	require.Equal(t, "sequential", validateNBestWire(""))
+	require.Equal(t, "sequential", validateNBestWire("bogus"))
+}
