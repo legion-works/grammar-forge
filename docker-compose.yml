@@ -12,11 +12,13 @@ name: grammarforge
 
 services:
   bridge:
-    image: grammarforge-bridge:dev
+    image: ghcr.io/legion-works/grammar-forge-bridge:latest
     build: ./bridge
     depends_on: [llamacpp]
     volumes:
       - ./data:/data
+      - ./bridge/models/gector:/models/gector:ro
+      - ./bridge/models/minilm:/models/minilm:ro
     environment:
       GF_REST_ADDR: ":8000"
       GF_GRPC_ADDR: ":8082"
