@@ -26,11 +26,7 @@ Privacy tools usually trade away quality; grammar tools usually trade away priva
 - **No text leaves the server, ever.** No telemetry, no analytics, no phone-home. The only outbound traffic is to the LLM endpoint *you* configure — and the default is a local llama.cpp in the same compose stack.
 - **The LLM is escalation, not the pipeline.** Every keystroke is checked by the in-process fast path in ~35 ms; the LLM (~300–800 ms) runs only when the fast path isn't confident. A three-tier pipeline, not a chatbot with a spellcheck prompt.
 - **Bring your own model.** The slow path speaks the OpenAI-compatible API. llama.cpp is the default; vLLM, Ollama, LM Studio, or a remote endpoint are config changes, not code changes. Pointing at a remote endpoint is an explicit opt-in.
-- **It learns you — locally.** Accept and reject suggestions and the bridge builds a personal profile from the signal log (SQLite, on your disk): rejected corrections stop being suggested, accepted ones steer the prompt.
-
-## What's in the box
-
-One runtime service (the bridge) plus your LLM backend. Harper and GECToR run inside the bridge process — no model sidecar.
+- **Learns your style — locally.** Accept and reject suggestions and the bridge builds a personal profile from the signal log (SQLite, on your disk): rejected corrections stop being suggested, accepted ones steer the prompt.
 
 ### Pipeline
 
@@ -40,7 +36,7 @@ One runtime service (the bridge) plus your LLM backend. Harper and GECToR run in
 | Fast path 2 | GECToR-2024 (ONNX INT8, in-process) | ~25 ms CPU | agreement, articles, tense, plurals |
 | Escalation | Any OpenAI-compatible LLM | ~300–800 ms | everything the fast path can't prove |
 
-A per-sentence cache means unchanged text never re-runs the pipeline. Deterministic repair chains revert measured LLM over-edit classes (contraction expansion, dialect Americanisation, prescriptivist rewrites) before suggestions ever reach a client.
+A per-sentence cache skips unchanged text. Deterministic repair chains revert measured LLM over-edit classes — contraction expansion, dialect Americanisation, prescriptivist rewrites — before suggestions reach a client.
 
 ### Clients
 
@@ -53,7 +49,7 @@ A per-sentence cache means unchanged text never re-runs the pipeline. Determinis
 
 ### Beyond corrections
 
-Rephrase with alternatives, tone tags, offline synonyms (Moby Thesaurus), inline completion, a user dictionary with hot-reload, per-category stats and streaks, and dialect-aware checking (British/Canadian/Australian) that stops the LLM from "fixing" your spelling of *colour*.
+Rephrase with alternatives, tone tags, offline synonyms (Moby Thesaurus), inline completion, and a hot-reload user dictionary. Per-category stats with streaks. Dialect-aware checking (British/Canadian/Australian) that stops the LLM from "fixing" your spelling of *colour*.
 
 ## Quickstart
 
@@ -102,7 +98,7 @@ The eval harness — a 125-case golden set, CoNLL-14 / BEA-19 / JFLEG benchmarks
 
 ## Status
 
-Running in production on the author's hardware, checking real Discord messages and browser text daily; the OpenCode client is built and tested but waits on an upstream TUI hook to go live. Single-user and English-only by design — no auth, no i18n, no cloud sync, and none planned. Young project, one maintainer; interfaces may shift.
+Running in production on our hardware, checking real Discord messages and browser text daily; the OpenCode client is built and tested but waits on an upstream TUI hook to go live. Single-user and English-only by design — no auth, no i18n, no cloud sync, and none planned. Young project, single maintainer; interfaces may shift.
 
 ## License
 
@@ -111,6 +107,6 @@ AGPL-3.0.
 ---
 
 <p align="center">
-  <img src="handoff/reference/assets/legion-mark.svg" alt="Legion Works" width="16" valign="middle">
+  <img src="handoff/reference/assets/legion-mark.svg" alt="Legion Works" width="16" style="vertical-align: middle">
   &nbsp;A <strong>Legion Works</strong> product. Many programs. One consensus.
 </p>
