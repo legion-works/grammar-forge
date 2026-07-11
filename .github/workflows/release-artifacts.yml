@@ -65,6 +65,12 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
 
+      - name: Resolve version
+        id: ver
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: echo "version=${TAG#grammar-forge-v}" >> "$GITHUB_OUTPUT"
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11
@@ -75,17 +81,35 @@ jobs:
           cache: pnpm
           cache-dependency-path: clients/browser/pnpm-lock.yaml
 
+      # --- Browser (Chrome) ---
       - name: Install browser dependencies
         run: pnpm install
         working-directory: clients/browser
 
-      - name: Build browser extension
-        run: pnpm run build
-        working-directory: clients/browser
-
-      - name: Package Chrome extension
+      - name: Build + package Chrome extension
         run: pnpm run zip
         working-directory: clients/browser
+
+      # --- Browser (Firefox) ---
+      - name: Build + package Firefox extension
+        run: pnpm run zip:firefox
+        working-directory: clients/browser
+
+      # --- Vencord ---
+      - name: Install Vencord dependencies
+        run: pnpm install
+        working-directory: clients/vencord
+
+      - name: Build Vencord plugin
+        run: pnpm run build
+        working-directory: clients/vencord
+
+      - name: Package Vencord plugin
+        run: |
+          mkdir -p .output
+          cd dist
+          zip -r "../.output/grammarforge-vencord-${{ steps.ver.outputs.version }}.zip" grammarForge/
+        working-directory: clients/vencord
 
       - name: Upload artifacts to release
         env:
@@ -93,6 +117,8 @@ jobs:
         run: |
           gh release upload "${{ github.event.release.tag_name || inputs.tag }}" \
             clients/browser/.output/*-chrome.zip \
+            clients/browser/.output/*-firefox.zip \
+            clients/vencord/.output/*.zip \
             --clobber
 
   # master is the release-only mirror — fast-forward to the published tag
