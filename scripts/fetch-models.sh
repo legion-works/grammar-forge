@@ -39,12 +39,20 @@ else
 fi
 
 echo "==> [2/7] hugot native libs ($HUGOT_VER)"
-for tarball in libonnxruntime-linux-x64.tar.gz libtokenizers-linux-x64.tar.gz; do
-  echo "    $tarball"
-  curl -fL --retry 5 \
-    "https://github.com/knights-analytics/hugot/releases/download/$HUGOT_VER/$tarball" \
-    | tar -xz -C "$NATIVE_DIR"
-done
+# Assets are plain files (not tarballs) — mirror the Dockerfile's install exactly.
+# libonnxruntime-linux-x64.so is renamed to libonnxruntime.so; libtokenizers.a is used as-is.
+if [ -f "$NATIVE_DIR/libonnxruntime.so" ] && [ -f "$NATIVE_DIR/libtokenizers.a" ]; then
+  echo "    present, skipping (delete to re-fetch)"
+else
+  echo "    libonnxruntime-linux-x64.so → libonnxruntime.so"
+  curl -fL --retry 5 -o "$NATIVE_DIR/libonnxruntime-linux-x64.so" \
+    "https://github.com/knights-analytics/hugot/releases/download/$HUGOT_VER/libonnxruntime-linux-x64.so"
+  mv "$NATIVE_DIR/libonnxruntime-linux-x64.so" "$NATIVE_DIR/libonnxruntime.so"
+
+  echo "    libtokenizers.a"
+  curl -fL --retry 5 -o "$NATIVE_DIR/libtokenizers.a" \
+    "https://github.com/knights-analytics/hugot/releases/download/$HUGOT_VER/libtokenizers.a"
+fi
 
 echo "==> [3/7] GECToR model.onnx (~345 MB, INT8, resumable)"
 if [ -f "$GECTOR_DIR/model.onnx" ]; then
@@ -58,14 +66,22 @@ fi
 
 echo "==> [4/7] GECToR support files (tokenizer/config JSONs)"
 for f in config.json tokenizer.json tokenizer_config.json vocab.json merges.txt special_tokens_map.json; do
+  if [ -f "$GECTOR_DIR/$f" ]; then
+    echo "    $f — present, skipping"
+    continue
+  fi
   echo "    $f"
   curl -fL --retry 5 -o "$GECTOR_DIR/$f" "$GECTOR_REPO/$f"
 done
 
 echo "==> [5/7] verb-form vocabulary"
 # verb-form-vocab.txt is fetched from grammarly/gector — identical $TRANSFORM_VERB_* tags.
-curl -fL --retry 5 -o "$GECTOR_DIR/verb-form-vocab.txt" \
-  "https://raw.githubusercontent.com/grammarly/gector/master/data/verb-form-vocab.txt"
+if [ -f "$GECTOR_DIR/verb-form-vocab.txt" ]; then
+  echo "    present, skipping"
+else
+  curl -fL --retry 5 -o "$GECTOR_DIR/verb-form-vocab.txt" \
+    "https://raw.githubusercontent.com/grammarly/gector/master/data/verb-form-vocab.txt"
+fi
 
 echo "==> [6/7] MiniLM model.onnx (~90 MB, FP32, resumable)"
 if [ -f "$MINILM_DIR/model.onnx" ]; then
@@ -81,6 +97,10 @@ fi
 
 echo "==> [7/7] MiniLM tokenizer + config"
 for f in tokenizer.json config.json vocab.txt special_tokens_map.json; do
+  if [ -f "$MINILM_DIR/$f" ]; then
+    echo "    $f — present, skipping"
+    continue
+  fi
   echo "    $f"
   curl -fL --retry 5 -o "$MINILM_DIR/$f" "$MINILM_REPO/$f"
 done
