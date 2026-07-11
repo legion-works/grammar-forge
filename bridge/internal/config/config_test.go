@@ -659,3 +659,51 @@ func TestLoad_EscalationCalibratedOverride(t *testing.T) {
 	})
 	require.True(t, cfg.EscalationCalibrated)
 }
+
+// Task 7: iterative GECToR passes. Default 1 keeps the fast path
+// byte-identical to today; GF_GECTOR_PASSES is clamped to [1,3] so a
+// misconfigured deploy cannot silently pay unbounded per-request latency.
+func TestLoad_GECToRPassesDefaultsOne(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.Equal(t, 1, cfg.GECToRPasses,
+		"GF_GECTOR_PASSES must default to 1 (today's single-pass, byte-identical behaviour)")
+}
+
+func TestLoad_GECToRPassesValidValue(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_GECTOR_PASSES" {
+			return "2", true
+		}
+		return "", false
+	})
+	require.Equal(t, 2, cfg.GECToRPasses)
+}
+
+func TestLoad_GECToRPassesClampsBelowOne(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_GECTOR_PASSES" {
+			return "0", true
+		}
+		return "", false
+	})
+	require.Equal(t, 1, cfg.GECToRPasses, "GF_GECTOR_PASSES=0 must clamp up to 1")
+}
+
+func TestLoad_GECToRPassesClampsAboveThree(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_GECTOR_PASSES" {
+			return "4", true
+		}
+		return "", false
+	})
+	require.Equal(t, 3, cfg.GECToRPasses, "GF_GECTOR_PASSES=4 must clamp down to 3")
+}
+
+func TestClampGECToRPasses(t *testing.T) {
+	require.Equal(t, 1, clampGECToRPasses(0))
+	require.Equal(t, 1, clampGECToRPasses(1))
+	require.Equal(t, 2, clampGECToRPasses(2))
+	require.Equal(t, 3, clampGECToRPasses(3))
+	require.Equal(t, 3, clampGECToRPasses(4))
+	require.Equal(t, 1, clampGECToRPasses(-5))
+}

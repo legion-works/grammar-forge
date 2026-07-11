@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -83,7 +84,22 @@ type Config struct {
 	// Fast path (Plan 1C): Harper + GECToR run in-process; the LLM is
 	// escalation-only (see correction.EscalationPolicy).
 	GECToRModelDir string
-	HarperEnabled  bool
+	// GECToRPasses (Task 7, GF_GECTOR_PASSES) controls how many GECToR
+	// inference passes gector.GECToR.Correct runs per request (default 1 =
+	// today's single pass, byte-identical output — see gector.go's Correct
+	// doc comment). Clamped to [1,3]: below 1 is nonsensical (there is
+	// always at least one pass), and above 3 buys little extra recall for
+	// roughly linear extra latency per pass while the confidence-calibration
+	// bucket stays shared across passes (see gector.go), so an unbounded
+	// value would let a typo'd deploy silently pay unbounded latency.
+	// Load has no injected *slog.Logger, but log/slog's package-level
+	// default logger is already used directly (without one being threaded
+	// through) elsewhere in this bridge (main.go, fastpath_ort.go,
+	// suppression.go, cache.go), so the clamp warning is emitted here via
+	// slog.Warn rather than deferred to fastpath_ort.go, the sole consumer —
+	// this also keeps the clamp behaviour unit-testable in config_test.go.
+	GECToRPasses  int
+	HarperEnabled bool
 	// HarperMarkdown parses Harper input as Markdown so code spans, fenced code
 	// blocks, math, and HTML are masked unlintable (default true). Set
 	// GF_HARPER_MARKDOWN=false for plain-English parsing. HarperIgnoreLinkTitle
@@ -429,6 +445,7 @@ func Load(getenv Getenv) Config {
 		ToneCacheSize:       getInt("GF_TONE_CACHE_SIZE", 512),
 
 		GECToRModelDir:            get("GF_GECTOR_MODEL_DIR", "/models/gector"),
+		GECToRPasses:              clampGECToRPasses(getInt("GF_GECTOR_PASSES", 1)),
 		HarperEnabled:             getBool("GF_HARPER_ENABLED", true),
 		HarperMarkdown:            getBool("GF_HARPER_MARKDOWN", true),
 		HarperIgnoreLinkTitle:     getBool("GF_HARPER_IGNORE_LINK_TITLE", false),
@@ -514,6 +531,23 @@ func ParseTrustedCategories(csv string) ([]string, error) {
 		out = append(out, tok)
 	}
 	return out, nil
+}
+
+// clampGECToRPasses bounds GF_GECTOR_PASSES to [1,3] (see the GECToRPasses
+// field doc comment for why), logging a Warn only when clamping actually
+// changes the requested value so a misconfigured deploy is visible in logs.
+func clampGECToRPasses(n int) int {
+	clamped := n
+	switch {
+	case clamped < 1:
+		clamped = 1
+	case clamped > 3:
+		clamped = 3
+	}
+	if clamped != n {
+		slog.Warn("GF_GECTOR_PASSES out of range [1,3]; clamped", "requested", n, "clamped", clamped)
+	}
+	return clamped
 }
 
 // FromOS is the production loader.

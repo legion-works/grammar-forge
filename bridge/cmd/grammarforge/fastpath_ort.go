@@ -42,8 +42,12 @@ func buildFastPath(cfg config.Config) ([]correction.Corrector, func()) {
 	if g, err := gector.New(cfg.GECToRModelDir); err != nil {
 		slog.Warn("gector unavailable; running without it", "err", err)
 	} else {
+		// GF_GECTOR_PASSES (Task 7): cfg.GECToRPasses is already clamped to
+		// [1,3] by config.Load, so this is just wiring the validated value
+		// through. Default 1 makes SetPasses a no-op (New already sets 1).
+		g.SetPasses(cfg.GECToRPasses)
 		fast = append(fast, g)
-		slog.Info("fast path: gector loaded", "model_dir", cfg.GECToRModelDir)
+		slog.Info("fast path: gector loaded", "model_dir", cfg.GECToRModelDir, "passes", cfg.GECToRPasses)
 	}
 
 	cleanup := func() {
