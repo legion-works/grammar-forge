@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+* linux/arm64 bridge image + Apple Silicon / Metal setup docs ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
+
 ### CI
 
+* publish multi-arch bridge image (amd64 + arm64) ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
 * ship Firefox + Vencord release artifacts ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
 
 ## [0.1.1](https://github.com/legion-works/grammar-forge/compare/grammar-forge-v0.1.0...grammar-forge-v0.1.1) (2026-07-11)

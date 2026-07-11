@@ -102,6 +102,23 @@ services:
   #     "--gpu-memory-utilization","0.20","--enforce-eager","--enable-lora","--enable-sleep-mode"]
   #   deploy: { resources: { reservations: { devices: [{driver: nvidia, count: 1, capabilities: [gpu]}] } } }
   #
+  # --- macOS / Metal: llama.cpp on the host, bridge in Docker Desktop ---
+  # On Apple Silicon, Docker has no GPU passthrough — run llama.cpp natively
+  # on the Mac with Metal acceleration and point the bridge at it. Disable the
+  # default llamacpp service (it targets NVIDIA GPUs) and set the base URL to
+  # host.docker.internal (Docker Desktop's host-gateway alias).
+  #
+  # compose overrides:
+  #   llamacpp:
+  #     profiles: ["disabled"]
+  #   bridge:
+  #     environment:
+  #       GF_LLM_BASE_URL: "http://host.docker.internal:8080/v1"
+  #
+  # Start llama.cpp on the Mac:
+  #   brew install llama.cpp
+  #   llama-server -m ./models/llm/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf --port 8080 -ngl 99
+
   # --- BYO alternate: Ollama (simplest; GGUF; no per-request hot-swap) ---
   # ollama:
   #   image: ollama/ollama:latest

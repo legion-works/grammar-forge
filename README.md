@@ -73,6 +73,35 @@ curl -s -X POST http://localhost:8000/v2/check -d "text=I has three cats" -d "la
 
 To use a different backend, set `GF_LLM_BASE_URL` / `GF_LLM_MODEL` / `GF_LLM_FORMAT` — see the commented BYO blocks in `docker-compose.yml`.
 
+### macOS (Apple Silicon / Metal)
+
+> **Community-verified status** — tested under Docker QEMU emulation on Linux;
+> not yet validated on real Apple Silicon hardware. Reports welcome.
+
+Docker Desktop for Mac runs the bridge natively on arm64 (image published from
+v0.1.2). The LLM runs on the host with Metal acceleration:
+
+```bash
+# 1. Install llama.cpp via Homebrew
+brew install llama.cpp
+
+# 2. Provision the model (or point at an existing GGUF)
+./scripts/fetch-models.sh
+
+# 3. Start llama.cpp with Metal (offload 99 layers to GPU)
+llama-server \
+  -m ./models/llm/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
+  --port 8080 \
+  -ngl 99
+
+# 4. Point the bridge at the host Metal server
+export GF_LLM_BASE_URL=http://host.docker.internal:8080/v1
+docker compose up -d
+```
+
+In compose, disable the `llamacpp` service and set `GF_LLM_BASE_URL` — see the
+commented macOS/Metal block in `docker-compose.yml`.
+
 ### CPU-only
 
 No GPU? Swap the LLM backend to CPU. Two options:
