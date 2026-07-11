@@ -24,4 +24,6 @@ jobs:
         if: ${{ steps.rp.outputs.release_created }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run release-artifacts.yml -f tag="${{ steps.rp.outputs.tag_name }}"
+        # -R is required: this job never checks out the repo, so gh cannot
+        # infer the repository from a working tree.
+        run: gh workflow run release-artifacts.yml -R "${{ github.repository }}" -f tag="${{ steps.rp.outputs.tag_name }}"
