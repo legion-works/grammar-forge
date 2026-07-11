@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * ship Firefox + Vencord release artifacts ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
 
+## [0.1.1](https://github.com/legion-works/grammar-forge/compare/grammar-forge-v0.1.0...grammar-forge-v0.1.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **compose:** default to the GHCR bridge image + verify model mounts ([b83a92b](https://github.com/legion-works/grammar-forge/commit/b83a92b15d677e711179da11fb07778d46d53a58))
+* **compose:** pin bridge image to release version (dclint) + release-please bump annotation ([a99acca](https://github.com/legion-works/grammar-forge/commit/a99acca79b61ef3a7a91cdbae193270b6dd2e30e))
+* **scripts:** correct hugot native-lib asset names + make fetch-models fully idempotent ([4aed4a2](https://github.com/legion-works/grammar-forge/commit/4aed4a2d39e0b2e0c06173be57d81d38b348b8c7))
+
 ## 0.1.0 (2026-07-11)
 
 
