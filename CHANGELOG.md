@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * publish multi-arch bridge image (amd64 + arm64) ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
 * ship Firefox + Vencord release artifacts ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
 
+## [0.2.0](https://github.com/legion-works/grammar-forge/compare/grammar-forge-v0.1.1...grammar-forge-v0.2.0) (2026-07-11)
+
+
+### Features
+
+* **bridge:** linux/arm64 image support ([eb7e630](https://github.com/legion-works/grammar-forge/commit/eb7e6300d6de36fed6c69a31e5d71493c183f30c))
+
 ## [0.1.1](https://github.com/legion-works/grammar-forge/compare/grammar-forge-v0.1.0...grammar-forge-v0.1.1) (2026-07-11)
 
 
