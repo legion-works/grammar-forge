@@ -511,10 +511,64 @@ GF_GATE=1 eval/run_all.sh http://127.0.0.1:8001
 Gate logic lives in `eval/lib_summary.py` (`build_summary` /
 `overall_gate`), unit-tested in `eval/test_run_all_summary.py`.
 
+**Dialect/threshold pairing caveat:** the in-suite clean step gates against
+the 13.6% ceiling derived from `clean_baseline.json`, which was measured
+under `GF_HARPER_DIALECT=british` (+ the dialect spelling guard) — but
+`run_all.sh` runs clean against whatever dialect the target bridge is
+configured with. On an american-configured bridge (the golden/benchmark
+config) the clean step reads high (~16% observed 2026-07-11) and can fail
+the gate spuriously; that is a threshold-pairing artifact, not a
+regression. The CANONICAL clean-FP gate is the separate british-configured
+run (§4/§6). Treat an in-suite clean "fail" on an american bridge as
+informational; never compare FP numbers across dialect envs (§4).
+
 ## 9. Recall measurement matrix
 
-(Verdict recording home for the Phase-3 recall flags — populated when the
-measurement matrix runs.)
+Phase-3 measurement matrix, run 2026-07-11 at bridge commit `ead7995` on
+`gf-bridge-eval` (american unless noted, cold `gf-llamacpp` restarts per §1's
+protocol, one flag on per run). Candidate criteria (from the P2-P4 plan):
+golden 125/125, clean-FP (british re-run) ≤ 13.6%, CoNLL F0.5 ≥ 60.63 OR
+JFLEG GLEU ≥ 0.4180, golden p50 ≤ 150ms for context/multi-pass (N-best is
+exempt from the p50 ceiling — an opt-in quality knob priced at ~k× LLM
+latency, never a default candidate).
+
+| Metric | run0 (all off) | `GF_LLM_SENTENCE_CONTEXT` | `GF_GECTOR_PASSES=2` | `GF_LLM_NBEST=3` |
+|---|---|---|---|---|
+| Golden (american) | 125/125 | 125/125 | 125/125 | **123/125 ✗** |
+| CoNLL-14 F0.5 (P/R) | 60.78 (64.84/48.59) | 60.78 (64.84/48.59) | 60.82 (64.88/48.65) | 60.56 (64.59/48.46) |
+| BEA-19 F0.5 | 42.51 | 42.51 | 42.35 | (timeout) |
+| JFLEG GLEU | — | 0.4107 | (timeout) | (timeout) |
+| Clean-FP british | — | 11.6% ✓ | 11.6% ✓ | 11.0% ✓ |
+| Golden p50 | 95.8ms | 108.4ms ✓ | **152.8ms ✗** | **250.0ms ✗** |
+
+**Verdicts (code defaults did NOT flip — Global Constraints):**
+
+- **`GF_LLM_SENTENCE_CONTEXT` — eligible for operator enable; benefit
+  unmeasured-by-design on current instruments.** Passes every criterion
+  (golden ✓, clean ✓, CoNLL 60.78 ≥ 60.63 ✓, p50 108.4ms ≤ 150ms ✓). CAVEAT:
+  the measured quality delta is ZERO because every instrument (golden,
+  CoNLL, JFLEG, clean corpus) is single-sentence — the ±1-context path never
+  activates, so this matrix proves no-regression + the latency cost
+  (+12.6ms p50), NOT a gain. Any real gain would only show on
+  multi-sentence live text.
+- **`GF_GECTOR_PASSES=2` — stays OFF: cost without measurable gain.** Fails
+  the p50 ceiling (152.8ms > 150ms) with a noise-level quality delta
+  (+0.04 CoNLL F0.5, −0.16 BEA-19).
+- **`GF_LLM_NBEST=3` — refuted for enablement (negative result, recorded
+  per the plan's abort path).** REAL majority-vote regression on golden:
+  confusable `#106` (discrete→discreet) and `#107` (Whose→Who's,
+  complement→compliment) are correctly fixed by the single-sample
+  temperature-0 path but voted away in the merge — 2 of 3 temperature-0.3
+  samples miss them and the majority kills the fix. Also p50 250ms. The
+  code stays merged-but-dark.
+
+Run notes: (1) run0's CoNLL 60.78 vs the plan's pinned 60.53 baseline is
+llama.cpp cold-restart GPU nondeterminism (known noise band), not drift —
+same build, flags off. (2) The `GF_GATE=1` exit-1s on the context/gector2
+runs came from the in-suite AMERICAN clean run tripping the british-derived
+13.6% threshold (see the dialect note in §8) — the canonical british
+clean-FP re-runs all passed. The nbest3 run's gate failure was the real
+golden regression.
 
 ## 10. Per-rule over-edit study
 

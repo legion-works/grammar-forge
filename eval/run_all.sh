@@ -97,6 +97,10 @@ run_step() { # run_step <name> <cmd...>
 # Clean-FP ceiling: baseline fp_rate (PERCENT, one decimal) + 2pp — currently
 # 11.6 + 2 = 13.6. Derived from eval/clean_baseline.json so the gate follows
 # a re-baselined corpus without editing this script.
+# DIALECT PAIRING CAVEAT (README §8): the baseline was measured on a
+# BRITISH-configured bridge; against an american-configured bridge (the
+# golden/benchmark config) this step reads high and can fail spuriously —
+# the canonical clean-FP gate is the separate british run (README §4/§6).
 MAX_FP_RATE="$(python3 -c '
 import json, sys
 j = json.load(open(sys.argv[1]))
