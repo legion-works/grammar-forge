@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GHCR container image: `ghcr.io/legion-works/grammar-forge-bridge` published on every release.
 - Bridge fast path: Harper (spelling/mechanics, ~10 ms) + GECToR-2024 (structural grammar, ONNX INT8, ~25 ms CPU) running in-process, with a per-sentence LRU cache and concurrent corrector execution.
 - Bridge slow path: LLM escalation for low-confidence sentences, speaking the OpenAI-compatible API with configurable backend (llama.cpp default; vLLM, Ollama, LM Studio, remote supported). GRMR-native and chat-instruct prompt formats supported.
 - LanguageTool compatibility: native `POST /v2/check` + `GET /v2/languages`, including UTF-16 code-unit offset conversion and `software.premium` surface.

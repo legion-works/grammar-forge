@@ -68,6 +68,8 @@ Requires Docker and an NVIDIA GPU host for the default llama.cpp backend (CPU-on
 cp .env.example .env
 
 # 2. Bring up the stack: bridge + llama.cpp
+#    Pre-built bridge image (models fetched separately, bind-mounted):
+#    docker pull ghcr.io/legion-works/grammar-forge-bridge:latest
 docker compose up -d --build
 
 # 3. Check it
