@@ -280,6 +280,35 @@ type Config struct {
 	// form is CSV because comma lists are the convention for GF_*_RULES
 	// (HarperDisabledRules, HarperEnabledRules) and similar.
 	EscalationTrustedCategories string // GF_ESCALATION_TRUSTED_CATEGORIES (default "")
+
+	// ConfidenceCalibration (Task 3): when true, main constructs a
+	// correction.ConfidenceCalibrator over the store and wires it via
+	// Service.SetConfidenceCalibrator. DISPLAY-ONLY: it changes the
+	// `confidence` value clients see on /correct suggestions, replacing the
+	// raw per-model constant with the observed (model, category) acceptance
+	// rate; it never changes routing (escalation, suppression, or which
+	// suggestions are returned) and never changes what is written to the
+	// edits-table audit log, which always keeps the raw model confidence
+	// (see correction.Service.SetConfidenceCalibrator). A later flag,
+	// GF_ESCALATION_CALIBRATED, will additionally use the calibrator's
+	// output to DRIVE escalation decisions — main.go constructs the
+	// calibrator when EITHER flag is on, so enabling that flag alone (with
+	// this one left false) still builds the calibrator, just without
+	// touching the response JSON. Default false; enabling is an eval-gated
+	// operator action, matching the other calibration-adjacent gates in
+	// this file.
+	ConfidenceCalibration bool // GF_CONFIDENCE_CALIBRATION    (default false)
+	// CalibrationTTLSeconds bounds how often the calibrator re-reads
+	// Store.SignalRates (stale-while-revalidate — the request path never
+	// blocks on the store; see correction.ConfidenceCalibrator). Expressed
+	// in SECONDS (env-friendly integer), mirroring
+	// GF_REJECT_SUPPRESSION_TTL_SECONDS.
+	CalibrationTTLSeconds int // GF_CALIBRATION_TTL_SECONDS   (default 300)
+	// CalibrationMinSamples is the minimum Accepted+Rejected signal count a
+	// (model, category) bucket needs before the calibrator trusts it; a
+	// thinner bucket reports ok=false and the caller keeps the raw
+	// confidence (see correction.ConfidenceCalibrator.Calibrated).
+	CalibrationMinSamples int // GF_CALIBRATION_MIN_SAMPLES   (default 10)
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -412,6 +441,10 @@ func Load(getenv Getenv) Config {
 		DialectSpellingGuard: getBool("GF_DIALECT_SPELLING_GUARD", false),
 
 		EscalationTrustedCategories: get("GF_ESCALATION_TRUSTED_CATEGORIES", ""),
+
+		ConfidenceCalibration: getBool("GF_CONFIDENCE_CALIBRATION", false),
+		CalibrationTTLSeconds: getInt("GF_CALIBRATION_TTL_SECONDS", 300),
+		CalibrationMinSamples: getInt("GF_CALIBRATION_MIN_SAMPLES", 10),
 	}
 }
 

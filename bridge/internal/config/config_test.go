@@ -584,3 +584,31 @@ func TestLoad_DialectSpellingGuardOverrides(t *testing.T) {
 			"GF_DIALECT_SPELLING_GUARD=1 must parse as true (getBool convention)")
 	})
 }
+
+// Task 3: display-only confidence calibration. Config discipline is
+// exception-free — every new GF_* gate defaults to the legacy behaviour
+// (calibrator unconstructed, response confidences untouched) so existing
+// deploys are byte-identical until the operator opts in. TTL and min-samples
+// mirror the ConfidenceCalibrator constructor arguments exactly (see
+// correction.NewConfidenceCalibrator).
+func TestLoad_ConfidenceCalibrationDefaults(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.False(t, cfg.ConfidenceCalibration,
+		"GF_CONFIDENCE_CALIBRATION must default false")
+	require.Equal(t, 300, cfg.CalibrationTTLSeconds,
+		"GF_CALIBRATION_TTL_SECONDS must default 300")
+	require.Equal(t, 10, cfg.CalibrationMinSamples,
+		"GF_CALIBRATION_MIN_SAMPLES must default 10")
+}
+
+func TestLoad_ConfidenceCalibrationOverrides(t *testing.T) {
+	env := map[string]string{
+		"GF_CONFIDENCE_CALIBRATION":  "true",
+		"GF_CALIBRATION_TTL_SECONDS": "60",
+		"GF_CALIBRATION_MIN_SAMPLES": "25",
+	}
+	cfg := Load(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	require.True(t, cfg.ConfidenceCalibration)
+	require.Equal(t, 60, cfg.CalibrationTTLSeconds)
+	require.Equal(t, 25, cfg.CalibrationMinSamples)
+}

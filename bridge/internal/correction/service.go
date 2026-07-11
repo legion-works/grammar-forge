@@ -180,6 +180,12 @@ type Service struct {
 	// Surfaced via CacheMetrics for the /stats cache_metrics block. Atomic:
 	// bumped from whichever goroutine's Correct call observed shared=true.
 	sfDedupCount uint64
+	// confidenceCalibrator, when set, replaces each returned suggestion's
+	// display Confidence with the observed (model, category) acceptance rate
+	// (see calibration.go). nil (zero value) = no calibration; confidences
+	// stay raw. Applied in finalize AFTER store.LogCorrection — see that
+	// call site for why the ordering is load-bearing.
+	confidenceCalibrator *ConfidenceCalibrator
 }
 
 // MergeFastEditsMode values for Service.mergeFastEditsMode
@@ -283,6 +289,23 @@ func (s *Service) SetSemanticVerifier(v SemanticVerifier, threshold float64) {
 // snapshot serves the current (possibly empty) set without blocking,
 // so suppression is opportunistic rather than strict.
 func (s *Service) SetRejectSuppressor(r *RejectSuppressor) { s.rejectSuppressor = r }
+
+// SetConfidenceCalibrator installs the display-confidence calibrator (see
+// ConfidenceCalibrator). nil (never calling this setter) disables
+// calibration; every returned suggestion keeps its raw model confidence.
+//
+// Ordering is load-bearing: finalize calls store.LogCorrection with the RAW
+// suggestion confidences FIRST, and only AFTER logging does it overwrite the
+// in-memory Suggestion.Confidence values for the response. The edits table's
+// `confidence` column is the audit trail of what the model actually
+// believed at correction time; if the calibrator's output were logged
+// instead, later SignalRates queries (which the calibrator itself reads)
+// would be computed over calibrated numbers, letting the calibrator's
+// output feed back into its own future input. Logging raw and mutating only
+// the response copy keeps the log an independent ground truth forever, no
+// matter how many times calibration is toggled on/off across the log's
+// history.
+func (s *Service) SetConfidenceCalibrator(c *ConfidenceCalibrator) { s.confidenceCalibrator = c }
 
 // semanticVerifierApproves reports whether the repaired LLM output keeps
 // enough of the original's meaning to be diffed into suggestions. Fails
@@ -786,11 +809,27 @@ func (s *Service) finalize(ctx context.Context, req Request, all []Suggestion) (
 	})
 	if err != nil {
 		s.log.Error("log correction failed", "err", err)
-		return result, nil
+	} else {
+		for i := range result.Suggestions {
+			if i < len(editIDs) {
+				result.Suggestions[i].ID = editIDs[i]
+			}
+		}
 	}
-	for i := range result.Suggestions {
-		if i < len(editIDs) {
-			result.Suggestions[i].ID = editIDs[i]
+	// Calibrate DISPLAY confidence only, AFTER the LogCorrection call above
+	// (edits[i].Confidence carried the RAW value into the store, win or
+	// lose). See SetConfidenceCalibrator for why the ordering is
+	// load-bearing (the logged edit row must stay the model-native ground
+	// truth, never the calibrator's own output — otherwise the calibrator
+	// would eventually be reading a snapshot built from its own past
+	// output). ok=false (cold snapshot, unknown bucket, or too few samples)
+	// keeps the raw confidence untouched.
+	if s.confidenceCalibrator != nil {
+		for i := range result.Suggestions {
+			sg := &result.Suggestions[i]
+			if calibrated, ok := s.confidenceCalibrator.Calibrated(sg.Model, sg.Category, sg.Confidence); ok {
+				sg.Confidence = calibrated
+			}
 		}
 	}
 	return result, nil

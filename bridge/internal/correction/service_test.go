@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -224,6 +225,105 @@ func TestServiceFastPathNoEscalation(t *testing.T) {
 	require.Len(t, got.Suggestions, 1)
 	require.Equal(t, ModelGECToR, got.Suggestions[0].Model)
 	require.Equal(t, "I have a cat", st.lastEvent.Suggestion, "fast path must produce the corrected text")
+}
+
+// fakeCalibrationStore embeds fakeStore (for the LogCorrection/lastEvent
+// capture the calibration tests below assert on) and overrides SignalRates
+// so a ConfidenceCalibrator built over the SAME store the service logs to
+// can be warmed with a canned bucket. Mirrors fakeRateStore in
+// calibration_test.go, minus the single-flight/error knobs this package's
+// tests don't need.
+type fakeCalibrationStore struct {
+	fakeStore
+	rates []SignalRate
+}
+
+func (f *fakeCalibrationStore) SignalRates(context.Context) ([]SignalRate, error) {
+	return f.rates, nil
+}
+
+// TestServiceCalibratesDisplayConfidenceAfterLoggingRaw is the core Task-3
+// contract: once a warmed calibrator is set, the RESPONSE confidence is the
+// calibrated acceptance rate, but the confidence LogCorrection received (the
+// edits-table audit trail) stays the raw model-native value. See
+// Service.SetConfidenceCalibrator for why that ordering matters.
+func TestServiceCalibratesDisplayConfidenceAfterLoggingRaw(t *testing.T) {
+	st := &fakeCalibrationStore{
+		rates: []SignalRate{{Model: ModelGECToR, Category: CategorySpelling, Accepted: 18, Rejected: 2}},
+	}
+	cal := NewConfidenceCalibrator(st, time.Minute, 10, slog.Default())
+	// Warm the calibrator BEFORE running Correct (see
+	// TestCalibratorColdCallFallsBackThenWarms) so the assertions below don't
+	// race the background refresh.
+	require.Eventually(t, func() bool {
+		_, ok := cal.Calibrated(ModelGECToR, CategorySpelling, 0)
+		return ok
+	}, time.Second, 5*time.Millisecond, "calibrator must warm before the assertions below")
+
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Category: CategorySpelling, Confidence: 0.95}},
+	}
+	// llm that would error if called — the fast edit is confident, so
+	// fastPolicy() must not escalate.
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	svc.SetConfidenceCalibrator(cal)
+
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+
+	wantCalibrated := (18.0 + 1) / (18.0 + 2 + 2) // Laplace-smoothed 19/22
+	require.InDelta(t, wantCalibrated, got.Suggestions[0].Confidence, 1e-9,
+		"response confidence must be the calibrated acceptance rate")
+
+	require.Len(t, st.lastEvent.Edits, 1)
+	require.InDelta(t, 0.95, st.lastEvent.Edits[0].Confidence, 1e-9,
+		"LogCorrection must receive the RAW confidence, never the calibrator's output")
+}
+
+// TestServiceNoCalibratorKeepsRawConfidence is the default-off contract:
+// when SetConfidenceCalibrator is never called, the response is untouched —
+// byte-identical to pre-Task-3 behaviour.
+func TestServiceNoCalibratorKeepsRawConfidence(t *testing.T) {
+	st := &fakeStore{}
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Confidence: 0.95}},
+	}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+	require.InDelta(t, 0.95, got.Suggestions[0].Confidence, 1e-9,
+		"no calibrator set -> raw confidence must be untouched")
+}
+
+// TestServiceCalibratorBelowMinSamplesKeepsRawConfidence: a warmed but
+// too-thin bucket (Calibrated returns ok=false) must never overwrite the
+// response confidence, mirroring TestCalibratorMinSamplesFallsBack.
+func TestServiceCalibratorBelowMinSamplesKeepsRawConfidence(t *testing.T) {
+	st := &fakeCalibrationStore{
+		rates: []SignalRate{{Model: ModelGECToR, Category: CategorySpelling, Accepted: 3, Rejected: 1}}, // 4 < minSamples(10)
+	}
+	cal := NewConfidenceCalibrator(st, time.Minute, 10, slog.Default())
+	cal.Calibrated(ModelGECToR, CategorySpelling, 0) // kick the background refresh
+	require.Never(t, func() bool {
+		_, ok := cal.Calibrated(ModelGECToR, CategorySpelling, 0)
+		return ok
+	}, 200*time.Millisecond, 10*time.Millisecond, "bucket below minSamples must never report ok")
+
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Category: CategorySpelling, Confidence: 0.95}},
+	}
+	svc := NewService(fakePB{}, []Corrector{fc}, fakeLLM{err: errAlways}, st, "m", fastPolicy())
+	svc.SetConfidenceCalibrator(cal)
+
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+	require.InDelta(t, 0.95, got.Suggestions[0].Confidence, 1e-9, "below minSamples -> raw confidence kept")
 }
 
 func TestServiceFastPathEscalatesOnLowGECToRConfidence(t *testing.T) {

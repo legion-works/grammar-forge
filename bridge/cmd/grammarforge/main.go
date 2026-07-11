@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"time"
 
 	"github.com/grammarforge/bridge/internal/config"
 	"github.com/grammarforge/bridge/internal/correction"
@@ -228,6 +229,26 @@ func main() {
 	// Phase-D gates pass.
 	if cfg.RejectSuppressionEnabled {
 		svc.SetRejectSuppressor(correction.NewRejectSuppressor(st, cfg.RejectSuppressionTTL))
+	}
+
+	// Task 3 confidence calibration (GF_CONFIDENCE_CALIBRATION, default off):
+	// swaps the raw per-model confidence on /correct responses for the
+	// observed (model, category) acceptance rate, DISPLAY-ONLY — routing is
+	// untouched and the edits-table audit log always keeps the raw value
+	// (see correction.Service.SetConfidenceCalibrator). Today the condition
+	// is just cfg.ConfidenceCalibration; a later task adds
+	// GF_ESCALATION_CALIBRATED (which uses the SAME calibrator to drive
+	// escalation decisions), and that task will widen this to
+	// `cfg.ConfidenceCalibration || cfg.EscalationCalibrated` so either flag
+	// alone is enough to construct the calibrator.
+	if cfg.ConfidenceCalibration {
+		cal := correction.NewConfidenceCalibrator(
+			st,
+			time.Duration(cfg.CalibrationTTLSeconds)*time.Second,
+			cfg.CalibrationMinSamples,
+			slog.Default(),
+		)
+		svc.SetConfidenceCalibrator(cal)
 	}
 
 	// Inject the rephrase provider factory (this is where internal/llm is
