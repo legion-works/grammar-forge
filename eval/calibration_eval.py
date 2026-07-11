@@ -38,6 +38,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -260,7 +261,7 @@ def _run_per_case(rows: list[dict], results_path: Path) -> dict:
 
     return {
         "mode": "per-case",
-        "source": str(results_path),
+        "source": os.path.relpath(results_path, start=HERE),
         "n_buckets": N_BUCKETS,
         "n_rows_scored": n_scored,
         "n_rows_total": n_total,
@@ -295,7 +296,7 @@ def _run_per_edit(rows: list[dict], results_path: Path) -> dict:
 
     return {
         "mode": "per-edit",
-        "source": str(results_path),
+        "source": os.path.relpath(results_path, start=HERE),
         "n_buckets": N_BUCKETS,
         "n_rows_total": len(rows),
         "n_rows_skipped_missing_suggestions": n_rows_skipped,
