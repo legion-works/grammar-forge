@@ -3,6 +3,12 @@ name: release-artifacts
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: release tag to build artifacts for, e.g. grammar-forge-v0.1.0
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,6 +21,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -24,13 +32,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve version
+        id: ver
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: echo "version=${TAG#grammar-forge-v}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/metadata-action@v5
         id: meta
         with:
           images: ghcr.io/legion-works/grammar-forge-bridge
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ steps.ver.outputs.version }}
             type=raw,value=latest
 
       - uses: docker/build-push-action@v6
@@ -49,6 +62,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - uses: pnpm/action-setup@v4
 
@@ -74,7 +89,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.event.release.tag_name }} \
+          gh release upload "${{ github.event.release.tag_name || inputs.tag }}" \
             clients/browser/.output/*-chrome.zip \
             --clobber
 
@@ -87,6 +102,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
       - name: Fast-forward master to the release tag
         run: |
-          git push origin "refs/tags/${{ github.event.release.tag_name }}^{commit}:refs/heads/master"
+          git push origin "refs/tags/${{ github.event.release.tag_name || inputs.tag }}^{commit}:refs/heads/master"
