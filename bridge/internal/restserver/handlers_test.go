@@ -49,6 +49,14 @@ type fakeService struct {
 	// cacheMetrics is the canned CacheMetrics return (zero value is the
 	// legitimate "nothing cached yet" response).
 	cacheMetrics correction.CacheMetrics
+	// signalRates is the canned SignalRates return; signalRatesErr injects
+	// a store failure (the handler must omit the field, never 5xx).
+	signalRates    []correction.SignalRate
+	signalRatesErr error
+}
+
+func (f *fakeService) SignalRates(context.Context) ([]correction.SignalRate, error) {
+	return f.signalRates, f.signalRatesErr
 }
 
 func (f *fakeService) Correct(_ context.Context, req correction.Request) (correction.Correction, error) {
@@ -927,4 +935,41 @@ func TestCompleteRejectsTrailingGarbage(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/complete", strings.NewReader(`{"text":"hello"} trailing`))
 	serve(svc).ServeHTTP(rr, req)
 	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// /stats surfaces the per-(model, category) signal-rate buckets (the
+// calibrator's operator instrument): additive "signal_rates" field, omitted
+// entirely when there are no signaled edits (omitempty), and a store error
+// only logs a warning + omits the field — never a 5xx (the rest of /stats
+// must stay usable).
+func TestStatsSurfacesSignalRates(t *testing.T) {
+	svc := &fakeService{
+		signalRates: []correction.SignalRate{
+			{Model: correction.ModelHarper, Category: correction.CategorySpelling, Accepted: 18, Rejected: 2},
+			{Model: correction.ModelLLM, Category: correction.CategoryGrammar, Accepted: 3, Rejected: 1},
+		},
+	}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got struct {
+		SignalRates []correction.SignalRate `json:"signal_rates"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	require.Equal(t, svc.signalRates, got.SignalRates)
+}
+
+func TestStatsOmitsSignalRatesWhenEmpty(t *testing.T) {
+	rr := httptest.NewRecorder()
+	serve(&fakeService{}).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.NotContains(t, rr.Body.String(), "signal_rates")
+}
+
+func TestStatsSignalRatesErrorOmitsFieldNot5xx(t *testing.T) {
+	svc := &fakeService{signalRatesErr: errors.New("store down")}
+	rr := httptest.NewRecorder()
+	serve(svc).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.NotContains(t, rr.Body.String(), "signal_rates")
 }

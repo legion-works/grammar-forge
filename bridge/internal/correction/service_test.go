@@ -120,6 +120,10 @@ func (f *fakeStore) PersonalizationExamples(context.Context) (PersonalizationDat
 	return PersonalizationData{}, nil
 }
 
+func (f *fakeStore) SignalRates(context.Context) ([]SignalRate, error) {
+	return nil, nil
+}
+
 func (f *fakeStore) CountStatsExtended(_ context.Context, _ time.Time) (StatsExtended, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

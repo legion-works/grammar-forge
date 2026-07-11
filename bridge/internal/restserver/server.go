@@ -33,6 +33,11 @@ type CorrectionService interface {
 	// additive, never gated, so empty/zero values surface on a fresh
 	// install rather than being hidden behind an enable flag.
 	CountStatsExtended(ctx context.Context, now time.Time) (correction.StatsExtended, error)
+	// SignalRates backs the /stats "signal_rates" field: per-(model,
+	// category) accept/reject tallies from the edit-level signal log — the
+	// operator instrument for verifying calibrator sample prerequisites.
+	// A store error is soft: the handler logs Warn and omits the field.
+	SignalRates(ctx context.Context) ([]correction.SignalRate, error)
 	Rephrase(ctx context.Context, req correction.RephraseRequest) (correction.RephraseResult, error)
 	// AnalyzeTone is the tone-detection entry point. ToneEnabled gates the
 	// /tone route (404 when off) so the endpoint is off the wire until

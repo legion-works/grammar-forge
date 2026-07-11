@@ -967,6 +967,13 @@ func (s *Service) CountSignals(ctx context.Context) (SignalCounts, error) {
 	return s.store.CountSignals(ctx)
 }
 
+// SignalRates exposes the store's per-(model, category) accept/reject
+// tallies for /stats — the operator instrument for the calibrator's
+// minimum-sample prerequisite.
+func (s *Service) SignalRates(ctx context.Context) ([]SignalRate, error) {
+	return s.store.SignalRates(ctx)
+}
+
 // CountStatsExtended exposes the retention field block (top_issues, streak,
 // words_this_week) for /stats. The store computes the per-category
 // histogram, the consecutive-day streak, and the 7d word sum from the

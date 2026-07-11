@@ -760,3 +760,41 @@ func TestCountStatsExtendedIncludesSignallessEdits(t *testing.T) {
 	}, got.TopIssues, "signalless edits MUST still count toward top_issues")
 	require.Equal(t, 1, got.Streak, "an unsignaled correction today still counts as an active day")
 }
+
+func TestSignalRatesByModelCategory(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	_, editIDs, err := st.LogCorrection(ctx, correction.Event{
+		Source: correction.SourceBrowser, Original: "teh cat go", Suggestion: "the cat goes", //nolint:misspell // intentional fixture
+		Model: correction.ModelLLM, BaseModel: "test-model",
+		Edits: []correction.EditRecord{
+			{SpanStart: 0, SpanEnd: 3, Original: "teh", Replacement: "the", Model: correction.ModelHarper, Category: correction.CategorySpelling, Confidence: 0.95}, //nolint:misspell // intentional fixture
+			{SpanStart: 8, SpanEnd: 10, Original: "go", Replacement: "goes", Model: correction.ModelLLM},
+			{SpanStart: 4, SpanEnd: 7, Original: "cat", Replacement: "cats", Model: correction.ModelLLM},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, editIDs, 3)
+	require.NoError(t, st.LogSignal(ctx, editIDs[0], correction.SignalAccepted))
+	require.NoError(t, st.LogSignal(ctx, editIDs[1], correction.SignalAccepted))
+	require.NoError(t, st.LogSignal(ctx, editIDs[2], correction.SignalRejected))
+	// An ignored edit must appear in NEITHER count — log one and ignore it.
+	_, moreIDs, err := st.LogCorrection(ctx, correction.Event{
+		Source: correction.SourceBrowser, Original: "x", Suggestion: "y",
+		Model: correction.ModelLLM, BaseModel: "test-model",
+		Edits: []correction.EditRecord{{SpanStart: 0, SpanEnd: 1, Original: "x", Replacement: "y", Model: correction.ModelLLM}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, st.LogSignal(ctx, moreIDs[0], correction.SignalIgnored))
+
+	rates, err := st.SignalRates(ctx)
+	require.NoError(t, err)
+	byKey := map[string]correction.SignalRate{}
+	for _, r := range rates {
+		byKey[string(r.Model)+"|"+r.Category] = r
+	}
+	require.Equal(t, 1, byKey["harper|spelling"].Accepted)
+	require.Equal(t, 0, byKey["harper|spelling"].Rejected)
+	require.Equal(t, 1, byKey["llm|"].Accepted)
+	require.Equal(t, 1, byKey["llm|"].Rejected)
+}

@@ -243,6 +243,12 @@ type statsResponse struct {
 	// WordsThisWeek retention block above — a fresh install just reports
 	// all-zero counters and an empty breaker state.
 	CacheMetrics correction.CacheMetrics `json:"cache_metrics"`
+	// SignalRates is the per-(model, category) accept/reject tally from
+	// the edit-level signal log — the operator instrument for verifying
+	// the calibrator's ≥minSamples prerequisite before enabling
+	// calibration flags. Omitted when empty (fresh install / no signals)
+	// and on store error (logged Warn, never a 5xx).
+	SignalRates []correction.SignalRate `json:"signal_rates,omitempty"`
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +281,13 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	if signaled := sc.Accepted + sc.Rejected + sc.Ignored; signaled > 0 {
 		rate := float64(sc.Accepted) / float64(signaled)
 		resp.AcceptanceRate = &rate
+	}
+	// Soft-fail: signal rates are an additive diagnostic — a store error
+	// must not take down the rest of /stats.
+	if rates, err := s.svc.SignalRates(r.Context()); err != nil {
+		s.log.Warn("stats: signal rates unavailable", "error", err)
+	} else {
+		resp.SignalRates = rates
 	}
 	// Keep TopIssues non-nil on the wire even when empty so clients can
 	// iterate without a nil check (mirrors the /synonyms contract: empty

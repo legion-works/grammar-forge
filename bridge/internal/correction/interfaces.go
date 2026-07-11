@@ -123,6 +123,16 @@ type SignalCounts struct {
 	Ignored    int64
 }
 
+// SignalRate is the accept/reject tally for one (model, category) bucket,
+// derived from user signals on individual edits. Ignored signals are not
+// counted: an ignore is ambiguous (dismissed UI, not a quality verdict).
+type SignalRate struct {
+	Model    Model  `json:"model"`
+	Category string `json:"category"` // "" = grammar, mirroring Suggestion.Category
+	Accepted int    `json:"accepted"`
+	Rejected int    `json:"rejected"`
+}
+
 // PersonalizationData is the aggregated accept/reject history used to build the
 // prompt-cache few-shot examples (SPEC §5.5 — zero-compute personalisation).
 type PersonalizationData struct {
@@ -210,6 +220,10 @@ type Store interface {
 	// cap the result (e.g. 20 accepted / 20 rejected) and drop rejected
 	// pairs with Count < 3.
 	PersonalizationExamples(ctx context.Context) (PersonalizationData, error)
+	// SignalRates aggregates accept/reject counts per (model, category)
+	// bucket over all signaled edits. Feeds the confidence calibrator;
+	// ignored signals are deliberately excluded (ambiguous intent).
+	SignalRates(ctx context.Context) ([]SignalRate, error)
 	// LogTone records a tone-analysis event for the Phase-3 signal log.
 	// Best-effort: the service swallows errors so /tone never fails on log
 	// problems. Target is reserved (client-supplied desired tone, empty in v1).

@@ -184,6 +184,34 @@ func (s *SQLite) CountSignals(ctx context.Context) (correction.SignalCounts, err
 	return c, nil
 }
 
+// SignalRates aggregates accept/reject counts per (model, category) bucket
+// over all signaled edits. Feeds the confidence calibrator; ignored signals
+// are deliberately excluded (ambiguous intent).
+func (s *SQLite) SignalRates(ctx context.Context) ([]correction.SignalRate, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT model, COALESCE(category, ''),
+		       SUM(CASE WHEN signal = 'accepted' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN signal = 'rejected' THEN 1 ELSE 0 END)
+		FROM edits
+		WHERE signal IN ('accepted', 'rejected')
+		GROUP BY model, COALESCE(category, '')`)
+	if err != nil {
+		return nil, fmt.Errorf("query signal rates: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []correction.SignalRate
+	for rows.Next() {
+		var r correction.SignalRate
+		var model string
+		if err := rows.Scan(&model, &r.Category, &r.Accepted, &r.Rejected); err != nil {
+			return nil, fmt.Errorf("scan signal rate: %w", err)
+		}
+		r.Model = correction.Model(model)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // CountStatsExtended computes the retention field block for /stats:
 // top_issues, streak, and words_this_week. `now` is the reference time —
 // the production caller passes time.Now(), tests pin it to a synthetic
