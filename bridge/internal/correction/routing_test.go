@@ -8,7 +8,7 @@ import (
 
 func TestShouldEscalateLongInput(t *testing.T) {
 	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 10}
-	if !p.ShouldEscalate("this is a long sentence", nil) {
+	if !p.ShouldEscalate("this is a long sentence", nil, nil) {
 		t.Error("long input should escalate")
 	}
 }
@@ -16,11 +16,11 @@ func TestShouldEscalateLongInput(t *testing.T) {
 func TestShouldEscalateLowConfidence(t *testing.T) {
 	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000}
 	low := []Suggestion{{Confidence: 0.4, Model: ModelGECToR}}
-	if !p.ShouldEscalate("short", low) {
+	if !p.ShouldEscalate("short", low, nil) {
 		t.Error("low confidence should escalate")
 	}
 	high := []Suggestion{{Confidence: 0.95, Model: ModelGECToR}}
-	if p.ShouldEscalate("short", high) {
+	if p.ShouldEscalate("short", high, nil) {
 		t.Error("high confidence short input should NOT escalate")
 	}
 }
@@ -35,7 +35,7 @@ func TestShouldEscalateIgnoresHarperHighConfidenceWhenGECToRLow(t *testing.T) {
 		{Confidence: 0.95, Model: ModelHarper, Span: Span{0, 4}},
 		{Confidence: 0.4, Model: ModelGECToR, Span: Span{5, 8}},
 	}
-	if !p.ShouldEscalate("short sentence", fast) {
+	if !p.ShouldEscalate("short sentence", fast, nil) {
 		t.Error("Harper's high confidence must not mask low GECToR confidence")
 	}
 }
@@ -45,11 +45,11 @@ func TestShouldEscalateFallsBackWhenNoGECToRSuggestions(t *testing.T) {
 	// the historical behaviour: best-of-all confidence.
 	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000}
 	fast := []Suggestion{{Confidence: 0.95, Model: ModelHarper}}
-	if p.ShouldEscalate("short", fast) {
+	if p.ShouldEscalate("short", fast, nil) {
 		t.Error("Harper-only with high confidence should NOT escalate")
 	}
 	fastLow := []Suggestion{{Confidence: 0.3, Model: ModelHarper}}
-	if !p.ShouldEscalate("short", fastLow) {
+	if !p.ShouldEscalate("short", fastLow, nil) {
 		t.Error("Harper-only with low confidence SHOULD escalate (fallback)")
 	}
 }
@@ -59,17 +59,17 @@ func TestShouldEscalateEmptyFastPathNonTrivial(t *testing.T) {
 	// see (homophones/confusables). A non-trivial empty-fast-path input MUST
 	// escalate so the LLM gets a chance.
 	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000, MinWordsForEscalation: 3}
-	if !p.ShouldEscalate("I think your right about that", nil) {
+	if !p.ShouldEscalate("I think your right about that", nil, nil) {
 		t.Error("non-trivial empty-fast-path input should escalate")
 	}
 }
 
 func TestShouldEscalateEmptyFastPathTrivialDoesNot(t *testing.T) {
 	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000, MinWordsForEscalation: 3}
-	if p.ShouldEscalate("ok thanks", nil) {
+	if p.ShouldEscalate("ok thanks", nil, nil) {
 		t.Error("trivial (<3 words) empty-fast-path input should NOT escalate")
 	}
-	if p.ShouldEscalate("yes", nil) {
+	if p.ShouldEscalate("yes", nil, nil) {
 		t.Error("single-word empty-fast-path input should NOT escalate")
 	}
 }
@@ -77,10 +77,10 @@ func TestShouldEscalateEmptyFastPathTrivialDoesNot(t *testing.T) {
 func TestShouldEscalateEmptyFastPathUsesDefaultMinWords(t *testing.T) {
 	// MinWordsForEscalation unset (0) falls back to the package default (3).
 	p := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000}
-	if !p.ShouldEscalate("she go store today", nil) {
+	if !p.ShouldEscalate("she go store today", nil, nil) {
 		t.Error("4-word input should escalate under the default min-words")
 	}
-	if p.ShouldEscalate("go now", nil) {
+	if p.ShouldEscalate("go now", nil, nil) {
 		t.Error("2-word input should not escalate under the default min-words")
 	}
 }
@@ -94,10 +94,10 @@ func TestShouldEscalate_OnFastEditWhenFlagged(t *testing.T) {
 	fast := []Suggestion{{Span: Span{Start: 0, End: 1}, Replacement: "X", Model: ModelHarper, Confidence: 0.95}}
 	on := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true}
 	off := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: false}
-	if !on.ShouldEscalate("a short clean-ish line", fast) {
+	if !on.ShouldEscalate("a short clean-ish line", fast, nil) {
 		t.Error("EscalateOnFastEdit=true with any fast edit must escalate")
 	}
-	if off.ShouldEscalate("a short clean-ish line", fast) {
+	if off.ShouldEscalate("a short clean-ish line", fast, nil) {
 		t.Error("EscalateOnFastEdit=false must preserve the high-confidence short path")
 	}
 }
@@ -108,10 +108,10 @@ func TestShouldEscalate_OnFastEdit_NoEditsNoForce(t *testing.T) {
 	// to the long-input / non-trivial-input rules (mirrors the
 	// MinWordsForEscalation gate).
 	pol := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true, MinWordsForEscalation: 3}
-	if pol.ShouldEscalate("hi", nil) {
+	if pol.ShouldEscalate("hi", nil, nil) {
 		t.Error("trivial empty-fast-path input should NOT escalate")
 	}
-	if !pol.ShouldEscalate("this is a longer line", nil) {
+	if !pol.ShouldEscalate("this is a longer line", nil, nil) {
 		t.Error("non-trivial empty-fast-path input should escalate")
 	}
 }
@@ -239,14 +239,14 @@ func TestShouldEscalate_SkipsAllSpellingFastEditsWhenFlagged(t *testing.T) {
 		{Span: Span{Start: 6, End: 9}, Replacement: "Y", Model: ModelGECToR, Confidence: 0.95, Category: CategoryGrammar},
 	}
 	pol := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true, SkipLLMForSpellingOnly: true}
-	if pol.ShouldEscalate("a short line with typos", spelling) {
+	if pol.ShouldEscalate("a short line with typos", spelling, nil) {
 		t.Error("all-spelling fast edits with the skip flag must NOT escalate")
 	}
-	if !pol.ShouldEscalate("a short line with typos", mixed) {
+	if !pol.ShouldEscalate("a short line with typos", mixed, nil) {
 		t.Error("mixed-category fast edits must still escalate")
 	}
 	off := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true}
-	if !off.ShouldEscalate("a short line with typos", spelling) {
+	if !off.ShouldEscalate("a short line with typos", spelling, nil) {
 		t.Error("without the skip flag all-spelling fast edits must escalate (current default)")
 	}
 }
@@ -257,7 +257,7 @@ func TestShouldEscalate_SkipSpellingStillHonorsConfidenceFloor(t *testing.T) {
 	// floor and escalates.
 	low := []Suggestion{{Span: Span{Start: 0, End: 5}, Replacement: "X", Model: ModelGECToR, Confidence: 0.3, Category: CategorySpelling}}
 	pol := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 200, EscalateOnFastEdit: true, SkipLLMForSpellingOnly: true}
-	if !pol.ShouldEscalate("a short line", low) {
+	if !pol.ShouldEscalate("a short line", low, nil) {
 		t.Error("a low-confidence spelling-only edit must still escalate")
 	}
 }
@@ -286,7 +286,7 @@ func TestTrustedCategoriesSkipsEscalation(t *testing.T) {
 		{Category: CategorySpelling, Confidence: 0.95},
 		{Category: CategoryTypography, Confidence: 0.9},
 	}
-	require.False(t, p.ShouldEscalate("Teh word — nice.", fast)) //nolint:misspell // intentional fixture
+	require.False(t, p.ShouldEscalate("Teh word — nice.", fast, nil)) //nolint:misspell // intentional fixture
 }
 
 func TestUntrustedCategoryStillEscalates(t *testing.T) {
@@ -303,7 +303,7 @@ func TestUntrustedCategoryStillEscalates(t *testing.T) {
 		{Category: CategorySpelling, Confidence: 0.95},
 		{Category: CategoryGrammar, Confidence: 0.9},
 	}
-	require.True(t, p.ShouldEscalate("She go to teh school.", fast)) //nolint:misspell // intentional fixture
+	require.True(t, p.ShouldEscalate("She go to teh school.", fast, nil)) //nolint:misspell // intentional fixture
 }
 
 func TestEmptyTrustedFallsBackToLegacyFlag(t *testing.T) {
@@ -316,7 +316,7 @@ func TestEmptyTrustedFallsBackToLegacyFlag(t *testing.T) {
 		SkipLLMForSpellingOnly: true,
 	}
 	fast := []Suggestion{{Category: CategorySpelling, Confidence: 0.95}}
-	require.False(t, p.ShouldEscalate("Teh word.", fast)) //nolint:misspell // intentional fixture
+	require.False(t, p.ShouldEscalate("Teh word.", fast, nil)) //nolint:misspell // intentional fixture
 }
 
 func TestTrustedCategoriesNeverTrustsGrammar(t *testing.T) {
@@ -331,7 +331,7 @@ func TestTrustedCategoriesNeverTrustsGrammar(t *testing.T) {
 		TrustedCategories:  []string{""}, // parser rejects; defensive test
 	}
 	fast := []Suggestion{{Category: CategoryGrammar, Confidence: 0.9}}
-	require.True(t, p.ShouldEscalate("She go.", fast),
+	require.True(t, p.ShouldEscalate("She go.", fast, nil),
 		"CategoryGrammar must never be trusted regardless of set contents")
 }
 
@@ -348,6 +348,64 @@ func TestTrustedCategoriesStackedWithLegacyFlag(t *testing.T) {
 		TrustedCategories:      []string{CategoryTypography},
 	}
 	fast := []Suggestion{{Category: CategoryTypography, Confidence: 0.95}}
-	require.False(t, p.ShouldEscalate("the word — nice.", fast),
+	require.False(t, p.ShouldEscalate("the word — nice.", fast, nil),
 		"trusted-set union (spelling+typography) must skip typography-only fast edits")
+}
+
+// Task 5: calibrated escalation. These fixtures ALL use EscalateOnFastEdit
+// with an empty trust set (TrustedCategories/SkipLLMForSpellingOnly both
+// unset), so everyCategoryTrusted always fails and the ONLY way to avoid the
+// legacy unconditional "return true" is the new calibrated-skip check.
+
+func TestCalibratedEscalation_AllConfidentNonGrammarSkips(t *testing.T) {
+	p := EscalationPolicy{MaxSentenceLen: 200, MinConfidence: 0.7, EscalateOnFastEdit: true}
+	fast := []Suggestion{
+		{Category: CategorySpelling, Confidence: 0.5},
+		{Category: CategoryPunctuation, Confidence: 0.5},
+	}
+	calibrated := func(Suggestion) (float64, bool) { return 0.9, true }
+	require.False(t, p.ShouldEscalate("short line", fast, calibrated),
+		"every fast suggestion non-grammar + calibrated >= MinConfidence must skip the LLM")
+}
+
+func TestCalibratedEscalation_OneUncalibratedStillEscalates(t *testing.T) {
+	p := EscalationPolicy{MaxSentenceLen: 200, MinConfidence: 0.7, EscalateOnFastEdit: true}
+	fast := []Suggestion{
+		{Category: CategorySpelling, Confidence: 0.5},
+		{Category: CategoryPunctuation, Confidence: 0.5},
+	}
+	calls := 0
+	calibrated := func(s Suggestion) (float64, bool) {
+		calls++
+		if s.Category == CategoryPunctuation {
+			return 0, false // cold bucket / unknown -> caller must keep raw and escalate
+		}
+		return 0.9, true
+	}
+	require.True(t, p.ShouldEscalate("short line", fast, calibrated),
+		"any suggestion the calibrator does not confidently vouch for must still escalate")
+	require.Positive(t, calls, "calibrated closure must actually be consulted")
+}
+
+func TestCalibratedEscalation_GrammarNeverSkips(t *testing.T) {
+	p := EscalationPolicy{MaxSentenceLen: 200, MinConfidence: 0.7, EscalateOnFastEdit: true}
+	fast := []Suggestion{
+		{Category: CategorySpelling, Confidence: 0.5},
+		{Category: CategoryGrammar, Confidence: 0.5},
+	}
+	calibrated := func(Suggestion) (float64, bool) { return 0.99, true }
+	require.True(t, p.ShouldEscalate("short line", fast, calibrated),
+		"CategoryGrammar must never be skipped via calibration, mirroring the Phase-B trusted-set invariant")
+}
+
+func TestCalibratedEscalation_ZeroFloorDisablesSkip(t *testing.T) {
+	// MinConfidence == 0 means the confidence floor is disabled (see the
+	// legacy `best < p.MinConfidence` check, which is always false when
+	// MinConfidence is 0). The calibrated-skip block mirrors that: a zero
+	// floor must not be treated as "any calibrated value clears it".
+	p := EscalationPolicy{MaxSentenceLen: 200, MinConfidence: 0, EscalateOnFastEdit: true}
+	fast := []Suggestion{{Category: CategorySpelling, Confidence: 0.5}}
+	calibrated := func(Suggestion) (float64, bool) { return 0.99, true }
+	require.True(t, p.ShouldEscalate("short line", fast, calibrated),
+		"MinConfidence=0 must disable the calibrated skip, not vacuously satisfy it")
 }

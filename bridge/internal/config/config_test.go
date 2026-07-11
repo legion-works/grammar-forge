@@ -612,3 +612,24 @@ func TestLoad_ConfidenceCalibrationOverrides(t *testing.T) {
 	require.Equal(t, 60, cfg.CalibrationTTLSeconds)
 	require.Equal(t, 25, cfg.CalibrationMinSamples)
 }
+
+// Task 5: calibrated escalation. GF_ESCALATION_CALIBRATED is independent of
+// GF_CONFIDENCE_CALIBRATION — main.go's calibrator-construction condition is
+// the OR of both flags (see the ConfidenceCalibration doc comment), but each
+// flag's own default must be false so legacy deploys stay byte-identical
+// until an operator opts in.
+func TestLoad_EscalationCalibratedDefaultsFalse(t *testing.T) {
+	cfg := Load(func(string) (string, bool) { return "", false })
+	require.False(t, cfg.EscalationCalibrated,
+		"GF_ESCALATION_CALIBRATED must default false")
+}
+
+func TestLoad_EscalationCalibratedOverride(t *testing.T) {
+	cfg := Load(func(k string) (string, bool) {
+		if k == "GF_ESCALATION_CALIBRATED" {
+			return "true", true
+		}
+		return "", false
+	})
+	require.True(t, cfg.EscalationCalibrated)
+}

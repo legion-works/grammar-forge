@@ -80,7 +80,16 @@ type EscalationPolicy struct {
 // low-confidence structural-error suggestions. When the fast path produced no
 // GECToR suggestions (but some Harper ones), the floor is checked against the
 // best of all fast suggestions (covers the GECToR-unavailable case).
-func (p EscalationPolicy) ShouldEscalate(text string, fast []Suggestion) bool {
+//
+// calibrated, when non-nil, is consulted ONLY inside the EscalateOnFastEdit
+// branch's non-trusted path (Task 5, GF_ESCALATION_CALIBRATED): a fast set
+// that fails the TrustedCategories check still gets one more chance to skip
+// the LLM if EVERY suggestion is non-grammar and calibrated-confident at or
+// above MinConfidence. calibrated is nil when the feature is off (or no
+// calibrator is configured), in which case that block is dead code and
+// ShouldEscalate's behaviour is byte-identical to pre-Task-5 code — the
+// existing routing test matrix passing with calibrated=nil pins this.
+func (p EscalationPolicy) ShouldEscalate(text string, fast []Suggestion, calibrated func(Suggestion) (float64, bool)) bool {
 	if len([]rune(text)) > p.MaxSentenceLen {
 		return true
 	}
@@ -104,8 +113,35 @@ func (p EscalationPolicy) ShouldEscalate(text string, fast []Suggestion) bool {
 		// escalate), preserving legacy behaviour.
 		trusted := p.effectiveTrustedCategories()
 		if len(trusted) == 0 || !everyCategoryTrusted(fast, trusted) {
+			// Second exception (Task 5, calibrated mode only): a non-trusted
+			// fast set whose EVERY suggestion is (a) non-grammar-category
+			// and (b) calibrated-confident at or above MinConfidence skips
+			// the LLM. Grammar (CategoryGrammar, "") NEVER skips here — same
+			// invariant as the Phase-B trusted set (a grammar fast-path edit
+			// is exactly what the LLM exists to override). calibrated == nil
+			// (feature off) makes this whole block dead code, so the legacy
+			// unconditional `return true` below is reached exactly as
+			// before Task 5.
+			if calibrated != nil && p.MinConfidence > 0 {
+				allConfident := true
+				for _, s := range fast {
+					if s.Category == CategoryGrammar {
+						allConfident = false
+						break
+					}
+					v, ok := calibrated(s)
+					if !ok || v < p.MinConfidence {
+						allConfident = false
+						break
+					}
+				}
+				if allConfident {
+					return false
+				}
+			}
 			return true
 		}
+		// Trusted sets fall through to the confidence floor below (unchanged).
 	}
 	gectorScores := make([]float64, 0, len(fast))
 	allScores := make([]float64, 0, len(fast))

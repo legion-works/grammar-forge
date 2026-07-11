@@ -374,8 +374,106 @@ on `gf-bridge-eval`:
 
 ## 7. Operator enable protocol — calibrated escalation
 
-(Placeholder — content lands with the `GF_ESCALATION_CALIBRATED` task in the
-SOTA roadmap P2-P4 plan.)
+`GF_ESCALATION_CALIBRATED` (default `false`) wires the SAME
+`correction.ConfidenceCalibrator` used for `GF_CONFIDENCE_CALIBRATION`
+(display) onto `correction.Service.SetEscalationCalibrator` (routing):
+setting either flag alone is enough for main to CONSTRUCT the calibrator
+(`cfg.ConfidenceCalibration || cfg.EscalationCalibrated`), and each flag
+independently controls which setter is called. With `GF_ESCALATION_CALIBRATED`
+on, a fast-path suggestion set that fails the `EscalateOnFastEdit` /
+`TrustedCategories` check gets one more chance to skip the LLM: if EVERY
+suggestion is non-grammar AND the calibrator reports a value at or above
+`MinConfidence` for that suggestion's `(model, category)` bucket, the LLM
+call is elided (see `correction.EscalationPolicy.ShouldEscalate`'s
+`calibrated` parameter). `CategoryGrammar` (`""`) never skips — same
+invariant as the Phase-B trusted-set exception in §6.
+
+**Default deploys keep `GF_ESCALATION_CALIBRATED=false`.** Enabling it is an
+eval-gated operator action; do not flip it on a live container without first
+clearing the prerequisite and passing both gates below on `gf-bridge-eval`.
+
+### (a) Prerequisite: every routing-relevant bucket must be warm
+
+The calibrator reports `ok=false` (raw confidence kept, no skip) for any
+`(model, category)` bucket with fewer than `GF_CALIBRATION_MIN_SAMPLES`
+(default 10) accepted+rejected signals — so an under-sampled bucket is safe
+by construction, but it also means the flag is a no-op for that bucket until
+enough `/signal` feedback has accumulated. Before enabling, confirm every
+bucket the fast path actually emits on the routing-relevant categories
+(`harper`/spelling, `harper`/punctuation, `harper`/typography,
+`gector`/grammar) has reached the threshold:
+
+```bash
+curl -s http://127.0.0.1:8001/stats | jq '.signal_rates[] | select(.accepted + .rejected < 10)'
+```
+
+An empty result means every observed bucket is warm enough to be trusted.
+Buckets absent from `signal_rates` entirely have zero signals and are
+equally under threshold — the flag will not skip the LLM for them until
+signal volume accumulates naturally (or via a deliberate signal-generation
+pass), so there is nothing to force here; just re-check before enabling.
+
+### (b) The two-env eval gate
+
+Same recipe as §6, `-e GF_ESCALATION_CALIBRATED=true` added, and BOTH
+sub-gates must pass:
+
+```bash
+docker build -t grammarforge-bridge:dev bridge/
+
+# Golden gate: american dialect, exact-match required.
+docker run -d --name gf-bridge-eval --network homelab_default \
+    -p 127.0.0.1:8001:8000 \
+    -e GF_ESCALATION_CALIBRATED=true \
+    -e GF_HARPER_DIALECT=american \
+    -v "$PWD/bridge/models/gector:/models/gector" \
+    grammarforge-bridge:dev
+
+# exit 0 ⇒ 125/125 exact
+eval/.venv/bin/python3 run_eval.py --require-exact http://127.0.0.1:8001
+
+docker stop gf-bridge-eval && docker rm gf-bridge-eval
+
+# Clean-FP gate: british dialect + the dialect spelling guard, since a
+# calibrated skip is most likely to fire on the spelling/punctuation
+# categories the guard also touches.
+docker run -d --name gf-bridge-eval --network homelab_default \
+    -p 127.0.0.1:8001:8000 \
+    -e GF_ESCALATION_CALIBRATED=true \
+    -e GF_HARPER_DIALECT=british \
+    -e GF_DIALECT_SPELLING_GUARD=true \
+    -v "$PWD/bridge/models/gector:/models/gector" \
+    grammarforge-bridge:dev
+
+# ≤ baseline + 2pp ⇒ no clean-text regression from the calibrated skip
+eval/.venv/bin/python3 clean_eval.py http://127.0.0.1:8001 \
+    clean_corpus.jsonl --max-fp-rate $(jq -r '.fp_rate * 100 + 2' clean_baseline.json)
+
+docker stop gf-bridge-eval && docker rm gf-bridge-eval
+```
+
+Both the golden gate (american) and the clean-FP gate (british +
+`GF_DIALECT_SPELLING_GUARD=true`) must pass before the flag goes live on any
+real deploy. A single low score is not itself a regression — re-run
+back-to-back before concluding the flag broke something (mirrors §6).
+
+### (c) Rollback
+
+`GF_ESCALATION_CALIBRATED` is a pure routing gate with no schema or data
+migration attached — rollback is always a config change, never a code
+revert:
+
+1. Unset (or set `false`) `GF_ESCALATION_CALIBRATED` in the deploy
+   environment.
+2. Recreate the container (`docker stop` + `docker rm` + `docker run` with
+   the updated env — an env change does not apply to a running container).
+3. Re-run the golden gate flag-off and confirm `125/125` — this reconfirms
+   the deploy is back to the flag's default (legacy, byte-identical)
+   behaviour, not just that the flag is unset in the env file.
+
+Because the default (`false`) is always the legacy, already-shipped
+behaviour, a rollback never requires reverting any code change — only the
+env var and a container recreate.
 
 ## 8. Gated turnkey runs (`GF_GATE=1`)
 

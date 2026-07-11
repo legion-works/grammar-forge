@@ -326,6 +326,52 @@ func TestServiceCalibratorBelowMinSamplesKeepsRawConfidence(t *testing.T) {
 	require.InDelta(t, 0.95, got.Suggestions[0].Confidence, 1e-9, "below minSamples -> raw confidence kept")
 }
 
+// zeroCallLLM fails the test if Complete is ever called — used to prove the
+// escalation calibrator's skip actually elides the LLM round-trip (Task 5).
+type zeroCallLLM struct{ t *testing.T }
+
+func (z zeroCallLLM) Complete(context.Context, Prompt) (string, error) {
+	z.t.Fatal("LLM must not be called when the escalation calibrator confidently skips")
+	return "", nil
+}
+
+// TestServiceEscalationCalibratorSkipsLLMKeepsRawConfidence is the Task-5
+// contract: SetEscalationCalibrator (ROUTING) is set but SetConfidenceCalibrator
+// (DISPLAY) is never called. A fast set that fails the trusted-category check
+// but is calibrated-confident (>= MinConfidence) skips the LLM entirely, and
+// the response confidence stays the RAW model value — the escalation
+// calibrator must never leak into the display path.
+func TestServiceEscalationCalibratorSkipsLLMKeepsRawConfidence(t *testing.T) {
+	st := &fakeCalibrationStore{
+		rates: []SignalRate{{Model: ModelGECToR, Category: CategorySpelling, Accepted: 18, Rejected: 2}},
+	}
+	cal := NewConfidenceCalibrator(st, time.Minute, 10, slog.Default())
+	// Warm the calibrator BEFORE running Correct so the assertions below
+	// don't race the background refresh (mirrors
+	// TestServiceCalibratesDisplayConfidenceAfterLoggingRaw).
+	require.Eventually(t, func() bool {
+		_, ok := cal.Calibrated(ModelGECToR, CategorySpelling, 0)
+		return ok
+	}, time.Second, 5*time.Millisecond, "calibrator must warm before the assertions below")
+
+	fc := fakeCorrector{
+		name: string(ModelGECToR),
+		sugs: []Suggestion{{Span: Span{2, 5}, Replacement: "have", Model: ModelGECToR, Category: CategorySpelling, Confidence: 0.5}},
+	}
+	// EscalateOnFastEdit=true with an empty trust set: everyCategoryTrusted
+	// fails, so the ONLY way to avoid escalating is the calibrated-skip
+	// check. The scripted LLM fails the test if it is ever invoked.
+	pol := EscalationPolicy{MinConfidence: 0.7, MaxSentenceLen: 1000, EscalateOnFastEdit: true}
+	svc := NewService(fakePB{}, []Corrector{fc}, zeroCallLLM{t: t}, st, "m", pol)
+	svc.SetEscalationCalibrator(cal) // routing ONLY — SetConfidenceCalibrator deliberately not called
+
+	got, err := svc.Correct(context.Background(), Request{Text: "I has a cat"})
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+	require.InDelta(t, 0.5, got.Suggestions[0].Confidence, 1e-9,
+		"SetEscalationCalibrator must not affect response confidence — that is SetConfidenceCalibrator's job")
+}
+
 func TestServiceFastPathEscalatesOnLowGECToRConfidence(t *testing.T) {
 	st := &fakeStore{}
 	fc := fakeCorrector{

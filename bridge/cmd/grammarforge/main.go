@@ -231,24 +231,33 @@ func main() {
 		svc.SetRejectSuppressor(correction.NewRejectSuppressor(st, cfg.RejectSuppressionTTL))
 	}
 
-	// Task 3 confidence calibration (GF_CONFIDENCE_CALIBRATION, default off):
-	// swaps the raw per-model confidence on /correct responses for the
-	// observed (model, category) acceptance rate, DISPLAY-ONLY — routing is
-	// untouched and the edits-table audit log always keeps the raw value
-	// (see correction.Service.SetConfidenceCalibrator). Today the condition
-	// is just cfg.ConfidenceCalibration; a later task adds
-	// GF_ESCALATION_CALIBRATED (which uses the SAME calibrator to drive
-	// escalation decisions), and that task will widen this to
-	// `cfg.ConfidenceCalibration || cfg.EscalationCalibrated` so either flag
-	// alone is enough to construct the calibrator.
-	if cfg.ConfidenceCalibration {
+	// Task 3/5 confidence calibration (GF_CONFIDENCE_CALIBRATION /
+	// GF_ESCALATION_CALIBRATED, both default off): ONE shared calibrator,
+	// TWO independent consumers. GF_CONFIDENCE_CALIBRATION wires
+	// SetConfidenceCalibrator, which swaps the raw per-model confidence on
+	// /correct responses for the observed (model, category) acceptance
+	// rate — DISPLAY-ONLY, routing untouched, and the edits-table audit log
+	// always keeps the raw value (see
+	// correction.Service.SetConfidenceCalibrator). GF_ESCALATION_CALIBRATED
+	// wires SetEscalationCalibrator, which lets ShouldEscalate's calibrated
+	// closure skip the LLM for a non-trusted, non-grammar fast set that is
+	// calibrated-confident — ROUTING-ONLY, response confidence untouched.
+	// Either flag alone is enough to construct the calibrator; each setter
+	// is called independently so display-only, routing-only, and both-on
+	// are all valid operator states.
+	if cfg.ConfidenceCalibration || cfg.EscalationCalibrated {
 		cal := correction.NewConfidenceCalibrator(
 			st,
 			time.Duration(cfg.CalibrationTTLSeconds)*time.Second,
 			cfg.CalibrationMinSamples,
 			slog.Default(),
 		)
-		svc.SetConfidenceCalibrator(cal)
+		if cfg.ConfidenceCalibration {
+			svc.SetConfidenceCalibrator(cal) // display: response confidence values
+		}
+		if cfg.EscalationCalibrated {
+			svc.SetEscalationCalibrator(cal) // routing: the ShouldEscalate closure
+		}
 	}
 
 	// Inject the rephrase provider factory (this is where internal/llm is

@@ -289,8 +289,8 @@ type Config struct {
 	// rate; it never changes routing (escalation, suppression, or which
 	// suggestions are returned) and never changes what is written to the
 	// edits-table audit log, which always keeps the raw model confidence
-	// (see correction.Service.SetConfidenceCalibrator). A later flag,
-	// GF_ESCALATION_CALIBRATED, will additionally use the calibrator's
+	// (see correction.Service.SetConfidenceCalibrator). GF_ESCALATION_CALIBRATED
+	// (EscalationCalibrated, below) additionally uses the SAME calibrator's
 	// output to DRIVE escalation decisions — main.go constructs the
 	// calibrator when EITHER flag is on, so enabling that flag alone (with
 	// this one left false) still builds the calibrator, just without
@@ -309,6 +309,22 @@ type Config struct {
 	// thinner bucket reports ok=false and the caller keeps the raw
 	// confidence (see correction.ConfidenceCalibrator.Calibrated).
 	CalibrationMinSamples int // GF_CALIBRATION_MIN_SAMPLES   (default 10)
+
+	// EscalationCalibrated (Task 5): when true, main wires the SAME
+	// ConfidenceCalibrator built for ConfidenceCalibration onto
+	// correction.Service.SetEscalationCalibrator instead of (or in addition
+	// to) SetConfidenceCalibrator. ROUTING, not display: a non-trusted,
+	// non-grammar fast-path suggestion set that is calibrated-confident at
+	// or above EscalationPolicy.MinConfidence skips the LLM entirely (see
+	// correction.EscalationPolicy.ShouldEscalate's calibrated parameter).
+	// Setting this true implies calibrator CONSTRUCTION in main even when
+	// GF_CONFIDENCE_CALIBRATION is false — main's condition is
+	// `cfg.ConfidenceCalibration || cfg.EscalationCalibrated`. Conversely,
+	// GF_CONFIDENCE_CALIBRATION alone (this flag false) changes only the
+	// response's displayed confidence values, never routing. Default false;
+	// enabling is an eval-gated operator action — see the operator enable
+	// protocol in eval/README.md.
+	EscalationCalibrated bool // GF_ESCALATION_CALIBRATED (default false)
 }
 
 // Getenv matches os.LookupEnv; injected for testability.
@@ -445,6 +461,8 @@ func Load(getenv Getenv) Config {
 		ConfidenceCalibration: getBool("GF_CONFIDENCE_CALIBRATION", false),
 		CalibrationTTLSeconds: getInt("GF_CALIBRATION_TTL_SECONDS", 300),
 		CalibrationMinSamples: getInt("GF_CALIBRATION_MIN_SAMPLES", 10),
+
+		EscalationCalibrated: getBool("GF_ESCALATION_CALIBRATED", false),
 	}
 }
 

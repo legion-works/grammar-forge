@@ -186,6 +186,15 @@ type Service struct {
 	// stay raw. Applied in finalize AFTER store.LogCorrection — see that
 	// call site for why the ordering is load-bearing.
 	confidenceCalibrator *ConfidenceCalibrator
+	// escalationCalibrator, when set, is consulted by ShouldEscalate's
+	// calibrated closure (see correctOnce) to let a high-calibrated-
+	// confidence non-trusted, non-grammar fast set skip the LLM (Task 5,
+	// GF_ESCALATION_CALIBRATED). ROUTING, not display: it never touches a
+	// returned suggestion's Confidence field — that is confidenceCalibrator's
+	// job. Deliberately a separate field/setter from confidenceCalibrator so
+	// display-only, routing-only, and both-on are all independently
+	// selectable operator states.
+	escalationCalibrator *ConfidenceCalibrator
 }
 
 // MergeFastEditsMode values for Service.mergeFastEditsMode
@@ -306,6 +315,14 @@ func (s *Service) SetRejectSuppressor(r *RejectSuppressor) { s.rejectSuppressor 
 // matter how many times calibration is toggled on/off across the log's
 // history.
 func (s *Service) SetConfidenceCalibrator(c *ConfidenceCalibrator) { s.confidenceCalibrator = c }
+
+// SetEscalationCalibrator installs the calibrator consumed by escalation
+// routing (ShouldEscalate's calibrated closure) — deliberately a SEPARATE
+// setter from SetConfidenceCalibrator (display): display-only, routing-only,
+// and both are all valid operator states, each driven by its own GF_ flag in
+// main. The Service itself has no flag knowledge — main decides which
+// setters to call.
+func (s *Service) SetEscalationCalibrator(c *ConfidenceCalibrator) { s.escalationCalibrator = c }
 
 // semanticVerifierApproves reports whether the repaired LLM output keeps
 // enough of the original's meaning to be diffed into suggestions. Fails
@@ -558,7 +575,13 @@ func (s *Service) correctOnce(ctx context.Context, req Request) ([]Suggestion, e
 	fast := s.runFast(ctx, req)
 	all := fast
 
-	if s.llm != nil && s.policy.ShouldEscalate(req.Text, fast) {
+	var calibrated func(Suggestion) (float64, bool)
+	if s.escalationCalibrator != nil {
+		calibrated = func(sg Suggestion) (float64, bool) {
+			return s.escalationCalibrator.Calibrated(sg.Model, sg.Category, sg.Confidence)
+		}
+	}
+	if s.llm != nil && s.policy.ShouldEscalate(req.Text, fast, calibrated) {
 		// Feed the LLM the ORIGINAL text, not the fast-path-corrected text.
 		// Sequential refinement locked in confident-wrong fast edits the LLM
 		// could not revert (GECToR "dogs runs"->"ran", "two mouses"->"mice
