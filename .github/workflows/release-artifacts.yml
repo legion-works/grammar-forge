@@ -56,7 +56,7 @@ jobs:
         with:
           context: bridge/
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=ghcr.io/legion-works/grammar-forge-bridge,push-by-digest=true
+          outputs: type=image,name=ghcr.io/legion-works/grammar-forge-bridge,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
