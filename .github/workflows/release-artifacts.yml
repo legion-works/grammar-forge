@@ -43,6 +43,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # upload-artifact rejects '/' in the artifact name, so the raw platform
+      # (linux/amd64) can't be the suffix — sanitize to linux-amd64.
+      - name: Sanitize platform pair
+        run: echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
@@ -62,7 +69,7 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ matrix.platform }}
+          name: digests-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
           retention-days: 1
 
