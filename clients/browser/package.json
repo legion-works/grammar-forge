@@ -1,6 +1,6 @@
 {
   "name": "grammarforge-browser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "GrammarForge browser extension — privacy-first grammar corrections from a local bridge.",
   "license": "MIT",
