@@ -1,18 +1,29 @@
-// Typed contracts for messages between the background service worker and
-// content scripts. Tiny on purpose — there's exactly one command the
-// background ever needs to send (the on-demand check trigger) and the
-// future-proofing is mostly about discrimination + a small set of "from
-// content" replies the popup/options can ask for (e.g. "what's the current
-// per-tab status?"). The background remains a router — it never inspects
-// payloads beyond the type tag.
+// Typed contracts for messages between the background service worker,
+// content scripts, and extension pages. Network requests cross this boundary
+// as relative bridge paths so the worker cannot become an arbitrary URL proxy.
 
 import type { Category } from '@/api/types'
+
+export type BridgeRequestMethod = 'GET' | 'POST' | 'DELETE'
+
+export interface BridgeRelayResponse {
+    status: number
+    ok: boolean
+    contentType: string
+    bodyText: string
+}
 
 /** Discriminated union of every message that may cross the boundary. */
 export type GfMessage =
     | { type: 'TRIGGER_CHECK' }
     | { type: 'GET_TAB_STATUS' }
     | { type: 'REPHRASE_SELECTION' }
+    | {
+          type: 'BRIDGE_REQUEST'
+          path: string
+          method: BridgeRequestMethod
+          body?: string
+      }
     | {
           type: 'TAB_STATUS'
           enabled: boolean
@@ -27,6 +38,12 @@ export interface GfMessageMap {
     TRIGGER_CHECK: { type: 'TRIGGER_CHECK' }
     GET_TAB_STATUS: { type: 'GET_TAB_STATUS' }
     REPHRASE_SELECTION: { type: 'REPHRASE_SELECTION' }
+    BRIDGE_REQUEST: {
+        type: 'BRIDGE_REQUEST'
+        path: string
+        method: BridgeRequestMethod
+        body?: string
+    }
     TAB_STATUS: {
         type: 'TAB_STATUS'
         enabled: boolean

@@ -16,6 +16,8 @@ import type {
 // bridge's own backend timeout is 30s, so mirror it client-side.
 const REPHRASE_TIMEOUT_MS = 30_000
 
+export type BridgeFetch = (input: string, init?: RequestInit) => Promise<Response>
+
 /** Distinguishes an in-band bridge `error` event (real pipeline failure —
  *  propagate) from transport/parse failures (fall back to /correct). */
 class BridgeStreamError extends Error {}
@@ -32,12 +34,18 @@ export class BridgeClient {
     /** Remembered after the first failed probe so old bridges (no
      *  /correct/stream route) pay exactly one extra request per page. */
     private streamUnsupported = false
+    private readonly transport: BridgeFetch
+    private readonly usesDirectFetch: boolean
 
     constructor(
         private baseUrl: string,
         private allowRemote: boolean,
+        transport?: BridgeFetch,
         private timeoutMs = 8000,
-    ) {}
+    ) {
+        this.transport = transport ?? ((input, init) => fetch(input, init))
+        this.usesDirectFetch = transport === undefined
+    }
 
     private guard(): void {
         if (!this.allowRemote && !isLocalBridgeUrl(this.baseUrl)) {
@@ -50,7 +58,7 @@ export class BridgeClient {
         const ctrl = new AbortController()
         const t = setTimeout(() => ctrl.abort(), timeoutMs)
         try {
-            const r = await fetch(`${this.baseUrl}${path}`, {
+            const r = await this.transport(`${this.baseUrl}${path}`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify(body),
@@ -73,7 +81,7 @@ export class BridgeClient {
         const ctrl = new AbortController()
         const t = setTimeout(() => ctrl.abort(), this.timeoutMs)
         try {
-            const r = await fetch(`${this.baseUrl}${path}`, { signal: ctrl.signal })
+            const r = await this.transport(`${this.baseUrl}${path}`, { signal: ctrl.signal })
             if (!r.ok) throw new Error(`bridge ${path} ${r.status}`)
             return (await r.json()) as T
         } finally {
@@ -86,7 +94,7 @@ export class BridgeClient {
         const ctrl = new AbortController()
         const t = setTimeout(() => ctrl.abort(), this.timeoutMs)
         try {
-            const r = await fetch(`${this.baseUrl}${path}`, {
+            const r = await this.transport(`${this.baseUrl}${path}`, {
                 method: 'DELETE',
                 signal: ctrl.signal,
             })
@@ -139,7 +147,8 @@ export class BridgeClient {
     ): Promise<CorrectResponse> {
         if (this.streamUnsupported) return this.correct(req)
         this.guard()
-        if (signal?.aborted) throw new DOMException('correctStream aborted before start', 'AbortError')
+        if (signal?.aborted)
+            throw new DOMException('correctStream aborted before start', 'AbortError')
         const ctrl = new AbortController()
         const t = setTimeout(() => ctrl.abort(), this.timeoutMs)
         const onExternalAbort = (): void => ctrl.abort()
@@ -147,7 +156,7 @@ export class BridgeClient {
         try {
             let r: Response
             try {
-                r = await fetch(`${this.baseUrl}/correct/stream`, {
+                r = await this.transport(`${this.baseUrl}/correct/stream`, {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify(req),
@@ -244,7 +253,11 @@ export class BridgeClient {
         for (const e of attributable) {
             const url = `${this.baseUrl}/signal`
             const body = JSON.stringify({ id: e.id, signal: e.action })
-            if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+            if (
+                this.usesDirectFetch &&
+                typeof navigator !== 'undefined' &&
+                typeof navigator.sendBeacon === 'function'
+            ) {
                 try {
                     const blob = new Blob([body], { type: 'application/json' })
                     if (navigator.sendBeacon(url, blob)) continue
@@ -253,7 +266,7 @@ export class BridgeClient {
                 }
             }
             try {
-                void fetch(url, {
+                void this.transport(url, {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     body,

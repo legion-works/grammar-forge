@@ -4,6 +4,24 @@ import { BridgeClient } from '@/api/client'
 afterEach(() => vi.restoreAllMocks())
 
 describe('BridgeClient.correct', () => {
+    it('uses an injected transport instead of global fetch', async () => {
+        const globalFetch = vi.fn<typeof fetch>()
+        vi.stubGlobal('fetch', globalFetch)
+        const transport = vi.fn<typeof fetch>().mockResolvedValue(
+            new Response(JSON.stringify({ original: 'teh', suggestions: [], score: 100 }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            }),
+        )
+        const client = new BridgeClient('http://localhost:8000', true, transport)
+
+        await client.correct({ text: 'teh', source: 'browser' })
+
+        expect(transport).toHaveBeenCalledOnce()
+        expect(transport.mock.calls[0]![0]).toBe('http://localhost:8000/correct')
+        expect(globalFetch).not.toHaveBeenCalled()
+    })
+
     it('POSTs /correct and returns parsed suggestions', async () => {
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
             new Response(
@@ -100,6 +118,21 @@ describe('BridgeClient.signal', () => {
 })
 
 describe('BridgeClient.signalOnUnload (P0-2)', () => {
+    it('uses the injected transport with keepalive instead of page-origin sendBeacon', () => {
+        const beacon = vi.fn<(url: string, data?: BodyInit) => boolean>().mockReturnValue(true)
+        vi.stubGlobal('navigator', { ...navigator, sendBeacon: beacon })
+        const transport = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(new Response(null, { status: 204 }))
+        const client = new BridgeClient('http://localhost:8000', true, transport)
+
+        client.signalOnUnload([{ id: 7, action: 'accepted', source: 'browser' }])
+
+        expect(beacon).not.toHaveBeenCalled()
+        expect(transport).toHaveBeenCalledOnce()
+        expect(transport.mock.calls[0]![1]?.keepalive).toBe(true)
+    })
+
     it('prefers navigator.sendBeacon when available, one call per attributable event', () => {
         const beacon = vi.fn<(url: string, data?: BodyInit) => boolean>().mockReturnValue(true)
         vi.stubGlobal('navigator', { ...navigator, sendBeacon: beacon })
@@ -120,7 +153,9 @@ describe('BridgeClient.signalOnUnload (P0-2)', () => {
 
     it('falls back to a keepalive fetch when sendBeacon is unavailable or fails', () => {
         vi.stubGlobal('navigator', { ...navigator, sendBeacon: undefined })
-        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
+        const fetchMock = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(new Response(null, { status: 204 }))
         vi.stubGlobal('fetch', fetchMock)
         const c = new BridgeClient('http://localhost:8000', true)
 
@@ -137,7 +172,9 @@ describe('BridgeClient.signalOnUnload (P0-2)', () => {
         const beacon = vi.fn<(url: string, data?: BodyInit) => boolean>().mockReturnValue(true)
         vi.stubGlobal('navigator', { ...navigator, sendBeacon: beacon })
         const c = new BridgeClient('http://evil.com', false)
-        expect(() => c.signalOnUnload([{ id: 1, action: 'accepted', source: 'browser' }])).not.toThrow()
+        expect(() =>
+            c.signalOnUnload([{ id: 1, action: 'accepted', source: 'browser' }]),
+        ).not.toThrow()
         expect(beacon).not.toHaveBeenCalled()
     })
 })
@@ -497,10 +534,10 @@ function sseResponse(body: string): Response {
 describe('BridgeClient.complete', () => {
     it('POSTs /complete and returns continuation on success', async () => {
         const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-            new Response(
-                JSON.stringify({ continuation: 'fox jumps over' }),
-                { status: 200, headers: { 'content-type': 'application/json' } },
-            ),
+            new Response(JSON.stringify({ continuation: 'fox jumps over' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            }),
         )
         vi.stubGlobal('fetch', fetchMock)
         const c = new BridgeClient('http://localhost:8000', true)
@@ -527,6 +564,24 @@ describe('BridgeClient.complete', () => {
 })
 
 describe('BridgeClient.correctStream', () => {
+    it('falls back through the injected transport when streaming is unsupported', async () => {
+        const transport = vi
+            .fn<typeof fetch>()
+            .mockResolvedValueOnce(new Response(null, { status: 501 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify(FINAL), { status: 200 }))
+        const client = new BridgeClient('http://localhost:8000', false, transport)
+        const onFast = vi.fn<() => void>()
+
+        const final = await client.correctStream({ text: 'I has a cat', source: 'browser' }, onFast)
+
+        expect(final).toEqual(FINAL)
+        expect(onFast).not.toHaveBeenCalled()
+        expect(transport.mock.calls.map(([url]) => url)).toEqual([
+            'http://localhost:8000/correct/stream',
+            'http://localhost:8000/correct',
+        ])
+    })
+
     it('delivers the fast frame then resolves with final', async () => {
         vi.stubGlobal(
             'fetch',
@@ -691,7 +746,9 @@ describe('BridgeClient.correctStream', () => {
             await expect(aborted).rejects.toThrow('aborted')
 
             fetchMock.mockReset()
-            fetchMock.mockResolvedValue(sseResponse(`event: final\ndata: ${JSON.stringify(FINAL)}\n\n`))
+            fetchMock.mockResolvedValue(
+                sseResponse(`event: final\ndata: ${JSON.stringify(FINAL)}\n\n`),
+            )
             await client.correctStream({ text: 'd e f', source: 'browser' }, () => {})
             expect(String(fetchMock.mock.calls[0]![0])).toContain('/correct/stream')
         })

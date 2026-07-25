@@ -1,9 +1,10 @@
-// Background service worker (MV3). Message router only — no business logic.
+// Background service worker (MV3). Explicit message router and bridge transport.
 // Routes:
 //   1. `commands.trigger-check`  →  forward TRIGGER_CHECK to the active tab
 //   2. popup `GET_TAB_STATUS`    →  forward to the active tab; the content
 //      script owns the truth (focused field, current counts) and replies
 //      with TAB_STATUS. We don't synthesise the reply here.
+//   3. content `BRIDGE_REQUEST`  →  validate and fetch from worker origin
 // We keep a tiny explicit router so every flow is greppable.
 import {
     isMessage,
@@ -12,6 +13,8 @@ import {
     type GfMessage,
     type GfMessageMap,
 } from '@/messaging/schema'
+import { relayBridgeRequest } from '@/background/bridge-relay'
+import { getSettings } from '@/storage/settings'
 
 export default defineBackground(() => {
     // (1) Browser commands: on-demand check.
@@ -21,24 +24,23 @@ export default defineBackground(() => {
         }
     })
 
-    // (2) Popup → active tab: GET_TAB_STATUS. The content script's listener
-    // returns a Promise<unknown>; we forward it back to the popup as the
-    // message reply. Returning `true` (or a Promise) from the listener is
-    // how WebExtensions keeps the response channel open.
+    // (2, 3) Requests that need the response channel kept open.
     browser.runtime.onMessage.addListener((raw: unknown, sender: Browser.runtime.MessageSender) => {
         // P1-8: only trust messages from THIS extension.
         if (!isTrustedSender(sender, browser.runtime.id)) return undefined
-        if (!isMessage(raw, 'GET_TAB_STATUS')) return undefined
-        return forwardGetTabStatusToActiveTab()
+        if (isMessage(raw, 'BRIDGE_REQUEST')) {
+            return getSettings().then((settings) => relayBridgeRequest(raw, settings))
+        }
+        if (isMessage(raw, 'GET_TAB_STATUS')) return forwardGetTabStatusToActiveTab()
+        return undefined
     })
 
-    // Generic router — currently the only cross-cutting messages are
-    // TRIGGER_CHECK (background → content) and GET_TAB_STATUS (popup → active
-    // tab). Listed for documentation + future expansion.
+    // Generic router lists every cross-cutting message for greppability.
     const _route = (msg: GfMessage): GfMessageMap[keyof GfMessageMap] | undefined => {
         if (isMessage(msg, 'TRIGGER_CHECK')) return undefined
         if (isMessage(msg, 'GET_TAB_STATUS')) return undefined
         if (isMessage(msg, 'TAB_STATUS')) return undefined
+        if (isMessage(msg, 'BRIDGE_REQUEST')) return undefined
         return undefined
     }
     void _route

@@ -2,8 +2,8 @@ import { defineConfig } from 'wxt'
 import { execSync } from 'child_process'
 
 // GrammarForge browser extension (MV3, Chrome + Firefox). Privacy-first: the
-// only network target is the user-configured LOCAL bridge. Host access is
-// requested on demand via optional_host_permissions, not granted up front.
+// only network target is the user-configured bridge. Loopback access is granted
+// up front; arbitrary host access remains an on-demand permission.
 
 function getBuildSha(): string {
     try {
@@ -31,6 +31,7 @@ export default defineConfig({
         name: 'GrammarForge',
         description: 'Privacy-first grammar corrections from your self-hosted GrammarForge bridge.',
         permissions: ['storage', 'activeTab'],
+        host_permissions: ['http://localhost/*', 'http://127.0.0.1/*'],
         optional_host_permissions: ['<all_urls>'],
         // The overlay's review panel (overlay/panel.ts) renders the Forge
         // Caret mark via `browser.runtime.getURL('/assets/grammarforge-mark.svg')`

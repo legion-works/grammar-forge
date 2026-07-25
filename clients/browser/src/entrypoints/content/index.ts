@@ -56,6 +56,7 @@ import { showPanel, type PanelHandle, type PanelOptions } from '@/overlay/panel'
 import { showGoals, type GoalsHandle } from '@/overlay/goals'
 import { mountStatsView, type StatsViewHandle } from '@/overlay/stats-view'
 import { showSynonyms, type ResolvedWord, type SynonymsHandle } from '@/overlay/synonyms'
+import { createBackgroundBridgeFetch } from '@/background/bridge-transport'
 import { BridgeClient } from '@/api/client'
 import { createSignalQueue, type SignalQueue } from '@/signal/queue'
 import {
@@ -425,7 +426,11 @@ async function start(ctx: ContentScriptContext): Promise<void> {
     }
 
     const makeRuntime = (s: Settings): Runtime => {
-        const client = new BridgeClient(s.bridgeBaseUrl, s.allowRemoteBridge)
+        const client = new BridgeClient(
+            s.bridgeBaseUrl,
+            s.allowRemoteBridge,
+            createBackgroundBridgeFetch(s.bridgeBaseUrl),
+        )
         const signalQueue: SignalQueue = createSignalQueue({
             send: (events) => client.signal(events),
             sendFinal: (events) => client.signalOnUnload(events),
@@ -591,7 +596,11 @@ async function start(ctx: ContentScriptContext): Promise<void> {
             // Recreate the client + signal queue's sender so a remote opt-out
             // takes effect immediately (the queue's `send` closes over the OLD
             // client; rebind it).
-            const newClient = new BridgeClient(next.bridgeBaseUrl, next.allowRemoteBridge)
+            const newClient = new BridgeClient(
+                next.bridgeBaseUrl,
+                next.allowRemoteBridge,
+                createBackgroundBridgeFetch(next.bridgeBaseUrl),
+            )
             runtime.client = newClient
             runtime.signalQueue = createSignalQueue({
                 send: (events) => newClient.signal(events),
