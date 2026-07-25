@@ -1060,6 +1060,23 @@ func TestCorrectPickyStyleOverlapDroppedForGrammar(t *testing.T) {
 	require.Empty(t, styleEdits, "style edit overlapping a grammar edit must be dropped")
 }
 
+func TestAppendStyleSuggestionsKeepsGrammarBeforeStyle(t *testing.T) {
+	original := "The quick brown fox jump over the lazy dog"
+	grammar := []Suggestion{{
+		Span:        Span{Start: 24, End: 24},
+		Replacement: "ed",
+		Category:    CategoryGrammar,
+	}}
+	llm := &scriptedLLM{styleOut: "The quick brown fox jump over the sleepy dog"}
+	svc := NewService(pickyPB{}, nil, llm, &fakeStore{}, "m", fastPolicy())
+
+	got := svc.appendStyleSuggestions(context.Background(), Request{Text: original, Picky: true}, grammar)
+
+	require.Len(t, got, 2)
+	require.Equal(t, grammar[0], got[0])
+	require.Equal(t, CategoryStyle, got[1].Category)
+}
+
 func TestCorrectPickyFinalizesIdenticalGrammarAndStyleInsertionOnce(t *testing.T) {
 	st := &fakeStore{}
 	original := "The quick brown fox jump over the lazy dog and he were very tired after that."
