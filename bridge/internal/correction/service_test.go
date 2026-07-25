@@ -1060,6 +1060,93 @@ func TestCorrectPickyStyleOverlapDroppedForGrammar(t *testing.T) {
 	require.Empty(t, styleEdits, "style edit overlapping a grammar edit must be dropped")
 }
 
+func TestCorrectPickyFinalizesIdenticalGrammarAndStyleInsertionOnce(t *testing.T) {
+	st := &fakeStore{}
+	original := "The quick brown fox jump over the lazy dog and he were very tired after that."
+	llm := &scriptedLLM{
+		grammarOut: "The quick brown fox jumped over the lazy dog and he were very tired after that.",
+		styleOut:   "The quick brown fox jumped over the lazy dog and he were very tired after that.",
+	}
+	svc := NewService(pickyPB{}, nil, llm, st, "m", fastPolicy())
+
+	got, err := svc.Correct(context.Background(), Request{Text: original, Picky: true})
+
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+	require.Equal(t, Span{Start: 24, End: 24}, got.Suggestions[0].Span)
+	require.Equal(t, "ed", got.Suggestions[0].Replacement)
+	require.Equal(t, CategoryGrammar, got.Suggestions[0].Category)
+	require.Len(t, st.lastEvent.Edits, 1)
+}
+
+func TestFinalizeDropsConflictingZeroWidthReplacementsAtSamePosition(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, nil, st, "m", fastPolicy())
+
+	got, err := svc.finalize(context.Background(), Request{Text: "The fox jump"}, []Suggestion{
+		{Span: Span{Start: 12, End: 12}, Replacement: "ed", Category: CategoryGrammar},
+		{Span: Span{Start: 12, End: 12}, Replacement: "s", Category: CategoryStyle},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+	require.Equal(t, "ed", got.Suggestions[0].Replacement)
+	require.Len(t, st.lastEvent.Edits, 1)
+}
+
+func TestClientStyleWideningCorruptsDifferentInsertionsAtSamePosition(t *testing.T) {
+	got := applyWithClientInsertionWidening("The fox jump", []Suggestion{
+		{Span: Span{Start: 12, End: 12}, Replacement: "ed"},
+		{Span: Span{Start: 12, End: 12}, Replacement: "s"},
+	})
+
+	require.Equal(t, "The fox jumpeds", got)
+}
+
+func TestFinalizeDropsInsertionTouchingReplacementBoundary(t *testing.T) {
+	st := &fakeStore{}
+	svc := NewService(fakePB{}, nil, nil, st, "m", fastPolicy())
+
+	got, err := svc.finalize(context.Background(), Request{Text: "The fox jump"}, []Suggestion{
+		{Span: Span{Start: 8, End: 12}, Replacement: "walked", Category: CategoryGrammar},
+		{Span: Span{Start: 12, End: 12}, Replacement: "ed", Category: CategoryStyle},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, got.Suggestions, 1)
+	require.Equal(t, Span{Start: 8, End: 12}, got.Suggestions[0].Span)
+	require.Len(t, st.lastEvent.Edits, 1)
+}
+
+func TestClientStyleWideningCorruptsInsertionAtReplacementBoundary(t *testing.T) {
+	got := applyWithClientInsertionWidening("The fox jump", []Suggestion{
+		{Span: Span{Start: 8, End: 12}, Replacement: "walked"},
+		{Span: Span{Start: 12, End: 12}, Replacement: "ed"},
+	})
+
+	require.Equal(t, "The fox walkeded", got)
+}
+
+func applyWithClientInsertionWidening(text string, suggestions []Suggestion) string {
+	out := text
+	for index := len(suggestions) - 1; index >= 0; index-- {
+		suggestion := suggestions[index]
+		span := suggestion.Span
+		replacement := suggestion.Replacement
+		if span.Start == span.End && len(out) > 0 {
+			if span.Start > 0 {
+				span.Start--
+				replacement = out[span.Start:span.End] + replacement
+			} else {
+				span.End++
+				replacement += out[span.Start:span.End]
+			}
+		}
+		out = out[:span.Start] + replacement + out[span.End:]
+	}
+	return out
+}
+
 // Style LLM error is best-effort: the request must still succeed with the
 // grammar suggestions intact. The style pass is a layer ON TOP of grammar;
 // it must never fail the request.

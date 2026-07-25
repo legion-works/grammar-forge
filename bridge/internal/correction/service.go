@@ -1070,6 +1070,7 @@ func (s *Service) finalize(ctx context.Context, req Request, all []Suggestion) (
 	sort.SliceStable(all, func(i, j int) bool {
 		return all[i].Span.Start < all[j].Span.Start
 	})
+	all = deduplicateFinalizeSuggestions(all)
 	result := Correction{Original: req.Text, Suggestions: all, Score: score(req.Text, all)}
 	if len(all) == 0 {
 		return result, nil
@@ -1125,6 +1126,59 @@ func (s *Service) finalize(ctx context.Context, req Request, all []Suggestion) (
 		}
 	}
 	return result, nil
+}
+
+// deduplicateFinalizeSuggestions preserves the first suggestion for each exact
+// edit. Zero-width edits need boundary conflict handling because clients widen
+// them onto an adjacent character before applying, giving an insertion a
+// footprint that its empty bridge span does not express.
+func deduplicateFinalizeSuggestions(suggestions []Suggestion) []Suggestion {
+	type suggestionKey struct {
+		start       int
+		end         int
+		replacement string
+	}
+
+	seen := make(map[suggestionKey]struct{}, len(suggestions))
+	kept := make([]Suggestion, 0, len(suggestions))
+	for _, suggestion := range suggestions {
+		key := suggestionKey{
+			start:       suggestion.Span.Start,
+			end:         suggestion.Span.End,
+			replacement: suggestion.Replacement,
+		}
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		conflicts := false
+		for _, earlier := range kept {
+			if zeroWidthSuggestionsConflict(earlier.Span, suggestion.Span) {
+				conflicts = true
+				break
+			}
+		}
+		if conflicts {
+			continue
+		}
+		seen[key] = struct{}{}
+		kept = append(kept, suggestion)
+	}
+	return kept
+}
+
+func zeroWidthSuggestionsConflict(first, second Span) bool {
+	firstZeroWidth := first.Start == first.End
+	secondZeroWidth := second.Start == second.End
+	if firstZeroWidth && secondZeroWidth {
+		return first.Start == second.Start
+	}
+	if firstZeroWidth {
+		return first.Start == second.Start || first.Start == second.End
+	}
+	if secondZeroWidth {
+		return second.Start == first.Start || second.Start == first.End
+	}
+	return false
 }
 
 // runFast invokes every fast corrector CONCURRENTLY (one goroutine per

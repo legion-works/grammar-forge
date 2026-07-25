@@ -85,6 +85,12 @@ export interface BuildItemsOptions {
     preview?: boolean
 }
 
+interface RenderableItemKey {
+    cuStart: number
+    cuEnd: number
+    replacement: string
+}
+
 /**
  * Transform one /correct-shaped response into renderable items. Pure and
  * synchronous — the SSE staged path calls this once per frame; runCheck
@@ -110,6 +116,7 @@ export function buildRenderableItems(
     const textHash = text
 
     const items: RenderableItem[] = []
+    const seenItems = new Set<string>()
     let dropped = 0
     // Defensive: a malformed response (missing/non-array suggestions) must not
     // throw inside the orchestrator and kill the check; treat it as "no edits".
@@ -142,6 +149,14 @@ export function buildRenderableItems(
         }
         const replacements =
             s.replacements && s.replacements.length > 0 ? s.replacements : [s.replacement]
+        const itemKey: RenderableItemKey = {
+            cuStart: cu.start,
+            cuEnd: cu.end,
+            replacement: replacements[0] ?? '',
+        }
+        const serializedItemKey = JSON.stringify(itemKey)
+        if (seenItems.has(serializedItemKey)) continue
+        seenItems.add(serializedItemKey)
         const original = text.slice(cu.start, cu.end)
         const diff = wordLevelDiff(text, cu.start, cu.end, replacements[0] ?? '')
         items.push({

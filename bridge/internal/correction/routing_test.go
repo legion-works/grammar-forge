@@ -198,6 +198,12 @@ func TestMergeNonOverlappingBothKept(t *testing.T) {
 	require.Len(t, mergeSuggestions(in), 2)
 }
 
+func TestOverlapsTreatsZeroWidthSpansAsNonOverlapping(t *testing.T) {
+	zeroWidth := Span{Start: 24, End: 24}
+	require.False(t, overlaps(zeroWidth, zeroWidth))
+	require.False(t, overlaps(Span{Start: 20, End: 24}, zeroWidth))
+}
+
 func TestPropagateFastCategoriesTagsSpelling(t *testing.T) {
 	// LLM diff edit (grammar/"") overlapping a Harper spelling span inherits
 	// spelling; a grammar edit with no overlap stays grammar.

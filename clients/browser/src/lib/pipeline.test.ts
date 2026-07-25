@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { BridgeSuggestion, Category, CorrectResponse } from '@/api/types'
 import { clearVerifyCache, verifyByteSpan } from '@/api/offset'
 import { buildRenderableItems, isSpanStillValid, runCheck, tallyByCategory } from '@/lib/pipeline'
+import { widenInsertion } from '@/input/rich-editor-apply'
 
 function suggestion(over: Partial<BridgeSuggestion>): BridgeSuggestion {
     return {
@@ -269,6 +270,33 @@ describe('buildRenderableItems', () => {
         const { items, dropped } = buildRenderableItems('teh quick', res, {})
         expect(items).toHaveLength(1)
         expect(dropped).toBe(0)
+    })
+
+    it('collapses duplicate zero-width items before an apply-all batch', () => {
+        const text = 'The quick brown fox jump over the lazy dog'
+        const res: CorrectResponse = {
+            original: text,
+            suggestions: [
+                { span: { start: 24, end: 24 }, replacement: 'ed', model: 'llm' },
+                {
+                    span: { start: 24, end: 24 },
+                    replacement: 'ed',
+                    model: 'llm',
+                    category: 'style',
+                },
+            ],
+            score: 90,
+        }
+
+        const { items } = buildRenderableItems(text, res)
+        let applied = text
+        for (const item of [...items].sort((a, b) => b.cuStart - a.cuStart)) {
+            const widened = widenInsertion(applied, { start: item.cuStart, end: item.cuEnd }, item.replacements[0] ?? '')
+            applied = applied.slice(0, widened.span.start) + widened.replacement + applied.slice(widened.span.end)
+        }
+
+        expect(items).toHaveLength(1)
+        expect(applied).toBe('The quick brown fox jumped over the lazy dog')
     })
 })
 
