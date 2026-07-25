@@ -13,6 +13,10 @@ export interface BridgeRelayResponse {
     bodyText: string
 }
 
+export type BridgeRelayMessageResponse =
+    | { success: true; response: BridgeRelayResponse }
+    | { success: false; error: string }
+
 /** Discriminated union of every message that may cross the boundary. */
 export type GfMessage =
     | { type: 'TRIGGER_CHECK' }
@@ -20,10 +24,12 @@ export type GfMessage =
     | { type: 'REPHRASE_SELECTION' }
     | {
           type: 'BRIDGE_REQUEST'
+          requestId: string
           path: string
           method: BridgeRequestMethod
           body?: string
       }
+    | { type: 'BRIDGE_CANCEL'; requestId: string }
     | {
           type: 'TAB_STATUS'
           enabled: boolean
@@ -40,10 +46,12 @@ export interface GfMessageMap {
     REPHRASE_SELECTION: { type: 'REPHRASE_SELECTION' }
     BRIDGE_REQUEST: {
         type: 'BRIDGE_REQUEST'
+        requestId: string
         path: string
         method: BridgeRequestMethod
         body?: string
     }
+    BRIDGE_CANCEL: { type: 'BRIDGE_CANCEL'; requestId: string }
     TAB_STATUS: {
         type: 'TAB_STATUS'
         enabled: boolean
@@ -61,19 +69,22 @@ export function isMessage<K extends GfMessageType>(msg: unknown, type: K): msg i
 }
 
 /**
- * P1-8: true when a `runtime.onMessage` sender is THIS extension (not a web
- * page, not another extension). `runtime.onMessage` fires for any sender the
- * platform allows to reach it (including, per manifest config, other
- * extensions via `externally_connectable`) — a same-shaped payload from an
- * untrusted sender must never be allowed to trigger TRIGGER_CHECK /
- * GET_TAB_STATUS / REPHRASE_SELECTION handling. Every listener that acts on
- * a GfMessage MUST check this before dispatching on `type`.
+ * A matching extension id is necessary but not sufficient: internal messages
+ * must also originate from a content-script tab or this extension's own URL.
  */
 export function isTrustedSender(
-    sender: { id?: string } | null | undefined,
+    sender: { id?: string; tab?: { id?: number }; url?: string } | null | undefined,
     expectedExtensionId: string,
+    expectedExtensionOrigin: string,
 ): boolean {
-    return sender?.id === expectedExtensionId
+    if (sender?.id !== expectedExtensionId) return false
+    if (typeof sender.tab?.id === 'number') return true
+    if (!sender.url) return false
+    try {
+        return new URL(sender.url).origin === new URL(expectedExtensionOrigin).origin
+    } catch {
+        return false
+    }
 }
 
 /**

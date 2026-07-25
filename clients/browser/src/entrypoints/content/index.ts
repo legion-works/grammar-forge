@@ -1594,21 +1594,21 @@ function wireRuntime(
     })
 
     // Background → content: TRIGGER_CHECK (on-demand hotkey / popup "Check now")
-    // and GET_TAB_STATUS (popup on open). The latter is handled synchronously
-    // (Promise resolve pattern) so the popup gets a useful reply without a
-    // separate bridge call.
+    // and GET_TAB_STATUS (popup on open). The callback response keeps this
+    // compatible with Chromium versions that ignore Promise listener returns.
     const messageHandler = (
         raw: unknown,
         sender: Browser.runtime.MessageSender,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        _sendResponse: (r: unknown) => void,
+        sendResponse: (r: unknown) => void,
     ): true | undefined => {
         // P1-8: only trust messages from THIS extension (the background
         // script forwarding TRIGGER_CHECK/GET_TAB_STATUS/REPHRASE_SELECTION).
         // Without this guard, any page could dispatch a same-shaped message
         // into runtime.onMessage and trigger these actions on the field the
         // user happens to be editing.
-        if (!isTrustedSender(sender, browser.runtime.id)) return undefined
+        if (!isTrustedSender(sender, browser.runtime.id, browser.runtime.getURL('/'))) {
+            return undefined
+        }
         if (isMessage(raw, 'TRIGGER_CHECK')) {
             void checkFocusedField()
             return undefined
@@ -1623,8 +1623,8 @@ function wireRuntime(
             return undefined
         }
         if (isMessage(raw, 'GET_TAB_STATUS')) {
-            const reply = buildTabStatus(runtime)
-            return Promise.resolve(reply) as unknown as true
+            sendResponse(buildTabStatus(runtime))
+            return true
         }
         return undefined
     }

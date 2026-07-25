@@ -8,11 +8,11 @@
 // We keep a tiny explicit router so every flow is greppable.
 import {
     isMessage,
-    isTrustedSender,
     messageSender,
     type GfMessage,
     type GfMessageMap,
 } from '@/messaging/schema'
+import { createBackgroundMessageListener } from '@/background/message-listener'
 import { relayBridgeRequest } from '@/background/bridge-relay'
 import { getSettings } from '@/storage/settings'
 
@@ -25,15 +25,16 @@ export default defineBackground(() => {
     })
 
     // (2, 3) Requests that need the response channel kept open.
-    browser.runtime.onMessage.addListener((raw: unknown, sender: Browser.runtime.MessageSender) => {
-        // P1-8: only trust messages from THIS extension.
-        if (!isTrustedSender(sender, browser.runtime.id)) return undefined
-        if (isMessage(raw, 'BRIDGE_REQUEST')) {
-            return getSettings().then((settings) => relayBridgeRequest(raw, settings))
-        }
-        if (isMessage(raw, 'GET_TAB_STATUS')) return forwardGetTabStatusToActiveTab()
-        return undefined
-    })
+    browser.runtime.onMessage.addListener(
+        createBackgroundMessageListener({
+            extensionId: browser.runtime.id,
+            extensionOrigin: browser.runtime.getURL('/'),
+            getSettings,
+            relayBridgeRequest: (request, settings, signal) =>
+                relayBridgeRequest(request, settings, fetch, signal),
+            getTabStatus: forwardGetTabStatusToActiveTab,
+        }),
+    )
 
     // Generic router lists every cross-cutting message for greppability.
     const _route = (msg: GfMessage): GfMessageMap[keyof GfMessageMap] | undefined => {
@@ -41,6 +42,7 @@ export default defineBackground(() => {
         if (isMessage(msg, 'GET_TAB_STATUS')) return undefined
         if (isMessage(msg, 'TAB_STATUS')) return undefined
         if (isMessage(msg, 'BRIDGE_REQUEST')) return undefined
+        if (isMessage(msg, 'BRIDGE_CANCEL')) return undefined
         return undefined
     }
     void _route

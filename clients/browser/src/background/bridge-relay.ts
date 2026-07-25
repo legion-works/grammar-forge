@@ -25,6 +25,7 @@ export async function relayBridgeRequest(
     request: GfMessageMap['BRIDGE_REQUEST'],
     settings: BridgeSettings,
     fetcher: typeof fetch = fetch,
+    signal?: AbortSignal,
 ): Promise<BridgeRelayResponse> {
     validateBridgeRoute(request.path, request.method)
     if (!settings.allowRemoteBridge && !isLocalBridgeUrl(settings.bridgeBaseUrl)) {
@@ -36,6 +37,8 @@ export async function relayBridgeRequest(
         method: request.method,
         headers: request.body === undefined ? undefined : { 'content-type': 'application/json' },
         body: request.body,
+        redirect: 'error',
+        signal,
     })
     return {
         status: response.status,

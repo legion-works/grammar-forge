@@ -53,10 +53,18 @@ export class BridgeClient {
         }
     }
 
-    private async post<T>(path: string, body: unknown, timeoutMs = this.timeoutMs): Promise<T> {
+    private async post<T>(
+        path: string,
+        body: unknown,
+        timeoutMs = this.timeoutMs,
+        externalSignal?: AbortSignal,
+    ): Promise<T> {
         this.guard()
+        if (externalSignal?.aborted) throw externalSignal.reason
         const ctrl = new AbortController()
         const t = setTimeout(() => ctrl.abort(), timeoutMs)
+        const onExternalAbort = (): void => ctrl.abort(externalSignal?.reason)
+        externalSignal?.addEventListener('abort', onExternalAbort, { once: true })
         try {
             const r = await this.transport(`${this.baseUrl}${path}`, {
                 method: 'POST',
@@ -73,6 +81,7 @@ export class BridgeClient {
             return (text ? JSON.parse(text) : undefined) as T
         } finally {
             clearTimeout(t)
+            externalSignal?.removeEventListener('abort', onExternalAbort)
         }
     }
 
@@ -145,10 +154,9 @@ export class BridgeClient {
         onFast: (res: CorrectResponse) => void,
         signal?: AbortSignal,
     ): Promise<CorrectResponse> {
-        if (this.streamUnsupported) return this.correct(req)
+        if (signal?.aborted) throw new DOMException('correctStream aborted before start', 'AbortError')
+        if (this.streamUnsupported) return this.correctAfterStreamFallback(req, signal)
         this.guard()
-        if (signal?.aborted)
-            throw new DOMException('correctStream aborted before start', 'AbortError')
         const ctrl = new AbortController()
         const t = setTimeout(() => ctrl.abort(), this.timeoutMs)
         const onExternalAbort = (): void => ctrl.abort()
@@ -171,7 +179,7 @@ export class BridgeClient {
             }
             if (!r.ok || !r.headers.get('content-type')?.includes('text/event-stream') || !r.body) {
                 this.streamUnsupported = true
-                return await this.correct(req)
+                return await this.correctAfterStreamFallback(req, signal)
             }
             let final: CorrectResponse | undefined
             try {
@@ -204,17 +212,28 @@ export class BridgeClient {
                 }
                 // Malformed stream: fall back and remember.
                 this.streamUnsupported = true
-                return await this.correct(req)
+                return await this.correctAfterStreamFallback(req, signal)
             }
             if (!final) {
                 this.streamUnsupported = true
-                return await this.correct(req)
+                return await this.correctAfterStreamFallback(req, signal)
             }
             return final
         } finally {
             clearTimeout(t)
             signal?.removeEventListener('abort', onExternalAbort)
         }
+    }
+
+    private correctAfterStreamFallback(
+        req: CorrectRequest,
+        signal?: AbortSignal,
+    ): Promise<CorrectResponse> {
+        if (!signal) return this.correct(req)
+        if (signal.aborted) {
+            return Promise.reject(new DOMException('correctStream aborted before fallback', 'AbortError'))
+        }
+        return this.post<CorrectResponse>('/correct', req, this.timeoutMs, signal)
     }
 
     // The bridge POST /signal takes a single { id, signal } per call (strict

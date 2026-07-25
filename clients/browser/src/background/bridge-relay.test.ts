@@ -16,7 +16,7 @@ describe('relayBridgeRequest', () => {
         )
 
         const result = await relayBridgeRequest(
-            { type: 'BRIDGE_REQUEST', path: '/health', method: 'GET' },
+            { type: 'BRIDGE_REQUEST', requestId: 'request-health', path: '/health', method: 'GET' },
             LOCAL_SETTINGS,
             fetcher,
         )
@@ -25,6 +25,8 @@ describe('relayBridgeRequest', () => {
             method: 'GET',
             headers: undefined,
             body: undefined,
+            redirect: 'error',
+            signal: undefined,
         })
         expect(result).toEqual({
             status: 200,
@@ -46,7 +48,12 @@ describe('relayBridgeRequest', () => {
 
         await expect(
             relayBridgeRequest(
-                { type: 'BRIDGE_REQUEST', path, method: method as 'GET' | 'POST' | 'DELETE' },
+                {
+                    type: 'BRIDGE_REQUEST',
+                    requestId: 'request-rejected',
+                    path,
+                    method: method as 'GET' | 'POST' | 'DELETE',
+                },
                 LOCAL_SETTINGS,
                 fetcher,
             ),
@@ -59,12 +66,34 @@ describe('relayBridgeRequest', () => {
 
         await expect(
             relayBridgeRequest(
-                { type: 'BRIDGE_REQUEST', path: '/health', method: 'GET' },
+                {
+                    type: 'BRIDGE_REQUEST',
+                    requestId: 'request-remote',
+                    path: '/health',
+                    method: 'GET',
+                },
                 { bridgeBaseUrl: 'https://attacker.example', allowRemoteBridge: false },
                 fetcher,
             ),
         ).rejects.toThrow(/local/i)
         expect(fetcher).not.toHaveBeenCalled()
+    })
+
+    it('passes the worker cancellation signal to fetch and rejects redirects', async () => {
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
+        const controller = new AbortController()
+
+        await relayBridgeRequest(
+            { type: 'BRIDGE_REQUEST', requestId: 'request-signal', path: '/health', method: 'GET' },
+            LOCAL_SETTINGS,
+            fetcher,
+            controller.signal,
+        )
+
+        expect(fetcher.mock.calls[0]![1]).toMatchObject({
+            redirect: 'error',
+            signal: controller.signal,
+        })
     })
 
     it.each([
@@ -84,7 +113,12 @@ describe('relayBridgeRequest', () => {
         const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
 
         await relayBridgeRequest(
-            { type: 'BRIDGE_REQUEST', path, method: method as 'GET' | 'POST' | 'DELETE' },
+            {
+                type: 'BRIDGE_REQUEST',
+                requestId: 'request-allowed',
+                path,
+                method: method as 'GET' | 'POST' | 'DELETE',
+            },
             LOCAL_SETTINGS,
             fetcher,
         )

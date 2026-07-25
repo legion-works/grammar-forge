@@ -59,21 +59,49 @@ describe('isMessage', () => {
 
 describe('isTrustedSender (P1-8: message-passing hardening)', () => {
     const OWN_ID = 'abcdefghijklmnopqrstuvwxyzabcdef'
+    const OWN_ORIGIN = `chrome-extension://${OWN_ID}/`
 
-    it('accepts a sender whose id matches this extension', () => {
-        expect(isTrustedSender({ id: OWN_ID }, OWN_ID)).toBe(true)
+    it('accepts this extension content script using its tab context', () => {
+        expect(isTrustedSender({ id: OWN_ID, tab: { id: 7 } }, OWN_ID, OWN_ORIGIN)).toBe(true)
+    })
+
+    it('accepts this extension page using its extension URL', () => {
+        expect(
+            isTrustedSender(
+                { id: OWN_ID, url: `${OWN_ORIGIN}popup.html` },
+                OWN_ID,
+                OWN_ORIGIN,
+            ),
+        ).toBe(true)
     })
 
     it('rejects a sender from a different extension id', () => {
-        expect(isTrustedSender({ id: 'some-other-extension-id' }, OWN_ID)).toBe(false)
+        expect(
+            isTrustedSender(
+                { id: 'some-other-extension-id', tab: { id: 7 } },
+                OWN_ID,
+                OWN_ORIGIN,
+            ),
+        ).toBe(false)
     })
 
     it('rejects a sender with no id at all (e.g. a web page)', () => {
-        expect(isTrustedSender({}, OWN_ID)).toBe(false)
+        expect(isTrustedSender({}, OWN_ID, OWN_ORIGIN)).toBe(false)
+    })
+
+    it('rejects a matching id without a content-script or extension-page context', () => {
+        expect(isTrustedSender({ id: OWN_ID }, OWN_ID, OWN_ORIGIN)).toBe(false)
+        expect(
+            isTrustedSender(
+                { id: OWN_ID, url: 'https://attacker.example/' },
+                OWN_ID,
+                OWN_ORIGIN,
+            ),
+        ).toBe(false)
     })
 
     it('rejects a null/undefined sender', () => {
-        expect(isTrustedSender(null, OWN_ID)).toBe(false)
-        expect(isTrustedSender(undefined, OWN_ID)).toBe(false)
+        expect(isTrustedSender(null, OWN_ID, OWN_ORIGIN)).toBe(false)
+        expect(isTrustedSender(undefined, OWN_ID, OWN_ORIGIN)).toBe(false)
     })
 })

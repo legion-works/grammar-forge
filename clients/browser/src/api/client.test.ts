@@ -764,5 +764,51 @@ describe('BridgeClient.correctStream', () => {
             ).rejects.toMatchObject({ name: 'AbortError' })
             expect(fetchMock).not.toHaveBeenCalled()
         })
+
+        it('propagates external cancellation after unsupported streaming falls back to /correct', async () => {
+            const transport = vi
+                .fn<typeof fetch>()
+                .mockResolvedValueOnce(new Response(null, { status: 501 }))
+                .mockImplementationOnce((_url, init) => {
+                    const signal = init?.signal as AbortSignal
+                    return new Promise<Response>((_resolve, reject) => {
+                        signal.addEventListener('abort', () => {
+                            reject(new DOMException('fallback aborted', 'AbortError'))
+                        })
+                    })
+                })
+            const client = new BridgeClient('http://localhost:8000', false, transport)
+            const controller = new AbortController()
+            const correction = client.correctStream(
+                { text: 'a b c', source: 'browser' },
+                () => {},
+                controller.signal,
+            )
+
+            await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
+            controller.abort()
+
+            await expect(correction).rejects.toMatchObject({ name: 'AbortError' })
+        })
+
+        it('checks an already-aborted signal after streaming has been marked unsupported', async () => {
+            const transport = vi
+                .fn<typeof fetch>()
+                .mockResolvedValueOnce(new Response(null, { status: 501 }))
+                .mockResolvedValueOnce(new Response(JSON.stringify(FINAL), { status: 200 }))
+            const client = new BridgeClient('http://localhost:8000', false, transport)
+            await client.correctStream({ text: 'first', source: 'browser' }, () => {})
+            const controller = new AbortController()
+            controller.abort()
+
+            await expect(
+                client.correctStream(
+                    { text: 'second', source: 'browser' },
+                    () => {},
+                    controller.signal,
+                ),
+            ).rejects.toMatchObject({ name: 'AbortError' })
+            expect(transport).toHaveBeenCalledTimes(2)
+        })
     })
 })
