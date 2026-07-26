@@ -20,13 +20,18 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # Each filter includes this workflow file: a change to the CI
+          # definition must re-run the jobs it configures, or a fix to a job
+          # (tool version, flags) merges "green" without that job ever running.
           filters: |
             go:
               - 'bridge/**'
+              - '.github/workflows/ci.yml'
             proto:
               - 'bridge/proto/**'
               - 'bridge/buf.yaml'
               - 'bridge/buf.gen.yaml'
+              - '.github/workflows/ci.yml'
             docker:
               - 'Dockerfile*'
               - '**/Dockerfile'
@@ -35,6 +40,7 @@ jobs:
               - 'scripts/**'
               - '.yamllint'
               - '.dclintrc'
+              - '.github/workflows/ci.yml'
 
   secrets:
     runs-on: ubuntu-latest
