@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * publish multi-arch bridge image (amd64 + arm64) ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
 * ship Firefox + Vencord release artifacts ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
 
+## [0.2.1](https://github.com/legion-works/grammar-forge/compare/grammar-forge-v0.2.0...grammar-forge-v0.2.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **browser:** preserve relay responses and aborts ([d0e2b6b](https://github.com/legion-works/grammar-forge/commit/d0e2b6b888a5a15b132a5c4997b78a095395025d))
+* **browser:** relay bridge requests through worker ([99443ff](https://github.com/legion-works/grammar-forge/commit/99443ff8226912f2b604e47ab894b677f2cd24d9))
+* **correction:** deduplicate zero-width suggestions ([8ceae07](https://github.com/legion-works/grammar-forge/commit/8ceae07bec1920668f36bc4fe1f2a5454173103d))
+
 ## [0.2.0](https://github.com/legion-works/grammar-forge/compare/grammar-forge-v0.1.1...grammar-forge-v0.2.0) (2026-07-11)
 
 
