@@ -15,6 +15,7 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       proto: ${{ steps.filter.outputs.proto }}
       docker: ${{ steps.filter.outputs.docker }}
+      clients: ${{ steps.filter.outputs.clients }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -40,6 +41,9 @@ jobs:
               - 'scripts/**'
               - '.yamllint'
               - '.dclintrc'
+              - '.github/workflows/ci.yml'
+            clients:
+              - 'clients/**'
               - '.github/workflows/ci.yml'
 
   secrets:
@@ -153,8 +157,60 @@ jobs:
       - name: dclint docker-compose.yml
         run: npx --yes dclint docker-compose.yml
 
+  clients:
+    needs: changes
+    if: needs.changes.outputs.clients == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: |
+            clients/browser/pnpm-lock.yaml
+            clients/vencord/pnpm-lock.yaml
+            clients/opencode/pnpm-lock.yaml
+
+      - name: Browser client
+        working-directory: clients/browser
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run lint
+          pnpm exec wxt prepare
+          pnpm exec tsc --noEmit
+          pnpm run test:run
+          pnpm run build
+
+      - name: Vencord client
+        working-directory: clients/vencord
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir ../browser install --frozen-lockfile
+          pnpm run lint
+          pnpm run typecheck
+          pnpm run test
+          pnpm run build
+
+      - name: OpenCode client
+        working-directory: clients/opencode
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir ../browser install --frozen-lockfile
+          pnpm run lint
+          pnpm run typecheck
+          pnpm run test
+          pnpm run build
+
   ci-complete:
-    needs: [secrets, go, proto, docker]
+    needs: [secrets, go, proto, docker, clients]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -164,4 +220,5 @@ jobs:
           if [ "${{ needs.go.result }}" != "success" ] && [ "${{ needs.go.result }}" != "skipped" ]; then echo "go failed"; exit 1; fi
           if [ "${{ needs.proto.result }}" != "success" ] && [ "${{ needs.proto.result }}" != "skipped" ]; then echo "proto failed"; exit 1; fi
           if [ "${{ needs.docker.result }}" != "success" ] && [ "${{ needs.docker.result }}" != "skipped" ]; then echo "docker failed"; exit 1; fi
+          if [ "${{ needs.clients.result }}" != "success" ] && [ "${{ needs.clients.result }}" != "skipped" ]; then echo "clients failed"; exit 1; fi
           echo "ci-complete: ok"
