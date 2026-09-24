@@ -361,6 +361,7 @@ describe('rephrase flow — pending → result is a single user-perceived transi
             client: () => client,
             overlayRoot: document.createElement('div') as unknown as ShadowRoot,
             debugLog: vi.fn<(...args: unknown[]) => void>(),
+            composerClearRect: () => new DOMRect(),
         }
         const el = document.createElement('div')
         document.body.appendChild(el)

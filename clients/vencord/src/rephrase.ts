@@ -55,6 +55,7 @@ export interface RephraseDeps {
     client: () => BridgeClient
     overlayRoot: ShadowRoot
     debugLog: ApplyTraceLogger
+    composerClearRect: (el: HTMLElement) => DOMRect
     /** W3-3: tone seed from the user's goals (formal→'formal',
      *  informal→'casual', neutral→'neutral'). The card lets the user
      *  override per-request; this is the initial value. Optional for
@@ -134,6 +135,7 @@ export function openRephraseFor(
                             showToast(deps.overlayRoot, {
                                 message: 'Rephrased',
                                 actionLabel: 'Undo',
+                                clearRect: deps.composerClearRect(el),
                                 onAction: () => {
                                     void applySlateFix(
                                         el,

@@ -309,6 +309,7 @@ export function startOrchestrator(
         signalQueue,
         rerun: (el) => (text) => rerunFor(el)(text),
         overlayRoot: overlay.root,
+        composerClearRect,
     }
     // Deps bundle for the extracted openRephraseFor (./rephrase.ts).
     // W3-3: pass a `defaultTone` getter so the rephrase card's
@@ -319,6 +320,7 @@ export function startOrchestrator(
         client: () => refreshClient(),
         overlayRoot: overlay.root,
         debugLog,
+        composerClearRect,
         defaultTone: () => defaultToneFromGoals(getConfig().goals),
     }
     const fields = new Map<HTMLElement, FieldState>()

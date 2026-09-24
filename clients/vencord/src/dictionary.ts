@@ -22,6 +22,7 @@ export interface DictionaryDeps {
     signalQueue: SignalQueue
     rerun: (el: HTMLElement) => (text: string) => Promise<void>
     overlayRoot: ShadowRoot
+    composerClearRect: (el: HTMLElement) => DOMRect
 }
 
 export function addWordToDictionary(
@@ -50,6 +51,7 @@ export function addWordToDictionary(
             showToast(deps.overlayRoot, {
                 message: label,
                 actionLabel: 'Undo',
+                clearRect: deps.composerClearRect(el),
                 onAction: () => {
                     Promise.all(tokens.map((t) => c.dictionaryRemove(t)))
                         .then(() => deps.rerun(el)(getText(el)))

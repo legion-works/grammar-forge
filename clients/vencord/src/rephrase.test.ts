@@ -2,6 +2,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { resolveRephraseScope, openRephraseFor, type RephraseDeps } from './rephrase'
 import * as rephraseCard from '@/overlay/rephrase-card'
+import * as toast from '@/overlay/toast'
+import * as slateApply from '@/input/rich-editor-apply'
 import type { BridgeClient } from '@/api/client'
 
 describe('resolveRephraseScope', () => {
@@ -77,6 +79,7 @@ describe('openRephraseFor — goals-seeded tone', () => {
             client: () => client,
             overlayRoot: document.createElement('div') as unknown as ShadowRoot,
             debugLog: vi.fn<(...args: unknown[]) => void>(),
+            composerClearRect: () => new DOMRect(),
             defaultTone,
         }
         const el = document.createElement('div')
@@ -114,6 +117,7 @@ describe('openRephraseFor — goals-seeded tone', () => {
             client: () => client,
             overlayRoot: document.createElement('div') as unknown as ShadowRoot,
             debugLog: vi.fn<(...args: unknown[]) => void>(),
+            composerClearRect: () => new DOMRect(),
         }
         const el = document.createElement('div')
         el.innerHTML = 'hello'
@@ -151,6 +155,7 @@ describe('openRephraseFor — scope/tone/regenerate re-issue the bridge call', (
             client: () => client,
             overlayRoot: document.createElement('div') as unknown as ShadowRoot,
             debugLog: vi.fn<(...args: unknown[]) => void>(),
+            composerClearRect: () => new DOMRect(),
             defaultTone: () => 'neutral',
         }
         const el = document.createElement('div')
@@ -204,6 +209,46 @@ describe('openRephraseFor — scope/tone/regenerate re-issue the bridge call', (
     })
 })
 
+describe('openRephraseFor — undo toast composer clearance', () => {
+    it('passes the composer clear rect to the Undo toast', async () => {
+        const rootHost = document.createElement('div')
+        document.body.appendChild(rootHost)
+        const overlayRoot = rootHost.attachShadow({ mode: 'open' })
+        const client = {
+            rephrase: vi.fn<() => Promise<unknown>>(async () => ({
+                original: 'hello',
+                rephrased: 'hi',
+                alternatives: [],
+            })),
+        } as unknown as BridgeClient
+        const clearRect = new DOMRect(1, 2, 3, 4)
+        const deps: RephraseDeps = {
+            client: () => client,
+            overlayRoot,
+            debugLog: vi.fn<(...args: unknown[]) => void>(),
+            composerClearRect: () => clearRect,
+        }
+        vi.spyOn(rephraseCard, 'showRephrasePending').mockReturnValue({
+            hide: vi.fn<() => void>(),
+        } as never)
+        vi.spyOn(rephraseCard, 'showRephraseCard').mockImplementation((_root, opts) => {
+            opts.onAccept('hi')
+            return { hide: vi.fn<() => void>() } as never
+        })
+        const toastSpy = vi.spyOn(toast, 'showToast')
+        vi.spyOn(slateApply, 'applySlateFix').mockResolvedValue(true)
+        const el = document.createElement('div')
+        el.textContent = 'hello'
+        document.body.appendChild(el)
+        await openRephraseFor(el, 'hello', { start: 0, end: 5 }, deps, () => {})
+
+        await Promise.resolve()
+        expect(toastSpy.mock.calls[0]?.[1]?.clearRect).toBe(clearRect)
+        rootHost.remove()
+        el.remove()
+    })
+})
+
 // Placement audit: the pending/result/error card must anchor to the
 // SELECTION rect (when supplied) instead of always falling back to the
 // composer's whole bounding box — mirrors the browser client's fix in
@@ -233,6 +278,7 @@ describe('openRephraseFor — anchors to the supplied rect, not the composer (pl
             client: () => client,
             overlayRoot: document.createElement('div') as unknown as ShadowRoot,
             debugLog: vi.fn<(...args: unknown[]) => void>(),
+            composerClearRect: () => new DOMRect(),
             defaultTone: () => 'neutral',
         }
         const el = document.createElement('div')

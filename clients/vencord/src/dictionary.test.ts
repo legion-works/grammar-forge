@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { splitDictionaryTokens, addWordToDictionary, type DictionaryDeps } from './dictionary'
 import type { RenderableItem } from '@/lib/pipeline'
 import type { BridgeClient } from '@/api/client'
+import * as toast from '@/overlay/toast'
 
 describe('splitDictionaryTokens', () => {
     it('returns [] for empty input', () => {
@@ -75,6 +76,7 @@ describe('addWordToDictionary', () => {
             signalQueue: { enqueue } as unknown as DictionaryDeps['signalQueue'],
             rerun: () => rerun,
             overlayRoot: root,
+            composerClearRect: () => new DOMRect(1, 2, 3, 4),
         }
         return { deps, client, rerun, enqueue, root }
     }
@@ -107,6 +109,20 @@ describe('addWordToDictionary', () => {
 
         el.remove()
         root.host.remove()
+    })
+
+    it('passes the composer clear rect to the Undo toast', async () => {
+        const { deps } = makeDeps()
+        const el = document.createElement('div')
+        document.body.appendChild(el)
+        const clearRect = new DOMRect(1, 2, 3, 4)
+        deps.composerClearRect = () => clearRect
+        const toastSpy = vi.spyOn(toast, 'showToast')
+
+        await addWordToDictionary(el, item, 'teh', deps)
+
+        expect(toastSpy.mock.calls.at(-1)?.[1]?.clearRect).toBe(clearRect)
+        el.remove()
     })
 
     it('multi-token words get a pluralised toast message and each token is POSTed', async () => {
