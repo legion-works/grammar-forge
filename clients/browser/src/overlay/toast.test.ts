@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { OVERLAY_CSS } from '@/overlay/styles'
 import { showToast } from '@/overlay/toast'
+
+function declaredPointerEvents(css: string, selector: string): string | null {
+    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '')
+    const rule = new RegExp(`${selector}\\s*\\{([^}]*)\\}`, 's').exec(stripped)
+    const declaration = /(?:^|;)\s*pointer-events:\s*([^;]+);/.exec(rule?.[1] ?? '')
+    return declaration?.[1]?.trim() ?? null
+}
 
 function mkRoot(): ShadowRoot {
     const host = document.createElement('div')
@@ -27,6 +35,25 @@ describe('showToast', () => {
         expect(btn.classList.contains('gf-btn-soft')).toBe(true)
         expect(btn.classList.contains('gf-toast__action')).toBe(false)
         expect(btn.textContent).toBe('Undo')
+    })
+
+    it('clears a supplied host rect while preserving the default bottom placement', () => {
+        const root = mkRoot()
+        const clearRect = new DOMRect(10, Math.floor(window.innerHeight / 2), 300, 120)
+        showToast(root, { message: 'Applied', clearRect } as Parameters<typeof showToast>[1])
+        const clearedToast = root.querySelector('.gf-toast') as HTMLElement
+        const resolvedBottom = Number.parseFloat(clearedToast.style.bottom)
+
+        expect(window.innerHeight - resolvedBottom).toBe(clearRect.top - 12)
+
+        showToast(root, { message: 'Default placement' })
+        const defaultToast = root.querySelector('.gf-toast') as HTMLElement
+        expect(defaultToast.style.bottom).toBe('')
+    })
+
+    it('makes only the toast action clickable', () => {
+        expect(declaredPointerEvents(OVERLAY_CSS, '\\.gf-toast')).toBe('none')
+        expect(declaredPointerEvents(OVERLAY_CSS, '\\.gf-toast\\s+\\.gf-btn-soft')).toBe('auto')
     })
 
     it('renders the primary message in .gf-toast__text', () => {

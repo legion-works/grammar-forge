@@ -799,7 +799,7 @@ export const OVERLAY_CSS = `
     gap: 10px;
     padding: 8px 14px;
     border-radius: 9999px;
-    pointer-events: auto;
+    pointer-events: none;
     background: light-dark(rgba(245, 245, 245, 0.92), rgba(28, 28, 30, 0.92));
     color: light-dark(#111, #f5f5f5);
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -810,6 +810,9 @@ export const OVERLAY_CSS = `
        for this exact shape (its "to" transform matches the static
        translateX(-50%) centering above). */
     animation: gf-toast-in ${DURATION_TOOLTIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .gf-toast .gf-btn-soft {
+    pointer-events: auto;
   }
 
   /* ============================================================

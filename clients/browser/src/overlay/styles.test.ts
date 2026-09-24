@@ -7,6 +7,13 @@
 import { describe, expect, it } from 'vitest'
 import { OVERLAY_CSS } from '@/overlay/styles'
 
+function declaredPointerEvents(css: string, className: string): string | null {
+    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '')
+    const rule = new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`, 's').exec(stripped)
+    const declaration = /(?:^|;)\s*pointer-events:\s*([^;]+);/.exec(rule?.[1] ?? '')
+    return declaration?.[1]?.trim() ?? null
+}
+
 describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
     describe('.gf-orb (score orb)', () => {
         it('constrains the orb to 44×44 (DC: orbSize = z(46,40); reduced from 60 in round 6)', () => {
@@ -37,8 +44,7 @@ describe('OVERLAY_CSS (W2 design system shadow-root CSS)', () => {
             // .gf-pill carried this explicitly (styles.ts line ~136 on
             // master). The W2 .gf-orb omitted it → the orb was invisible
             // to mouse events and the click handler never fired.
-            const rule = /\.gf-orb\s*\{[^}]*pointer-events:\s*auto/s.exec(OVERLAY_CSS)
-            expect(rule, '.gf-orb must set pointer-events: auto').not.toBeNull()
+            expect(declaredPointerEvents(OVERLAY_CSS, 'gf-orb')).toBe('auto')
         })
 
         it('does not position via transform translate (W2 design system uses left/top)', () => {

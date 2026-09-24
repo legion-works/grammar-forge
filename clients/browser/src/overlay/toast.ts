@@ -24,6 +24,9 @@ export interface ToastOptions {
     onDismiss?: () => void
     /** Default 1200ms. */
     durationMs?: number
+    /** Optional viewport rect the toast must clear (for host chrome such as
+     *  Discord's composer). */
+    clearRect?: DOMRect
 }
 
 export interface ToastHandle {
@@ -43,10 +46,12 @@ export interface ToastHandle {
 // previous toast's timer is cancelled and its lifecycle-once `onDismiss`
 // (if any) fires deterministically at replacement time, not later.
 const ACTIVE = new WeakMap<ShadowRoot, ToastHandle>()
+const TOAST_CLEARANCE_GAP_PX = 12
 
 export function showToast(root: ShadowRoot, opts: ToastOptions): ToastHandle {
     ACTIVE.get(root)?.dismiss()
     const doc = root.ownerDocument
+    const view = doc.defaultView ?? window
     const el = doc.createElement('div')
     el.className = 'gf-toast'
     el.setAttribute('role', 'status')
@@ -133,5 +138,10 @@ export function showToast(root: ShadowRoot, opts: ToastOptions): ToastHandle {
     const handle: ToastHandle = { dismiss }
     ACTIVE.set(root, handle)
     root.appendChild(el)
+    if (opts.clearRect) {
+        const desiredBottom = view.innerHeight - opts.clearRect.top + TOAST_CLEARANCE_GAP_PX
+        const maxBottom = Math.max(0, view.innerHeight - el.getBoundingClientRect().height)
+        el.style.bottom = `${Math.min(Math.max(desiredBottom, 0), maxBottom)}px`
+    }
     return handle
 }

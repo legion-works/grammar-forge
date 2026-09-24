@@ -649,6 +649,7 @@ export function startOrchestrator(
         showToast(overlay.root, {
             message: `Fixed \u201C${item.diffOriginal}\u201D \u2192 \u201C${replacement}\u201D`,
             actionLabel: 'Undo',
+            clearRect: composerClearRect(el),
             onAction: () => void undoFor(el),
         })
         void rerunFor(el)(getText(el))
@@ -714,6 +715,7 @@ export function startOrchestrator(
             showToast(overlay.root, {
                 message: `Fixed ${String(batch.length)} suggestion${batch.length === 1 ? '' : 's'}`,
                 actionLabel: 'Undo',
+                clearRect: composerClearRect(el),
                 onAction: () => void undoFor(el),
             })
         }
@@ -816,6 +818,7 @@ export function startOrchestrator(
         showToast(overlay.root, {
             message: `Synonym: ${resolved.word} \u2192 ${synonym}`,
             actionLabel: 'Undo',
+            clearRect: composerClearRect(el),
             onAction: () => void undoFor(el),
         })
         closeSynonyms()
@@ -980,6 +983,7 @@ export function startOrchestrator(
                 showToast(overlay.root, {
                     message: `Won\u2019t flag \u201C${item.diffOriginal}\u201D again`,
                     actionLabel: 'Undo',
+                    clearRect: composerClearRect(el),
                     onAction: () => {
                         // Restore the item in place at its original index.
                         if (idx >= 0 && !st.items.includes(item)) {
