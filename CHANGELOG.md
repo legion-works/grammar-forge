@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * publish multi-arch bridge image (amd64 + arm64) ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
 * ship Firefox + Vencord release artifacts ([#TBD](https://github.com/legion-works/grammar-forge/commit/TBD))
 
+## [0.2.2](https://github.com/legion-works/grammar-forge/compare/grammar-forge-v0.2.1...grammar-forge-v0.2.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **browser:** reject stale zero-width insertions before apply ([d79a119](https://github.com/legion-works/grammar-forge/commit/d79a119f68a528580bae89b5ea85bd8ed50ecee2))
+* **browser:** resolve panel clicks against live items after a re-check ([83a9182](https://github.com/legion-works/grammar-forge/commit/83a9182456e88e89b961be07586337d0aee094b1))
+* **deps:** patch called vulnerabilities (grpc v1.83.2, x/net v0.58.0, Go 1.26.6) ([a9d13e1](https://github.com/legion-works/grammar-forge/commit/a9d13e15c705031dff3bd95992cb05633af8dfe5))
+* **vencord:** keep rephrase and dictionary undo toasts clear of composer ([e28a2ca](https://github.com/legion-works/grammar-forge/commit/e28a2caab73ba8a9164b30c9dd09ed9477e7ddc9))
+* **vencord:** keep undo toast clear of the composer ([75629f0](https://github.com/legion-works/grammar-forge/commit/75629f0c404405cae647d02dc96096082dc05336))
+
 ## [0.2.1](https://github.com/legion-works/grammar-forge/compare/grammar-forge-v0.2.0...grammar-forge-v0.2.1) (2026-09-24)
 
 
