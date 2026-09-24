@@ -14,7 +14,10 @@ services:
   bridge:
     image: ghcr.io/legion-works/grammar-forge-bridge:0.2.0 # x-release-please-version
     build: ./bridge
-    depends_on: [llamacpp]
+    depends_on:
+      llamacpp:
+        condition: service_healthy
+        required: false
     volumes:
       - ./data:/data
       - ./bridge/models/gector:/models/gector:ro
@@ -33,6 +36,17 @@ services:
       - "127.0.0.1:8000:8000"  # REST (/correct, /rephrase, /signal, /health, /stats, /v2/check)
       - "127.0.0.1:8082:8082"  # gRPC (LanguageTool RemoteRule; used only by the optional LT profile)
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8000 && printf "GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && grep -q "\"status\":\"ok\"" <&3']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # OPTIONAL second correction source (profile-gated; see header). The bridge's
   # own /v2/check serves LT-protocol clients without this container — and
@@ -81,6 +95,17 @@ services:
       - "--sleep-idle-seconds"
       - "300"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     # internal only — clients hit the bridge, not llama-server
     deploy:
       resources:
