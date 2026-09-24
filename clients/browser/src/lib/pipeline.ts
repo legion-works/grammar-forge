@@ -33,6 +33,11 @@ export interface RenderableItem {
     replacements: string[]
     /** Original text the suggestion is replacing (the exact edit span). */
     original: string
+    /** Snapshot text immediately before a zero-width edit. Used to reject an
+     *  insertion whose offset shifted before the next check completes. */
+    contextBefore?: string
+    /** Snapshot text immediately after a zero-width edit. */
+    contextAfter?: string
     /** Word-level preview of the primary replacement: the surrounding whole
      *  word(s) before vs after the edit (e.g. "was" -> "were" even though the
      *  raw span is "as" -> "ere"). Display only — apply uses the exact span. */
@@ -90,6 +95,8 @@ interface RenderableItemKey {
     cuEnd: number
     replacement: string
 }
+
+const INSERTION_CONTEXT_WINDOW_CODE_UNITS = 12
 
 /**
  * Transform one /correct-shaped response into renderable items. Pure and
@@ -169,6 +176,14 @@ export function buildRenderableItems(
             message: s.message ?? '',
             replacements,
             original,
+            contextBefore: text.slice(
+                Math.max(0, cu.start - INSERTION_CONTEXT_WINDOW_CODE_UNITS),
+                cu.start,
+            ),
+            contextAfter: text.slice(
+                cu.end,
+                Math.min(text.length, cu.end + INSERTION_CONTEXT_WINDOW_CODE_UNITS),
+            ),
             diffOriginal: diff.original,
             diffCorrected: diff.corrected,
             diffIsDeletion: diff.isDeletion,
@@ -222,10 +237,19 @@ export function tallyByCategory(
  */
 export function isSpanStillValid(
     text: string,
-    item: Pick<RenderableItem, 'cuStart' | 'cuEnd' | 'original'>,
+    item: Pick<RenderableItem, 'cuStart' | 'cuEnd' | 'original' | 'contextBefore' | 'contextAfter'>,
 ): boolean {
     if (item.cuStart < 0 || item.cuEnd < item.cuStart) return false
     if (item.cuStart > text.length || item.cuEnd > text.length) return false
+    if (item.cuStart === item.cuEnd && item.contextBefore !== undefined && item.contextAfter !== undefined) {
+        const contextBefore = text.slice(Math.max(0, item.cuStart - item.contextBefore.length), item.cuStart)
+        if (contextBefore !== item.contextBefore) return false
+        // cuStart is absolute; a prefix edit changes contextBefore at that offset,
+        // so truncated leading context needs no separate boundary anchor.
+        // Apply-all runs descending, so post-offset text legitimately changes before
+        // lower items are checked; comparing contextAfter would skip those items.
+        if (item.contextAfter.length === 0 && item.cuEnd !== text.length) return false
+    }
     return text.slice(item.cuStart, item.cuEnd) === item.original
 }
 

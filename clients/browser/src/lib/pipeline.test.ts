@@ -338,6 +338,122 @@ describe('isSpanStillValid', () => {
         const item = { cuStart: 5, cuEnd: 5, original: '' }
         expect(isSpanStillValid(text, item)).toBe(true)
     })
+
+    it('rejects a shifted zero-width span only when its captured context no longer matches', () => {
+        const item = {
+            cuStart: 5,
+            cuEnd: 5,
+            original: '',
+            contextBefore: 'hello',
+            contextAfter: ' world',
+        }
+
+        expect(isSpanStillValid('hello world', item)).toBe(true)
+        expect(isSpanStillValid('Xhello world', item)).toBe(false)
+        expect(isSpanStillValid('Xhello world', { cuStart: 5, cuEnd: 5, original: '' })).toBe(true)
+    })
+
+    it('rejects a zero-width span when truncated suffix context no longer reaches the live end', () => {
+        const item = {
+            cuStart: 3,
+            cuEnd: 3,
+            original: '',
+            contextBefore: 'abc',
+            contextAfter: '',
+        }
+
+        expect(isSpanStillValid('abc', item)).toBe(true)
+        expect(isSpanStillValid('abcd', item)).toBe(false)
+    })
+
+    it('does not falsely reject a start-boundary insertion after a suffix edit outside its context', () => {
+        const item = {
+            cuStart: 0,
+            cuEnd: 0,
+            original: '',
+            contextBefore: '',
+            contextAfter: 'hello world!',
+        }
+
+        expect(isSpanStillValid('hello world! abc?', item)).toBe(true)
+    })
+
+    it('still rejects a prefix change for an item with start-truncated context', () => {
+        const item = {
+            cuStart: 11,
+            cuEnd: 11,
+            original: '',
+            contextBefore: 'hello world',
+            contextAfter: '',
+        }
+
+        expect(isSpanStillValid('Xhello world', item)).toBe(false)
+    })
+
+    it('keeps a lower adjacent insertion valid after descending batch application', () => {
+        const lowerItem = {
+            cuStart: 3,
+            cuEnd: 3,
+            original: '',
+            contextBefore: 'don',
+            contextAfter: 't cant',
+        }
+
+        expect(isSpanStillValid("dont can't", lowerItem)).toBe(true)
+    })
+
+    it('keeps lower bridge insertions valid after applying the sentence-final insertion first', () => {
+        const itemAtFive = {
+            cuStart: 5,
+            cuEnd: 5,
+            original: '',
+            contextBefore: 'i don',
+            contextAfter: 't think that',
+        }
+        const itemAtSeventeen = {
+            cuStart: 17,
+            cuEnd: 17,
+            original: '',
+            contextBefore: 't think that',
+            contextAfter: 's correct',
+        }
+        const afterSentenceFinalInsertion = 'i dont think thats correct.'
+
+        expect(isSpanStillValid(afterSentenceFinalInsertion, itemAtSeventeen)).toBe(true)
+        expect(isSpanStillValid(afterSentenceFinalInsertion, itemAtFive)).toBe(true)
+    })
+
+    it('rejects later insertions after an earlier insertion changes their prefixes', () => {
+        const itemAtSeventeen = {
+            cuStart: 17,
+            cuEnd: 17,
+            original: '',
+            contextBefore: 't think that',
+            contextAfter: 's correct',
+        }
+        const itemAtTwentySix = {
+            cuStart: 26,
+            cuEnd: 26,
+            original: '',
+            contextBefore: 'hat thats correct',
+            contextAfter: '',
+        }
+        const afterEarlierInsertion = "i don't think thats correct"
+
+        expect(isSpanStillValid(afterEarlierInsertion, itemAtSeventeen)).toBe(false)
+        expect(isSpanStillValid(afterEarlierInsertion, itemAtTwentySix)).toBe(false)
+    })
+
+    it('captures bounded context for zero-width items when building renderable items', () => {
+        const text = 'one two three'
+        const { items } = buildRenderableItems(
+            text,
+            correctResponse([suggestion({ span: { start: 4, end: 4 }, replacement: "'" })]),
+        )
+
+        expect(items[0]?.contextBefore).toBe('one ')
+        expect(items[0]?.contextAfter).toBe('two three')
+    })
 })
 
 describe('buildRenderableItems — P1 verifyByteSpanWithCache', () => {
