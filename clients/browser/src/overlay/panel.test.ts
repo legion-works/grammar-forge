@@ -740,5 +740,18 @@ describe('showPanel (W2b review panel)', () => {
             expect(root.querySelectorAll('.gf-group')).toHaveLength(1)
             expect(root.querySelectorAll('.gf-row-item')).toHaveLength(1)
         })
+
+        it('clicks a refreshed row using its current item id', () => {
+            const root = mkRoot()
+            const onAcceptItem = vi.fn<(i: RenderableItem) => void>()
+            const handle = showPanel(root, mkOptions({ items: [item({ id: 1 })], onAcceptItem }))
+            const freshItem = item({ id: 99, category: 'grammar' })
+
+            expect(handle.restoreReviewBody([freshItem], 'I have an apple.', neutralGoals, 'done', true)).toBe(true)
+            const row = root.querySelector('.gf-row-item') as HTMLElement
+            row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+
+            expect(onAcceptItem).toHaveBeenCalledWith(freshItem)
+        })
     })
 })

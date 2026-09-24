@@ -192,6 +192,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
         goals: options.goals,
         phase: options.phase,
     })
+    let liveItems = options.items
     const goalsLabel = formatFormality(options.goals.formality)
     // W3-3b: when disabled (site paused), the body renders the paused
     // empty-state instead of the score→list review. The head + tabs +
@@ -267,7 +268,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
         if (action === 'accept-item') {
             const id = btn.dataset.itemId
             if (id) {
-                const item = findItemById(options.items, id)
+                const item = findItemById(liveItems, id)
                 if (item) options.onAcceptItem(item)
             }
             return
@@ -344,6 +345,7 @@ export function showPanel(root: ShadowRoot, options: PanelOptions): PanelHandle 
             hasRephrase: boolean,
         ): boolean => {
             if (!bodyRef || !bodyRef.isConnected) return false
+            liveItems = items
             // Guard: when Stats is active, a check completing must NOT
             // clobber the Stats view. Return false so the caller knows
             // the refresh was skipped (it will fire again on next check
